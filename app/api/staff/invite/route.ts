@@ -1,0 +1,41 @@
+import { NextRequest, NextResponse } from "next/server";
+import { createClient } from "@supabase/supabase-js";
+
+export async function POST(request: NextRequest) {
+  try {
+    const { full_name, email, phone, role } = await request.json();
+
+    if (!full_name || !email || !role) {
+      return NextResponse.json({ error: "Name, email and role are required" }, { status: 400 });
+    }
+
+    const supabaseAdmin = createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY!,
+      { auth: { autoRefreshToken: false, persistSession: false } }
+    );
+
+    // Create auth user and send invite email
+    const { data: authData, error: authError } = await supabaseAdmin.auth.admin.inviteUserByEmail(email, {
+      data: { full_name, role },
+    });
+
+    if (authError) return NextResponse.json({ error: authError.message }, { status: 400 });
+
+    // Create profile row
+    const { error: profileError } = await supabaseAdmin.from("profiles").insert({
+      id: authData.user.id,
+      full_name,
+      email,
+      phone: phone || null,
+      role,
+      is_active: true,
+    });
+
+    if (profileError) return NextResponse.json({ error: profileError.message }, { status: 400 });
+
+    return NextResponse.json({ success: true });
+  } catch (err: any) {
+    return NextResponse.json({ error: err.message ?? "Failed to invite user" }, { status: 500 });
+  }
+}
