@@ -12,6 +12,8 @@
     "@base-ui/react": "^1.6.0",
     "@supabase/ssr": "^0.12.0",
     "@supabase/supabase-js": "^2.108.2",
+    "@vercel/next": "^4.20.2",
+    "adapter-vercel": "github:nextjs/adapter-vercel",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "lucide-react": "^1.22.0",
