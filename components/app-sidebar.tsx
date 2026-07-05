@@ -20,6 +20,7 @@ import {
   ChevronRight,
   Settings,
   ClipboardCheck,
+  BarChart3,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -37,6 +38,7 @@ const navItems = [
   { href: "/dashboard/pricing", label: "Pricing", icon: DollarSign },
   { href: "/dashboard/inventory", label: "Inventory", icon: Package },
   { href: "/dashboard/staff", label: "Staff", icon: Users },
+  { href: "/dashboard/reports", label: "Reports", icon: BarChart3 },
   { href: "/dashboard/settings", label: "Settings", icon: Settings },
 ];
 
