@@ -10,7 +10,6 @@ import { Button, buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Wrench } from "lucide-react";
 
 export default function ForgotPasswordPage() {
   const [email, setEmail] = useState("");
@@ -35,12 +34,11 @@ export default function ForgotPasswordPage() {
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-900 to-slate-800 p-4">
       <div className="w-full max-w-md space-y-6">
-        <div className="flex flex-col items-center gap-2 text-white">
-          <div className="flex items-center justify-center w-14 h-14 rounded-2xl bg-blue-500 shadow-lg">
-            <Wrench className="w-7 h-7 text-white" />
+        <div className="flex flex-col items-center gap-2">
+          <div className="rounded-2xl bg-white px-6 py-4 shadow-lg">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src="/logo.png" alt="Mellerick Plumbing and Drainage" className="h-20 w-auto" />
           </div>
-          <h1 className="text-2xl font-bold tracking-tight">Mellerick App</h1>
-          <p className="text-slate-400 text-sm">Plumbing Business Management</p>
         </div>
 
         <Card className="shadow-2xl border-0">

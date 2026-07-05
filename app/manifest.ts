@@ -7,7 +7,7 @@ export default function manifest(): MetadataRoute.Manifest {
     description: "Mellerick Plumbing Business Management",
     start_url: "/dashboard",
     display: "standalone",
-    background_color: "#0f172a",
+    background_color: "#ffffff",
     theme_color: "#0f172a",
     orientation: "portrait",
     icons: [
