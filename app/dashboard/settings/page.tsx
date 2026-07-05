@@ -1,17 +1,25 @@
 import { createClient } from "@/lib/supabase/server";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { CheckCircle2, XCircle, ExternalLink } from "lucide-react";
+import { CheckCircle2, XCircle, ExternalLink, CalendarDays } from "lucide-react";
 import Link from "next/link";
 
-export default async function SettingsPage({ searchParams }: { searchParams: Promise<{ xero?: string }> }) {
+export default async function SettingsPage({ searchParams }: { searchParams: Promise<{ xero?: string; google?: string }> }) {
   const params = await searchParams;
   const supabase = await createClient();
-  const { data: xeroToken } = await supabase.from("xero_tokens").select("tenant_name, updated_at").single();
+  const [{ data: xeroToken }, { data: googleToken }] = await Promise.all([
+    supabase.from("xero_tokens").select("tenant_name, updated_at").single(),
+    supabase.from("google_tokens").select("google_email, updated_at").single(),
+  ]);
 
   const isConnected = !!xeroToken;
   const justConnected = params.xero === "connected";
   const hasError = params.xero === "error";
+
+  const isGoogleConnected = !!googleToken;
+  const googleJustConnected = params.google === "connected";
+  const googleJustDisconnected = params.google === "disconnected";
+  const googleHasError = params.google === "error";
 
   const emailConfigured = !!process.env.RESEND_API_KEY;
   const usingSharedDomain = !process.env.EMAIL_FROM;
@@ -34,6 +42,27 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
         <div className="flex items-center gap-3 bg-red-50 border border-red-200 text-red-800 rounded-lg px-4 py-3 text-sm">
           <XCircle className="w-4 h-4 flex-shrink-0" />
           Xero connection failed. Please try again.
+        </div>
+      )}
+
+      {googleJustConnected && (
+        <div className="flex items-center gap-3 bg-green-50 border border-green-200 text-green-800 rounded-lg px-4 py-3 text-sm">
+          <CheckCircle2 className="w-4 h-4 flex-shrink-0" />
+          Google Calendar connected — scheduled jobs will now sync automatically.
+        </div>
+      )}
+
+      {googleJustDisconnected && (
+        <div className="flex items-center gap-3 bg-slate-50 border border-slate-200 text-slate-700 rounded-lg px-4 py-3 text-sm">
+          <XCircle className="w-4 h-4 flex-shrink-0" />
+          Google Calendar disconnected. Jobs will no longer sync.
+        </div>
+      )}
+
+      {googleHasError && (
+        <div className="flex items-center gap-3 bg-red-50 border border-red-200 text-red-800 rounded-lg px-4 py-3 text-sm">
+          <XCircle className="w-4 h-4 flex-shrink-0" />
+          Google Calendar connection failed. Please try again.
         </div>
       )}
 
@@ -71,6 +100,61 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
             <p className="text-sm text-slate-500">
               Add a <code className="bg-slate-100 px-1 rounded">RESEND_API_KEY</code> environment variable in Vercel to enable emailing quotes and invoices.
             </p>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <div className="flex items-center justify-between">
+            <div>
+              <CardTitle className="text-base flex items-center gap-2">
+                <CalendarDays className="w-4 h-4 text-blue-600" />
+                Google Calendar
+              </CardTitle>
+              <CardDescription className="mt-1">
+                Automatically syncs scheduled jobs to your Google Calendar
+              </CardDescription>
+            </div>
+            {isGoogleConnected ? (
+              <span className="flex items-center gap-1.5 text-xs font-medium text-green-700 bg-green-100 px-2.5 py-1 rounded-full">
+                <CheckCircle2 className="w-3.5 h-3.5" /> Connected
+              </span>
+            ) : (
+              <span className="flex items-center gap-1.5 text-xs font-medium text-slate-500 bg-slate-100 px-2.5 py-1 rounded-full">
+                <XCircle className="w-3.5 h-3.5" /> Not connected
+              </span>
+            )}
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          {isGoogleConnected ? (
+            <div className="space-y-2 text-sm text-slate-600">
+              <p>Connected as: <span className="font-medium text-slate-900">{googleToken.google_email}</span></p>
+              <div className="flex gap-3">
+                <Link href="/api/google/auth">
+                  <Button variant="outline" size="sm" className="gap-2">
+                    <ExternalLink className="w-3.5 h-3.5" /> Reconnect
+                  </Button>
+                </Link>
+                <form action="/api/google/disconnect" method="POST">
+                  <Button variant="outline" size="sm" type="submit" className="text-red-600 hover:text-red-700">
+                    Disconnect
+                  </Button>
+                </form>
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              <p className="text-sm text-slate-500">
+                Connect Google Calendar so scheduled jobs automatically appear as events — created, moved, and removed as jobs are scheduled, rescheduled, or completed.
+              </p>
+              <Link href="/api/google/auth">
+                <Button className="gap-2">
+                  <ExternalLink className="w-4 h-4" /> Connect Google Calendar
+                </Button>
+              </Link>
+            </div>
           )}
         </CardContent>
       </Card>

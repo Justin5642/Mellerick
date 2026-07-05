@@ -121,6 +121,8 @@ export function JobSignature({ jobId, currentUserId, existingSignature }: Props)
       ready_to_invoice: true,
     }).eq("id", jobId);
 
+    fetch(`/api/jobs/${jobId}/sync-calendar`, { method: "POST" }).catch(() => {});
+
     toast.success("Job complete — flagged for office review");
     setSaved(true);
     setSaving(false);

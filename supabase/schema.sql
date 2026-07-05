@@ -319,3 +319,19 @@ create policy "Authenticated users can upload job photos"
 create policy "Authenticated users can view job photos"
   on storage.objects for select
   using (bucket_id = 'job-photos' and auth.role() = 'authenticated');
+
+-- =============================================
+-- GOOGLE CALENDAR TOKENS (single connected account)
+-- =============================================
+create table google_tokens (
+  id uuid default uuid_generate_v4() primary key,
+  access_token text not null,
+  refresh_token text not null,
+  token_expiry timestamptz not null,
+  google_email text,
+  created_at timestamptz default now(),
+  updated_at timestamptz default now()
+);
+
+alter table google_tokens enable row level security;
+create policy "Authenticated users can manage google tokens" on google_tokens for all using (auth.role() = 'authenticated');

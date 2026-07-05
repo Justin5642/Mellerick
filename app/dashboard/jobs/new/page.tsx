@@ -61,11 +61,14 @@ export default function NewJobPage() {
       scheduled_start: form.scheduled_start || null,
       scheduled_end: form.scheduled_end || null,
     };
-    const { error } = await supabase.from("jobs").insert(payload);
+    const { data, error } = await supabase.from("jobs").insert(payload).select("id").single();
     if (error) {
       toast.error(error.message);
       setLoading(false);
     } else {
+      if (data?.id) {
+        fetch(`/api/jobs/${data.id}/sync-calendar`, { method: "POST" }).catch(() => {});
+      }
       toast.success("Job created successfully");
       window.location.href = "/dashboard/jobs";
     }

@@ -55,6 +55,7 @@ export default function ApprovalsPage() {
       status: "in_progress",
       ready_to_invoice: false,
     }).eq("id", jobId);
+    fetch(`/api/jobs/${jobId}/sync-calendar`, { method: "POST" }).catch(() => {});
     setJobs(j => j.filter(job => job.id !== jobId));
     toast.success("Job sent back — technician will be notified");
     setSaving(null);

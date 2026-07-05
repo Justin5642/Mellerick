@@ -41,8 +41,12 @@ export function JobOverview({ job, staff }: Props) {
       scheduled_start: form.scheduled_start || null,
       scheduled_end: form.scheduled_end || null,
     }).eq("id", job.id);
-    if (error) toast.error(error.message);
-    else toast.success("Job updated");
+    if (error) {
+      toast.error(error.message);
+    } else {
+      toast.success("Job updated");
+      fetch(`/api/jobs/${job.id}/sync-calendar`, { method: "POST" }).catch(() => {});
+    }
     setSaving(false);
   }
 
