@@ -6,7 +6,19 @@ import { toast } from "sonner";
 import { createClient } from "@/lib/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { ArrowLeft, Send, CheckCircle2, XCircle, Pencil, Briefcase } from "lucide-react";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+  DialogTrigger,
+} from "@/components/ui/dialog";
+import { ArrowLeft, Send, CheckCircle2, XCircle, Pencil, Briefcase, FileDown } from "lucide-react";
 import Link from "next/link";
 
 const statusColors: Record<string, string> = {
@@ -28,6 +40,10 @@ export function QuoteDetail({ quote }: Props) {
   const [updating, setUpdating] = useState(false);
   const [converting, setConverting] = useState(false);
   const [converted, setConverted] = useState(!!quote.job_id);
+  const [sending, setSending] = useState(false);
+  const [sendOpen, setSendOpen] = useState(false);
+  const [sendTo, setSendTo] = useState(quote.customers?.email ?? "");
+  const [sendMessage, setSendMessage] = useState("");
 
   async function updateStatus(newStatus: string) {
     setUpdating(true);
@@ -40,6 +56,30 @@ export function QuoteDetail({ quote }: Props) {
       router.refresh();
     }
     setUpdating(false);
+  }
+
+  async function sendQuote() {
+    if (!sendTo.trim()) {
+      toast.error("Enter an email address to send to");
+      return;
+    }
+    setSending(true);
+    try {
+      const res = await fetch(`/api/quotes/${quote.id}/send`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ to: sendTo, message: sendMessage }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      toast.success(`Quote emailed to ${data.sentTo}`);
+      setStatus("sent");
+      setSendOpen(false);
+      router.refresh();
+    } catch (err: any) {
+      toast.error(err.message ?? "Failed to send quote");
+    }
+    setSending(false);
   }
 
   async function convertToJob() {
@@ -104,16 +144,45 @@ export function QuoteDetail({ quote }: Props) {
         </div>
 
         <div className="flex items-center gap-2 flex-wrap">
+          <a href={`/api/quotes/${quote.id}/pdf`} target="_blank" rel="noopener noreferrer">
+            <Button variant="outline" size="sm" className="gap-2"><FileDown className="w-3.5 h-3.5" />PDF</Button>
+          </a>
           <Link href={`/dashboard/quotes/${quote.id}/edit`}>
             <Button variant="outline" size="sm" className="gap-2"><Pencil className="w-3.5 h-3.5" />Edit</Button>
           </Link>
 
-          {status === "draft" && (
-            <Button onClick={() => updateStatus("sent")} disabled={updating} className="gap-2 bg-blue-600 hover:bg-blue-700">
-              <Send className="w-4 h-4" />
-              {updating ? "Updating..." : "Mark as Sent"}
-            </Button>
-          )}
+          <Dialog open={sendOpen} onOpenChange={setSendOpen}>
+            <DialogTrigger
+              render={
+                <Button className="gap-2 bg-blue-600 hover:bg-blue-700">
+                  <Send className="w-4 h-4" />
+                  {status === "draft" ? "Send to Customer" : "Resend"}
+                </Button>
+              }
+            />
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>Send Quote #{quote.quote_number}</DialogTitle>
+                <DialogDescription>Emails a PDF copy of this quote to the customer.</DialogDescription>
+              </DialogHeader>
+              <div className="space-y-3">
+                <div className="space-y-2">
+                  <Label>Send to</Label>
+                  <Input type="email" value={sendTo} onChange={(e) => setSendTo(e.target.value)} placeholder="customer@example.com" />
+                </div>
+                <div className="space-y-2">
+                  <Label>Message (optional)</Label>
+                  <Textarea value={sendMessage} onChange={(e) => setSendMessage(e.target.value)} rows={3} placeholder="Add a personal note..." />
+                </div>
+              </div>
+              <DialogFooter>
+                <Button onClick={sendQuote} disabled={sending} className="gap-2 bg-blue-600 hover:bg-blue-700">
+                  <Send className="w-4 h-4" />
+                  {sending ? "Sending..." : "Send Email"}
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
 
           {status === "sent" && (
             <>

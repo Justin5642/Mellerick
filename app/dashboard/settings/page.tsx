@@ -13,6 +13,9 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
   const justConnected = params.xero === "connected";
   const hasError = params.xero === "error";
 
+  const emailConfigured = !!process.env.RESEND_API_KEY;
+  const usingSharedDomain = !process.env.EMAIL_FROM;
+
   return (
     <div className="p-6 max-w-2xl space-y-6">
       <div>
@@ -33,6 +36,44 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
           Xero connection failed. Please try again.
         </div>
       )}
+
+      <Card>
+        <CardHeader>
+          <div className="flex items-center justify-between">
+            <div>
+              <CardTitle className="text-base">Email (Quotes &amp; Invoices)</CardTitle>
+              <CardDescription className="mt-1">
+                Sends quote/invoice PDFs directly to customers via email
+              </CardDescription>
+            </div>
+            {emailConfigured ? (
+              <span className="flex items-center gap-1.5 text-xs font-medium text-green-700 bg-green-100 px-2.5 py-1 rounded-full">
+                <CheckCircle2 className="w-3.5 h-3.5" /> Configured
+              </span>
+            ) : (
+              <span className="flex items-center gap-1.5 text-xs font-medium text-slate-500 bg-slate-100 px-2.5 py-1 rounded-full">
+                <XCircle className="w-3.5 h-3.5" /> Not configured
+              </span>
+            )}
+          </div>
+        </CardHeader>
+        <CardContent>
+          {emailConfigured ? (
+            usingSharedDomain ? (
+              <p className="text-sm text-orange-600">
+                Using Resend's shared test domain — emails will only deliver to your own Resend account address. Set{" "}
+                <code className="bg-slate-100 px-1 rounded">EMAIL_FROM</code> to an address on a verified domain to send to real customers.
+              </p>
+            ) : (
+              <p className="text-sm text-slate-500">Sending live from a verified domain. Ready to email customers.</p>
+            )
+          ) : (
+            <p className="text-sm text-slate-500">
+              Add a <code className="bg-slate-100 px-1 rounded">RESEND_API_KEY</code> environment variable in Vercel to enable emailing quotes and invoices.
+            </p>
+          )}
+        </CardContent>
+      </Card>
 
       <Card>
         <CardHeader>
