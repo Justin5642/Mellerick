@@ -1,0 +1,34 @@
+-- Adds site_lat/site_lng to the `sites` table.
+--
+-- BACKGROUND: these columns already exist on `purchase_orders` (added ad-hoc,
+-- outside any tracked migration file — used by the PO-based geofencing
+-- clock-in/out feature in components/job/job-time.tsx and the PO Waze button
+-- in components/job/job-po.tsx, both of which work fine today). Several
+-- newer features were built assuming the `sites` table ALSO has site_lat/
+-- site_lng — it never did, in this schema.sql or any of migrations
+-- 0001-0008. Every query that selects sites(..., site_lat, site_lng) has
+-- been failing outright with Postgres error 42703 ("column does not exist"),
+-- silently swallowed by `(data as any) ?? null/[]` call sites, which is why
+-- affected screens looked like they were just "stuck loading" instead of
+-- showing an error.
+--
+-- Confirmed broken by this bug (all select from `sites` directly, not via
+-- purchase_orders):
+--   - app/dashboard/jobs/[id]/page.tsx   (main web job detail page)
+--   - app/dashboard/schedule/page.tsx
+--   - app/dashboard/my-jobs/page.tsx
+--   - components/job/job-overview.tsx    (Waze button)
+--   - mobile/app/(tabs)/index.tsx        (My Jobs list)
+--   - mobile/app/(tabs)/search.tsx       (Search tab)
+--   - mobile/app/job/[id].tsx            (mobile job detail — infinite spinner)
+--   - mobile/components/job/overview.tsx
+--   - mobile/lib/location-tracking.tsx   (mobile geofencing)
+--
+-- Nullable, no default: existing sites simply won't have a pin until
+-- geocoded (a separate follow-up task). All the Waze-button code already
+-- falls back to an address-text-based Waze search when lat/lng are null, so
+-- this migration alone is enough to unblock every failing query above —
+-- precise-pin navigation/geofencing for a given site will only work once
+-- that site's lat/lng are actually populated.
+alter table sites add column if not exists site_lat numeric;
+alter table sites add column if not exists site_lng numeric;

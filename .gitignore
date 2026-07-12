@@ -39,3 +39,6 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# one-off script run reports / raw data exports (contain customer PII, regenerable)
+/scripts/data/

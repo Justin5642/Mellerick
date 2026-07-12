@@ -7,15 +7,16 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent } from "@/components/ui/card";
-import { CheckCircle2, RotateCcw, Save, PenLine } from "lucide-react";
+import { CheckCircle2, RotateCcw, Save, PenLine, Mic } from "lucide-react";
 
 interface Props {
   jobId: string;
   currentUserId: string;
   existingSignature?: string | null;
+  voiceReportTranscript?: string | null;
 }
 
-export function JobSignature({ jobId, currentUserId, existingSignature }: Props) {
+export function JobSignature({ jobId, currentUserId, existingSignature, voiceReportTranscript }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [drawing, setDrawing] = useState(false);
   const [lastPos, setLastPos] = useState({ x: 0, y: 0 });
@@ -148,6 +149,18 @@ export function JobSignature({ jobId, currentUserId, existingSignature }: Props)
           </CardContent>
         </Card>
       ) : null}
+
+      {voiceReportTranscript && (
+        <Card className="border-blue-100 bg-blue-50/40">
+          <CardContent className="p-4 space-y-1.5">
+            <div className="flex items-center gap-2 text-blue-700">
+              <Mic className="w-4 h-4" />
+              <p className="text-sm font-semibold">Voice Report (transcribed)</p>
+            </div>
+            <p className="text-sm text-slate-600 whitespace-pre-wrap">{voiceReportTranscript}</p>
+          </CardContent>
+        </Card>
+      )}
 
       <div className="space-y-2">
         <Label htmlFor="signerName">Customer Name</Label>

@@ -1,0 +1,52 @@
+{
+  "expo": {
+    "name": "Mellerick Field",
+    "slug": "mellerick-field",
+    "scheme": "mellerickfield",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "au.com.mellerick.field"
+    },
+    "android": {
+      "package": "au.com.mellerick.field",
+      "adaptiveIcon": {
+        "backgroundColor": "#E6F4FE",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      "expo-router",
+      "expo-secure-store",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Mellerick Field uses your photo library to attach job photos.",
+          "cameraPermission": "Mellerick Field uses your camera to take job photos and evidence."
+        }
+      ],
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "Mellerick Field uses your location to timestamp and geo-tag site photos, and to automatically clock you in/out and track travel time when you arrive at or leave a job site."
+        }
+      ],
+      [
+        "expo-audio",
+        {
+          "microphonePermission": "Mellerick Field uses your microphone to record job completion voice reports."
+        }
+      ],
+      "expo-asset"
+    ]
+  }
+}

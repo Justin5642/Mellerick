@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Briefcase, Plus } from "lucide-react";
+import { Input } from "@/components/ui/input";
+import { Briefcase, Plus, Search, X } from "lucide-react";
 import Link from "next/link";
 
 const statusColors: Record<string, string> = {
@@ -27,18 +28,57 @@ export default function JobsPage() {
   const supabase = createClient();
   const [jobs, setJobs] = useState<any[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [search, setSearch] = useState("");
 
   useEffect(() => {
     async function load() {
-      const { data, error } = await supabase
-        .from("jobs")
-        .select("*, customers(name)")
-        .order("created_at", { ascending: false });
-      if (error) setError(error.message);
-      else setJobs(data ?? []);
+      // Paginate explicitly — Supabase caps an unranged .select() at 1000
+      // rows, which would silently hide older jobs (and results of the
+      // search box below) once the table grows past that.
+      const pageSize = 1000;
+      let from = 0;
+      const all: any[] = [];
+      for (;;) {
+        const { data, error } = await supabase
+          .from("jobs")
+          .select("*, customers(name), sites(name, address_line1, suburb)")
+          .order("created_at", { ascending: false })
+          .range(from, from + pageSize - 1);
+        if (error) {
+          setError(error.message);
+          return;
+        }
+        all.push(...(data ?? []));
+        if (!data || data.length < pageSize) break;
+        from += pageSize;
+      }
+      setJobs(all);
     }
     load();
   }, []);
+
+  const filteredJobs = useMemo(() => {
+    if (!jobs) return jobs;
+    const q = search.trim().toLowerCase();
+    if (!q) return jobs;
+    return jobs.filter((job: any) => {
+      const haystack = [
+        job.job_number,
+        job.title,
+        job.description,
+        job.status,
+        job.priority,
+        job.customers?.name,
+        job.sites?.name,
+        job.sites?.address_line1,
+        job.sites?.suburb,
+      ]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase();
+      return haystack.includes(q);
+    });
+  }, [jobs, search]);
 
   if (jobs === null && !error) {
     return <div className="p-6 text-slate-400 text-sm">Loading...</div>;
@@ -53,7 +93,9 @@ export default function JobsPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Jobs</h1>
-          <p className="text-slate-500 text-sm mt-1">{jobs?.length ?? 0} total jobs</p>
+          <p className="text-slate-500 text-sm mt-1">
+            {filteredJobs?.length ?? 0} of {jobs?.length ?? 0} jobs
+          </p>
         </div>
         <Link href="/dashboard/jobs/new">
           <Button className="gap-2">
@@ -63,19 +105,45 @@ export default function JobsPage() {
         </Link>
       </div>
 
+      <div className="relative max-w-md">
+        <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+        <Input
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Search jobs by number, title, customer, or address..."
+          className="pl-8 pr-8"
+        />
+        {search && (
+          <button
+            type="button"
+            onClick={() => setSearch("")}
+            className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+            aria-label="Clear search"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        )}
+      </div>
+
       <Card>
         <CardContent className="p-0">
-          {!jobs || jobs.length === 0 ? (
+          {!filteredJobs || filteredJobs.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-16 text-slate-400">
               <Briefcase className="w-12 h-12 mb-3 opacity-40" />
-              <p className="text-sm font-medium">No jobs yet</p>
-              <Link href="/dashboard/jobs/new" className="mt-2 text-sm text-blue-600 hover:underline">
-                Create your first job
-              </Link>
+              {jobs && jobs.length > 0 && search ? (
+                <p className="text-sm font-medium">No jobs match &ldquo;{search}&rdquo;</p>
+              ) : (
+                <>
+                  <p className="text-sm font-medium">No jobs yet</p>
+                  <Link href="/dashboard/jobs/new" className="mt-2 text-sm text-blue-600 hover:underline">
+                    Create your first job
+                  </Link>
+                </>
+              )}
             </div>
           ) : (
             <div className="divide-y">
-              {jobs.map((job: any) => (
+              {filteredJobs.map((job: any) => (
                 <Link
                   key={job.id}
                   href={`/dashboard/jobs/${job.id}`}

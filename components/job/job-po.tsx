@@ -29,11 +29,20 @@ interface PurchaseOrder {
   po_cost_centers: CostCenter[];
 }
 
+const OVERTIME_LABELS: Record<string, string> = {
+  unexpected_issue: "Unexpected issue",
+  difficult_site: "Difficult site",
+  training_needed: "Training needed",
+  other: "Other",
+};
+
 interface Props {
   jobId: string;
   pos: PurchaseOrder[];
   totalHoursLogged: number;
   onUpdate: (pos: PurchaseOrder[]) => void;
+  overtimeReason?: string | null;
+  overtimeCategory?: string | null;
 }
 
 function progressColor(pct: number) {
@@ -42,7 +51,7 @@ function progressColor(pct: number) {
   return "bg-green-500";
 }
 
-export function JobPO({ jobId, pos: initialPos, totalHoursLogged, onUpdate }: Props) {
+export function JobPO({ jobId, pos: initialPos, totalHoursLogged, onUpdate, overtimeReason, overtimeCategory }: Props) {
   const supabase = createClient();
   const [pos, setPos] = useState<PurchaseOrder[]>(initialPos);
   const [showForm, setShowForm] = useState(false);
@@ -167,6 +176,15 @@ export function JobPO({ jobId, pos: initialPos, totalHoursLogged, onUpdate }: Pr
               <span className="text-slate-500">Total PO value</span>
               <span className="font-semibold text-slate-800">${totalAllocatedValue.toFixed(2)}</span>
             </div>
+            {overtimeCategory && (
+              <div className="pt-2 border-t">
+                <p className="text-xs font-semibold text-red-600 uppercase tracking-wide">Overtime reason logged</p>
+                <p className="text-sm text-slate-700 mt-1">
+                  {OVERTIME_LABELS[overtimeCategory] ?? overtimeCategory}
+                  {overtimeReason ? ` — ${overtimeReason}` : ""}
+                </p>
+              </div>
+            )}
           </CardContent>
         </Card>
       )}

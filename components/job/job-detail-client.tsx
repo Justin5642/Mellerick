@@ -4,7 +4,7 @@ import { useState } from "react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { ArrowLeft, Briefcase, FileText, Image, List, MessageSquare, PenLine, ClipboardList, Clock, Receipt } from "lucide-react";
+import { ArrowLeft, Briefcase, FileText, Image, List, MessageSquare, PenLine, ClipboardList, Clock, Receipt, GitPullRequestArrow, DollarSign } from "lucide-react";
 import Link from "next/link";
 import { JobOverview } from "./job-overview";
 import { JobDocuments } from "./job-documents";
@@ -14,6 +14,8 @@ import { JobNotes } from "./job-notes";
 import { JobSignature } from "./job-signature";
 import { JobPO } from "./job-po";
 import { JobTime } from "./job-time";
+import { JobVariations } from "./job-variations";
+import { JobExpenses } from "./job-expenses";
 
 const statusColors: Record<string, string> = {
   pending: "bg-yellow-100 text-yellow-800",
@@ -42,15 +44,24 @@ interface Props {
   staff: any[];
   purchaseOrders: any[];
   timeEntries: any[];
+  variations: any[];
+  variationTypes: any[];
+  expenses: any[];
 }
 
-export function JobDetailClient({ job, currentUserId, photos: initialPhotos, documents: initialDocuments, notes: initialNotes, lineItems: initialLineItems, pricingItems, staff, purchaseOrders: initialPOs, timeEntries: initialTimeEntries }: Props) {
+export function JobDetailClient({ job, currentUserId, photos: initialPhotos, documents: initialDocuments, notes: initialNotes, lineItems: initialLineItems, pricingItems, staff, purchaseOrders: initialPOs, timeEntries: initialTimeEntries, variations: initialVariations, variationTypes, expenses: initialExpenses }: Props) {
   const [photos, setPhotos] = useState(initialPhotos);
   const [documents, setDocuments] = useState(initialDocuments);
   const [notes, setNotes] = useState(initialNotes);
   const [lineItems, setLineItems] = useState(initialLineItems);
   const [purchaseOrders, setPurchaseOrders] = useState(initialPOs);
-  const totalHoursLogged = initialTimeEntries.reduce((sum: number, e: any) => sum + (e.hours ? Number(e.hours) : 0), 0);
+  const [variations, setVariations] = useState(initialVariations);
+  const [expenses, setExpenses] = useState(initialExpenses);
+  // Only "work" entries count against the allocated-hours budget — travel
+  // time between jobs is tracked separately and shouldn't eat into it.
+  const totalHoursLogged = initialTimeEntries
+    .filter((e: any) => e.entry_type !== "travel")
+    .reduce((sum: number, e: any) => sum + (e.hours ? Number(e.hours) : 0), 0);
 
   return (
     <div className="flex flex-col h-full">
@@ -97,6 +108,8 @@ export function JobDetailClient({ job, currentUserId, photos: initialPhotos, doc
                 { value: "overview", label: "Overview", icon: Briefcase },
                 { value: "po", label: "Purchase Orders", icon: ClipboardList },
                 { value: "time", label: "Time", icon: Clock },
+                { value: "variations", label: "Variations", icon: GitPullRequestArrow },
+                { value: "expenses", label: "Expenses", icon: DollarSign },
                 { value: "documents", label: "Documents", icon: FileText },
                 { value: "photos", label: "Photos", icon: Image },
                 { value: "items", label: "Line Items", icon: List },
@@ -120,10 +133,23 @@ export function JobDetailClient({ job, currentUserId, photos: initialPhotos, doc
               <JobOverview job={job} staff={staff} />
             </TabsContent>
             <TabsContent value="po" className="m-0 h-full">
-              <JobPO jobId={job.id} pos={purchaseOrders} totalHoursLogged={totalHoursLogged} onUpdate={setPurchaseOrders} />
+              <JobPO
+                jobId={job.id}
+                pos={purchaseOrders}
+                totalHoursLogged={totalHoursLogged}
+                onUpdate={setPurchaseOrders}
+                overtimeReason={job.overtime_reason}
+                overtimeCategory={job.overtime_category}
+              />
             </TabsContent>
             <TabsContent value="time" className="m-0 h-full">
               <JobTime jobId={job.id} currentUserId={currentUserId} timeEntries={initialTimeEntries} pos={purchaseOrders} />
+            </TabsContent>
+            <TabsContent value="variations" className="m-0 h-full">
+              <JobVariations jobId={job.id} variations={variations} variationTypes={variationTypes} currentUserId={currentUserId} onUpdate={setVariations} />
+            </TabsContent>
+            <TabsContent value="expenses" className="m-0 h-full">
+              <JobExpenses jobId={job.id} jobNumber={job.job_number} expenses={expenses} onUpdate={setExpenses} currentUserId={currentUserId} />
             </TabsContent>
             <TabsContent value="documents" className="m-0 h-full">
               <JobDocuments jobId={job.id} documents={documents} onUpdate={setDocuments} currentUserId={currentUserId} />
@@ -138,7 +164,7 @@ export function JobDetailClient({ job, currentUserId, photos: initialPhotos, doc
               <JobNotes jobId={job.id} notes={notes} onUpdate={setNotes} currentUserId={currentUserId} />
             </TabsContent>
             <TabsContent value="signature" className="m-0 h-full">
-              <JobSignature jobId={job.id} currentUserId={currentUserId} existingSignature={job.completion_notes} />
+              <JobSignature jobId={job.id} currentUserId={currentUserId} existingSignature={job.completion_notes} voiceReportTranscript={job.voice_report_transcript} />
             </TabsContent>
           </div>
         </Tabs>

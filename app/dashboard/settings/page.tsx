@@ -1,15 +1,17 @@
 import { createClient } from "@/lib/supabase/server";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { CheckCircle2, XCircle, ExternalLink, CalendarDays } from "lucide-react";
+import { CheckCircle2, XCircle, ExternalLink, CalendarDays, Wrench } from "lucide-react";
 import Link from "next/link";
+import { GoogleCalendarSyncButton } from "@/components/settings/google-calendar-sync-button";
+import { XeroExpenseAccountCode } from "@/components/settings/xero-expense-account-code";
 
 export default async function SettingsPage({ searchParams }: { searchParams: Promise<{ xero?: string; google?: string }> }) {
   const params = await searchParams;
   const supabase = await createClient();
   const [{ data: xeroToken }, { data: googleToken }] = await Promise.all([
-    supabase.from("xero_tokens").select("tenant_name, updated_at").single(),
-    supabase.from("google_tokens").select("google_email, updated_at").single(),
+    supabase.from("xero_tokens").select("tenant_name, updated_at, default_expense_account_code").single(),
+    supabase.from("google_tokens").select("google_email, updated_at, calendar_last_synced_at").single(),
   ]);
 
   const isConnected = !!xeroToken;
@@ -131,12 +133,18 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
           {isGoogleConnected ? (
             <div className="space-y-2 text-sm text-slate-600">
               <p>Connected as: <span className="font-medium text-slate-900">{googleToken.google_email}</span></p>
+              <p className="text-xs text-slate-400">
+                {googleToken.calendar_last_synced_at
+                  ? `Last pulled changes from Calendar: ${new Date(googleToken.calendar_last_synced_at).toLocaleString("en-AU")}`
+                  : "Changes made directly in Google Calendar haven't been pulled in yet."}
+              </p>
               <div className="flex gap-3">
                 <Link href="/api/google/auth">
                   <Button variant="outline" size="sm" className="gap-2">
                     <ExternalLink className="w-3.5 h-3.5" /> Reconnect
                   </Button>
                 </Link>
+                <GoogleCalendarSyncButton />
                 <form action="/api/google/disconnect" method="POST">
                   <Button variant="outline" size="sm" type="submit" className="text-red-600 hover:text-red-700">
                     Disconnect
@@ -147,7 +155,8 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
           ) : (
             <div className="space-y-3">
               <p className="text-sm text-slate-500">
-                Connect Google Calendar so scheduled jobs automatically appear as events — created, moved, and removed as jobs are scheduled, rescheduled, or completed.
+                Connect Google Calendar so scheduled jobs automatically appear as events — created, moved, and removed as jobs are scheduled, rescheduled, or completed. Drag or resize an event
+                directly in Google Calendar and it'll sync back to the job too (via the periodic sync or the "Sync now" button).
               </p>
               <Link href="/api/google/auth">
                 <Button className="gap-2">
@@ -156,6 +165,30 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
               </Link>
             </div>
           )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <div className="flex items-center justify-between">
+            <div>
+              <CardTitle className="text-base flex items-center gap-2">
+                <Wrench className="w-4 h-4 text-blue-600" />
+                Variation Types
+              </CardTitle>
+              <CardDescription className="mt-1">
+                Preset rates for standard job variations (rock removal, spoil removal, etc) — controls what crew can
+                auto-approve on site vs. what needs office pricing
+              </CardDescription>
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent>
+          <Link href="/dashboard/settings/variation-types">
+            <Button variant="outline" className="gap-2">
+              <ExternalLink className="w-4 h-4" /> Manage Variation Types
+            </Button>
+          </Link>
         </CardContent>
       </Card>
 
@@ -193,6 +226,7 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
                   </Button>
                 </Link>
               </div>
+              <XeroExpenseAccountCode initialValue={xeroToken.default_expense_account_code} />
             </div>
           ) : (
             <div className="space-y-3">

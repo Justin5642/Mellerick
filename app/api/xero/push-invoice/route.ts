@@ -32,6 +32,17 @@ export async function POST(request: NextRequest) {
     const { invoiceId } = await request.json();
     const supabase = await createClient();
 
+    // Server-side enforcement (not just a UI hint): only admins may push
+    // invoices to Xero, whether triggered from the Approvals auto-push or
+    // the manual button on the invoice page. Per Justin: technicians must
+    // never be able to push invoices, including by calling this API directly.
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+    const { data: profile } = await supabase.from("profiles").select("role").eq("id", user.id).single();
+    if (profile?.role !== "admin") {
+      return NextResponse.json({ error: "Only admins can push invoices to Xero" }, { status: 403 });
+    }
+
     const { data: invoice } = await supabase
       .from("invoices")
       .select("*, customers(name, email, phone), invoice_items(*)")

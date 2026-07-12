@@ -5,7 +5,7 @@ import { createClient } from "@/lib/supabase/client";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { Clock, LogIn, LogOut, MapPin, Radio, WifiOff } from "lucide-react";
+import { Clock, LogIn, LogOut, MapPin, Radio, WifiOff, Car } from "lucide-react";
 
 interface TimeEntry {
   id: string;
@@ -14,6 +14,7 @@ interface TimeEntry {
   clock_out: string | null;
   hours: number | null;
   auto_clocked: boolean;
+  entry_type?: "work" | "travel";
   profiles: { full_name: string };
 }
 
@@ -57,8 +58,11 @@ export function JobTime({ jobId, currentUserId, timeEntries: initial, pos }: Pro
   const lastInsideRef = useRef<boolean | null>(null);
 
   const poWithLocation = pos.find(p => p.site_lat && p.site_lng);
-  const myOpenEntry = entries.find(e => e.staff_id === currentUserId && !e.clock_out);
-  const totalHours = entries.reduce((sum, e) => sum + (e.hours ? Number(e.hours) : 0), 0);
+  const myOpenEntry = entries.find(e => e.staff_id === currentUserId && e.entry_type !== "travel" && !e.clock_out);
+  const workEntries = entries.filter(e => e.entry_type !== "travel");
+  const travelEntries = entries.filter(e => e.entry_type === "travel");
+  const totalHours = workEntries.reduce((sum, e) => sum + (e.hours ? Number(e.hours) : 0), 0);
+  const totalTravelHours = travelEntries.reduce((sum, e) => sum + (e.hours ? Number(e.hours) : 0), 0);
 
   useEffect(() => {
     if (!poWithLocation?.site_lat || !poWithLocation?.site_lng) return;
@@ -218,26 +222,35 @@ export function JobTime({ jobId, currentUserId, timeEntries: initial, pos }: Pro
         <div>
           <div className="flex items-center justify-between mb-3">
             <h3 className="text-sm font-semibold text-slate-700">Time Log</h3>
-            <span className="text-sm font-bold text-slate-900">{totalHours.toFixed(1)}h total</span>
+            <span className="text-sm font-bold text-slate-900">
+              {totalHours.toFixed(1)}h total
+              {totalTravelHours > 0 && <span className="text-slate-400 font-normal"> · {totalTravelHours.toFixed(1)}h travel</span>}
+            </span>
           </div>
           <div className="space-y-2">
-            {entries.map(entry => (
-              <div key={entry.id} className="flex items-center justify-between py-2.5 px-3 bg-slate-50 rounded-lg text-sm">
-                <div>
-                  <span className="font-medium text-slate-800">{entry.profiles?.full_name}</span>
-                  <span className="text-slate-400 text-xs ml-2">{formatDate(entry.clock_in)}</span>
-                  {entry.auto_clocked && (
-                    <span className="text-xs text-blue-500 ml-1.5 bg-blue-50 px-1.5 py-0.5 rounded">auto</span>
-                  )}
+            {entries.map(entry => {
+              const isTravel = entry.entry_type === "travel";
+              return (
+                <div key={entry.id} className={`flex items-center justify-between py-2.5 px-3 rounded-lg text-sm ${isTravel ? "bg-blue-50/60" : "bg-slate-50"}`}>
+                  <div className="flex items-center gap-1.5">
+                    {isTravel && <Car className="w-3.5 h-3.5 text-blue-500" />}
+                    <span className="font-medium text-slate-800">{entry.profiles?.full_name}</span>
+                    <span className="text-slate-400 text-xs ml-1">{formatDate(entry.clock_in)}</span>
+                    {isTravel ? (
+                      <span className="text-xs text-blue-500 ml-1.5 bg-blue-100 px-1.5 py-0.5 rounded">travel</span>
+                    ) : entry.auto_clocked && (
+                      <span className="text-xs text-blue-500 ml-1.5 bg-blue-50 px-1.5 py-0.5 rounded">auto</span>
+                    )}
+                  </div>
+                  <div className="text-right text-slate-600">
+                    {formatTime(entry.clock_in)} → {entry.clock_out ? formatTime(entry.clock_out) : <span className="text-green-600 font-medium">now</span>}
+                    {entry.hours != null && (
+                      <span className="ml-2 font-semibold text-slate-800">{Number(entry.hours).toFixed(1)}h</span>
+                    )}
+                  </div>
                 </div>
-                <div className="text-right text-slate-600">
-                  {formatTime(entry.clock_in)} → {entry.clock_out ? formatTime(entry.clock_out) : <span className="text-green-600 font-medium">now</span>}
-                  {entry.hours != null && (
-                    <span className="ml-2 font-semibold text-slate-800">{Number(entry.hours).toFixed(1)}h</span>
-                  )}
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </div>
       )}

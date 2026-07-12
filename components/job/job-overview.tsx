@@ -9,7 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
-import { Phone, Mail, MapPin, Calendar, User, Save } from "lucide-react";
+import { Phone, Mail, MapPin, Calendar, User, Save, Navigation } from "lucide-react";
 
 interface Props {
   job: any;
@@ -164,12 +164,17 @@ export function JobOverview({ job, staff }: Props) {
                   <p className="text-slate-500">{job.sites.address_line1}</p>
                   <p className="text-slate-500">{job.sites.suburb} {job.sites.state} {job.sites.postcode}</p>
                   <a
-                    href={`https://maps.google.com/?q=${encodeURIComponent(`${job.sites.address_line1} ${job.sites.suburb} ${job.sites.state}`)}`}
+                    href={
+                      job.sites.site_lat && job.sites.site_lng
+                        ? `https://waze.com/ul?ll=${job.sites.site_lat},${job.sites.site_lng}&navigate=yes`
+                        : `https://waze.com/ul?q=${encodeURIComponent(`${job.sites.address_line1} ${job.sites.suburb} ${job.sites.state}`)}&navigate=yes`
+                    }
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="text-blue-600 hover:underline text-xs mt-1 inline-block"
+                    className="inline-flex items-center gap-1 text-blue-600 hover:underline text-xs mt-1"
                   >
-                    Open in Maps
+                    <Navigation className="w-3 h-3" />
+                    Navigate with Waze
                   </a>
                 </div>
               </div>
