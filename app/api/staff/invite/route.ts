@@ -1,8 +1,25 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { createClient as createServerClient } from "@/lib/supabase/server";
 
 export async function POST(request: NextRequest) {
   try {
+    // Server-side enforcement (not just a UI hint): only admins may invite
+    // new staff, since the invite form lets the caller pick the role
+    // (including "admin"). Without this, anyone who knows the endpoint
+    // could POST directly and grant themselves admin access.
+    const supabaseSession = await createServerClient();
+    const { data: { user } } = await supabaseSession.auth.getUser();
+    if (!user) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+    const { data: requesterProfile } = await supabaseSession
+      .from("profiles")
+      .select("role")
+      .eq("id", user.id)
+      .single();
+    if (requesterProfile?.role !== "admin") {
+      return NextResponse.json({ error: "Only admins can invite staff" }, { status: 403 });
+    }
+
     const { full_name, email, phone, role } = await request.json();
 
     if (!full_name || !email || !role) {
