@@ -2,6 +2,7 @@ export const dynamic = "force-dynamic";
 
 import { createClient } from "@/lib/supabase/server";
 import { ReportsDashboard } from "@/components/reports/reports-dashboard";
+import { computeLoadedCost } from "@/lib/staff-cost";
 
 function monthKey(date: string) {
   const d = new Date(date);
@@ -16,12 +17,82 @@ function monthLabel(key: string) {
 export default async function ReportsPage() {
   const supabase = await createClient();
 
-  const [{ data: invoices }, { data: quotes }, { data: jobs }, { data: profiles }] = await Promise.all([
+  const [{ data: invoices }, { data: quotes }, { data: jobs }, { data: profiles }, { data: { user } }] = await Promise.all([
     supabase.from("invoices").select("id, total, status, created_at, customer_id, customers(name)"),
     supabase.from("quotes").select("id, total, status, created_at"),
     supabase.from("jobs").select("id, status, assigned_to, created_at"),
     supabase.from("profiles").select("id, full_name").eq("is_active", true),
+    supabase.auth.getUser(),
   ]);
+
+  // Staff cost/efficiency data is payroll-sensitive (wage, super, sick
+  // leave), so it's only fetched and passed down at all when the viewer is
+  // an admin -- everyone else gets `staffEfficiency: null` and the
+  // dashboard component simply doesn't render that section.
+  let isAdmin = false;
+  if (user) {
+    const { data: viewerProfile } = await supabase.from("profiles").select("role").eq("id", user.id).single();
+    isAdmin = viewerProfile?.role === "admin";
+  }
+
+  let staffEfficiency: {
+    name: string;
+    loadedHourlyRate: number;
+    workedHours: number;
+    sickHours: number;
+    leaveHours: number;
+    utilizationPct: number | null;
+    trueCostPerWorkedHour: number | null;
+  }[] = [];
+
+  if (isAdmin) {
+    const twelveMonthsAgo = new Date();
+    twelveMonthsAgo.setFullYear(twelveMonthsAgo.getFullYear() - 1);
+    const cutoffIso = twelveMonthsAgo.toISOString();
+    const cutoffDate = twelveMonthsAgo.toISOString().slice(0, 10);
+
+    const [{ data: costProfiles }, { data: leaveEntries }, { data: workEntries }] = await Promise.all([
+      supabase.from("staff_cost_profiles").select("*"),
+      supabase.from("staff_leave").select("staff_id, leave_type, hours, start_date").gte("start_date", cutoffDate),
+      supabase.from("time_entries").select("staff_id, hours").eq("entry_type", "work").gte("clock_in", cutoffIso).not("hours", "is", null),
+    ]);
+
+    const profileNameMap = new Map((profiles ?? []).map((p: any) => [p.id, p.full_name]));
+
+    const workedByStaff = new Map<string, number>();
+    (workEntries ?? []).forEach((e: any) => {
+      workedByStaff.set(e.staff_id, (workedByStaff.get(e.staff_id) ?? 0) + Number(e.hours ?? 0));
+    });
+
+    const sickByStaff = new Map<string, number>();
+    const leaveByStaff = new Map<string, number>();
+    (leaveEntries ?? []).forEach((l: any) => {
+      const hours = Number(l.hours ?? 0);
+      leaveByStaff.set(l.staff_id, (leaveByStaff.get(l.staff_id) ?? 0) + hours);
+      if (l.leave_type === "sick") {
+        sickByStaff.set(l.staff_id, (sickByStaff.get(l.staff_id) ?? 0) + hours);
+      }
+    });
+
+    staffEfficiency = (costProfiles ?? [])
+      .map((cp: any) => {
+        const { annualLoadedCost, loadedHourlyRate } = computeLoadedCost(cp);
+        const workedHours = workedByStaff.get(cp.staff_id) ?? 0;
+        const leaveHours = leaveByStaff.get(cp.staff_id) ?? 0;
+        const sickHours = sickByStaff.get(cp.staff_id) ?? 0;
+        const paidHours = workedHours + leaveHours;
+        return {
+          name: profileNameMap.get(cp.staff_id) ?? "Unknown",
+          loadedHourlyRate,
+          workedHours,
+          sickHours,
+          leaveHours,
+          utilizationPct: paidHours > 0 ? (workedHours / paidHours) * 100 : null,
+          trueCostPerWorkedHour: workedHours > 0 ? annualLoadedCost / workedHours : null,
+        };
+      })
+      .sort((a, b) => (b.trueCostPerWorkedHour ?? 0) - (a.trueCostPerWorkedHour ?? 0));
+  }
 
   const invoicesData = invoices ?? [];
   const quotesData = quotes ?? [];
@@ -106,6 +177,7 @@ export default async function ReportsPage() {
       topCustomers={topCustomers}
       totalJobs={jobsData.length}
       totalQuotes={quotesData.length}
+      staffEfficiency={isAdmin ? staffEfficiency : null}
     />
   );
 }

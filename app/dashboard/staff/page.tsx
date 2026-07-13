@@ -8,7 +8,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Users, Plus, Mail, Phone, Shield, Wrench, Monitor, RotateCw } from "lucide-react";
+import { Users, Plus, Mail, Phone, Shield, Wrench, Monitor, RotateCw, DollarSign } from "lucide-react";
+import { StaffCostDialog } from "@/components/staff/staff-cost-dialog";
 
 const roleColors: Record<string, string> = {
   admin: "bg-purple-100 text-purple-700",
@@ -32,16 +33,27 @@ export default function StaffPage() {
   const [form, setForm] = useState({ full_name: "", email: "", phone: "", role: "technician" });
   const [errors, setErrors] = useState<Record<string, boolean>>({});
   const [resendingId, setResendingId] = useState<string | null>(null);
+  const [role, setRole] = useState<string | null>(null);
+  const [costDialogFor, setCostDialogFor] = useState<{ id: string; name: string } | null>(null);
 
   useEffect(() => {
     async function load() {
-      const { data, error } = await supabase.from("profiles").select("*").order("full_name");
+      const [{ data, error }, { data: { user } }] = await Promise.all([
+        supabase.from("profiles").select("*").order("full_name"),
+        supabase.auth.getUser(),
+      ]);
       if (error) setFetchError(error.message);
       setStaff(data ?? []);
+      if (user) {
+        const { data: profile } = await supabase.from("profiles").select("role").eq("id", user.id).single();
+        setRole(profile?.role ?? null);
+      }
       setLoading(false);
     }
     load();
   }, []);
+
+  const isAdmin = role === "admin";
 
   function setField(field: string, value: string) {
     setForm(p => ({ ...p, [field]: value }));
@@ -195,6 +207,15 @@ export default function StaffPage() {
                       <span className={`text-xs px-2 py-0.5 rounded-full font-medium flex items-center gap-1 ${roleColors[member.role]}`}>
                         <RoleIcon className="w-3 h-3" />{member.role}
                       </span>
+                      {isAdmin && (
+                        <Button
+                          variant="ghost" size="sm"
+                          className="text-xs h-7 gap-1 text-slate-400 hover:text-green-700"
+                          onClick={() => setCostDialogFor({ id: member.id, name: member.full_name })}
+                        >
+                          <DollarSign className="w-3 h-3" />Cost &amp; Leave
+                        </Button>
+                      )}
                       <Button
                         variant="ghost" size="sm"
                         className="text-xs h-7 gap-1 text-slate-400 hover:text-blue-600"
@@ -219,6 +240,15 @@ export default function StaffPage() {
           )}
         </CardContent>
       </Card>
+
+      {costDialogFor && (
+        <StaffCostDialog
+          staffId={costDialogFor.id}
+          staffName={costDialogFor.name}
+          open={!!costDialogFor}
+          onOpenChange={(open) => !open && setCostDialogFor(null)}
+        />
+      )}
     </div>
   );
 }

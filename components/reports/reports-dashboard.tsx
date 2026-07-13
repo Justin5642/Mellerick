@@ -14,7 +14,7 @@ import {
   Pie,
   Cell,
 } from "recharts";
-import { DollarSign, TrendingUp, AlertTriangle, Target, Briefcase, Users } from "lucide-react";
+import { DollarSign, TrendingUp, AlertTriangle, Target, Briefcase, Users, HeartPulse } from "lucide-react";
 
 function money(n: number) {
   return `$${n.toLocaleString("en-AU", { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
@@ -50,6 +50,15 @@ interface Props {
   topCustomers: { name: string; total: number }[];
   totalJobs: number;
   totalQuotes: number;
+  staffEfficiency: {
+    name: string;
+    loadedHourlyRate: number;
+    workedHours: number;
+    sickHours: number;
+    leaveHours: number;
+    utilizationPct: number | null;
+    trueCostPerWorkedHour: number | null;
+  }[] | null;
 }
 
 export function ReportsDashboard({
@@ -65,6 +74,7 @@ export function ReportsDashboard({
   topCustomers,
   totalJobs,
   totalQuotes,
+  staffEfficiency,
 }: Props) {
   const quotePieData = Object.entries(quoteStatusCounts)
     .filter(([, count]) => count > 0)
@@ -238,6 +248,58 @@ export function ReportsDashboard({
           </CardContent>
         </Card>
       </div>
+
+      {staffEfficiency && staffEfficiency.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base flex items-center gap-2">
+              <HeartPulse className="w-4 h-4" /> Staff Cost &amp; Efficiency (trailing 12 months)
+            </CardTitle>
+            <p className="text-xs text-slate-400">
+              True cost per hour actually worked, factoring in wage on-costs and paid leave taken — a higher figure than the
+              loaded rate means more of that person&apos;s paid time went to leave rather than jobs. Admin only.
+            </p>
+          </CardHeader>
+          <CardContent className="p-0">
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b text-left text-xs text-slate-500">
+                    <th className="px-4 py-2 font-medium">Staff</th>
+                    <th className="px-4 py-2 font-medium text-right">Loaded Rate</th>
+                    <th className="px-4 py-2 font-medium text-right">Worked Hrs</th>
+                    <th className="px-4 py-2 font-medium text-right">Sick Hrs</th>
+                    <th className="px-4 py-2 font-medium text-right">Leave Hrs</th>
+                    <th className="px-4 py-2 font-medium text-right">Utilization</th>
+                    <th className="px-4 py-2 font-medium text-right">True Cost / Hr Worked</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y">
+                  {staffEfficiency.map((s) => {
+                    const overLoaded = s.trueCostPerWorkedHour != null && s.trueCostPerWorkedHour > s.loadedHourlyRate * 1.1;
+                    const lowUtilization = s.utilizationPct != null && s.utilizationPct < 85;
+                    return (
+                      <tr key={s.name}>
+                        <td className="px-4 py-2.5 font-medium text-slate-700">{s.name}</td>
+                        <td className="px-4 py-2.5 text-right text-slate-600">${s.loadedHourlyRate.toFixed(2)}</td>
+                        <td className="px-4 py-2.5 text-right text-slate-600">{s.workedHours.toFixed(1)}</td>
+                        <td className="px-4 py-2.5 text-right text-slate-600">{s.sickHours.toFixed(1)}</td>
+                        <td className="px-4 py-2.5 text-right text-slate-600">{s.leaveHours.toFixed(1)}</td>
+                        <td className={`px-4 py-2.5 text-right font-medium ${lowUtilization ? "text-orange-600" : "text-slate-600"}`}>
+                          {s.utilizationPct != null ? `${s.utilizationPct.toFixed(0)}%` : "—"}
+                        </td>
+                        <td className={`px-4 py-2.5 text-right font-semibold ${overLoaded ? "text-red-600" : "text-slate-800"}`}>
+                          {s.trueCostPerWorkedHour != null ? `$${s.trueCostPerWorkedHour.toFixed(2)}` : "—"}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </CardContent>
+        </Card>
+      )}
     </div>
   );
 }
