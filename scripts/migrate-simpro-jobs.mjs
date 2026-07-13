@@ -354,6 +354,12 @@ async function main() {
       description: job.description || null,
       notes: buildJobNotes(job),
       status: "completed",
+      // These are historical Simpro jobs, already completed and invoiced in
+      // Simpro long before this app existed — they must not land in the
+      // Approvals "pending" queue and drown out jobs that actually need an
+      // admin's attention (see 2026-07 cleanup after 668 imported jobs did
+      // exactly that).
+      admin_status: "approved",
       priority: "normal",
       job_type: mapJobType(job.type),
       actual_end: job.completedDate || null,
