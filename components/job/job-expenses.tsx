@@ -23,6 +23,14 @@ interface Expense {
   xero_bill_id: string | null;
   xero_synced_at: string | null;
   created_at: string;
+  cost_center_id: string | null;
+}
+
+interface CostCenterOption {
+  id: string;
+  name: string;
+  code: string | null;
+  po_number?: string;
 }
 
 const CATEGORY_LABELS: Record<string, string> = {
@@ -38,9 +46,10 @@ interface Props {
   expenses: Expense[];
   onUpdate: (expenses: Expense[]) => void;
   currentUserId: string;
+  costCenters: CostCenterOption[];
 }
 
-export function JobExpenses({ jobId, jobNumber, expenses: initialExpenses, onUpdate, currentUserId }: Props) {
+export function JobExpenses({ jobId, jobNumber, expenses: initialExpenses, onUpdate, currentUserId, costCenters }: Props) {
   const supabase = createClient();
   const [expenses, setExpenses] = useState<Expense[]>(initialExpenses);
   const [showForm, setShowForm] = useState(false);
@@ -56,6 +65,7 @@ export function JobExpenses({ jobId, jobNumber, expenses: initialExpenses, onUpd
     invoice_date: "",
     amount: "",
     gst_amount: "",
+    cost_center_id: "none",
   });
   const [errors, setErrors] = useState<Record<string, boolean>>({});
 
@@ -88,6 +98,7 @@ export function JobExpenses({ jobId, jobNumber, expenses: initialExpenses, onUpd
         gst_amount: Number(form.gst_amount) || 0,
         receipt_storage_path: receiptPath,
         entered_by: currentUserId,
+        cost_center_id: form.cost_center_id === "none" ? null : form.cost_center_id,
       })
       .select()
       .single();
@@ -98,7 +109,7 @@ export function JobExpenses({ jobId, jobNumber, expenses: initialExpenses, onUpd
     setExpenses(updated);
     onUpdate(updated);
     setShowForm(false);
-    setForm({ supplier_name: "", category: "materials", description: "", invoice_number: "", invoice_date: "", amount: "", gst_amount: "" });
+    setForm({ supplier_name: "", category: "materials", description: "", invoice_number: "", invoice_date: "", amount: "", gst_amount: "", cost_center_id: "none" });
     setReceiptFile(null);
     toast.success("Expense saved");
     setSaving(false);
@@ -146,6 +157,13 @@ export function JobExpenses({ jobId, jobNumber, expenses: initialExpenses, onUpd
   const totalExGst = expenses.reduce((sum, e) => sum + Number(e.amount), 0);
   const totalGst = expenses.reduce((sum, e) => sum + Number(e.gst_amount), 0);
 
+  function costCenterLabel(id: string | null) {
+    if (!id) return null;
+    const cc = costCenters.find((c) => c.id === id);
+    if (!cc) return null;
+    return cc.po_number ? `${cc.name} (PO #${cc.po_number})` : cc.name;
+  }
+
   return (
     <div className="p-6 space-y-6">
       {expenses.length > 0 && (
@@ -180,6 +198,11 @@ export function JobExpenses({ jobId, jobNumber, expenses: initialExpenses, onUpd
                   {expense.invoice_date ? ` · ${new Date(expense.invoice_date).toLocaleDateString("en-AU")}` : ""}
                 </p>
                 {expense.description && <p className="text-sm text-slate-600 mt-1">{expense.description}</p>}
+                {costCenterLabel(expense.cost_center_id) && (
+                  <span className="inline-block text-xs font-medium px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 mt-1.5">
+                    {costCenterLabel(expense.cost_center_id)}
+                  </span>
+                )}
               </div>
               <button onClick={() => deleteExpense(expense)} className="text-slate-300 hover:text-red-400 transition-colors p-1 shrink-0">
                 <Trash2 className="w-4 h-4" />
@@ -250,6 +273,23 @@ export function JobExpenses({ jobId, jobNumber, expenses: initialExpenses, onUpd
                 </Select>
               </div>
             </div>
+
+            {costCenters.length > 0 && (
+              <div className="space-y-1.5">
+                <Label>Cost Centre / Stage</Label>
+                <Select value={form.cost_center_id} onValueChange={(v) => setForm((f) => ({ ...f, cost_center_id: v ?? "none" }))}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">Unassigned</SelectItem>
+                    {costCenters.map((cc) => (
+                      <SelectItem key={cc.id} value={cc.id}>
+                        {cc.name}{cc.po_number ? ` (PO #${cc.po_number})` : ""}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
 
             <div className="space-y-1.5">
               <Label>Description</Label>

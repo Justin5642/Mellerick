@@ -36,6 +36,17 @@ const OVERTIME_LABELS: Record<string, string> = {
   other: "Other",
 };
 
+interface ExpenseForAgg {
+  cost_center_id: string | null;
+  amount: number;
+}
+
+interface TimeEntryForAgg {
+  cost_center_id: string | null;
+  hours: number | null;
+  entry_type?: "work" | "travel";
+}
+
 interface Props {
   jobId: string;
   pos: PurchaseOrder[];
@@ -43,6 +54,8 @@ interface Props {
   onUpdate: (pos: PurchaseOrder[]) => void;
   overtimeReason?: string | null;
   overtimeCategory?: string | null;
+  expenses: ExpenseForAgg[];
+  timeEntries: TimeEntryForAgg[];
 }
 
 function progressColor(pct: number) {
@@ -51,7 +64,7 @@ function progressColor(pct: number) {
   return "bg-green-500";
 }
 
-export function JobPO({ jobId, pos: initialPos, totalHoursLogged, onUpdate, overtimeReason, overtimeCategory }: Props) {
+export function JobPO({ jobId, pos: initialPos, totalHoursLogged, onUpdate, overtimeReason, overtimeCategory, expenses, timeEntries }: Props) {
   const supabase = createClient();
   const [pos, setPos] = useState<PurchaseOrder[]>(initialPos);
   const [showForm, setShowForm] = useState(false);
@@ -147,6 +160,19 @@ export function JobPO({ jobId, pos: initialPos, totalHoursLogged, onUpdate, over
   const totalAllocatedValue = pos.reduce((sum, p) => sum + (Number(p.total_value) || 0), 0);
   const hoursPct = totalAllocatedHours > 0 ? Math.min((totalHoursLogged / totalAllocatedHours) * 100, 100) : 0;
 
+  // Actual spend/hours per cost centre (stage), so budgeted vs. actual can
+  // be compared stage-by-stage instead of only for the job as a whole.
+  const spentByCostCenter: Record<string, number> = {};
+  for (const e of expenses) {
+    if (!e.cost_center_id) continue;
+    spentByCostCenter[e.cost_center_id] = (spentByCostCenter[e.cost_center_id] ?? 0) + (Number(e.amount) || 0);
+  }
+  const hoursByCostCenter: Record<string, number> = {};
+  for (const t of timeEntries) {
+    if (!t.cost_center_id || t.entry_type === "travel") continue;
+    hoursByCostCenter[t.cost_center_id] = (hoursByCostCenter[t.cost_center_id] ?? 0) + (Number(t.hours) || 0);
+  }
+
   return (
     <div className="p-6 space-y-6">
       {/* Scoreboard */}
@@ -218,34 +244,45 @@ export function JobPO({ jobId, pos: initialPos, totalHoursLogged, onUpdate, over
             </div>
           </CardHeader>
           {po.po_cost_centers && po.po_cost_centers.length > 0 && (
-            <CardContent className="pt-0">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b">
-                    <th className="text-left pb-2 font-medium text-slate-400 text-xs">Cost Centre</th>
-                    <th className="text-left pb-2 font-medium text-slate-400 text-xs">Code</th>
-                    <th className="text-right pb-2 font-medium text-slate-400 text-xs">$ Allocated</th>
-                    <th className="text-right pb-2 font-medium text-slate-400 text-xs">Hours</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y">
-                  {po.po_cost_centers.map(cc => (
-                    <tr key={cc.id}>
-                      <td className="py-2 font-medium text-slate-800">{cc.name}</td>
-                      <td className="py-2 text-slate-400 text-xs font-mono">{cc.code}</td>
-                      <td className="py-2 text-right text-slate-700">${Number(cc.allocated_amount).toFixed(2)}</td>
-                      <td className="py-2 text-right text-slate-700">{Number(cc.allocated_hours).toFixed(1)}h</td>
-                    </tr>
-                  ))}
-                </tbody>
-                <tfoot>
-                  <tr className="border-t">
-                    <td colSpan={2} className="pt-2 text-sm font-semibold text-slate-800">Total</td>
-                    <td className="pt-2 text-right font-semibold text-slate-800">${Number(po.total_value).toFixed(2)}</td>
-                    <td className="pt-2 text-right font-semibold text-slate-800">{Number(po.total_hours).toFixed(1)}h</td>
-                  </tr>
-                </tfoot>
-              </table>
+            <CardContent className="pt-0 space-y-3">
+              {po.po_cost_centers.map(cc => {
+                const spent = spentByCostCenter[cc.id] ?? 0;
+                const hoursLogged = hoursByCostCenter[cc.id] ?? 0;
+                const allocatedAmount = Number(cc.allocated_amount) || 0;
+                const allocatedHours = Number(cc.allocated_hours) || 0;
+                const dollarPct = allocatedAmount > 0 ? Math.min((spent / allocatedAmount) * 100, 100) : 0;
+                const stageHoursPct = allocatedHours > 0 ? Math.min((hoursLogged / allocatedHours) * 100, 100) : 0;
+                return (
+                  <div key={cc.id} className="rounded-lg border border-slate-100 p-3 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <p className="text-sm font-semibold text-slate-800">{cc.name}</p>
+                      {cc.code && <p className="text-xs text-slate-400 font-mono">{cc.code}</p>}
+                    </div>
+                    <div>
+                      <div className="flex justify-between text-xs text-slate-500 mb-1">
+                        <span>${spent.toFixed(2)} spent</span>
+                        <span>${allocatedAmount.toFixed(2)} allocated</span>
+                      </div>
+                      <div className="w-full bg-slate-200 rounded-full h-2">
+                        <div className={`h-2 rounded-full ${progressColor(dollarPct)}`} style={{ width: `${dollarPct}%` }} />
+                      </div>
+                    </div>
+                    <div>
+                      <div className="flex justify-between text-xs text-slate-500 mb-1">
+                        <span>{hoursLogged.toFixed(1)}h logged</span>
+                        <span>{allocatedHours.toFixed(1)}h allocated</span>
+                      </div>
+                      <div className="w-full bg-slate-200 rounded-full h-2">
+                        <div className={`h-2 rounded-full ${progressColor(stageHoursPct)}`} style={{ width: `${stageHoursPct}%` }} />
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+              <div className="flex justify-between text-sm pt-2 border-t font-semibold text-slate-800">
+                <span>PO Total</span>
+                <span>${Number(po.total_value).toFixed(2)} · {Number(po.total_hours).toFixed(1)}h</span>
+              </div>
             </CardContent>
           )}
         </Card>

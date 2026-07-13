@@ -5,6 +5,7 @@ import { createClient } from "@/lib/supabase/client";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Clock, LogIn, LogOut, MapPin, Radio, WifiOff, Car } from "lucide-react";
 
 interface TimeEntry {
@@ -15,6 +16,7 @@ interface TimeEntry {
   hours: number | null;
   auto_clocked: boolean;
   entry_type?: "work" | "travel";
+  cost_center_id: string | null;
   profiles: { full_name: string };
 }
 
@@ -24,11 +26,20 @@ interface PO {
   site_address: string | null;
 }
 
+interface CostCenterOption {
+  id: string;
+  name: string;
+  code: string | null;
+  po_number?: string;
+}
+
 interface Props {
   jobId: string;
   currentUserId: string;
   timeEntries: TimeEntry[];
   pos: PO[];
+  costCenters: CostCenterOption[];
+  onUpdate: (entries: TimeEntry[]) => void;
 }
 
 const GEOFENCE_RADIUS = 150;
@@ -49,13 +60,38 @@ function formatDate(iso: string) {
   return new Date(iso).toLocaleDateString("en-AU", { weekday: "short", day: "numeric", month: "short" });
 }
 
-export function JobTime({ jobId, currentUserId, timeEntries: initial, pos }: Props) {
+export function JobTime({ jobId, currentUserId, timeEntries: initial, pos, costCenters, onUpdate }: Props) {
   const supabase = createClient();
   const [entries, setEntries] = useState<TimeEntry[]>(initial);
   const [loading, setLoading] = useState(false);
+  const [assigningId, setAssigningId] = useState<string | null>(null);
   const [distance, setDistance] = useState<number | null>(null);
   const [withinFence, setWithinFence] = useState(false);
   const lastInsideRef = useRef<boolean | null>(null);
+
+  // Single source of truth for entries lives in local state (needed for the
+  // geofencing watcher's functional updates below); mirror every change up
+  // to the parent so the PO tab's per-stage actuals stay in sync without a
+  // full page reload.
+  useEffect(() => {
+    onUpdate(entries);
+  }, [entries]);
+
+  async function assignCostCenter(entryId: string, costCenterId: string) {
+    setAssigningId(entryId);
+    const { data, error } = await supabase
+      .from("time_entries")
+      .update({ cost_center_id: costCenterId === "none" ? null : costCenterId })
+      .eq("id", entryId)
+      .select("*, profiles(full_name)")
+      .single();
+    setAssigningId(null);
+    if (error || !data) {
+      toast.error("Failed to assign stage");
+      return;
+    }
+    setEntries((prev) => prev.map((e) => (e.id === entryId ? (data as TimeEntry) : e)));
+  }
 
   const poWithLocation = pos.find(p => p.site_lat && p.site_lng);
   const myOpenEntry = entries.find(e => e.staff_id === currentUserId && e.entry_type !== "travel" && !e.clock_out);
@@ -231,23 +267,42 @@ export function JobTime({ jobId, currentUserId, timeEntries: initial, pos }: Pro
             {entries.map(entry => {
               const isTravel = entry.entry_type === "travel";
               return (
-                <div key={entry.id} className={`flex items-center justify-between py-2.5 px-3 rounded-lg text-sm ${isTravel ? "bg-blue-50/60" : "bg-slate-50"}`}>
-                  <div className="flex items-center gap-1.5">
-                    {isTravel && <Car className="w-3.5 h-3.5 text-blue-500" />}
-                    <span className="font-medium text-slate-800">{entry.profiles?.full_name}</span>
-                    <span className="text-slate-400 text-xs ml-1">{formatDate(entry.clock_in)}</span>
-                    {isTravel ? (
-                      <span className="text-xs text-blue-500 ml-1.5 bg-blue-100 px-1.5 py-0.5 rounded">travel</span>
-                    ) : entry.auto_clocked && (
-                      <span className="text-xs text-blue-500 ml-1.5 bg-blue-50 px-1.5 py-0.5 rounded">auto</span>
-                    )}
+                <div key={entry.id} className={`py-2.5 px-3 rounded-lg text-sm space-y-1.5 ${isTravel ? "bg-blue-50/60" : "bg-slate-50"}`}>
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-1.5">
+                      {isTravel && <Car className="w-3.5 h-3.5 text-blue-500" />}
+                      <span className="font-medium text-slate-800">{entry.profiles?.full_name}</span>
+                      <span className="text-slate-400 text-xs ml-1">{formatDate(entry.clock_in)}</span>
+                      {isTravel ? (
+                        <span className="text-xs text-blue-500 ml-1.5 bg-blue-100 px-1.5 py-0.5 rounded">travel</span>
+                      ) : entry.auto_clocked && (
+                        <span className="text-xs text-blue-500 ml-1.5 bg-blue-50 px-1.5 py-0.5 rounded">auto</span>
+                      )}
+                    </div>
+                    <div className="text-right text-slate-600">
+                      {formatTime(entry.clock_in)} → {entry.clock_out ? formatTime(entry.clock_out) : <span className="text-green-600 font-medium">now</span>}
+                      {entry.hours != null && (
+                        <span className="ml-2 font-semibold text-slate-800">{Number(entry.hours).toFixed(1)}h</span>
+                      )}
+                    </div>
                   </div>
-                  <div className="text-right text-slate-600">
-                    {formatTime(entry.clock_in)} → {entry.clock_out ? formatTime(entry.clock_out) : <span className="text-green-600 font-medium">now</span>}
-                    {entry.hours != null && (
-                      <span className="ml-2 font-semibold text-slate-800">{Number(entry.hours).toFixed(1)}h</span>
-                    )}
-                  </div>
+                  {!isTravel && costCenters.length > 0 && (
+                    <Select
+                      value={entry.cost_center_id ?? "none"}
+                      onValueChange={(v) => assignCostCenter(entry.id, v ?? "none")}
+                      disabled={assigningId === entry.id}
+                    >
+                      <SelectTrigger className="h-7 text-xs w-56 bg-white"><SelectValue placeholder="Assign to stage..." /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none">Unassigned</SelectItem>
+                        {costCenters.map((cc) => (
+                          <SelectItem key={cc.id} value={cc.id}>
+                            {cc.name}{cc.po_number ? ` (PO #${cc.po_number})` : ""}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  )}
                 </div>
               );
             })}

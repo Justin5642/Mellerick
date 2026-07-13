@@ -55,13 +55,21 @@ export function JobDetailClient({ job, currentUserId, photos: initialPhotos, doc
   const [notes, setNotes] = useState(initialNotes);
   const [lineItems, setLineItems] = useState(initialLineItems);
   const [purchaseOrders, setPurchaseOrders] = useState(initialPOs);
+  const [timeEntries, setTimeEntries] = useState(initialTimeEntries);
   const [variations, setVariations] = useState(initialVariations);
   const [expenses, setExpenses] = useState(initialExpenses);
   // Only "work" entries count against the allocated-hours budget — travel
   // time between jobs is tracked separately and shouldn't eat into it.
-  const totalHoursLogged = initialTimeEntries
+  const totalHoursLogged = timeEntries
     .filter((e: any) => e.entry_type !== "travel")
     .reduce((sum: number, e: any) => sum + (e.hours ? Number(e.hours) : 0), 0);
+
+  // Flat list of every cost centre (stage) across all POs on this job, so
+  // Expenses and Time can tag against them and the PO tab can show actual
+  // spend/hours per stage instead of just per job.
+  const costCenters = purchaseOrders.flatMap((po: any) =>
+    (po.po_cost_centers ?? []).map((cc: any) => ({ id: cc.id, name: cc.name, code: cc.code, po_number: po.po_number }))
+  );
 
   const unbilledVariations = variations.filter(
     (v: any) => (v.status === "approved" || v.status === "auto_approved") && !v.invoice_id
@@ -155,16 +163,18 @@ export function JobDetailClient({ job, currentUserId, photos: initialPhotos, doc
                 onUpdate={setPurchaseOrders}
                 overtimeReason={job.overtime_reason}
                 overtimeCategory={job.overtime_category}
+                expenses={expenses}
+                timeEntries={timeEntries}
               />
             </TabsContent>
             <TabsContent value="time" className="m-0 h-full">
-              <JobTime jobId={job.id} currentUserId={currentUserId} timeEntries={initialTimeEntries} pos={purchaseOrders} />
+              <JobTime jobId={job.id} currentUserId={currentUserId} timeEntries={timeEntries} pos={purchaseOrders} costCenters={costCenters} onUpdate={setTimeEntries} />
             </TabsContent>
             <TabsContent value="variations" className="m-0 h-full">
               <JobVariations jobId={job.id} variations={variations} variationTypes={variationTypes} currentUserId={currentUserId} onUpdate={setVariations} />
             </TabsContent>
             <TabsContent value="expenses" className="m-0 h-full">
-              <JobExpenses jobId={job.id} jobNumber={job.job_number} expenses={expenses} onUpdate={setExpenses} currentUserId={currentUserId} />
+              <JobExpenses jobId={job.id} jobNumber={job.job_number} expenses={expenses} onUpdate={setExpenses} currentUserId={currentUserId} costCenters={costCenters} />
             </TabsContent>
             <TabsContent value="documents" className="m-0 h-full">
               <JobDocuments jobId={job.id} documents={documents} onUpdate={setDocuments} currentUserId={currentUserId} />

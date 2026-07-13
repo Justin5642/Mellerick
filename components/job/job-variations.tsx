@@ -123,7 +123,7 @@ export function JobVariations({
         attachment_storage_path: attachmentPath,
         attachment_file_name: attachmentPath ? attachmentFile!.name : null,
       })
-      .select("*, variation_types(name), profiles(full_name)")
+      .select("*, variation_types(name), profiles!job_variations_logged_by_fkey(full_name)")
       .single();
 
     setSaving(false);
@@ -168,7 +168,7 @@ export function JobVariations({
         admin_notes: p.notes || null,
       })
       .eq("id", v.id)
-      .select("*, variation_types(name), profiles(full_name)")
+      .select("*, variation_types(name), profiles!job_variations_logged_by_fkey(full_name)")
       .single();
     if (error || !data) {
       toast.error(error?.message ?? "Failed to approve");
@@ -184,7 +184,7 @@ export function JobVariations({
       .from("job_variations")
       .update({ status: "rejected", admin_notes: notes || null, approved_by: currentUserId, approved_at: new Date().toISOString() })
       .eq("id", v.id)
-      .select("*, variation_types(name), profiles(full_name)")
+      .select("*, variation_types(name), profiles!job_variations_logged_by_fkey(full_name)")
       .single();
     if (error || !data) {
       toast.error(error?.message ?? "Failed to reject");

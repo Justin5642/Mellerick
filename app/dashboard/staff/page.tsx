@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Users, Plus, Mail, Phone, Shield, Wrench, Monitor } from "lucide-react";
+import { Users, Plus, Mail, Phone, Shield, Wrench, Monitor, RotateCw } from "lucide-react";
 
 const roleColors: Record<string, string> = {
   admin: "bg-purple-100 text-purple-700",
@@ -31,6 +31,7 @@ export default function StaffPage() {
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState({ full_name: "", email: "", phone: "", role: "technician" });
   const [errors, setErrors] = useState<Record<string, boolean>>({});
+  const [resendingId, setResendingId] = useState<string | null>(null);
 
   useEffect(() => {
     async function load() {
@@ -75,6 +76,22 @@ export default function StaffPage() {
       setStaff(updated ?? []);
     }
     setSaving(false);
+  }
+
+  async function resendInvite(member: any) {
+    setResendingId(member.id);
+    const res = await fetch("/api/staff/resend-invite", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email: member.email, full_name: member.full_name, role: member.role }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      toast.error(data.error ?? "Failed to resend invite");
+    } else {
+      toast.success(`Invite re-sent to ${member.email}`);
+    }
+    setResendingId(null);
   }
 
   async function toggleActive(id: string, current: boolean) {
@@ -178,6 +195,15 @@ export default function StaffPage() {
                       <span className={`text-xs px-2 py-0.5 rounded-full font-medium flex items-center gap-1 ${roleColors[member.role]}`}>
                         <RoleIcon className="w-3 h-3" />{member.role}
                       </span>
+                      <Button
+                        variant="ghost" size="sm"
+                        className="text-xs h-7 gap-1 text-slate-400 hover:text-blue-600"
+                        disabled={resendingId === member.id}
+                        onClick={() => resendInvite(member)}
+                      >
+                        <RotateCw className="w-3 h-3" />
+                        {resendingId === member.id ? "Sending..." : "Resend Invite"}
+                      </Button>
                       <Button
                         variant="ghost" size="sm"
                         className={`text-xs h-7 ${member.is_active ? "text-slate-400 hover:text-red-500" : "text-slate-400 hover:text-green-600"}`}
