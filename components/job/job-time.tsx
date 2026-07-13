@@ -6,7 +6,8 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Clock, LogIn, LogOut, MapPin, Radio, WifiOff, Car } from "lucide-react";
+import { Clock, LogIn, LogOut, MapPin, Radio, WifiOff, Car, Pencil, Plus } from "lucide-react";
+import { TimeEntryEditDialog } from "@/components/job/time-entry-edit-dialog";
 
 interface TimeEntry {
   id: string;
@@ -17,6 +18,7 @@ interface TimeEntry {
   auto_clocked: boolean;
   entry_type?: "work" | "travel";
   cost_center_id: string | null;
+  edited_at?: string | null;
   profiles: { full_name: string };
 }
 
@@ -68,6 +70,7 @@ export function JobTime({ jobId, currentUserId, timeEntries: initial, pos, costC
   const [distance, setDistance] = useState<number | null>(null);
   const [withinFence, setWithinFence] = useState(false);
   const lastInsideRef = useRef<boolean | null>(null);
+  const [editDialog, setEditDialog] = useState<{ mode: "edit" | "add"; entry?: TimeEntry } | null>(null);
 
   // Single source of truth for entries lives in local state (needed for the
   // geofencing watcher's functional updates below); mirror every change up
@@ -254,21 +257,37 @@ export function JobTime({ jobId, currentUserId, timeEntries: initial, pos, costC
       </div>
 
       {/* Time log */}
-      {entries.length > 0 && (
-        <div>
-          <div className="flex items-center justify-between mb-3">
-            <h3 className="text-sm font-semibold text-slate-700">Time Log</h3>
-            <span className="text-sm font-bold text-slate-900">
-              {totalHours.toFixed(1)}h total
-              {totalTravelHours > 0 && <span className="text-slate-400 font-normal"> · {totalTravelHours.toFixed(1)}h travel</span>}
-            </span>
+      <div>
+        <div className="flex items-center justify-between mb-1">
+          <h3 className="text-sm font-semibold text-slate-700">Time Log</h3>
+          <div className="flex items-center gap-3">
+            {entries.length > 0 && (
+              <span className="text-sm font-bold text-slate-900">
+                {totalHours.toFixed(1)}h total
+                {totalTravelHours > 0 && <span className="text-slate-400 font-normal"> · {totalTravelHours.toFixed(1)}h travel</span>}
+              </span>
+            )}
+            <Button variant="outline" size="sm" className="gap-1.5 h-7 text-xs" onClick={() => setEditDialog({ mode: "add" })}>
+              <Plus className="w-3.5 h-3.5" />Add manual entry
+            </Button>
           </div>
+        </div>
+        <p className="text-xs text-slate-400 mb-3">
+          Use this if auto clock-in/out didn&apos;t fire correctly — click an entry below to correct it.
+        </p>
+        {entries.length > 0 && (
           <div className="space-y-2">
             {entries.map(entry => {
               const isTravel = entry.entry_type === "travel";
+              const isMine = entry.staff_id === currentUserId;
               return (
                 <div key={entry.id} className={`py-2.5 px-3 rounded-lg text-sm space-y-1.5 ${isTravel ? "bg-blue-50/60" : "bg-slate-50"}`}>
-                  <div className="flex items-center justify-between">
+                  <button
+                    type="button"
+                    className={`flex items-center justify-between w-full text-left ${isMine ? "cursor-pointer" : "cursor-default"}`}
+                    onClick={() => isMine && setEditDialog({ mode: "edit", entry })}
+                    disabled={!isMine}
+                  >
                     <div className="flex items-center gap-1.5">
                       {isTravel && <Car className="w-3.5 h-3.5 text-blue-500" />}
                       <span className="font-medium text-slate-800">{entry.profiles?.full_name}</span>
@@ -278,14 +297,20 @@ export function JobTime({ jobId, currentUserId, timeEntries: initial, pos, costC
                       ) : entry.auto_clocked && (
                         <span className="text-xs text-blue-500 ml-1.5 bg-blue-50 px-1.5 py-0.5 rounded">auto</span>
                       )}
-                    </div>
-                    <div className="text-right text-slate-600">
-                      {formatTime(entry.clock_in)} → {entry.clock_out ? formatTime(entry.clock_out) : <span className="text-green-600 font-medium">now</span>}
-                      {entry.hours != null && (
-                        <span className="ml-2 font-semibold text-slate-800">{Number(entry.hours).toFixed(1)}h</span>
+                      {entry.edited_at && (
+                        <span className="text-xs text-slate-500 ml-1.5 bg-slate-100 px-1.5 py-0.5 rounded">edited</span>
                       )}
                     </div>
-                  </div>
+                    <div className="flex items-center gap-2 text-right text-slate-600">
+                      <span>
+                        {formatTime(entry.clock_in)} → {entry.clock_out ? formatTime(entry.clock_out) : <span className="text-green-600 font-medium">now</span>}
+                        {entry.hours != null && (
+                          <span className="ml-2 font-semibold text-slate-800">{Number(entry.hours).toFixed(1)}h</span>
+                        )}
+                      </span>
+                      {isMine && <Pencil className="w-3 h-3 text-slate-400" />}
+                    </div>
+                  </button>
                   {!isTravel && costCenters.length > 0 && (
                     <Select
                       value={entry.cost_center_id ?? "none"}
@@ -307,12 +332,29 @@ export function JobTime({ jobId, currentUserId, timeEntries: initial, pos, costC
               );
             })}
           </div>
-        </div>
-      )}
+        )}
 
-      {entries.length === 0 && (
-        <p className="text-sm text-slate-400 text-center py-8">No time logged yet</p>
-      )}
+        {entries.length === 0 && (
+          <p className="text-sm text-slate-400 text-center py-8">No time logged yet</p>
+        )}
+      </div>
+
+      <TimeEntryEditDialog
+        open={!!editDialog}
+        onOpenChange={(o) => !o && setEditDialog(null)}
+        mode={editDialog?.mode ?? "add"}
+        jobId={jobId}
+        currentUserId={currentUserId}
+        entry={editDialog?.entry}
+        costCenters={costCenters}
+        onSaved={(saved) => {
+          setEntries((prev) => {
+            const exists = prev.some((e) => e.id === saved.id);
+            return exists ? prev.map((e) => (e.id === saved.id ? saved : e)) : [saved, ...prev];
+          });
+        }}
+        onDeleted={(id) => setEntries((prev) => prev.filter((e) => e.id !== id))}
+      />
     </div>
   );
 }

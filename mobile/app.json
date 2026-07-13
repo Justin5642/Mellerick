@@ -46,7 +46,8 @@
           "microphonePermission": "Mellerick Field uses your microphone to record job completion voice reports."
         }
       ],
-      "expo-asset"
+      "expo-asset",
+      "@react-native-community/datetimepicker"
     ]
   }
 }
