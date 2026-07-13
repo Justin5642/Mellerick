@@ -8,8 +8,9 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Users, Plus, Mail, Phone, Shield, Wrench, Monitor, RotateCw, DollarSign } from "lucide-react";
+import { Users, Plus, Mail, Phone, Shield, Wrench, Monitor, RotateCw, DollarSign, Pencil } from "lucide-react";
 import { StaffCostDialog } from "@/components/staff/staff-cost-dialog";
+import { StaffEditDialog } from "@/components/staff/staff-edit-dialog";
 
 const roleColors: Record<string, string> = {
   admin: "bg-purple-100 text-purple-700",
@@ -35,6 +36,7 @@ export default function StaffPage() {
   const [resendingId, setResendingId] = useState<string | null>(null);
   const [role, setRole] = useState<string | null>(null);
   const [costDialogFor, setCostDialogFor] = useState<{ id: string; name: string } | null>(null);
+  const [editingMember, setEditingMember] = useState<any>(null);
 
   useEffect(() => {
     async function load() {
@@ -210,6 +212,15 @@ export default function StaffPage() {
                       {isAdmin && (
                         <Button
                           variant="ghost" size="sm"
+                          className="text-xs h-7 gap-1 text-slate-400 hover:text-blue-700"
+                          onClick={() => setEditingMember(member)}
+                        >
+                          <Pencil className="w-3 h-3" />Edit
+                        </Button>
+                      )}
+                      {isAdmin && (
+                        <Button
+                          variant="ghost" size="sm"
                           className="text-xs h-7 gap-1 text-slate-400 hover:text-green-700"
                           onClick={() => setCostDialogFor({ id: member.id, name: member.full_name })}
                         >
@@ -247,6 +258,17 @@ export default function StaffPage() {
           staffName={costDialogFor.name}
           open={!!costDialogFor}
           onOpenChange={(open) => !open && setCostDialogFor(null)}
+        />
+      )}
+
+      {editingMember && (
+        <StaffEditDialog
+          member={editingMember}
+          open={!!editingMember}
+          onOpenChange={(open) => !open && setEditingMember(null)}
+          onSaved={(updated) => {
+            setStaff(s => s.map(m => m.id === updated.id ? { ...m, ...updated } : m));
+          }}
         />
       )}
     </div>
