@@ -10,6 +10,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Phone, Mail, MapPin, Calendar, User, Save, Navigation } from "lucide-react";
+import { formatDate } from "@/lib/date";
 
 interface Props {
   job: any;
@@ -187,24 +188,24 @@ export function JobOverview({ job, staff }: Props) {
           <CardContent className="space-y-2 text-sm">
             <div className="flex justify-between">
               <span className="text-slate-500">Created</span>
-              <span>{new Date(job.created_at).toLocaleDateString("en-AU")}</span>
+              <span>{formatDate(job.created_at)}</span>
             </div>
             {job.scheduled_start && (
               <div className="flex justify-between">
                 <span className="text-slate-500">Scheduled</span>
-                <span>{new Date(job.scheduled_start).toLocaleDateString("en-AU")}</span>
+                <span>{formatDate(job.scheduled_start)}</span>
               </div>
             )}
             {job.actual_start && (
               <div className="flex justify-between">
                 <span className="text-slate-500">Started</span>
-                <span>{new Date(job.actual_start).toLocaleDateString("en-AU")}</span>
+                <span>{formatDate(job.actual_start)}</span>
               </div>
             )}
             {job.actual_end && (
               <div className="flex justify-between">
                 <span className="text-slate-500">Completed</span>
-                <span>{new Date(job.actual_end).toLocaleDateString("en-AU")}</span>
+                <span>{formatDate(job.actual_end)}</span>
               </div>
             )}
           </CardContent>

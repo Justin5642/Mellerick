@@ -10,6 +10,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Plus, Trash2, Zap, Clock3, CheckCircle2, XCircle, ImageIcon, Paperclip, Upload } from "lucide-react";
+import { formatDate } from "@/lib/date";
 
 interface VariationType {
   id: string;
@@ -278,7 +279,7 @@ export function JobVariations({
                   {v.profiles?.full_name && (
                     <p className="text-xs text-slate-400 mt-1">
                       Logged by {v.profiles.full_name}
-                      {v.logged_at ? ` · ${new Date(v.logged_at).toLocaleDateString("en-AU")}` : ""}
+                      {v.logged_at ? ` · ${formatDate(v.logged_at)}` : ""}
                     </p>
                   )}
                   {v.admin_notes && <p className="text-xs text-slate-500 mt-1 italic">Office note: {v.admin_notes}</p>}

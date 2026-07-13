@@ -8,6 +8,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
 import { CheckCircle2, XCircle, ClipboardList, Clock, User, MapPin, ChevronDown, ChevronUp, AlertTriangle, GitPullRequestArrow } from "lucide-react";
 import Link from "next/link";
+import { formatDate } from "@/lib/date";
 
 const OVERTIME_LABELS: Record<string, string> = {
   unexpected_issue: "Unexpected issue",
@@ -260,7 +261,7 @@ export default function ApprovalsPage() {
                         </span>
                       )}
                       <span className="text-xs text-slate-400 flex items-center gap-1">
-                        <Clock className="w-3 h-3" />Completed {new Date(job.updated_at).toLocaleDateString("en-AU")}
+                        <Clock className="w-3 h-3" />Completed {formatDate(job.updated_at)}
                       </span>
                       {job.overtime_category && (
                         <span className="text-xs font-medium text-orange-700 bg-orange-100 px-2 py-0.5 rounded-full flex items-center gap-1">
@@ -292,7 +293,7 @@ export default function ApprovalsPage() {
                         </p>
                         <p className="text-xs text-slate-400 mt-1">
                           Logged by {job.overtime_logged_by_profile?.full_name ?? "—"}
-                          {job.overtime_logged_at ? ` on ${new Date(job.overtime_logged_at).toLocaleDateString("en-AU")}` : ""}
+                          {job.overtime_logged_at ? ` on ${formatDate(job.overtime_logged_at)}` : ""}
                         </p>
                       </div>
                     )}

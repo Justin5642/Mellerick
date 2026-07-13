@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Image as ImageIcon, Upload, Trash2, X, ZoomIn } from "lucide-react";
+import { formatDate } from "@/lib/date";
 
 const tagColors: Record<string, string> = {
   before: "bg-orange-100 text-orange-700",
@@ -161,7 +162,7 @@ function PhotoCard({ photo, onOpen, onDelete, getUrl, tagColors }: any) {
         <X className="w-3 h-3" />
       </button>
       <div className="absolute bottom-0 left-0 right-0 bg-black/50 text-white text-xs p-1 opacity-0 group-hover:opacity-100 transition-opacity truncate">
-        {new Date(photo.created_at).toLocaleDateString("en-AU")}
+        {formatDate(photo.created_at)}
       </div>
     </div>
   );

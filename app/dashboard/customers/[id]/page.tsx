@@ -18,6 +18,7 @@ import {
   FileText,
   Receipt,
 } from "lucide-react";
+import { formatDate } from "@/lib/date";
 
 const jobStatusColors: Record<string, string> = {
   pending: "bg-yellow-100 text-yellow-800",
@@ -229,7 +230,7 @@ export default async function CustomerDetailPage({
                             </p>
                             <p className="text-xs text-slate-500">
                               {job.scheduled_start
-                                ? new Date(job.scheduled_start).toLocaleDateString("en-AU")
+                                ? formatDate(job.scheduled_start)
                                 : "Not scheduled"}
                             </p>
                           </div>
@@ -267,7 +268,7 @@ export default async function CustomerDetailPage({
                               #{quote.quote_number} — {quote.title}
                             </p>
                             <p className="text-xs text-slate-500">
-                              {new Date(quote.created_at).toLocaleDateString("en-AU")}
+                              {formatDate(quote.created_at)}
                             </p>
                           </div>
                           <div className="flex items-center gap-3 flex-shrink-0 ml-3">
@@ -309,7 +310,7 @@ export default async function CustomerDetailPage({
                               #{inv.invoice_number} — {inv.title}
                             </p>
                             <p className="text-xs text-slate-500">
-                              Due {inv.due_date ? new Date(inv.due_date).toLocaleDateString("en-AU") : "—"}
+                              Due {inv.due_date ? formatDate(inv.due_date) : "—"}
                             </p>
                           </div>
                           <div className="flex items-center gap-3 flex-shrink-0 ml-3">

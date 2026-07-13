@@ -5,6 +5,7 @@ import { CheckCircle2, XCircle, ExternalLink, CalendarDays, Wrench } from "lucid
 import Link from "next/link";
 import { GoogleCalendarSyncButton } from "@/components/settings/google-calendar-sync-button";
 import { XeroExpenseAccountCode } from "@/components/settings/xero-expense-account-code";
+import { formatDateTime } from "@/lib/date";
 
 export default async function SettingsPage({ searchParams }: { searchParams: Promise<{ xero?: string; google?: string }> }) {
   const params = await searchParams;
@@ -135,7 +136,7 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
               <p>Connected as: <span className="font-medium text-slate-900">{googleToken.google_email}</span></p>
               <p className="text-xs text-slate-400">
                 {googleToken.calendar_last_synced_at
-                  ? `Last pulled changes from Calendar: ${new Date(googleToken.calendar_last_synced_at).toLocaleString("en-AU")}`
+                  ? `Last pulled changes from Calendar: ${formatDateTime(googleToken.calendar_last_synced_at)}`
                   : "Changes made directly in Google Calendar haven't been pulled in yet."}
               </p>
               <div className="flex gap-3">

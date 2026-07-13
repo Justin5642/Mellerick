@@ -3,15 +3,16 @@ export const dynamic = "force-dynamic";
 import { createClient } from "@/lib/supabase/server";
 import { ReportsDashboard } from "@/components/reports/reports-dashboard";
 import { computeLoadedCost } from "@/lib/staff-cost";
+import { businessDateParts, formatDate } from "@/lib/date";
 
 function monthKey(date: string) {
-  const d = new Date(date);
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+  const { year, month } = businessDateParts(date);
+  return `${year}-${String(month).padStart(2, "0")}`;
 }
 
 function monthLabel(key: string) {
   const [year, month] = key.split("-").map(Number);
-  return new Date(year, month - 1, 1).toLocaleDateString("en-AU", { month: "short", year: "2-digit" });
+  return formatDate(new Date(year, month - 1, 1), { month: "short", year: "2-digit" });
 }
 
 export default async function ReportsPage() {
@@ -100,10 +101,10 @@ export default async function ReportsPage() {
   const profilesData = profiles ?? [];
 
   // ---- Revenue by month (last 6 months), paid vs outstanding ----
-  const now = new Date();
+  const { year: nowYear, month: nowMonth } = businessDateParts();
   const monthKeys: string[] = [];
   for (let i = 5; i >= 0; i--) {
-    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    const d = new Date(nowYear, nowMonth - 1 - i, 1);
     monthKeys.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`);
   }
   const revenueByMonth = monthKeys.map((key) => {

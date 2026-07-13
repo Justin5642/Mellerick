@@ -3,6 +3,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { FileText, Plus } from "lucide-react";
 import Link from "next/link";
+import { formatDate } from "@/lib/date";
 
 const statusColors: Record<string, string> = {
   draft: "bg-gray-100 text-gray-700",
@@ -47,7 +48,7 @@ export default async function QuotesPage() {
                     <p className="font-medium text-sm group-hover:text-blue-600 transition-colors truncate">
                       #{quote.quote_number} — {quote.title}
                     </p>
-                    <p className="text-xs text-slate-500 mt-0.5">{quote.customers?.name} · {new Date(quote.created_at).toLocaleDateString("en-AU")}</p>
+                    <p className="text-xs text-slate-500 mt-0.5">{quote.customers?.name} · {formatDate(quote.created_at)}</p>
                   </div>
                   <div className="flex items-center gap-3 ml-4 flex-shrink-0">
                     <span className="text-sm font-semibold text-slate-700">${Number(quote.total).toLocaleString("en-AU", { minimumFractionDigits: 2 })}</span>

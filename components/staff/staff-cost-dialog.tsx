@@ -11,6 +11,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Trash2 } from "lucide-react";
 import { computeLoadedCost, LEAVE_TYPE_LABELS, type StaffCostInputs } from "@/lib/staff-cost";
+import { formatDate } from "@/lib/date";
 
 interface LeaveEntry {
   id: string;
@@ -242,7 +243,7 @@ export function StaffCostDialog({ staffId, staffName, open, onOpenChange }: Prop
                       <div>
                         <span className="font-medium text-slate-700">{LEAVE_TYPE_LABELS[l.leave_type] ?? l.leave_type}</span>
                         <span className="text-slate-400 ml-2 text-xs">
-                          {new Date(l.start_date).toLocaleDateString("en-AU")} – {new Date(l.end_date).toLocaleDateString("en-AU")}
+                          {formatDate(l.start_date)} – {formatDate(l.end_date)}
                         </span>
                         <span className="ml-2 font-semibold text-slate-800">{Number(l.hours).toFixed(1)}h</span>
                         {l.notes && <p className="text-xs text-slate-400 mt-0.5">{l.notes}</p>}

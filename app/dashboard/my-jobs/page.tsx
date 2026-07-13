@@ -5,6 +5,7 @@ import { createClient } from "@/lib/supabase/client";
 import { Card, CardContent } from "@/components/ui/card";
 import { Briefcase, Clock, MapPin, Navigation } from "lucide-react";
 import Link from "next/link";
+import { formatTime, formatDate, isTodayInBusinessTZ } from "@/lib/date";
 
 const statusColors: Record<string, string> = {
   pending: "bg-yellow-100 text-yellow-800",
@@ -40,17 +41,8 @@ export default function MyJobsPage() {
 
   if (loading) return <div className="p-6 text-slate-400 text-sm">Loading...</div>;
 
-  const today = new Date().toDateString();
-  const todayJobs = jobs.filter(j => j.scheduled_start && new Date(j.scheduled_start).toDateString() === today);
-  const upcomingJobs = jobs.filter(j => !j.scheduled_start || new Date(j.scheduled_start).toDateString() !== today);
-
-  function formatTime(iso: string) {
-    return new Date(iso).toLocaleTimeString("en-AU", { hour: "2-digit", minute: "2-digit" });
-  }
-
-  function formatDate(iso: string) {
-    return new Date(iso).toLocaleDateString("en-AU", { weekday: "short", day: "numeric", month: "short" });
-  }
+  const todayJobs = jobs.filter(j => j.scheduled_start && isTodayInBusinessTZ(j.scheduled_start));
+  const upcomingJobs = jobs.filter(j => !j.scheduled_start || !isTodayInBusinessTZ(j.scheduled_start));
 
   function JobCard({ job }: { job: any }) {
     const address = job.sites
@@ -99,7 +91,7 @@ export default function MyJobsPage() {
     <div className="p-6 space-y-6 max-w-2xl">
       <div>
         <h1 className="text-2xl font-bold text-slate-900">My Jobs</h1>
-        <p className="text-slate-500 text-sm mt-1">{new Date().toLocaleDateString("en-AU", { weekday: "long", day: "numeric", month: "long" })}</p>
+        <p className="text-slate-500 text-sm mt-1">{formatDate(new Date(), { weekday: "long", day: "numeric", month: "long" })}</p>
       </div>
 
       {/* Today */}
@@ -131,7 +123,7 @@ export default function MyJobsPage() {
                 {upcomingJobs.map(job => (
                   <div key={job.id}>
                     {job.scheduled_start && (
-                      <p className="text-xs font-medium text-slate-400 px-6 pt-3">{formatDate(job.scheduled_start)}</p>
+                      <p className="text-xs font-medium text-slate-400 px-6 pt-3">{formatDate(job.scheduled_start, { weekday: "short", day: "numeric", month: "short" })}</p>
                     )}
                     <JobCard job={job} />
                   </div>

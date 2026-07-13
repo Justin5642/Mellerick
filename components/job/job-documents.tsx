@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { FileText, Upload, Trash2, Download, File } from "lucide-react";
+import { formatDate } from "@/lib/date";
 
 const fileIcons: Record<string, string> = {
   "application/pdf": "PDF",
@@ -146,7 +147,7 @@ export function JobDocuments({ jobId, documents, onUpdate, currentUserId }: Prop
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-medium text-slate-900 truncate">{doc.file_name}</p>
                   <p className="text-xs text-slate-500">
-                    {doc.file_size ? formatBytes(doc.file_size) : ""} · {doc.profiles?.full_name ?? "Unknown"} · {new Date(doc.created_at).toLocaleDateString("en-AU")}
+                    {doc.file_size ? formatBytes(doc.file_size) : ""} · {doc.profiles?.full_name ?? "Unknown"} · {formatDate(doc.created_at)}
                   </p>
                 </div>
                 <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">

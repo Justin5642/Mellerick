@@ -8,6 +8,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Clock, LogIn, LogOut, MapPin, Radio, WifiOff, Car, Pencil, Plus } from "lucide-react";
 import { TimeEntryEditDialog } from "@/components/job/time-entry-edit-dialog";
+import { BUSINESS_TIME_ZONE } from "@/lib/date";
 
 interface TimeEntry {
   id: string;
@@ -55,11 +56,11 @@ function haversineDistance(lat1: number, lng1: number, lat2: number, lng2: numbe
 }
 
 function formatTime(iso: string) {
-  return new Date(iso).toLocaleTimeString("en-AU", { hour: "2-digit", minute: "2-digit" });
+  return new Date(iso).toLocaleTimeString("en-AU", { hour: "2-digit", minute: "2-digit", timeZone: BUSINESS_TIME_ZONE });
 }
 
 function formatDate(iso: string) {
-  return new Date(iso).toLocaleDateString("en-AU", { weekday: "short", day: "numeric", month: "short" });
+  return new Date(iso).toLocaleDateString("en-AU", { weekday: "short", day: "numeric", month: "short", timeZone: BUSINESS_TIME_ZONE });
 }
 
 export function JobTime({ jobId, currentUserId, timeEntries: initial, pos, costCenters, onUpdate }: Props) {

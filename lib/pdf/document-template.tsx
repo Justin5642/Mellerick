@@ -1,4 +1,5 @@
 import { Document, Page, Text, View, StyleSheet, Image } from "@react-pdf/renderer";
+import { formatDate } from "@/lib/date";
 
 const styles = StyleSheet.create({
   page: { padding: 40, fontSize: 10, fontFamily: "Helvetica", color: "#1e293b" },
@@ -85,7 +86,7 @@ export function DocumentPdf({
         </View>
 
         <Text style={styles.title}>{docType}</Text>
-        <Text style={styles.docNumber}>#{docNumber} · {new Date(createdAt).toLocaleDateString("en-AU")}</Text>
+        <Text style={styles.docNumber}>#{docNumber} · {formatDate(createdAt)}</Text>
 
         <View style={styles.section}>
           <View>
@@ -97,7 +98,7 @@ export function DocumentPdf({
           {dateValue && (
             <View>
               <Text style={styles.label}>{dateLabel}</Text>
-              <Text style={styles.value}>{new Date(dateValue).toLocaleDateString("en-AU")}</Text>
+              <Text style={styles.value}>{formatDate(dateValue)}</Text>
             </View>
           )}
         </View>

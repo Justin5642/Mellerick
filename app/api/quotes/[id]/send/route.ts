@@ -3,6 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { renderDocumentPdf } from "@/lib/pdf/render";
 import { businessInfo } from "@/lib/business-info";
 import { getResend, getFromAddress } from "@/lib/resend";
+import { formatDate } from "@/lib/date";
 
 export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
@@ -47,7 +48,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     const resend = getResend();
     const personalNote = body.message ? `<p>${String(body.message).replace(/\n/g, "<br/>")}</p>` : "";
     const validUntilLine = quote.valid_until
-      ? `<p>This quote is valid until <strong>${new Date(quote.valid_until).toLocaleDateString("en-AU")}</strong>.</p>`
+      ? `<p>This quote is valid until <strong>${formatDate(quote.valid_until)}</strong>.</p>`
       : "";
 
     const { error: sendError } = await resend.emails.send({

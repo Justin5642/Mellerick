@@ -18,6 +18,7 @@ import {
 } from "@/components/ui/dialog";
 import { ArrowLeft, Send, CheckCircle2, ExternalLink, Pencil, FileDown } from "lucide-react";
 import Link from "next/link";
+import { formatDate } from "@/lib/date";
 
 const statusColors: Record<string, string> = {
   draft: "bg-gray-100 text-gray-700",
@@ -170,8 +171,8 @@ export function InvoiceDetail({ invoice, xeroConnected }: Props) {
         <Card>
           <CardHeader><CardTitle className="text-sm">Details</CardTitle></CardHeader>
           <CardContent className="text-sm space-y-1">
-            <div className="flex justify-between"><span className="text-slate-500">Created</span><span>{new Date(invoice.created_at).toLocaleDateString("en-AU")}</span></div>
-            {invoice.due_date && <div className="flex justify-between"><span className="text-slate-500">Due</span><span>{new Date(invoice.due_date).toLocaleDateString("en-AU")}</span></div>}
+            <div className="flex justify-between"><span className="text-slate-500">Created</span><span>{formatDate(invoice.created_at)}</span></div>
+            {invoice.due_date && <div className="flex justify-between"><span className="text-slate-500">Due</span><span>{formatDate(invoice.due_date)}</span></div>}
             {invoice.xero_invoice_id && <div className="flex justify-between"><span className="text-slate-500">Xero ID</span><span className="text-xs font-mono truncate ml-2">{invoice.xero_invoice_id}</span></div>}
           </CardContent>
         </Card>

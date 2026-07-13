@@ -9,6 +9,7 @@ import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Plus, Trash2, CheckCircle2, ExternalLink, Loader2 } from "lucide-react";
+import { formatDate } from "@/lib/date";
 
 interface Expense {
   id: string;
@@ -195,7 +196,7 @@ export function JobExpenses({ jobId, jobNumber, expenses: initialExpenses, onUpd
                 <p className="text-xs text-slate-500 mt-0.5">
                   {CATEGORY_LABELS[expense.category] ?? expense.category}
                   {expense.invoice_number ? ` · Inv #${expense.invoice_number}` : ""}
-                  {expense.invoice_date ? ` · ${new Date(expense.invoice_date).toLocaleDateString("en-AU")}` : ""}
+                  {expense.invoice_date ? ` · ${formatDate(expense.invoice_date)}` : ""}
                 </p>
                 {expense.description && <p className="text-sm text-slate-600 mt-1">{expense.description}</p>}
                 {costCenterLabel(expense.cost_center_id) && (

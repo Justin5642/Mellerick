@@ -20,6 +20,7 @@ import {
 } from "@/components/ui/dialog";
 import { ArrowLeft, Send, CheckCircle2, XCircle, Pencil, Briefcase, FileDown } from "lucide-react";
 import Link from "next/link";
+import { formatDate } from "@/lib/date";
 
 const statusColors: Record<string, string> = {
   draft: "bg-gray-100 text-gray-700",
@@ -222,8 +223,8 @@ export function QuoteDetail({ quote }: Props) {
         <Card>
           <CardHeader><CardTitle className="text-sm">Details</CardTitle></CardHeader>
           <CardContent className="text-sm space-y-1">
-            <div className="flex justify-between"><span className="text-slate-500">Created</span><span>{new Date(quote.created_at).toLocaleDateString("en-AU")}</span></div>
-            {quote.valid_until && <div className="flex justify-between"><span className="text-slate-500">Valid Until</span><span>{new Date(quote.valid_until).toLocaleDateString("en-AU")}</span></div>}
+            <div className="flex justify-between"><span className="text-slate-500">Created</span><span>{formatDate(quote.created_at)}</span></div>
+            {quote.valid_until && <div className="flex justify-between"><span className="text-slate-500">Valid Until</span><span>{formatDate(quote.valid_until)}</span></div>}
           </CardContent>
         </Card>
       </div>

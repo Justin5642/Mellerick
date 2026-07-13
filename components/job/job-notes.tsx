@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { MessageSquare, Send } from "lucide-react";
+import { formatDate, formatTime } from "@/lib/date";
 
 interface Props {
   jobId: string;
@@ -79,7 +80,7 @@ export function JobNotes({ jobId, notes, onUpdate, currentUserId }: Props) {
                 <div className="flex items-center gap-2 mb-1">
                   <span className="text-xs font-semibold text-slate-700">{note.profiles?.full_name ?? "Unknown"}</span>
                   <span className="text-xs text-slate-400">
-                    {new Date(note.created_at).toLocaleDateString("en-AU", { day: "numeric", month: "short", year: "numeric" })} at {new Date(note.created_at).toLocaleTimeString("en-AU", { hour: "2-digit", minute: "2-digit" })}
+                    {formatDate(note.created_at, { day: "numeric", month: "short", year: "numeric" })} at {formatTime(note.created_at)}
                   </span>
                 </div>
                 <p className="text-sm text-slate-700 whitespace-pre-wrap">{note.content}</p>

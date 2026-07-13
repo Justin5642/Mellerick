@@ -5,6 +5,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Receipt, Plus, AlertCircle } from "lucide-react";
 import Link from "next/link";
+import { formatDate } from "@/lib/date";
 
 const statusColors: Record<string, string> = {
   draft: "bg-gray-100 text-gray-700",
@@ -115,7 +116,7 @@ export default async function InvoicesPage() {
                       #{inv.invoice_number} — {inv.title}
                     </p>
                     <p className="text-xs text-slate-500 mt-0.5">
-                      {inv.customers?.name} · Due {inv.due_date ? new Date(inv.due_date).toLocaleDateString("en-AU") : "—"}
+                      {inv.customers?.name} · Due {inv.due_date ? formatDate(inv.due_date) : "—"}
                     </p>
                   </div>
                   <div className="flex items-center gap-3 ml-4 flex-shrink-0">

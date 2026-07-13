@@ -5,6 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Briefcase, Users, Receipt, AlertCircle, CheckCircle2, Clock, DollarSign } from "lucide-react";
 import Link from "next/link";
+import { businessDateParts, formatDate } from "@/lib/date";
 
 function StatCard({ title, value, icon: Icon, color, href }: {
   title: string; value: string | number; icon: React.ElementType; color: string; href: string;
@@ -65,7 +66,8 @@ export default async function DashboardPage() {
     supabase.from("profiles").select("full_name").eq("id", user!.id).single(),
   ]);
 
-  const greeting = new Date().getHours() < 12 ? "Good morning" : new Date().getHours() < 17 ? "Good afternoon" : "Good evening";
+  const { hour } = businessDateParts();
+  const greeting = hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening";
   const firstName = profile?.full_name?.split(" ")[0] ?? "there";
 
   return (
@@ -73,7 +75,7 @@ export default async function DashboardPage() {
       {/* Header */}
       <div>
         <h1 className="text-2xl font-bold text-slate-900">{greeting}, {firstName}</h1>
-        <p className="text-slate-500 text-sm mt-1">{new Date().toLocaleDateString("en-AU", { weekday: "long", day: "numeric", month: "long", year: "numeric" })}</p>
+        <p className="text-slate-500 text-sm mt-1">{formatDate(new Date(), { weekday: "long", day: "numeric", month: "long", year: "numeric" })}</p>
       </div>
 
       {/* Stats */}

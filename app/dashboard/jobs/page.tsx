@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Briefcase, Plus, Search, X } from "lucide-react";
 import Link from "next/link";
+import { formatDate } from "@/lib/date";
 
 const statusColors: Record<string, string> = {
   pending: "bg-yellow-100 text-yellow-800",
@@ -155,7 +156,7 @@ export default function JobsPage() {
                     </p>
                     <p className="text-xs text-slate-500 mt-0.5 truncate">
                       {job.customers?.name ?? "No customer"}
-                      {job.scheduled_start ? ` · ${new Date(job.scheduled_start).toLocaleDateString("en-AU")}` : ""}
+                      {job.scheduled_start ? ` · ${formatDate(job.scheduled_start)}` : ""}
                     </p>
                   </div>
                   <div className="flex items-center gap-2 ml-4 flex-shrink-0">
