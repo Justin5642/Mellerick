@@ -16,16 +16,6 @@ const OVERTIME_LABELS: Record<string, string> = {
   other: "Other",
 };
 
-// TEMPORARY ROLLOUT GATE (requested by Justin): auto-create-invoice +
-// auto-push-to-Xero on approval is brand new and touches real accounting
-// data, so it's restricted to this specific job number until Justin
-// confirms the test worked. Every other job keeps the pre-existing manual
-// behavior (approve just queues it for manual invoicing, exactly as before
-// this feature was built). Once confirmed working, remove this constant
-// and the `if (job.job_number !== AUTO_INVOICE_TEST_JOB_NUMBER)` check below
-// to enable it for all jobs/admins.
-const AUTO_INVOICE_TEST_JOB_NUMBER: number | null = 6;
-
 export default function ApprovalsPage() {
   const supabase = createClient();
   const [jobs, setJobs] = useState<any[]>([]);
@@ -75,27 +65,6 @@ export default function ApprovalsPage() {
     }
     setSaving(jobId);
     const job = jobs.find((j) => j.id === jobId);
-
-    const autoInvoiceEnabled =
-      !!job && (AUTO_INVOICE_TEST_JOB_NUMBER === null || job.job_number === AUTO_INVOICE_TEST_JOB_NUMBER);
-
-    if (!autoInvoiceEnabled) {
-      // Rollout gate not open for this job yet — behave exactly as the
-      // approvals flow did before this feature existed: no auto-invoice,
-      // no Xero push, just queue it for manual invoicing.
-      await supabase
-        .from("jobs")
-        .update({
-          admin_status: "approved",
-          admin_notes: notes[jobId] || null,
-          ready_to_invoice: true,
-        })
-        .eq("id", jobId);
-      setJobs((j) => j.filter((j2) => j2.id !== jobId));
-      toast.success("Job approved — moved to invoicing queue");
-      setSaving(null);
-      return;
-    }
 
     // Guard against double-creating an invoice if one already exists for
     // this job (e.g. office manually built one before approval finished).
