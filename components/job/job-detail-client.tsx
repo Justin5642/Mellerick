@@ -63,6 +63,11 @@ export function JobDetailClient({ job, currentUserId, photos: initialPhotos, doc
     .filter((e: any) => e.entry_type !== "travel")
     .reduce((sum: number, e: any) => sum + (e.hours ? Number(e.hours) : 0), 0);
 
+  const unbilledVariations = variations.filter(
+    (v: any) => (v.status === "approved" || v.status === "auto_approved") && !v.invoice_id
+  );
+  const unbilledVariationsTotal = unbilledVariations.reduce((sum: number, v: any) => sum + (Number(v.total_amount) || 0), 0);
+
   return (
     <div className="flex flex-col h-full">
       {/* Header */}
@@ -91,11 +96,21 @@ export function JobDetailClient({ job, currentUserId, photos: initialPhotos, doc
               </p>
             </div>
           </div>
-          {job.ready_to_invoice && (
-            <span className="text-xs font-medium px-2.5 py-1 rounded-full bg-amber-100 text-amber-700 shrink-0">
-              Awaiting Invoice
-            </span>
-          )}
+          <div className="flex items-center gap-2 shrink-0">
+            {unbilledVariations.length > 0 && (
+              <span
+                className="text-xs font-medium px-2.5 py-1 rounded-full bg-orange-100 text-orange-700"
+                title="Approved variations not yet added to an invoice"
+              >
+                {unbilledVariations.length} unbilled variation{unbilledVariations.length === 1 ? "" : "s"} · ${unbilledVariationsTotal.toFixed(2)}
+              </span>
+            )}
+            {job.ready_to_invoice && (
+              <span className="text-xs font-medium px-2.5 py-1 rounded-full bg-amber-100 text-amber-700">
+                Awaiting Invoice
+              </span>
+            )}
+          </div>
         </div>
       </div>
 

@@ -47,6 +47,7 @@ export function JobExpenses({ jobId, jobNumber, expenses: initialExpenses, onUpd
   const [saving, setSaving] = useState(false);
   const [pushingId, setPushingId] = useState<string | null>(null);
   const [receiptFile, setReceiptFile] = useState<File | null>(null);
+  const [receiptDragActive, setReceiptDragActive] = useState(false);
   const [form, setForm] = useState({
     supplier_name: "",
     category: "materials",
@@ -303,7 +304,24 @@ export function JobExpenses({ jobId, jobNumber, expenses: initialExpenses, onUpd
 
             <div className="space-y-1.5">
               <Label>Receipt / Invoice File</Label>
-              <div className="flex items-center gap-2">
+              <div
+                className={`flex flex-col items-center justify-center gap-2 rounded-md border-2 border-dashed p-4 text-center transition-colors ${
+                  receiptDragActive ? "border-blue-400 bg-blue-50/40 text-blue-500" : "border-slate-200 text-slate-400"
+                }`}
+                onDragOver={(e) => { e.preventDefault(); setReceiptDragActive(true); }}
+                onDragLeave={(e) => { e.preventDefault(); setReceiptDragActive(false); }}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  setReceiptDragActive(false);
+                  const file = e.dataTransfer.files?.[0];
+                  if (file) setReceiptFile(file);
+                }}
+              >
+                {receiptFile ? (
+                  <p className="text-sm text-slate-700">{receiptFile.name}</p>
+                ) : (
+                  <p className="text-xs">{receiptDragActive ? "Drop to attach" : "Drag and drop an invoice/receipt here, or"}</p>
+                )}
                 <input
                   type="file"
                   accept=".pdf,.png,.jpg,.jpeg"

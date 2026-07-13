@@ -79,13 +79,27 @@ export function JobVariationsTab({ jobId, currentUserId }: { jobId: string; curr
 
   const selectedType = types.find((t) => t.id === typeId);
 
-  async function pickPhoto() {
-    const perm = await ImagePicker.requestCameraPermissionsAsync();
-    if (!perm.granted) {
-      Alert.alert("Permission needed", "Camera access is required");
+  async function pickPhoto(source: "camera" | "library") {
+    if (source === "camera") {
+      const perm = await ImagePicker.requestCameraPermissionsAsync();
+      if (!perm.granted) {
+        Alert.alert("Permission needed", "Camera access is required");
+        return;
+      }
+      const result = await ImagePicker.launchCameraAsync({ quality: 0.7, base64: true });
+      if (result.canceled || !result.assets?.length) return;
+      setPhotoUri(result.assets[0].uri);
+      setPhotoBase64(result.assets[0].base64 ?? null);
       return;
     }
-    const result = await ImagePicker.launchCameraAsync({ quality: 0.7, base64: true });
+    // Library pick -- lets a tech attach an existing photo (e.g. a screenshot
+    // of a supplier quote/invoice) instead of only a fresh camera shot.
+    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!perm.granted) {
+      Alert.alert("Permission needed", "Photo library access is required");
+      return;
+    }
+    const result = await ImagePicker.launchImageLibraryAsync({ quality: 0.7, base64: true });
     if (result.canceled || !result.assets?.length) return;
     setPhotoUri(result.assets[0].uri);
     setPhotoBase64(result.assets[0].base64 ?? null);
@@ -195,9 +209,14 @@ export function JobVariationsTab({ jobId, currentUserId }: { jobId: string; curr
             multiline
           />
 
-          <TouchableOpacity style={styles.photoButton} onPress={pickPhoto}>
-            <Text style={styles.photoButtonText}>{photoUri ? "📷 Retake Photo" : "📷 Add Photo (optional)"}</Text>
-          </TouchableOpacity>
+          <View style={styles.photoButtonRow}>
+            <TouchableOpacity style={[styles.photoButton, styles.photoButtonHalf]} onPress={() => pickPhoto("camera")}>
+              <Text style={styles.photoButtonText}>{photoUri ? "📷 Retake Photo" : "📷 Take Photo"}</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={[styles.photoButton, styles.photoButtonHalf]} onPress={() => pickPhoto("library")}>
+              <Text style={styles.photoButtonText}>🖼️ Choose Existing</Text>
+            </TouchableOpacity>
+          </View>
           {photoUri && <Image source={{ uri: photoUri }} style={styles.photoPreview} />}
 
           <View style={styles.formButtonRow}>
@@ -264,7 +283,9 @@ const styles = StyleSheet.create({
     color: colors.slate900,
   },
   textArea: { minHeight: 60, textAlignVertical: "top" },
+  photoButtonRow: { flexDirection: "row", gap: 8, marginTop: 10 },
   photoButton: { marginTop: 10, backgroundColor: colors.blue100, borderRadius: 10, paddingVertical: 10, alignItems: "center" },
+  photoButtonHalf: { flex: 1, marginTop: 0 },
   photoButtonText: { color: colors.blue600, fontWeight: "600", fontSize: 13 },
   photoPreview: { width: "100%", height: 160, borderRadius: 10, marginTop: 8 },
   formButtonRow: { flexDirection: "row", gap: 10, marginTop: 14 },

@@ -33,10 +33,34 @@ export function JobDocuments({ jobId, documents, onUpdate, currentUserId }: Prop
   const inputRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
   const [deleting, setDeleting] = useState<string | null>(null);
+  const [dragActive, setDragActive] = useState(false);
 
   async function handleUpload(e: React.ChangeEvent<HTMLInputElement>) {
     const files = e.target.files;
     if (!files || files.length === 0) return;
+    await uploadFiles(files);
+    if (inputRef.current) inputRef.current.value = "";
+  }
+
+  function handleDragOver(e: React.DragEvent) {
+    e.preventDefault();
+    setDragActive(true);
+  }
+
+  function handleDragLeave(e: React.DragEvent) {
+    e.preventDefault();
+    setDragActive(false);
+  }
+
+  async function handleDrop(e: React.DragEvent) {
+    e.preventDefault();
+    setDragActive(false);
+    const files = e.dataTransfer.files;
+    if (!files || files.length === 0) return;
+    await uploadFiles(files);
+  }
+
+  async function uploadFiles(files: FileList) {
     setUploading(true);
 
     for (const file of Array.from(files)) {
@@ -59,7 +83,6 @@ export function JobDocuments({ jobId, documents, onUpdate, currentUserId }: Prop
     onUpdate(data ?? []);
     toast.success("Documents uploaded");
     setUploading(false);
-    if (inputRef.current) inputRef.current.value = "";
   }
 
   async function handleDelete(doc: any) {
@@ -94,18 +117,26 @@ export function JobDocuments({ jobId, documents, onUpdate, currentUserId }: Prop
       </div>
 
       {documents.length === 0 ? (
-        <Card>
+        <Card className={dragActive ? "border-blue-400 bg-blue-50/40" : undefined}>
           <CardContent
-            className="flex flex-col items-center justify-center py-16 text-slate-400 cursor-pointer hover:bg-slate-50 transition-colors"
+            className={`flex flex-col items-center justify-center py-16 cursor-pointer transition-colors ${dragActive ? "text-blue-500" : "text-slate-400 hover:bg-slate-50"}`}
             onClick={() => inputRef.current?.click()}
+            onDragOver={handleDragOver}
+            onDragLeave={handleDragLeave}
+            onDrop={handleDrop}
           >
             <FileText className="w-12 h-12 mb-3 opacity-40" />
-            <p className="text-sm font-medium">No documents yet</p>
-            <p className="text-xs mt-1">Click to upload plans, specs, permits and more</p>
+            <p className="text-sm font-medium">{dragActive ? "Drop files to upload" : "No documents yet"}</p>
+            <p className="text-xs mt-1">{dragActive ? "Release to upload" : "Click, or drag and drop, to upload plans, specs, permits and more"}</p>
           </CardContent>
         </Card>
       ) : (
-        <div className="grid grid-cols-1 gap-3">
+        <div
+          className={`grid grid-cols-1 gap-3 rounded-lg transition-colors ${dragActive ? "ring-2 ring-blue-400 ring-offset-2 bg-blue-50/30" : ""}`}
+          onDragOver={handleDragOver}
+          onDragLeave={handleDragLeave}
+          onDrop={handleDrop}
+        >
           {documents.map((doc) => (
             <Card key={doc.id} className="group">
               <CardContent className="flex items-center gap-4 p-4">

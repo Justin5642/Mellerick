@@ -9,7 +9,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Plus, Trash2, Zap, Clock3, CheckCircle2, XCircle, ImageIcon } from "lucide-react";
+import { Plus, Trash2, Zap, Clock3, CheckCircle2, XCircle, ImageIcon, Paperclip, Upload } from "lucide-react";
 
 interface VariationType {
   id: string;
@@ -29,10 +29,13 @@ interface Variation {
   rate: number | null;
   total_amount: number | null;
   photo_storage_path: string | null;
+  attachment_storage_path: string | null;
+  attachment_file_name: string | null;
   status: "auto_approved" | "pending_approval" | "approved" | "rejected";
   logged_by: string | null;
   logged_at: string | null;
   admin_notes: string | null;
+  invoice_id: string | null;
   variation_types?: { name: string } | null;
   profiles?: { full_name: string } | null;
 }
@@ -66,6 +69,9 @@ export function JobVariations({
   const [quantity, setQuantity] = useState("");
   const [description, setDescription] = useState("");
   const [pricing, setPricing] = useState<Record<string, { rate: string; quantity: string; notes: string }>>({});
+  const [attachmentFile, setAttachmentFile] = useState<File | null>(null);
+  const [attachmentDragActive, setAttachmentDragActive] = useState(false);
+  const [viewingId, setViewingId] = useState<string | null>(null);
 
   const selectedType = variationTypes.find((t) => t.id === typeId);
 
@@ -88,6 +94,18 @@ export function JobVariations({
     const unit = selectedType?.unit ?? "unit";
     const total = autoApprove && rate != null ? qty * rate : null;
 
+    let attachmentPath: string | null = null;
+    if (attachmentFile) {
+      const path = `${jobId}/variations/${Date.now()}_${attachmentFile.name.replace(/[^a-zA-Z0-9._-]/g, "_")}`;
+      const { error: uploadError } = await supabase.storage.from("job-documents").upload(path, attachmentFile);
+      if (uploadError) {
+        toast.error(`Failed to upload attachment: ${uploadError.message}`);
+        setSaving(false);
+        return;
+      }
+      attachmentPath = path;
+    }
+
     const { data, error } = await supabase
       .from("job_variations")
       .insert({
@@ -102,6 +120,8 @@ export function JobVariations({
         status: autoApprove ? "auto_approved" : "pending_approval",
         logged_by: currentUserId,
         logged_at: new Date().toISOString(),
+        attachment_storage_path: attachmentPath,
+        attachment_file_name: attachmentPath ? attachmentFile!.name : null,
       })
       .select("*, variation_types(name), profiles(full_name)")
       .single();
@@ -117,7 +137,19 @@ export function JobVariations({
     setCustomName("");
     setQuantity("");
     setDescription("");
+    setAttachmentFile(null);
     toast.success(autoApprove ? "Variation auto-approved" : "Variation sent to admin for pricing");
+  }
+
+  async function viewFile(bucket: "job-photos" | "job-documents", path: string, id: string) {
+    setViewingId(id);
+    const { data, error } = await supabase.storage.from(bucket).createSignedUrl(path, 60);
+    setViewingId(null);
+    if (error || !data?.signedUrl) {
+      toast.error("Couldn't open file");
+      return;
+    }
+    window.open(data.signedUrl, "_blank");
   }
 
   async function priceAndApprove(v: Variation) {
@@ -167,17 +199,26 @@ export function JobVariations({
     set(variations.filter((v) => v.id !== id));
   }
 
-  const totalApprovedValue = variations
-    .filter((v) => v.status === "auto_approved" || v.status === "approved")
-    .reduce((sum, v) => sum + (Number(v.total_amount) || 0), 0);
+  const approvedVariations = variations.filter((v) => v.status === "auto_approved" || v.status === "approved");
+  const totalApprovedValue = approvedVariations.reduce((sum, v) => sum + (Number(v.total_amount) || 0), 0);
+  const unbilledVariations = approvedVariations.filter((v) => !v.invoice_id);
+  const unbilledValue = unbilledVariations.reduce((sum, v) => sum + (Number(v.total_amount) || 0), 0);
 
   return (
     <div className="p-6 space-y-6">
       {totalApprovedValue > 0 && (
         <Card className="border-green-100 bg-green-50/40">
-          <CardContent className="pt-4 pb-4 flex items-center justify-between">
-            <p className="text-sm text-slate-600">Total approved variations</p>
-            <p className="text-lg font-bold text-slate-800">${totalApprovedValue.toFixed(2)}</p>
+          <CardContent className="pt-4 pb-4 space-y-1">
+            <div className="flex items-center justify-between">
+              <p className="text-sm text-slate-600">Total approved variations</p>
+              <p className="text-lg font-bold text-slate-800">${totalApprovedValue.toFixed(2)}</p>
+            </div>
+            {unbilledVariations.length > 0 && (
+              <div className="flex items-center justify-between text-orange-700">
+                <p className="text-xs font-medium">Not yet on an invoice ({unbilledVariations.length})</p>
+                <p className="text-xs font-bold">${unbilledValue.toFixed(2)}</p>
+              </div>
+            )}
           </CardContent>
         </Card>
       )}
@@ -198,9 +239,24 @@ export function JobVariations({
                   </p>
                   {v.description && <p className="text-xs text-slate-400 mt-1">{v.description}</p>}
                   {v.photo_storage_path && (
-                    <p className="text-xs text-slate-400 mt-1 flex items-center gap-1">
-                      <ImageIcon className="w-3 h-3" /> Photo attached
-                    </p>
+                    <button
+                      type="button"
+                      onClick={() => viewFile("job-photos", v.photo_storage_path as string, v.id)}
+                      disabled={viewingId === v.id}
+                      className="text-xs text-blue-500 hover:text-blue-700 mt-1 flex items-center gap-1"
+                    >
+                      <ImageIcon className="w-3 h-3" /> {viewingId === v.id ? "Opening..." : "View photo"}
+                    </button>
+                  )}
+                  {v.attachment_storage_path && (
+                    <button
+                      type="button"
+                      onClick={() => viewFile("job-documents", v.attachment_storage_path as string, v.id)}
+                      disabled={viewingId === v.id}
+                      className="text-xs text-blue-500 hover:text-blue-700 mt-1 flex items-center gap-1"
+                    >
+                      <Paperclip className="w-3 h-3" /> {viewingId === v.id ? "Opening..." : (v.attachment_file_name ?? "View attachment")}
+                    </button>
                   )}
                   {v.profiles?.full_name && (
                     <p className="text-xs text-slate-400 mt-1">
@@ -215,6 +271,13 @@ export function JobVariations({
                     <Icon className="w-3.5 h-3.5" />
                     {s.label}
                   </span>
+                  {(v.status === "auto_approved" || v.status === "approved") && (
+                    <span
+                      className={`text-xs font-medium px-2.5 py-1 rounded-full ${v.invoice_id ? "bg-slate-100 text-slate-500" : "bg-orange-100 text-orange-700"}`}
+                    >
+                      {v.invoice_id ? "Billed" : "Unbilled"}
+                    </span>
+                  )}
                   <button onClick={() => remove(v.id)} className="text-slate-300 hover:text-red-400 transition-colors">
                     <Trash2 className="w-4 h-4" />
                   </button>
@@ -294,6 +357,51 @@ export function JobVariations({
               <div className="space-y-1.5">
                 <Label>Description</Label>
                 <Textarea value={description} onChange={(e) => setDescription(e.target.value)} placeholder="What happened on site..." rows={2} />
+              </div>
+              <div className="space-y-1.5">
+                <Label>Supporting file (optional)</Label>
+                <p className="text-xs text-slate-400">Attach a supplier quote/invoice PDF or photo backing this variation</p>
+                <div
+                  className={`flex flex-col items-center justify-center gap-2 rounded-md border-2 border-dashed p-4 text-center transition-colors ${
+                    attachmentDragActive ? "border-blue-400 bg-blue-50/40 text-blue-500" : "border-slate-200 text-slate-400"
+                  }`}
+                  onDragOver={(e) => { e.preventDefault(); setAttachmentDragActive(true); }}
+                  onDragLeave={(e) => { e.preventDefault(); setAttachmentDragActive(false); }}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    setAttachmentDragActive(false);
+                    const file = e.dataTransfer.files?.[0];
+                    if (file) setAttachmentFile(file);
+                  }}
+                >
+                  {attachmentFile ? (
+                    <div className="flex items-center gap-2">
+                      <Paperclip className="w-3.5 h-3.5" />
+                      <p className="text-sm text-slate-700">{attachmentFile.name}</p>
+                      <button type="button" onClick={() => setAttachmentFile(null)} className="text-slate-300 hover:text-red-400">
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  ) : (
+                    <>
+                      <Upload className="w-5 h-5 opacity-50" />
+                      <p className="text-xs">{attachmentDragActive ? "Drop to attach" : "Drag and drop a file here, or"}</p>
+                    </>
+                  )}
+                  <label className="text-xs font-medium text-blue-600 hover:text-blue-700 cursor-pointer">
+                    {attachmentFile ? "Replace file" : "Browse files"}
+                    <input
+                      type="file"
+                      accept=".pdf,.png,.jpg,.jpeg"
+                      className="hidden"
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (file) setAttachmentFile(file);
+                        e.target.value = "";
+                      }}
+                    />
+                  </label>
+                </div>
               </div>
               <div className="flex justify-end gap-2">
                 <Button type="button" variant="outline" onClick={() => setShowForm(false)}>Cancel</Button>

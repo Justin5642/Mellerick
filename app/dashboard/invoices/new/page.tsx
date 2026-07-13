@@ -10,10 +10,19 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { ArrowLeft, Plus, Trash2 } from "lucide-react";
+import { ArrowLeft, Plus, Trash2, GitPullRequestArrow } from "lucide-react";
 import Link from "next/link";
 
-interface LineItem { name: string; description: string; quantity: string; unit_price: string; }
+interface LineItem { name: string; description: string; quantity: string; unit_price: string; variationId?: string; }
+interface UnbilledVariation {
+  id: string;
+  custom_name: string | null;
+  quantity: number;
+  unit: string;
+  rate: number | null;
+  total_amount: number | null;
+  variation_types?: { name: string } | null;
+}
 
 export default function NewInvoicePage() {
   const router = useRouter();
@@ -33,6 +42,8 @@ export default function NewInvoicePage() {
   });
   const [lineItems, setLineItems] = useState<LineItem[]>([{ name: "", description: "", quantity: "1", unit_price: "" }]);
   const [errors, setErrors] = useState<Record<string, boolean>>({});
+  const [unbilledVariations, setUnbilledVariations] = useState<UnbilledVariation[]>([]);
+  const addedVariationIds = lineItems.filter((i) => i.variationId).map((i) => i.variationId as string);
 
   useEffect(() => {
     async function load() {
@@ -54,6 +65,37 @@ export default function NewInvoicePage() {
     }
     loadJobs();
   }, [form.customer_id]);
+
+  useEffect(() => {
+    async function loadUnbilledVariations() {
+      if (!form.job_id) { setUnbilledVariations([]); return; }
+      const { data } = await supabase
+        .from("job_variations")
+        .select("id, custom_name, quantity, unit, rate, total_amount, variation_types(name)")
+        .eq("job_id", form.job_id)
+        .in("status", ["approved", "auto_approved"])
+        .is("invoice_id", null);
+      setUnbilledVariations((data as any) ?? []);
+    }
+    loadUnbilledVariations();
+  }, [form.job_id]);
+
+  function addVariationToInvoice(v: UnbilledVariation) {
+    setLineItems((prev) => {
+      const withoutBlankFirst = prev.length === 1 && !prev[0].name && !prev[0].unit_price ? [] : prev;
+      return [
+        ...withoutBlankFirst,
+        {
+          name: v.variation_types?.name ?? v.custom_name ?? "Variation",
+          description: `${v.quantity} ${v.unit}${v.rate != null ? ` @ $${Number(v.rate).toFixed(2)}` : ""}`,
+          quantity: "1",
+          unit_price: String(v.total_amount ?? (Number(v.rate ?? 0) * Number(v.quantity))),
+          variationId: v.id,
+        },
+      ];
+    });
+  }
+
 
   function setField(field: string, value: string | null) {
     setForm(prev => ({ ...prev, [field]: value ?? "" }));
@@ -110,6 +152,13 @@ export default function NewInvoicePage() {
       })));
     }
 
+    // Mark any variations that were pulled onto this invoice as billed, so
+    // they drop off the "unbilled" warning and can't be double-invoiced.
+    const includedVariationIds = validItems.filter(i => i.variationId).map(i => i.variationId as string);
+    if (includedVariationIds.length > 0) {
+      await supabase.from("job_variations").update({ invoice_id: invoice.id }).in("id", includedVariationIds);
+    }
+
     if (form.job_id) {
       await supabase.from("jobs").update({ ready_to_invoice: false }).eq("id", form.job_id);
     }
@@ -164,6 +213,33 @@ export default function NewInvoicePage() {
             </div>
           </CardContent>
         </Card>
+
+        {unbilledVariations.filter(v => !addedVariationIds.includes(v.id)).length > 0 && (
+          <Card className="border-orange-200 bg-orange-50/40">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base flex items-center gap-2 text-orange-800">
+                <GitPullRequestArrow className="w-4 h-4" />
+                Unbilled variations on this job
+              </CardTitle>
+              <p className="text-xs text-orange-700/80">Approved extra work not yet on an invoice — add it now so it doesn't get missed.</p>
+            </CardHeader>
+            <CardContent className="space-y-2">
+              {unbilledVariations.filter(v => !addedVariationIds.includes(v.id)).map(v => (
+                <div key={v.id} className="flex items-center justify-between gap-3 bg-white rounded-md border px-3 py-2">
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium text-slate-800 truncate">{v.variation_types?.name ?? v.custom_name}</p>
+                    <p className="text-xs text-slate-500">
+                      {v.quantity} {v.unit}{v.rate != null ? ` × $${Number(v.rate).toFixed(2)}` : ""} = ${Number(v.total_amount ?? 0).toFixed(2)}
+                    </p>
+                  </div>
+                  <Button type="button" size="sm" variant="outline" className="gap-1.5 shrink-0" onClick={() => addVariationToInvoice(v)}>
+                    <Plus className="w-3.5 h-3.5" />Add to invoice
+                  </Button>
+                </div>
+              ))}
+            </CardContent>
+          </Card>
+        )}
 
         <Card className={errors.lineItems ? "border-red-400" : ""}>
           <CardHeader className="flex flex-row items-center justify-between pb-3">
