@@ -72,14 +72,20 @@ export function AppSidebar({ userEmail, userName, userRole }: AppSidebarProps) {
         collapsed ? "w-16" : "w-60"
       )}
     >
-      {/* Logo */}
-      <div className="flex items-center gap-3 px-4 py-5 border-b border-slate-700">
-        <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-blue-500 flex-shrink-0">
-          <Wrench className="w-4 h-4 text-white" />
-        </div>
-        {!collapsed && (
-          <span className="font-bold text-sm tracking-wide truncate">Mellerick App</span>
+      {/* Logo — white plate so the brand mark's dark text/blue outline reads
+          clearly against the dark sidebar body. Collapsed state swaps to the
+          square icon crop so it doesn't get squashed into the 64px rail. */}
+      <div
+        className={cn(
+          "flex items-center justify-center border-b border-slate-700 bg-white flex-shrink-0",
+          collapsed ? "px-2 py-3" : "px-4 py-4"
         )}
+      >
+        <img
+          src={collapsed ? "/icon-192.png" : "/logo.png"}
+          alt="Mellerick Plumbing and Drainage"
+          className={collapsed ? "w-9 h-9 object-contain rounded" : "h-11 w-auto object-contain"}
+        />
       </div>
 
       {/* Collapse toggle */}

@@ -24,6 +24,15 @@ export default async function DashboardLayout({ children }: { children: React.Re
       <main className="flex-1 overflow-y-auto">
         {children}
       </main>
+      {/* Faint brand watermark, pinned to the bottom-right corner of the
+          viewport so it stays put while pages scroll and never collides
+          with the sidebar. Non-interactive — purely decorative. */}
+      <div
+        aria-hidden
+        className="pointer-events-none select-none fixed bottom-0 right-0 z-0 opacity-[0.06]"
+      >
+        <img src="/logo.png" alt="" className="w-[420px] max-w-[40vw]" />
+      </div>
     </div>
   );
 }
