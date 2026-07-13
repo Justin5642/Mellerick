@@ -16,10 +16,36 @@ const statusColors: Record<string, string> = {
 
 export default async function InvoicesPage() {
   const supabase = await createClient();
-  const [{ data: invoices }, { data: readyJobs }] = await Promise.all([
+  const [{ data: invoices }, { data: readyJobs }, { data: unbilledVariations }] = await Promise.all([
     supabase.from("invoices").select("*, customers(name)").order("created_at", { ascending: false }),
     supabase.from("jobs").select("id, job_number, title, customer_id, customers(name)").eq("ready_to_invoice", true).order("updated_at", { ascending: false }),
+    // Catches the case ready_to_invoice can't: a job that already got its
+    // first invoice, then had a variation approved later. Nothing else
+    // resets ready_to_invoice back to true for that, so without this
+    // separate query it would silently never surface anywhere.
+    supabase
+      .from("job_variations")
+      .select("id, total_amount, jobs(id, job_number, title, customer_id, customers(name))")
+      .in("status", ["approved", "auto_approved"])
+      .is("invoice_id", null),
   ]);
+
+  // Merge both sources into one queue, keyed by job, so a job needing its
+  // very first invoice and a job with a leftover unbilled variation both
+  // show up in the same place with no risk of falling through the cracks.
+  const queue = new Map<string, any>();
+  for (const job of readyJobs ?? []) {
+    queue.set(job.id, { ...job, needsFirstInvoice: true, variationsTotal: 0, variationsCount: 0 });
+  }
+  for (const v of unbilledVariations ?? []) {
+    const job = (v as any).jobs;
+    if (!job) continue;
+    const existing = queue.get(job.id) ?? { ...job, needsFirstInvoice: false, variationsTotal: 0, variationsCount: 0 };
+    existing.variationsTotal += Number(v.total_amount) || 0;
+    existing.variationsCount += 1;
+    queue.set(job.id, existing);
+  }
+  const invoiceQueue = Array.from(queue.values()).sort((a, b) => (b.needsFirstInvoice ? 1 : 0) - (a.needsFirstInvoice ? 1 : 0));
 
   return (
     <div className="p-6 space-y-6">
@@ -33,22 +59,34 @@ export default async function InvoicesPage() {
         </Link>
       </div>
 
-      {/* Ready to Invoice queue */}
-      {readyJobs && readyJobs.length > 0 && (
+      {/* Ready to Invoice queue — every job that either never got an
+          invoice, or has an approved variation still sitting unbilled,
+          lands here so nothing gets missed. */}
+      {invoiceQueue.length > 0 && (
         <Card className="border-amber-200 bg-amber-50/50">
           <div className="flex items-center gap-2 px-6 py-4 border-b border-amber-100">
             <AlertCircle className="w-4 h-4 text-amber-600" />
-            <h2 className="text-sm font-semibold text-amber-800">Ready to Invoice ({readyJobs.length})</h2>
+            <h2 className="text-sm font-semibold text-amber-800">Ready to Invoice ({invoiceQueue.length})</h2>
           </div>
           <CardContent className="p-0">
             <div className="divide-y divide-amber-100">
-              {readyJobs.map((job: any) => (
-                <div key={job.id} className="flex items-center justify-between px-6 py-3">
-                  <div>
-                    <p className="text-sm font-medium text-slate-800">#{job.job_number} — {job.title}</p>
+              {invoiceQueue.map((job: any) => (
+                <div key={job.id} className="flex items-center justify-between px-6 py-3 gap-3">
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium text-slate-800 truncate">#{job.job_number} — {job.title}</p>
                     <p className="text-xs text-slate-500">{job.customers?.name}</p>
+                    <div className="flex items-center gap-1.5 mt-1 flex-wrap">
+                      {job.needsFirstInvoice && (
+                        <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-amber-100 text-amber-700">No invoice yet</span>
+                      )}
+                      {job.variationsCount > 0 && (
+                        <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-orange-100 text-orange-700">
+                          {job.variationsCount} unbilled variation{job.variationsCount === 1 ? "" : "s"} · ${job.variationsTotal.toFixed(2)}
+                        </span>
+                      )}
+                    </div>
                   </div>
-                  <Link href={`/dashboard/invoices/new?job_id=${job.id}&customer_id=${job.customer_id}&title=${encodeURIComponent(job.title)}`}>
+                  <Link href={`/dashboard/invoices/new?job_id=${job.id}&customer_id=${job.customer_id}&title=${encodeURIComponent(job.title)}`} className="shrink-0">
                     <Button size="sm" className="gap-1.5 h-8 text-xs">
                       <Plus className="w-3.5 h-3.5" />Create Invoice
                     </Button>
