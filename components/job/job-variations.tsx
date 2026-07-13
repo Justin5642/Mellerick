@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -53,12 +53,14 @@ export function JobVariations({
   variationTypes,
   currentUserId,
   onUpdate,
+  highlightVariationId,
 }: {
   jobId: string;
   variations: Variation[];
   variationTypes: VariationType[];
   currentUserId: string;
   onUpdate: (v: Variation[]) => void;
+  highlightVariationId?: string | null;
 }) {
   const supabase = createClient();
   const [variations, setVariations] = useState<Variation[]>(initial);
@@ -72,6 +74,16 @@ export function JobVariations({
   const [attachmentFile, setAttachmentFile] = useState<File | null>(null);
   const [attachmentDragActive, setAttachmentDragActive] = useState(false);
   const [viewingId, setViewingId] = useState<string | null>(null);
+  const highlightRef = useRef<HTMLDivElement | null>(null);
+
+  // Deep-linked from Approvals ("Price & review" -> ?variation=<id>) — scroll
+  // the targeted variation into view so office doesn't have to hunt for it
+  // in a long list. Runs once the list has rendered.
+  useEffect(() => {
+    if (highlightVariationId && highlightRef.current) {
+      highlightRef.current.scrollIntoView({ behavior: "smooth", block: "center" });
+    }
+  }, [highlightVariationId]);
 
   const selectedType = variationTypes.find((t) => t.id === typeId);
 
@@ -226,8 +238,13 @@ export function JobVariations({
       {variations.map((v) => {
         const s = STATUS_STYLE[v.status];
         const Icon = s.icon;
+        const isHighlighted = v.id === highlightVariationId;
         return (
-          <Card key={v.id}>
+          <Card
+            key={v.id}
+            ref={isHighlighted ? highlightRef : undefined}
+            className={isHighlighted ? "ring-2 ring-orange-400 border-orange-200" : undefined}
+          >
             <CardContent className="pt-4 pb-4 space-y-3">
               <div className="flex items-start justify-between gap-2">
                 <div>

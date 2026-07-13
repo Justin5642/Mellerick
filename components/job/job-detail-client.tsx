@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -33,6 +34,11 @@ const priorityColors: Record<string, string> = {
   urgent: "bg-red-100 text-red-700",
 };
 
+// Kept in sync with the `value`s in the TabsTrigger list below — used to
+// validate a `?tab=` query param (e.g. from the Approvals page's "Price &
+// review" link) before trusting it as the initial active tab.
+const TAB_VALUES = ["overview", "po", "time", "variations", "expenses", "documents", "photos", "items", "notes", "signature"];
+
 interface Props {
   job: any;
   currentUserId: string;
@@ -50,6 +56,17 @@ interface Props {
 }
 
 export function JobDetailClient({ job, currentUserId, photos: initialPhotos, documents: initialDocuments, notes: initialNotes, lineItems: initialLineItems, pricingItems, staff, purchaseOrders: initialPOs, timeEntries: initialTimeEntries, variations: initialVariations, variationTypes, expenses: initialExpenses }: Props) {
+  // Deep-links like /dashboard/jobs/[id]?tab=variations&variation=[id]
+  // (used by the Approvals page's "Price & review" link) land here — read
+  // them once on mount so the right tab opens and the right variation is
+  // highlighted, instead of always defaulting to Overview.
+  const searchParams = useSearchParams();
+  const requestedTab = searchParams.get("tab");
+  const [activeTab, setActiveTab] = useState(
+    requestedTab && TAB_VALUES.includes(requestedTab) ? requestedTab : "overview"
+  );
+  const highlightVariationId = searchParams.get("variation");
+
   const [photos, setPhotos] = useState(initialPhotos);
   const [documents, setDocuments] = useState(initialDocuments);
   const [notes, setNotes] = useState(initialNotes);
@@ -124,7 +141,7 @@ export function JobDetailClient({ job, currentUserId, photos: initialPhotos, doc
 
       {/* Tabs */}
       <div className="flex-1 overflow-hidden">
-        <Tabs defaultValue="overview" className="h-full flex flex-col">
+        <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v ?? "overview")} className="h-full flex flex-col">
           <div className="bg-white border-b px-6 overflow-x-auto">
             <TabsList className="h-auto bg-transparent p-0 gap-0 flex w-max min-w-full">
               {[
@@ -171,7 +188,7 @@ export function JobDetailClient({ job, currentUserId, photos: initialPhotos, doc
               <JobTime jobId={job.id} currentUserId={currentUserId} timeEntries={timeEntries} pos={purchaseOrders} costCenters={costCenters} onUpdate={setTimeEntries} />
             </TabsContent>
             <TabsContent value="variations" className="m-0 h-full">
-              <JobVariations jobId={job.id} variations={variations} variationTypes={variationTypes} currentUserId={currentUserId} onUpdate={setVariations} />
+              <JobVariations jobId={job.id} variations={variations} variationTypes={variationTypes} currentUserId={currentUserId} onUpdate={setVariations} highlightVariationId={highlightVariationId} />
             </TabsContent>
             <TabsContent value="expenses" className="m-0 h-full">
               <JobExpenses jobId={job.id} jobNumber={job.job_number} expenses={expenses} onUpdate={setExpenses} currentUserId={currentUserId} costCenters={costCenters} />

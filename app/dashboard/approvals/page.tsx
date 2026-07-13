@@ -215,7 +215,7 @@ export default function ApprovalsPage() {
                   </p>
                   {v.description && <p className="text-xs text-slate-400 mt-1 truncate">{v.description}</p>}
                 </div>
-                <Link href={`/dashboard/jobs/${v.jobs?.id}`} className="shrink-0">
+                <Link href={`/dashboard/jobs/${v.jobs?.id}?tab=variations&variation=${v.id}`} className="shrink-0">
                   <Button size="sm" variant="outline" className="gap-1.5 text-xs">
                     Price &amp; review →
                   </Button>
