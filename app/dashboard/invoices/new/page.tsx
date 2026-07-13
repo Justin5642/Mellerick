@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
@@ -14,6 +14,18 @@ import { ArrowLeft, Plus, Trash2, GitPullRequestArrow } from "lucide-react";
 import Link from "next/link";
 
 interface LineItem { name: string; description: string; quantity: string; unit_price: string; variationId?: string; }
+interface JobOption {
+  id: string;
+  job_number: number;
+  title: string;
+  status: string;
+  customer_id: string;
+  customers?: { name: string } | null;
+  sites?: { address_line1: string; suburb: string } | null;
+}
+function jobLabel(j: JobOption) {
+  return `#${j.job_number} — ${j.title}`;
+}
 interface UnbilledVariation {
   id: string;
   custom_name: string | null;
@@ -29,8 +41,11 @@ export default function NewInvoicePage() {
   const supabase = createClient();
   const [loading, setLoading] = useState(false);
   const [customers, setCustomers] = useState<any[]>([]);
-  const [jobs, setJobs] = useState<any[]>([]);
   const [pricingItems, setPricingItems] = useState<any[]>([]);
+  const [allJobs, setAllJobs] = useState<JobOption[]>([]);
+  const [jobQuery, setJobQuery] = useState("");
+  const [showJobResults, setShowJobResults] = useState(false);
+  const [titleTouched, setTitleTouched] = useState(false);
 
   const params = typeof window !== "undefined" ? new URLSearchParams(window.location.search) : null;
   const [form, setForm] = useState({
@@ -45,26 +60,74 @@ export default function NewInvoicePage() {
   const [unbilledVariations, setUnbilledVariations] = useState<UnbilledVariation[]>([]);
   const addedVariationIds = lineItems.filter((i) => i.variationId).map((i) => i.variationId as string);
 
+  const jobSelectFields = "id, job_number, title, status, customer_id, customers(name), sites(address_line1, suburb)";
+
   useEffect(() => {
     async function load() {
-      const [{ data: c }, { data: p }] = await Promise.all([
+      const [{ data: c }, { data: p }, { data: j }] = await Promise.all([
         supabase.from("customers").select("id, name").eq("is_active", true).order("name"),
         supabase.from("pricing_items").select("*").eq("is_active", true).order("name"),
+        // Loaded once for the job search box below — deliberately not filtered
+        // by status or customer, since a job needing a top-up invoice for a
+        // late-approved variation might not be "completed", and letting people
+        // search by address/customer means they shouldn't have to pick the
+        // customer first just to narrow the job list.
+        supabase.from("jobs").select(jobSelectFields).neq("status", "cancelled").order("updated_at", { ascending: false }).limit(500),
       ]);
       setCustomers(c ?? []);
       setPricingItems(p ?? []);
+      setAllJobs((j as any) ?? []);
     }
     load();
   }, []);
 
   useEffect(() => {
-    async function loadJobs() {
-      if (!form.customer_id) { setJobs([]); return; }
-      const { data } = await supabase.from("jobs").select("id, job_number, title").eq("customer_id", form.customer_id).eq("status", "completed");
-      setJobs(data ?? []);
+    // Arrived here from the "Ready to Invoice" queue with a job_id already in
+    // the URL. Fetch that exact job directly (no status/customer filter) so
+    // the search box shows it pre-selected even if it isn't in the bulk list
+    // above yet, or isn't "completed" — nothing here should require retyping
+    // what the queue already knew.
+    async function loadLinkedJob() {
+      const jobId = params?.get("job_id");
+      if (!jobId) return;
+      const { data } = await supabase.from("jobs").select(jobSelectFields).eq("id", jobId).single();
+      if (data) {
+        setJobQuery(jobLabel(data as any));
+        setAllJobs((prev) => (prev.some((j) => j.id === (data as any).id) ? prev : [data as any, ...prev]));
+      }
     }
-    loadJobs();
-  }, [form.customer_id]);
+    loadLinkedJob();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const jobMatches = useMemo(() => {
+    const q = jobQuery.trim().toLowerCase();
+    if (!q) return [];
+    const tokens = q.split(/\s+/);
+    return allJobs
+      .filter((j) => {
+        const haystack = `${j.job_number} ${j.title} ${j.customers?.name ?? ""} ${j.sites?.address_line1 ?? ""} ${j.sites?.suburb ?? ""}`.toLowerCase();
+        return tokens.every((t) => haystack.includes(t));
+      })
+      .slice(0, 8);
+  }, [jobQuery, allJobs]);
+
+  function selectJob(j: JobOption) {
+    setForm((prev) => ({
+      ...prev,
+      job_id: j.id,
+      customer_id: j.customer_id,
+      title: titleTouched ? prev.title : j.title || prev.title,
+    }));
+    setJobQuery(jobLabel(j));
+    setShowJobResults(false);
+    setErrors((prev) => ({ ...prev, customer_id: false }));
+  }
+
+  function clearJob() {
+    setForm((prev) => ({ ...prev, job_id: "" }));
+    setJobQuery("");
+  }
 
   useEffect(() => {
     async function loadUnbilledVariations() {
@@ -100,6 +163,17 @@ export default function NewInvoicePage() {
   function setField(field: string, value: string | null) {
     setForm(prev => ({ ...prev, [field]: value ?? "" }));
     if (errors[field]) setErrors(prev => ({ ...prev, [field]: false }));
+  }
+
+  function setCustomer(value: string) {
+    setField("customer_id", value);
+    // Manually changing the customer away from the linked job's customer
+    // would leave a mismatched pairing — clear the job selection instead of
+    // silently keeping a stale link.
+    const linkedJob = allJobs.find(j => j.id === form.job_id);
+    if (linkedJob && linkedJob.customer_id !== value) {
+      clearJob();
+    }
   }
 
   function err(field: string) {
@@ -182,25 +256,72 @@ export default function NewInvoicePage() {
           <CardHeader><CardTitle className="text-base">Invoice Details</CardTitle></CardHeader>
           <CardContent className="space-y-4">
             <div className="space-y-2">
+              <Label>Linked Job</Label>
+              <div className="relative">
+                <Input
+                  value={jobQuery}
+                  onChange={e => {
+                    setJobQuery(e.target.value);
+                    setShowJobResults(true);
+                    if (form.job_id) setForm(prev => ({ ...prev, job_id: "" }));
+                  }}
+                  onFocus={() => setShowJobResults(true)}
+                  onBlur={() => setTimeout(() => setShowJobResults(false), 150)}
+                  placeholder="Search by job number, title, customer or address..."
+                  className={form.job_id ? "pr-14" : ""}
+                />
+                {form.job_id && (
+                  <button
+                    type="button"
+                    onClick={clearJob}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-slate-400 hover:text-red-500"
+                  >
+                    Clear
+                  </button>
+                )}
+                {showJobResults && jobQuery.trim().length > 0 && (
+                  <div className="absolute z-10 mt-1 w-full bg-white border rounded-md shadow-lg max-h-64 overflow-y-auto">
+                    {jobMatches.length === 0 ? (
+                      <p className="px-3 py-2 text-xs text-slate-400">No jobs match &ldquo;{jobQuery}&rdquo;</p>
+                    ) : (
+                      jobMatches.map(j => (
+                        <button
+                          key={j.id}
+                          type="button"
+                          onClick={() => selectJob(j)}
+                          className="w-full text-left px-3 py-2 hover:bg-slate-50 border-b last:border-0"
+                        >
+                          <p className="text-sm font-medium text-slate-800 truncate">{jobLabel(j)}</p>
+                          <p className="text-xs text-slate-500 truncate">
+                            {j.customers?.name}
+                            {j.sites ? ` · ${j.sites.address_line1}, ${j.sites.suburb}` : ""}
+                          </p>
+                        </button>
+                      ))
+                    )}
+                  </div>
+                )}
+              </div>
+              <p className="text-xs text-slate-400">Picking a job fills in the customer and title below automatically.</p>
+            </div>
+            <div className="space-y-2">
               <Label>Title *</Label>
-              <Input value={form.title} onChange={e => setField("title", e.target.value)} placeholder="e.g. Bathroom renovation — 123 Main St" className={err("title")} />
+              <Input
+                value={form.title}
+                onChange={e => { setTitleTouched(true); setField("title", e.target.value); }}
+                placeholder="e.g. Bathroom renovation — 123 Main St"
+                className={err("title")}
+              />
               {errors.title && <p className="text-xs text-red-500">Title is required</p>}
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label>Customer *</Label>
-                <Select value={form.customer_id} onValueChange={v => setField("customer_id", v as string)}>
+                <Select value={form.customer_id} onValueChange={v => setCustomer(v as string)}>
                   <SelectTrigger className={err("customer_id")}><SelectValue placeholder="Select customer" /></SelectTrigger>
                   <SelectContent>{customers.map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}</SelectContent>
                 </Select>
                 {errors.customer_id && <p className="text-xs text-red-500">Customer is required</p>}
-              </div>
-              <div className="space-y-2">
-                <Label>Linked Job</Label>
-                <Select value={form.job_id} onValueChange={v => setField("job_id", v as string)} disabled={!form.customer_id}>
-                  <SelectTrigger><SelectValue placeholder="Select completed job" /></SelectTrigger>
-                  <SelectContent>{jobs.map(j => <SelectItem key={j.id} value={j.id}>#{j.job_number} — {j.title}</SelectItem>)}</SelectContent>
-                </Select>
               </div>
               <div className="space-y-2">
                 <Label>Due Date</Label>
