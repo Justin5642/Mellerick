@@ -1,8 +1,8 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, Suspense } from "react";
 import { createClient } from "@/lib/supabase/client";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -37,6 +37,15 @@ interface UnbilledVariation {
 }
 
 export default function NewInvoicePage() {
+  // useSearchParams() needs a Suspense boundary above it in the App Router.
+  return (
+    <Suspense fallback={null}>
+      <NewInvoiceForm />
+    </Suspense>
+  );
+}
+
+function NewInvoiceForm() {
   const router = useRouter();
   const supabase = createClient();
   const [loading, setLoading] = useState(false);
@@ -47,11 +56,22 @@ export default function NewInvoicePage() {
   const [showJobResults, setShowJobResults] = useState(false);
   const [titleTouched, setTitleTouched] = useState(false);
 
-  const params = typeof window !== "undefined" ? new URLSearchParams(window.location.search) : null;
+  // Reactive, unlike reading window.location.search once: the App Router
+  // can navigate from /dashboard/invoices/new?job_id=A to ?job_id=B without
+  // remounting this component (same route, only the query string changed),
+  // so a mount-only read would keep showing whatever the *first* visit's
+  // params were — e.g. blank, if "+ New Invoice" was opened earlier in the
+  // session. useSearchParams() plus the effect below keep it in sync on
+  // every navigation, not just the first.
+  const searchParams = useSearchParams();
+  const jobIdParam = searchParams.get("job_id");
+  const customerIdParam = searchParams.get("customer_id");
+  const titleParam = searchParams.get("title");
+
   const [form, setForm] = useState({
-    title: params?.get("title") ?? "",
-    customer_id: params?.get("customer_id") ?? "",
-    job_id: params?.get("job_id") ?? "",
+    title: titleParam ?? "",
+    customer_id: customerIdParam ?? "",
+    job_id: jobIdParam ?? "",
     due_date: "",
     notes: "",
   });
@@ -82,15 +102,33 @@ export default function NewInvoicePage() {
   }, []);
 
   useEffect(() => {
-    // Arrived here from the "Ready to Invoice" queue with a job_id already in
-    // the URL. Fetch that exact job directly (no status/customer filter) so
-    // the search box shows it pre-selected even if it isn't in the bulk list
-    // above yet, or isn't "completed" — nothing here should require retyping
-    // what the queue already knew.
+    // Keeps form fields synced to the URL's job_id/customer_id/title any time
+    // they change — including when this exact component instance was already
+    // mounted (e.g. "+ New Invoice" was opened earlier this session) and the
+    // App Router just swapped the query string rather than remounting the
+    // page. Without this, the form would silently keep showing whatever the
+    // *first* visit's params were.
+    if (jobIdParam || customerIdParam || titleParam) {
+      setTitleTouched(false);
+      setForm((prev) => ({
+        ...prev,
+        job_id: jobIdParam ?? prev.job_id,
+        customer_id: customerIdParam ?? prev.customer_id,
+        title: titleParam ?? prev.title,
+      }));
+    }
+  }, [jobIdParam, customerIdParam, titleParam]);
+
+  useEffect(() => {
+    // Arrived here from the "Ready to Invoice" queue with a job_id in the
+    // URL. Fetch that exact job directly (no status/customer filter) so the
+    // search box shows it pre-selected even if it isn't in the bulk list
+    // below yet, or isn't "completed" — nothing here should require retyping
+    // what the queue already knew. Re-runs whenever job_id changes, not just
+    // on mount, for the same reason as the effect above.
     async function loadLinkedJob() {
-      const jobId = params?.get("job_id");
-      if (!jobId) return;
-      const { data } = await supabase.from("jobs").select(jobSelectFields).eq("id", jobId).single();
+      if (!jobIdParam) { setJobQuery(""); return; }
+      const { data } = await supabase.from("jobs").select(jobSelectFields).eq("id", jobIdParam).single();
       if (data) {
         setJobQuery(jobLabel(data as any));
         setAllJobs((prev) => (prev.some((j) => j.id === (data as any).id) ? prev : [data as any, ...prev]));
@@ -98,7 +136,7 @@ export default function NewInvoicePage() {
     }
     loadLinkedJob();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [jobIdParam]);
 
   const jobMatches = useMemo(() => {
     const q = jobQuery.trim().toLowerCase();
