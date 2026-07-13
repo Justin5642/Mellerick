@@ -3,6 +3,7 @@ import { Button } from "@/components/ui/button";
 import { Plus } from "lucide-react";
 import Link from "next/link";
 import { TeamScheduleView } from "@/components/schedule/team-schedule-view";
+import { isTodayInBusinessTZ, BUSINESS_TIME_ZONE } from "@/lib/date";
 
 export default async function SchedulePage() {
   const supabase = await createClient();
@@ -21,10 +22,9 @@ export default async function SchedulePage() {
   ]);
 
   const today = new Date();
-  const todayStr = today.toDateString();
 
-  const todayJobs = jobs?.filter((j: any) => new Date(j.scheduled_start).toDateString() === todayStr) ?? [];
-  const upcomingJobs = jobs?.filter((j: any) => new Date(j.scheduled_start).toDateString() !== todayStr) ?? [];
+  const todayJobs = jobs?.filter((j: any) => isTodayInBusinessTZ(j.scheduled_start)) ?? [];
+  const upcomingJobs = jobs?.filter((j: any) => !isTodayInBusinessTZ(j.scheduled_start)) ?? [];
 
   return (
     <div className="p-6 space-y-6">
@@ -32,7 +32,7 @@ export default async function SchedulePage() {
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Schedule</h1>
           <p className="text-slate-500 text-sm mt-1">
-            {today.toLocaleDateString("en-AU", { weekday: "long", day: "numeric", month: "long" })} · {jobs?.length ?? 0} scheduled jobs
+            {today.toLocaleDateString("en-AU", { weekday: "long", day: "numeric", month: "long", timeZone: BUSINESS_TIME_ZONE })} · {jobs?.length ?? 0} scheduled jobs
           </p>
         </div>
         <Link href="/dashboard/jobs/new">

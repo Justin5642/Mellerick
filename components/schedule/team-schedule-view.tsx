@@ -6,6 +6,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Navigation, Users, LayoutList } from "lucide-react";
+import { formatTime, formatDate } from "@/lib/date";
 
 type Job = {
   id: string;
@@ -92,11 +93,11 @@ function JobCard({ job }: { job: Job }) {
     >
       <div className="flex items-center justify-between gap-2">
         <p className="text-xs font-bold text-blue-600">
-          {new Date(job.scheduled_start).toLocaleTimeString("en-AU", { hour: "2-digit", minute: "2-digit" })}
+          {formatTime(job.scheduled_start)}
           {job.scheduled_end && (
             <span className="text-slate-400 font-medium">
               {" "}–{" "}
-              {new Date(job.scheduled_end).toLocaleTimeString("en-AU", { hour: "2-digit", minute: "2-digit" })}
+              {formatTime(job.scheduled_end)}
             </span>
           )}
         </p>
@@ -227,8 +228,8 @@ export function TeamScheduleView({
                 {todayJobs.map((job) => (
                   <Link key={job.id} href={`/dashboard/jobs/${job.id}`} className="flex items-center gap-4 px-6 py-4 hover:bg-slate-50 transition-colors group">
                     <div className="text-center w-16 flex-shrink-0">
-                      <p className="text-xs font-bold text-blue-600">{new Date(job.scheduled_start).toLocaleTimeString("en-AU", { hour: "2-digit", minute: "2-digit" })}</p>
-                      {job.scheduled_end && <p className="text-xs text-slate-400">{new Date(job.scheduled_end).toLocaleTimeString("en-AU", { hour: "2-digit", minute: "2-digit" })}</p>}
+                      <p className="text-xs font-bold text-blue-600">{formatTime(job.scheduled_start)}</p>
+                      {job.scheduled_end && <p className="text-xs text-slate-400">{formatTime(job.scheduled_end)}</p>}
                     </div>
                     <div className="flex-1 min-w-0">
                       <p className="font-medium text-sm group-hover:text-blue-600 transition-colors truncate">#{job.job_number} — {job.title}</p>
@@ -253,8 +254,8 @@ export function TeamScheduleView({
                 {upcomingJobs.map((job) => (
                   <Link key={job.id} href={`/dashboard/jobs/${job.id}`} className="flex items-center gap-4 px-6 py-4 hover:bg-slate-50 transition-colors group">
                     <div className="text-center w-20 flex-shrink-0">
-                      <p className="text-xs font-bold text-slate-700">{new Date(job.scheduled_start).toLocaleDateString("en-AU", { day: "numeric", month: "short" })}</p>
-                      <p className="text-xs text-slate-400">{new Date(job.scheduled_start).toLocaleTimeString("en-AU", { hour: "2-digit", minute: "2-digit" })}</p>
+                      <p className="text-xs font-bold text-slate-700">{formatDate(job.scheduled_start)}</p>
+                      <p className="text-xs text-slate-400">{formatTime(job.scheduled_start)}</p>
                     </div>
                     <div className="flex-1 min-w-0">
                       <p className="font-medium text-sm group-hover:text-blue-600 transition-colors truncate">#{job.job_number} — {job.title}</p>
