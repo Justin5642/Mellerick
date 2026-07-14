@@ -10,7 +10,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Phone, Mail, MapPin, Calendar, User, Save, Navigation } from "lucide-react";
-import { formatDate } from "@/lib/date";
+import { formatDate, toBusinessInputValue, fromBusinessInputValue } from "@/lib/date";
 
 interface Props {
   job: any;
@@ -24,8 +24,8 @@ export function JobOverview({ job, staff }: Props) {
     status: job.status,
     priority: job.priority,
     assigned_to: job.assigned_to ?? "",
-    scheduled_start: job.scheduled_start ? new Date(job.scheduled_start).toISOString().slice(0, 16) : "",
-    scheduled_end: job.scheduled_end ? new Date(job.scheduled_end).toISOString().slice(0, 16) : "",
+    scheduled_start: job.scheduled_start ? toBusinessInputValue(job.scheduled_start) : "",
+    scheduled_end: job.scheduled_end ? toBusinessInputValue(job.scheduled_end) : "",
     description: job.description ?? "",
     notes: job.notes ?? "",
   });
@@ -34,13 +34,22 @@ export function JobOverview({ job, staff }: Props) {
     setForm((prev) => ({ ...prev, [field]: value ?? "" }));
   }
 
+  // Quick-fill a standard 7:00am-3:30pm work day (Melbourne time) instead of
+  // requiring manual entry of both start and end times. Keeps whatever date
+  // is already selected (falls back to today) so this can be used after
+  // picking a date, or before.
+  function setAllDay() {
+    const datePart = (form.scheduled_start || toBusinessInputValue(new Date())).slice(0, 10);
+    setForm((prev) => ({ ...prev, scheduled_start: `${datePart}T07:00`, scheduled_end: `${datePart}T15:30` }));
+  }
+
   async function save() {
     setSaving(true);
     const { error } = await supabase.from("jobs").update({
       ...form,
       assigned_to: form.assigned_to || null,
-      scheduled_start: form.scheduled_start || null,
-      scheduled_end: form.scheduled_end || null,
+      scheduled_start: form.scheduled_start ? fromBusinessInputValue(form.scheduled_start) : null,
+      scheduled_end: form.scheduled_end ? fromBusinessInputValue(form.scheduled_end) : null,
     }).eq("id", job.id);
     if (error) {
       toast.error(error.message);
@@ -99,7 +108,10 @@ export function JobOverview({ job, staff }: Props) {
                 <p className="text-sm text-slate-700 capitalize py-2">{job.job_type}</p>
               </div>
               <div className="space-y-2">
-                <Label>Scheduled Start</Label>
+                <div className="flex items-center justify-between">
+                  <Label>Scheduled Start</Label>
+                  <Button type="button" variant="link" size="sm" className="h-auto p-0 text-xs" onClick={setAllDay}>All Day (7:00–3:30)</Button>
+                </div>
                 <Input type="datetime-local" value={form.scheduled_start} onChange={(e) => set("scheduled_start", e.target.value)} />
               </div>
               <div className="space-y-2">
