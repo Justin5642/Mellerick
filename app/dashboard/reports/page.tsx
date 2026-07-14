@@ -3,6 +3,7 @@ export const dynamic = "force-dynamic";
 import { createClient } from "@/lib/supabase/server";
 import { ReportsDashboard } from "@/components/reports/reports-dashboard";
 import { computeLoadedCost } from "@/lib/staff-cost";
+import { computeEquipmentCost } from "@/lib/equipment-cost";
 import { businessDateParts, formatDate } from "@/lib/date";
 
 function monthKey(date: string) {
@@ -95,6 +96,43 @@ export default async function ReportsPage() {
       .sort((a, b) => (b.trueCostPerWorkedHour ?? 0) - (a.trueCostPerWorkedHour ?? 0));
   }
 
+  // Equipment cost/utilization -- not payroll-sensitive (equipment table is
+  // readable by any authenticated user, same as the Fleet page), so this
+  // runs for everyone, not just admins. Same "true cost per hour actually
+  // used" idea as staff efficiency above: fixed costs (depreciation,
+  // insurance, maintenance, rego) are incurred whether or not the item gets
+  // used, so low utilization drives the true $/hr well above the budgeted
+  // rate -- the signal for "hire it instead of owning it."
+  const equipmentTwelveMonthsAgo = new Date();
+  equipmentTwelveMonthsAgo.setFullYear(equipmentTwelveMonthsAgo.getFullYear() - 1);
+  const equipmentCutoffDate = equipmentTwelveMonthsAgo.toISOString().slice(0, 10);
+
+  const [{ data: equipmentList }, { data: equipmentUsage }] = await Promise.all([
+    supabase.from("equipment").select("*").eq("is_active", true),
+    supabase.from("equipment_usage_log").select("equipment_id, hours, usage_date").gte("usage_date", equipmentCutoffDate),
+  ]);
+
+  const hoursByEquipment = new Map<string, number>();
+  (equipmentUsage ?? []).forEach((u: any) => {
+    hoursByEquipment.set(u.equipment_id, (hoursByEquipment.get(u.equipment_id) ?? 0) + Number(u.hours ?? 0));
+  });
+
+  const equipmentUtilization = (equipmentList ?? [])
+    .map((eq: any) => {
+      const { costPerHour, annualFixedCost, annualTotalCost } = computeEquipmentCost(eq);
+      const hoursUsed = hoursByEquipment.get(eq.id) ?? 0;
+      const targetHours = Number(eq.target_hours_per_year ?? 0);
+      return {
+        name: eq.name,
+        hoursUsed,
+        budgetedCostPerHour: costPerHour,
+        annualTotalCost,
+        utilizationPct: targetHours > 0 ? (hoursUsed / targetHours) * 100 : null,
+        trueCostPerHourUsed: hoursUsed > 0 ? annualFixedCost / hoursUsed + Number(eq.fuel_cost_per_hour ?? 0) : null,
+      };
+    })
+    .sort((a, b) => (b.trueCostPerHourUsed ?? 0) - (a.trueCostPerHourUsed ?? 0));
+
   const invoicesData = invoices ?? [];
   const quotesData = quotes ?? [];
   const jobsData = jobs ?? [];
@@ -179,6 +217,7 @@ export default async function ReportsPage() {
       totalJobs={jobsData.length}
       totalQuotes={quotesData.length}
       staffEfficiency={isAdmin ? staffEfficiency : null}
+      equipmentUtilization={equipmentUtilization}
     />
   );
 }

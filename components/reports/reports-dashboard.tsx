@@ -14,7 +14,7 @@ import {
   Pie,
   Cell,
 } from "recharts";
-import { DollarSign, TrendingUp, AlertTriangle, Target, Briefcase, Users, HeartPulse } from "lucide-react";
+import { DollarSign, TrendingUp, AlertTriangle, Target, Briefcase, Users, HeartPulse, Truck } from "lucide-react";
 
 function money(n: number) {
   return `$${n.toLocaleString("en-AU", { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
@@ -59,6 +59,14 @@ interface Props {
     utilizationPct: number | null;
     trueCostPerWorkedHour: number | null;
   }[] | null;
+  equipmentUtilization: {
+    name: string;
+    hoursUsed: number;
+    budgetedCostPerHour: number;
+    annualTotalCost: number;
+    utilizationPct: number | null;
+    trueCostPerHourUsed: number | null;
+  }[];
 }
 
 export function ReportsDashboard({
@@ -75,6 +83,7 @@ export function ReportsDashboard({
   totalJobs,
   totalQuotes,
   staffEfficiency,
+  equipmentUtilization,
 }: Props) {
   const quotePieData = Object.entries(quoteStatusCounts)
     .filter(([, count]) => count > 0)
@@ -290,6 +299,59 @@ export function ReportsDashboard({
                         </td>
                         <td className={`px-4 py-2.5 text-right font-semibold ${overLoaded ? "text-red-600" : "text-slate-800"}`}>
                           {s.trueCostPerWorkedHour != null ? `$${s.trueCostPerWorkedHour.toFixed(2)}` : "—"}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {equipmentUtilization.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base flex items-center gap-2">
+              <Truck className="w-4 h-4" /> Equipment Cost &amp; Utilization (trailing 12 months)
+            </CardTitle>
+            <p className="text-xs text-slate-400">
+              True cost per hour actually used, factoring in fixed costs (depreciation, insurance, maintenance, rego) that are
+              incurred whether or not the item gets used. A true cost well above the budgeted rate means it&apos;s under-used —
+              worth checking whether hiring on demand would be cheaper than owning it.
+            </p>
+          </CardHeader>
+          <CardContent className="p-0">
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b text-left text-xs text-slate-500">
+                    <th className="px-4 py-2 font-medium">Equipment</th>
+                    <th className="px-4 py-2 font-medium text-right">Budgeted Rate</th>
+                    <th className="px-4 py-2 font-medium text-right">Hours Used</th>
+                    <th className="px-4 py-2 font-medium text-right">Utilization</th>
+                    <th className="px-4 py-2 font-medium text-right">Annual Cost</th>
+                    <th className="px-4 py-2 font-medium text-right">True Cost / Hr Used</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y">
+                  {equipmentUtilization.map((eq) => {
+                    const overLoaded = eq.trueCostPerHourUsed != null && eq.trueCostPerHourUsed > eq.budgetedCostPerHour * 1.1;
+                    const lowUtilization = eq.utilizationPct != null && eq.utilizationPct < 60;
+                    return (
+                      <tr key={eq.name}>
+                        <td className="px-4 py-2.5 font-medium text-slate-700">{eq.name}</td>
+                        <td className="px-4 py-2.5 text-right text-slate-600">${eq.budgetedCostPerHour.toFixed(2)}</td>
+                        <td className="px-4 py-2.5 text-right text-slate-600">{eq.hoursUsed.toFixed(1)}</td>
+                        <td className={`px-4 py-2.5 text-right font-medium ${lowUtilization ? "text-orange-600" : "text-slate-600"}`}>
+                          {eq.utilizationPct != null ? `${eq.utilizationPct.toFixed(0)}%` : "—"}
+                        </td>
+                        <td className="px-4 py-2.5 text-right text-slate-600">
+                          ${eq.annualTotalCost.toLocaleString("en-AU", { maximumFractionDigits: 0 })}
+                        </td>
+                        <td className={`px-4 py-2.5 text-right font-semibold ${overLoaded ? "text-red-600" : "text-slate-800"}`}>
+                          {eq.trueCostPerHourUsed != null ? `$${eq.trueCostPerHourUsed.toFixed(2)}` : "—"}
                         </td>
                       </tr>
                     );
