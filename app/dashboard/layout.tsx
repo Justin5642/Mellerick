@@ -22,11 +22,12 @@ export default async function DashboardLayout({ children }: { children: React.Re
         userRole={profile?.role}
       />
       {/* Clears the fixed mobile top bar rendered by AppSidebar below md --
-          its actual height is the 56px bar plus whatever the iOS safe-area
-          inset is (status bar/notch/Dynamic Island), since the bar itself
-          pads for that inset rather than having a fixed height. Desktop has
-          no top bar so no offset needed there. */}
-      <main className="flex-1 overflow-y-auto pt-[calc(env(safe-area-inset-top)+3.5rem)] md:pt-0">
+          its actual height is the 56px bar plus whatever safe-area clearance
+          it added up top (real inset if the browser reports one, 44px floor
+          otherwise -- see the detailed comment in app-sidebar.tsx on why a
+          floor is needed even in a regular Safari tab). Desktop has no top
+          bar so no offset needed there. */}
+      <main className="flex-1 overflow-y-auto pt-[calc(max(env(safe-area-inset-top),44px)+3.5rem)] md:pt-0">
         {children}
       </main>
       {/* Faint brand watermark, pinned to the bottom-right corner of the

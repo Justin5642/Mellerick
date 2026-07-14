@@ -82,15 +82,17 @@ export function AppSidebar({ userEmail, userName, userRole }: AppSidebarProps) {
           content area to clear it.
           Root layout sets viewportFit: "cover" + a black-translucent iOS
           status bar, so content is allowed to draw under the notch/status
-          bar/Dynamic Island -- without the safe-area padding below, this bar
-          (and its hamburger button) renders partly underneath that system
-          UI, landing in the literal top corner and becoming unreliable to
-          tap. The outer div carries the safe-area inset as padding (so the
-          dark background still fills behind the notch); the inner div is
-          the actual fixed-height visible bar content. */}
+          bar/Dynamic Island. Confirmed on a real device (regular Safari tab,
+          not "Add to Home Screen") that env(safe-area-inset-top) alone
+          resolves to 0 there even though the page still visibly renders
+          under the status bar -- the inset is apparently only populated in
+          standalone/fullscreen mode, not a normal browser tab. So this uses
+          max(...) with a hardcoded 44px fallback (the standard iOS status
+          bar height) to guarantee clearance either way: real inset when one
+          is reported, 44px floor when it isn't. */}
       <div
         className="md:hidden fixed top-0 left-0 right-0 z-40 bg-slate-900 border-b border-slate-700"
-        style={{ paddingTop: "env(safe-area-inset-top)" }}
+        style={{ paddingTop: "max(env(safe-area-inset-top), 44px)" }}
       >
         <div
           className="h-14 flex items-center gap-3"
@@ -142,7 +144,7 @@ export function AppSidebar({ userEmail, userName, userRole }: AppSidebarProps) {
             // that button is hidden (justify-between with only one visible
             // child would otherwise leave it flush left instead of centered).
             "flex items-center justify-between md:justify-center border-b border-slate-700 bg-white flex-shrink-0",
-            "pt-[calc(env(safe-area-inset-top)+0.75rem)] md:pt-4",
+            "pt-[calc(max(env(safe-area-inset-top),44px)+0.75rem)] md:pt-4",
             collapsed ? "px-2 pb-3 md:pt-3" : "px-4 pb-4"
           )}
         >
