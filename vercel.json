@@ -3,6 +3,7 @@
   "buildCommand": "next build",
   "installCommand": "npm install",
   "crons": [
-    { "path": "/api/google/poll-calendar", "schedule": "*/10 * * * *" }
+    { "path": "/api/google/poll-calendar", "schedule": "*/10 * * * *" },
+    { "path": "/api/xero/poll-invoices", "schedule": "*/30 * * * *" }
   ]
 }

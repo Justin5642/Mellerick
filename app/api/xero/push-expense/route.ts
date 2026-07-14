@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getXeroClient } from "@/lib/xero";
+import { getRefreshedXero } from "@/lib/xero";
 import { createClient } from "@/lib/supabase/server";
 import { Invoice, LineItem, Contact, LineAmountTypes } from "xero-node";
 
@@ -8,29 +8,6 @@ import { Invoice, LineItem, Contact, LineAmountTypes } from "xero-node";
 // a Xero Bill (ACCPAY) for the supplier, coded to the office-configured
 // default_expense_account_code, with the job number in the Reference field
 // so the cost is identifiable per job in Xero reporting.
-async function getRefreshedXero() {
-  const supabase = await createClient();
-  const { data: tokenRow } = await supabase.from("xero_tokens").select("*").single();
-  if (!tokenRow) throw new Error("Xero not connected");
-
-  const xero = getXeroClient();
-  xero.setTokenSet({
-    access_token: tokenRow.access_token,
-    refresh_token: tokenRow.refresh_token,
-    expires_in: Math.floor((new Date(tokenRow.token_expiry).getTime() - Date.now()) / 1000),
-  });
-
-  if (new Date(tokenRow.token_expiry) < new Date()) {
-    const newTokenSet = await xero.refreshToken();
-    await supabase.from("xero_tokens").update({
-      access_token: newTokenSet.access_token!,
-      refresh_token: newTokenSet.refresh_token!,
-      token_expiry: new Date(Date.now() + (newTokenSet.expires_in as number) * 1000).toISOString(),
-    }).eq("id", tokenRow.id);
-  }
-
-  return { xero, tenantId: tokenRow.tenant_id, defaultExpenseAccountCode: tokenRow.default_expense_account_code as string | null };
-}
 
 export async function POST(request: NextRequest) {
   try {

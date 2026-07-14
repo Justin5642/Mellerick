@@ -5,13 +5,14 @@ import { CheckCircle2, XCircle, ExternalLink, CalendarDays, Wrench, Layers } fro
 import Link from "next/link";
 import { GoogleCalendarSyncButton } from "@/components/settings/google-calendar-sync-button";
 import { XeroExpenseAccountCode } from "@/components/settings/xero-expense-account-code";
+import { XeroInvoiceSyncButton } from "@/components/settings/xero-invoice-sync-button";
 import { formatDateTime } from "@/lib/date";
 
 export default async function SettingsPage({ searchParams }: { searchParams: Promise<{ xero?: string; google?: string }> }) {
   const params = await searchParams;
   const supabase = await createClient();
   const [{ data: xeroToken }, { data: googleToken }] = await Promise.all([
-    supabase.from("xero_tokens").select("tenant_name, updated_at, default_expense_account_code").single(),
+    supabase.from("xero_tokens").select("tenant_name, updated_at, default_expense_account_code, xero_invoice_last_synced_at").single(),
     supabase.from("google_tokens").select("google_email, updated_at, calendar_last_synced_at").single(),
   ]);
 
@@ -227,7 +228,8 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
                 Xero Accounting
               </CardTitle>
               <CardDescription className="mt-1">
-                Push invoices directly to Xero for payment tracking and accounting
+                Push invoices directly to Xero, and automatically pull payment status back so invoices paid in Xero
+                get marked paid here too
               </CardDescription>
             </div>
             {isConnected ? (
@@ -245,12 +247,18 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
           {isConnected ? (
             <div className="space-y-2 text-sm text-slate-600">
               <p>Connected to: <span className="font-medium text-slate-900">{xeroToken.tenant_name}</span></p>
+              <p className="text-xs text-slate-400">
+                {xeroToken.xero_invoice_last_synced_at
+                  ? `Last pulled payment status from Xero: ${formatDateTime(xeroToken.xero_invoice_last_synced_at)}`
+                  : "Payment status hasn't been pulled back from Xero yet."}
+              </p>
               <div className="flex gap-3">
                 <Link href="/api/xero/auth">
                   <Button variant="outline" size="sm" className="gap-2">
                     <ExternalLink className="w-3.5 h-3.5" /> Reconnect Xero
                   </Button>
                 </Link>
+                <XeroInvoiceSyncButton />
               </div>
               <XeroExpenseAccountCode initialValue={xeroToken.default_expense_account_code} />
             </div>
