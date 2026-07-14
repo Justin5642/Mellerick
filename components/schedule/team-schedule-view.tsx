@@ -321,7 +321,7 @@ export function TeamScheduleView({
 
         <DndContext sensors={sensors} collisionDetection={closestCenter} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
           <div className="flex gap-4 overflow-x-auto pb-2">
-            <DroppableColumn id={UNASSIGNED_COLUMN_ID} className="w-72 flex-shrink-0 rounded-xl">
+            <DroppableColumn id={UNASSIGNED_COLUMN_ID} className="w-72 flex-shrink-0 rounded-xl sticky left-0 z-10 bg-slate-50 shadow-[4px_0_8px_-4px_rgba(0,0,0,0.08)]">
               <Card className={cn("h-full", unassigned.length > 0 ? "border-amber-300" : "")}>
                 <CardHeader className="pb-3">
                   <div className="flex items-center gap-2">
