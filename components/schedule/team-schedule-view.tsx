@@ -161,7 +161,12 @@ function DraggableJobCard({ job }: { job: Job }) {
     <div
       ref={setNodeRef}
       {...listeners}
-      style={{ touchAction: "manipulation" }}
+      onContextMenu={(e) => e.preventDefault()}
+      style={{
+        touchAction: "none",
+        WebkitTouchCallout: "none",
+        WebkitUserSelect: "none",
+      }}
       className={cn("relative cursor-grab active:cursor-grabbing select-none", isDragging && "opacity-30")}
     >
       <GripVertical className="w-3.5 h-3.5 text-slate-300 absolute top-2 right-2 pointer-events-none" />
