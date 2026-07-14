@@ -5,7 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Briefcase, Users, Receipt, AlertCircle, CheckCircle2, Clock, DollarSign } from "lucide-react";
 import Link from "next/link";
-import { businessDateParts, formatDate } from "@/lib/date";
+import { businessDateParts, formatDate, formatTime, isTodayInBusinessTZ } from "@/lib/date";
 import { jobStatusColors, jobPriorityColors } from "@/lib/badge-colors";
 
 function StatCard({ title, value, icon: Icon, color, href }: {
@@ -39,6 +39,7 @@ export default async function DashboardPage() {
     { count: overdueInvoices },
     { data: recentJobs },
     { data: profile },
+    { data: scheduledJobs },
   ] = await Promise.all([
     supabase.from("jobs").select("*", { count: "exact", head: true }),
     supabase.from("jobs").select("*", { count: "exact", head: true }).in("status", ["pending", "scheduled", "in_progress"]),
@@ -49,7 +50,14 @@ export default async function DashboardPage() {
       .order("created_at", { ascending: false })
       .limit(8),
     supabase.from("profiles").select("full_name").eq("id", user!.id).single(),
+    supabase.from("jobs")
+      .select("*, customers(name), profiles(full_name)")
+      .not("scheduled_start", "is", null)
+      .in("status", ["scheduled", "in_progress", "pending"])
+      .order("scheduled_start"),
   ]);
+
+  const todaysJobs = (scheduledJobs ?? []).filter((j: any) => isTodayInBusinessTZ(j.scheduled_start));
 
   const { hour } = businessDateParts();
   const greeting = hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening";
@@ -70,6 +78,45 @@ export default async function DashboardPage() {
         <StatCard title="Customers" value={totalCustomers ?? 0} icon={Users} color="bg-violet-500" href="/dashboard/customers" />
         <StatCard title="Overdue Invoices" value={overdueInvoices ?? 0} icon={AlertCircle} color="bg-red-500" href="/dashboard/invoices" />
       </div>
+
+      {/* Today's Jobs */}
+      <Card>
+        <CardHeader className="flex flex-row items-center justify-between pb-3">
+          <CardTitle className="text-base font-semibold">Today&rsquo;s Jobs</CardTitle>
+          <Link href="/dashboard/schedule" className="text-sm text-blue-600 hover:underline font-medium">View schedule</Link>
+        </CardHeader>
+        <CardContent className="p-0">
+          {todaysJobs.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-10 text-slate-400">
+              <Clock className="w-10 h-10 mb-3 opacity-40" />
+              <p className="text-sm">No jobs scheduled for today.</p>
+            </div>
+          ) : (
+            <div className="divide-y">
+              {todaysJobs.map((job: any) => (
+                <Link key={job.id} href={`/dashboard/jobs/${job.id}`} className="flex items-center gap-4 px-6 py-4 hover:bg-slate-50 transition-colors group">
+                  <div className="text-center w-16 flex-shrink-0">
+                    <p className="text-xs font-bold text-blue-600">{formatTime(job.scheduled_start)}</p>
+                    {job.scheduled_end && <p className="text-xs text-slate-400">{formatTime(job.scheduled_end)}</p>}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="font-medium text-sm text-slate-900 group-hover:text-blue-600 transition-colors truncate">
+                      #{job.job_number} — {job.title}
+                    </p>
+                    <p className="text-xs text-slate-500 mt-0.5 truncate">
+                      {job.customers?.name}
+                      {job.profiles?.full_name ? ` · ${job.profiles.full_name}` : " · Unassigned"}
+                    </p>
+                  </div>
+                  <span className={`text-xs px-2 py-0.5 rounded-full font-medium capitalize flex-shrink-0 ${jobStatusColors[job.status] ?? ""}`}>
+                    {job.status.replace("_", " ")}
+                  </span>
+                </Link>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
 
       {/* Recent Jobs */}
       <Card>

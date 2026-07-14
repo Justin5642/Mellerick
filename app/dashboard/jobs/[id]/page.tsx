@@ -44,6 +44,25 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
 
   if (!job) notFound();
 
+  // The staff list above only includes active profiles (so you can't assign
+  // new work to someone who's left), but a job can already be assigned to
+  // someone who's since been deactivated. The assignment dropdown renders
+  // the technician's name by matching their id against this list, so if
+  // they're missing from it entirely it falls back to showing the raw
+  // profile id instead of their name. Fetch and append that one profile
+  // (flagged) so the current assignment always displays correctly.
+  let staffForDisplay = staff ?? [];
+  if (job.assigned_to && !staffForDisplay.some((s: any) => s.id === job.assigned_to)) {
+    const { data: assignedProfile } = await supabase
+      .from("profiles")
+      .select("id, full_name, role")
+      .eq("id", job.assigned_to)
+      .single();
+    if (assignedProfile) {
+      staffForDisplay = [...staffForDisplay, { ...assignedProfile, full_name: `${assignedProfile.full_name} (inactive)` }];
+    }
+  }
+
   // The "Costing" tab folds in staff_cost_profiles (payroll-sensitive), so
   // it's only fetched and rendered for admins — same gating pattern as the
   // Reports page's staff efficiency section.
@@ -72,7 +91,7 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
       notes={notes ?? []}
       lineItems={lineItems ?? []}
       pricingItems={pricingItems ?? []}
-      staff={staff ?? []}
+      staff={staffForDisplay}
       purchaseOrders={purchaseOrders ?? []}
       timeEntries={timeEntries ?? []}
       variations={variations ?? []}
