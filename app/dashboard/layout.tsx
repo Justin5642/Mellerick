@@ -21,9 +21,12 @@ export default async function DashboardLayout({ children }: { children: React.Re
         userName={profile?.full_name}
         userRole={profile?.role}
       />
-      {/* pt-14 clears the fixed mobile top bar (h-14) rendered by AppSidebar
-          below md; desktop has no top bar so no offset needed there. */}
-      <main className="flex-1 overflow-y-auto pt-14 md:pt-0">
+      {/* Clears the fixed mobile top bar rendered by AppSidebar below md --
+          its actual height is the 56px bar plus whatever the iOS safe-area
+          inset is (status bar/notch/Dynamic Island), since the bar itself
+          pads for that inset rather than having a fixed height. Desktop has
+          no top bar so no offset needed there. */}
+      <main className="flex-1 overflow-y-auto pt-[calc(env(safe-area-inset-top)+3.5rem)] md:pt-0">
         {children}
       </main>
       {/* Faint brand watermark, pinned to the bottom-right corner of the
