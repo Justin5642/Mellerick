@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Briefcase, Plus, Search, X } from "lucide-react";
 import Link from "next/link";
 import { formatDate } from "@/lib/date";
+import { ListPageSkeleton } from "@/components/ui/loading-skeletons";
 
 const statusColors: Record<string, string> = {
   pending: "bg-yellow-100 text-yellow-800",
@@ -82,7 +83,7 @@ export default function JobsPage() {
   }, [jobs, search]);
 
   if (jobs === null && !error) {
-    return <div className="p-6 text-slate-400 text-sm">Loading...</div>;
+    return <ListPageSkeleton />;
   }
 
   if (error) {

@@ -11,6 +11,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Users, Plus, Mail, Phone, Shield, Wrench, Monitor, RotateCw, DollarSign, Pencil } from "lucide-react";
 import { StaffCostDialog } from "@/components/staff/staff-cost-dialog";
 import { StaffEditDialog } from "@/components/staff/staff-edit-dialog";
+import { ListPageSkeleton } from "@/components/ui/loading-skeletons";
 
 const roleColors: Record<string, string> = {
   admin: "bg-purple-100 text-purple-700",
@@ -114,7 +115,7 @@ export default function StaffPage() {
     toast.success(current ? "Staff member deactivated" : "Staff member reactivated");
   }
 
-  if (loading) return <div className="p-6 text-slate-400 text-sm">Loading...</div>;
+  if (loading) return <ListPageSkeleton />;
   if (fetchError) return <div className="p-6 text-red-500 text-sm">Error loading staff: {fetchError}</div>;
 
   return (

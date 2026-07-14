@@ -12,6 +12,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ArrowLeft } from "lucide-react";
 import Link from "next/link";
+import { FormSkeleton } from "@/components/ui/loading-skeletons";
 
 const categories = ["Labour", "Materials", "Call Out", "Inspection", "Drainage", "Hot Water", "Gas", "Backflow", "Stormwater", "Other"];
 
@@ -76,7 +77,7 @@ export default function EditPricingItemPage() {
     }
   }
 
-  if (fetching) return <div className="p-6 text-slate-400 text-sm">Loading...</div>;
+  if (fetching) return <FormSkeleton />;
 
   return (
     <div className="p-6 max-w-xl space-y-6">

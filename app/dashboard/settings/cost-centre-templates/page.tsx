@@ -9,6 +9,7 @@ import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ArrowLeft, Plus, Trash2 } from "lucide-react";
 import Link from "next/link";
+import { ListPageSkeleton } from "@/components/ui/loading-skeletons";
 
 interface TemplateItem {
   id: string;
@@ -76,7 +77,7 @@ export default function CostCentreTemplatesPage() {
     toast.success("Removed");
   }
 
-  if (loading) return <div className="p-6 text-slate-400 text-sm">Loading...</div>;
+  if (loading) return <ListPageSkeleton />;
 
   return (
     <div className="p-6 max-w-2xl space-y-6">

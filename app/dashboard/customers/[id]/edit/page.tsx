@@ -11,6 +11,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ArrowLeft } from "lucide-react";
 import Link from "next/link";
+import { FormSkeleton } from "@/components/ui/loading-skeletons";
 
 export default function EditCustomerPage() {
   const params = useParams();
@@ -85,7 +86,7 @@ export default function EditCustomerPage() {
   }
 
   if (fetching) {
-    return <div className="p-6 text-slate-400 text-sm">Loading...</div>;
+    return <FormSkeleton />;
   }
 
   return (

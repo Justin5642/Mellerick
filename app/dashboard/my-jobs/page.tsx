@@ -6,6 +6,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Briefcase, Clock, MapPin, Navigation } from "lucide-react";
 import Link from "next/link";
 import { formatTime, formatDate, isTodayInBusinessTZ } from "@/lib/date";
+import { ListPageSkeleton } from "@/components/ui/loading-skeletons";
 
 const statusColors: Record<string, string> = {
   pending: "bg-yellow-100 text-yellow-800",
@@ -39,7 +40,7 @@ export default function MyJobsPage() {
     load();
   }, []);
 
-  if (loading) return <div className="p-6 text-slate-400 text-sm">Loading...</div>;
+  if (loading) return <ListPageSkeleton />;
 
   const todayJobs = jobs.filter(j => j.scheduled_start && isTodayInBusinessTZ(j.scheduled_start));
   const upcomingJobs = jobs.filter(j => !j.scheduled_start || !isTodayInBusinessTZ(j.scheduled_start));

@@ -11,6 +11,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Truck, Plus, DollarSign } from "lucide-react";
 import { EquipmentCostDialog } from "@/components/fleet/equipment-cost-dialog";
 import { computeEquipmentCost, EQUIPMENT_CATEGORY_LABELS } from "@/lib/equipment-cost";
+import { ListPageSkeleton } from "@/components/ui/loading-skeletons";
 
 const categoryColors: Record<string, string> = {
   vehicle: "bg-blue-100 text-blue-700",
@@ -95,7 +96,7 @@ export default function FleetPage() {
     toast.success(current ? "Marked inactive" : "Marked active");
   }
 
-  if (loading) return <div className="p-6 text-slate-400 text-sm">Loading...</div>;
+  if (loading) return <ListPageSkeleton />;
   if (fetchError) return <div className="p-6 text-red-500 text-sm">Error loading fleet: {fetchError}</div>;
 
   return (

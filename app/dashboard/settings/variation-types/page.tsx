@@ -9,6 +9,7 @@ import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { ArrowLeft, Plus, Trash2, Zap, UserCheck } from "lucide-react";
 import Link from "next/link";
+import { ListPageSkeleton } from "@/components/ui/loading-skeletons";
 
 interface VariationType {
   id: string;
@@ -82,7 +83,7 @@ export default function VariationTypesPage() {
     toast.success("Removed");
   }
 
-  if (loading) return <div className="p-6 text-slate-400 text-sm">Loading...</div>;
+  if (loading) return <ListPageSkeleton />;
 
   return (
     <div className="p-6 max-w-2xl space-y-6">

@@ -8,6 +8,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
 import { CheckCircle2, XCircle, ClipboardList, Clock, User, MapPin, ChevronDown, ChevronUp, AlertTriangle, GitPullRequestArrow } from "lucide-react";
 import Link from "next/link";
+import { ListPageSkeleton } from "@/components/ui/loading-skeletons";
 import { formatDate } from "@/lib/date";
 
 const OVERTIME_LABELS: Record<string, string> = {
@@ -177,7 +178,7 @@ export default function ApprovalsPage() {
     setSaving(null);
   }
 
-  if (loading) return <div className="p-6 text-slate-400 text-sm">Loading...</div>;
+  if (loading) return <ListPageSkeleton />;
 
   // Approving here auto-creates an invoice and pushes it to Xero (see
   // approve() above) — per Justin's explicit requirement, that action must
