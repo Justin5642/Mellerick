@@ -7,6 +7,9 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   const { id } = await params;
   const supabase = await createClient();
 
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+
   const { data: quote } = await supabase
     .from("quotes")
     .select("*, customers(name, email, phone), quote_items(*)")

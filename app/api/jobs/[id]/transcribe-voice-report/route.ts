@@ -5,15 +5,36 @@ import { createClient } from "@supabase/supabase-js";
 // this route is called from the mobile app with no browser session/cookies
 // — same pattern as app/api/staff/invite. It needs guaranteed read access
 // to the private job-audio bucket and write access to jobs regardless of
-// caller auth state.
+// caller auth state. Because the service-role key bypasses RLS entirely,
+// this route must verify the caller's identity itself: the mobile app
+// attaches its Supabase session access token as a Bearer header, which we
+// validate against the anon-key client below before touching any data.
 function getAdminClient() {
   return createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!, {
     auth: { autoRefreshToken: false, persistSession: false },
   });
 }
 
+async function getAuthenticatedUserId(request: NextRequest) {
+  const authHeader = request.headers.get("authorization") ?? "";
+  const token = authHeader.startsWith("Bearer ") ? authHeader.slice("Bearer ".length) : null;
+  if (!token) return null;
+
+  const anonClient = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!, {
+    auth: { autoRefreshToken: false, persistSession: false },
+  });
+  const { data, error } = await anonClient.auth.getUser(token);
+  if (error || !data.user) return null;
+  return data.user.id;
+}
+
 export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
+
+  const callerId = await getAuthenticatedUserId(request);
+  if (!callerId) {
+    return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+  }
 
   if (!process.env.OPENAI_API_KEY) {
     return NextResponse.json({ error: "OPENAI_API_KEY is not configured on the server" }, { status: 500 });

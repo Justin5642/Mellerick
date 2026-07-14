@@ -68,9 +68,15 @@ export function VoiceReportRecorder({
         setError("Failed to upload recording.");
         return;
       }
+      const { data: sessionData } = await supabase.auth.getSession();
+      const accessToken = sessionData.session?.access_token;
+      if (!accessToken) {
+        setError("You are signed out — sign back in to transcribe the voice report.");
+        return;
+      }
       const res = await fetch(`${API_BASE_URL}/api/jobs/${jobId}/transcribe-voice-report`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
         body: JSON.stringify({ storagePath: path, recordedBy: currentUserId }),
       });
       const data = await res.json();
