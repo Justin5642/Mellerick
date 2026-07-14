@@ -54,6 +54,14 @@ export async function POST(request: NextRequest) {
       lineAmountTypes: LineAmountTypes.Exclusive,
       dueDate: invoice.due_date ? invoice.due_date.split("T")[0] : undefined,
       reference: `INV-${invoice.invoice_number}`,
+      // Explicitly set Xero's own InvoiceNumber to match ours, rather than
+      // letting Xero auto-assign the next one in its sequence. Xero's live
+      // invoice numbering is a long-running plain-numeric series (no "INV-"
+      // prefix -- that prefix is purely how we *display* it in this app, see
+      // formatInvoiceNumber()); our invoice_number was bumped via migration
+      // 0019 to continue right after Xero's existing max so the two stay
+      // numerically identical from here on, invoice-for-invoice.
+      invoiceNumber: String(invoice.invoice_number),
       status: Invoice.StatusEnum.AUTHORISED,
     };
 

@@ -1,5 +1,12 @@
 import { Document, Page, Text, View, StyleSheet, Image } from "@react-pdf/renderer";
 import { formatDate } from "@/lib/date";
+import { formatInvoiceNumber } from "@/lib/utils";
+
+// Formal documents read better with an unambiguous, full date -- "30 Jun
+// 2026" instead of the app's usual short "30 Jun" (fine for in-app lists
+// where "today" context is implicit, not fine on a PDF a customer might
+// open months later).
+const pdfDateOpts: Intl.DateTimeFormatOptions = { day: "numeric", month: "short", year: "numeric" };
 
 const styles = StyleSheet.create({
   page: { padding: 40, fontSize: 10, fontFamily: "Helvetica", color: "#1e293b" },
@@ -86,7 +93,9 @@ export function DocumentPdf({
         </View>
 
         <Text style={styles.title}>{docType}</Text>
-        <Text style={styles.docNumber}>#{docNumber} · {formatDate(createdAt)}</Text>
+        <Text style={styles.docNumber}>
+          {docType === "Tax Invoice" ? formatInvoiceNumber(docNumber) : `#${docNumber}`} · {formatDate(createdAt, pdfDateOpts)}
+        </Text>
 
         <View style={styles.section}>
           <View>
@@ -98,7 +107,7 @@ export function DocumentPdf({
           {dateValue && (
             <View>
               <Text style={styles.label}>{dateLabel}</Text>
-              <Text style={styles.value}>{formatDate(dateValue)}</Text>
+              <Text style={styles.value}>{formatDate(dateValue, pdfDateOpts)}</Text>
             </View>
           )}
         </View>

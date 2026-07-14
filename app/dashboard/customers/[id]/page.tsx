@@ -19,6 +19,7 @@ import {
   Receipt,
 } from "lucide-react";
 import { formatDate } from "@/lib/date";
+import { formatInvoiceNumber } from "@/lib/utils";
 
 const jobStatusColors: Record<string, string> = {
   pending: "bg-yellow-100 text-yellow-800",
@@ -307,7 +308,7 @@ export default async function CustomerDetailPage({
                         >
                           <div className="min-w-0">
                             <p className="text-sm font-medium text-slate-900 group-hover:text-blue-600 truncate">
-                              #{inv.invoice_number} — {inv.title}
+                              {formatInvoiceNumber(inv.invoice_number)} — {inv.title}
                             </p>
                             <p className="text-xs text-slate-500">
                               Due {inv.due_date ? formatDate(inv.due_date) : "—"}

@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Receipt, Plus, AlertCircle } from "lucide-react";
 import Link from "next/link";
 import { formatDate } from "@/lib/date";
+import { formatInvoiceNumber } from "@/lib/utils";
 
 const statusColors: Record<string, string> = {
   draft: "bg-gray-100 text-gray-700",
@@ -113,7 +114,7 @@ export default async function InvoicesPage() {
                 <Link key={inv.id} href={`/dashboard/invoices/${inv.id}`} className="flex items-center justify-between px-6 py-4 hover:bg-slate-50 transition-colors group">
                   <div className="flex-1 min-w-0">
                     <p className="font-medium text-sm group-hover:text-blue-600 transition-colors truncate">
-                      #{inv.invoice_number} — {inv.title}
+                      {formatInvoiceNumber(inv.invoice_number)} — {inv.title}
                     </p>
                     <p className="text-xs text-slate-500 mt-0.5">
                       {inv.customers?.name} · Due {inv.due_date ? formatDate(inv.due_date) : "—"}

@@ -19,6 +19,7 @@ import {
 import { ArrowLeft, Send, CheckCircle2, ExternalLink, Pencil, FileDown } from "lucide-react";
 import Link from "next/link";
 import { formatDate } from "@/lib/date";
+import { formatInvoiceNumber } from "@/lib/utils";
 
 const statusColors: Record<string, string> = {
   draft: "bg-gray-100 text-gray-700",
@@ -92,7 +93,7 @@ export function InvoiceDetail({ invoice, xeroConnected }: Props) {
           </Link>
           <div>
             <div className="flex items-center gap-2 flex-wrap">
-              <h1 className="text-xl font-bold text-slate-900">#{invoice.invoice_number} — {invoice.title}</h1>
+              <h1 className="text-xl font-bold text-slate-900">{formatInvoiceNumber(invoice.invoice_number)} — {invoice.title}</h1>
               <span className={`text-xs px-2 py-0.5 rounded-full font-medium capitalize ${statusColors[status] ?? ""}`}>{status}</span>
             </div>
             <p className="text-sm text-slate-500 mt-0.5">{invoice.customers?.name}</p>
@@ -118,7 +119,7 @@ export function InvoiceDetail({ invoice, xeroConnected }: Props) {
             />
             <DialogContent>
               <DialogHeader>
-                <DialogTitle>Send Invoice #{invoice.invoice_number}</DialogTitle>
+                <DialogTitle>Send Invoice {formatInvoiceNumber(invoice.invoice_number)}</DialogTitle>
                 <DialogDescription>Emails a PDF copy of this invoice to the customer.</DialogDescription>
               </DialogHeader>
               <div className="space-y-3">

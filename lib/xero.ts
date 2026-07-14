@@ -35,6 +35,12 @@ export async function getRefreshedXero(supabaseClient?: any) {
   });
 
   if (new Date(tokenRow.token_expiry) < new Date()) {
+    // xero-node's refreshToken() reaches into this.openIdClient directly
+    // without lazily creating it (unlike buildConsentUrl, which does) --
+    // skipping initialize() throws "Cannot read properties of undefined
+    // (reading 'refresh')" the moment a token has actually expired. Confirmed
+    // by reproducing it directly against the live Xero connection.
+    await xero.initialize();
     const newTokenSet = await xero.refreshToken();
     await supabase
       .from("xero_tokens")
