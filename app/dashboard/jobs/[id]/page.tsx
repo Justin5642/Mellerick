@@ -22,6 +22,8 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
     { data: variations },
     { data: variationTypes },
     { data: expenses },
+    { data: equipmentOptions },
+    { data: equipmentUsage },
   ] = await Promise.all([
     supabase.from("jobs").select("*, customers(id, name, phone, mobile, email), sites(name, address_line1, suburb, state, postcode, site_lat, site_lng)").eq("id", id).single(),
     supabase.auth.getUser(),
@@ -36,9 +38,30 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
     supabase.from("job_variations").select("*, variation_types(name), profiles!job_variations_logged_by_fkey(full_name)").eq("job_id", id).order("created_at", { ascending: false }),
     supabase.from("variation_types").select("*").eq("is_active", true).order("name"),
     supabase.from("job_expenses").select("*").eq("job_id", id).order("created_at", { ascending: false }),
+    supabase.from("equipment").select("*").eq("is_active", true).order("name"),
+    supabase.from("equipment_usage_log").select("*").eq("job_id", id).order("usage_date", { ascending: false }),
   ]);
 
   if (!job) notFound();
+
+  // The "Costing" tab folds in staff_cost_profiles (payroll-sensitive), so
+  // it's only fetched and rendered for admins — same gating pattern as the
+  // Reports page's staff efficiency section.
+  let isAdmin = false;
+  let staffCostProfiles: any[] = [];
+  let jobInvoices: any[] = [];
+  if (user) {
+    const { data: viewerProfile } = await supabase.from("profiles").select("role").eq("id", user.id).single();
+    isAdmin = viewerProfile?.role === "admin";
+  }
+  if (isAdmin) {
+    const [{ data: costProfiles }, { data: invoicesForJob }] = await Promise.all([
+      supabase.from("staff_cost_profiles").select("*"),
+      supabase.from("invoices").select("id, subtotal, status").eq("job_id", id),
+    ]);
+    staffCostProfiles = costProfiles ?? [];
+    jobInvoices = invoicesForJob ?? [];
+  }
 
   return (
     <JobDetailClient
@@ -55,6 +78,11 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
       variations={variations ?? []}
       variationTypes={variationTypes ?? []}
       expenses={expenses ?? []}
+      equipmentOptions={equipmentOptions ?? []}
+      equipmentUsage={equipmentUsage ?? []}
+      isAdmin={isAdmin}
+      staffCostProfiles={staffCostProfiles}
+      jobInvoices={jobInvoices}
     />
   );
 }

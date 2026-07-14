@@ -21,6 +21,7 @@ import {
   Settings,
   ClipboardCheck,
   BarChart3,
+  Truck,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -37,6 +38,7 @@ const navItems = [
   { href: "/dashboard/invoices", label: "Invoices", icon: Receipt },
   { href: "/dashboard/pricing", label: "Pricing", icon: DollarSign },
   { href: "/dashboard/inventory", label: "Inventory", icon: Package },
+  { href: "/dashboard/fleet", label: "Fleet", icon: Truck },
   { href: "/dashboard/staff", label: "Staff", icon: Users },
   { href: "/dashboard/reports", label: "Reports", icon: BarChart3 },
   { href: "/dashboard/settings", label: "Settings", icon: Settings },

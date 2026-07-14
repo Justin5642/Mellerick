@@ -5,7 +5,7 @@ import { useSearchParams } from "next/navigation";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { ArrowLeft, Briefcase, FileText, Image, List, MessageSquare, PenLine, ClipboardList, Clock, Receipt, GitPullRequestArrow, DollarSign } from "lucide-react";
+import { ArrowLeft, Briefcase, FileText, Image, List, MessageSquare, PenLine, ClipboardList, Clock, Receipt, GitPullRequestArrow, DollarSign, Truck, TrendingUp } from "lucide-react";
 import Link from "next/link";
 import { JobOverview } from "./job-overview";
 import { JobDocuments } from "./job-documents";
@@ -17,6 +17,8 @@ import { JobPO } from "./job-po";
 import { JobTime } from "./job-time";
 import { JobVariations } from "./job-variations";
 import { JobExpenses } from "./job-expenses";
+import { JobEquipment } from "./job-equipment";
+import { JobProfitability } from "./job-profitability";
 
 const statusColors: Record<string, string> = {
   pending: "bg-yellow-100 text-yellow-800",
@@ -37,7 +39,7 @@ const priorityColors: Record<string, string> = {
 // Kept in sync with the `value`s in the TabsTrigger list below — used to
 // validate a `?tab=` query param (e.g. from the Approvals page's "Price &
 // review" link) before trusting it as the initial active tab.
-const TAB_VALUES = ["overview", "po", "time", "variations", "expenses", "documents", "photos", "items", "notes", "signature"];
+const TAB_VALUES = ["overview", "po", "time", "variations", "expenses", "equipment", "costing", "documents", "photos", "items", "notes", "signature"];
 
 interface Props {
   job: any;
@@ -53,9 +55,14 @@ interface Props {
   variations: any[];
   variationTypes: any[];
   expenses: any[];
+  equipmentOptions: any[];
+  equipmentUsage: any[];
+  isAdmin: boolean;
+  staffCostProfiles: any[];
+  jobInvoices: any[];
 }
 
-export function JobDetailClient({ job, currentUserId, photos: initialPhotos, documents: initialDocuments, notes: initialNotes, lineItems: initialLineItems, pricingItems, staff, purchaseOrders: initialPOs, timeEntries: initialTimeEntries, variations: initialVariations, variationTypes, expenses: initialExpenses }: Props) {
+export function JobDetailClient({ job, currentUserId, photos: initialPhotos, documents: initialDocuments, notes: initialNotes, lineItems: initialLineItems, pricingItems, staff, purchaseOrders: initialPOs, timeEntries: initialTimeEntries, variations: initialVariations, variationTypes, expenses: initialExpenses, equipmentOptions, equipmentUsage: initialEquipmentUsage, isAdmin, staffCostProfiles, jobInvoices }: Props) {
   // Deep-links like /dashboard/jobs/[id]?tab=variations&variation=[id]
   // (used by the Approvals page's "Price & review" link) land here — read
   // them once on mount so the right tab opens and the right variation is
@@ -75,6 +82,7 @@ export function JobDetailClient({ job, currentUserId, photos: initialPhotos, doc
   const [timeEntries, setTimeEntries] = useState(initialTimeEntries);
   const [variations, setVariations] = useState(initialVariations);
   const [expenses, setExpenses] = useState(initialExpenses);
+  const [equipmentUsage, setEquipmentUsage] = useState(initialEquipmentUsage);
   // Only "work" entries count against the allocated-hours budget — travel
   // time between jobs is tracked separately and shouldn't eat into it.
   const totalHoursLogged = timeEntries
@@ -150,6 +158,8 @@ export function JobDetailClient({ job, currentUserId, photos: initialPhotos, doc
                 { value: "time", label: "Time", icon: Clock },
                 { value: "variations", label: "Variations", icon: GitPullRequestArrow },
                 { value: "expenses", label: "Expenses", icon: DollarSign },
+                { value: "equipment", label: "Equipment", icon: Truck },
+                ...(isAdmin ? [{ value: "costing", label: "Costing", icon: TrendingUp }] : []),
                 { value: "documents", label: "Documents", icon: FileText },
                 { value: "photos", label: "Photos", icon: Image },
                 { value: "items", label: "Line Items", icon: List },
@@ -193,6 +203,21 @@ export function JobDetailClient({ job, currentUserId, photos: initialPhotos, doc
             <TabsContent value="expenses" className="m-0 h-full">
               <JobExpenses jobId={job.id} jobNumber={job.job_number} expenses={expenses} onUpdate={setExpenses} currentUserId={currentUserId} costCenters={costCenters} />
             </TabsContent>
+            <TabsContent value="equipment" className="m-0 h-full">
+              <JobEquipment jobId={job.id} usage={equipmentUsage} equipmentOptions={equipmentOptions} onUpdate={setEquipmentUsage} />
+            </TabsContent>
+            {isAdmin && (
+              <TabsContent value="costing" className="m-0 h-full">
+                <JobProfitability
+                  timeEntries={timeEntries}
+                  staffCostProfiles={staffCostProfiles}
+                  expenses={expenses}
+                  equipmentUsage={equipmentUsage}
+                  equipmentOptions={equipmentOptions}
+                  invoices={jobInvoices}
+                />
+              </TabsContent>
+            )}
             <TabsContent value="documents" className="m-0 h-full">
               <JobDocuments jobId={job.id} documents={documents} onUpdate={setDocuments} currentUserId={currentUserId} />
             </TabsContent>
