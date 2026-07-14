@@ -75,10 +75,10 @@ export function InvoiceDetail({ invoice, xeroConnected }: Props) {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
-      toast.success("Invoice pushed to Xero successfully");
+      toast.success(data.updated ? "Invoice updated in Xero" : "Invoice pushed to Xero successfully");
       setPushed(true);
     } catch (err: any) {
-      toast.error(err.message ?? "Failed to push to Xero");
+      toast.error(err.message ?? (pushed ? "Failed to update in Xero" : "Failed to push to Xero"));
     }
     setPushing(false);
   }
@@ -140,22 +140,30 @@ export function InvoiceDetail({ invoice, xeroConnected }: Props) {
             </DialogContent>
           </Dialog>
 
-          {pushed ? (
+          {pushed && (
             <span className="flex items-center gap-1.5 text-sm text-green-700 font-medium">
               <CheckCircle2 className="w-4 h-4" /> In Xero
             </span>
-          ) : xeroConnected ? (
-            <Button onClick={pushToXero} disabled={pushing} className="gap-2 bg-blue-600 hover:bg-blue-700">
+          )}
+          {xeroConnected ? (
+            <Button
+              onClick={pushToXero}
+              disabled={pushing}
+              variant={pushed ? "outline" : "default"}
+              className={pushed ? "gap-2" : "gap-2 bg-blue-600 hover:bg-blue-700"}
+            >
               <Send className="w-4 h-4" />
-              {pushing ? "Pushing to Xero..." : "Push to Xero"}
+              {pushed
+                ? (pushing ? "Updating..." : "Update in Xero")
+                : (pushing ? "Pushing to Xero..." : "Push to Xero")}
             </Button>
-          ) : (
+          ) : !pushed ? (
             <Link href="/dashboard/settings">
               <Button variant="outline" size="sm" className="gap-2">
                 <ExternalLink className="w-3.5 h-3.5" /> Connect Xero first
               </Button>
             </Link>
-          )}
+          ) : null}
         </div>
       </div>
 

@@ -57,15 +57,28 @@ export async function POST(request: NextRequest) {
       status: Invoice.StatusEnum.AUTHORISED,
     };
 
-    const response = await xero.accountingApi.createInvoices(tenantId, { invoices: [xeroInvoice] });
-    const created = response.body.invoices?.[0];
+    // Already pushed once (has a xero_invoice_id) -- push edits forward by
+    // updating the same Xero invoice in place, rather than creating a
+    // duplicate. First push still creates. Xero will itself reject the
+    // update if the invoice has since been paid/voided there, which
+    // surfaces as a normal error below -- we don't try to pre-empt that,
+    // since the reverse-sync poll is what keeps paid/void status current
+    // here and this route doesn't second-guess it.
+    const isUpdate = !!invoice.xero_invoice_id;
 
-    await supabase.from("invoices").update({
-      xero_invoice_id: created?.invoiceID,
-      status: "sent",
-    }).eq("id", invoiceId);
+    const response = isUpdate
+      ? await xero.accountingApi.updateInvoice(tenantId, invoice.xero_invoice_id, { invoices: [xeroInvoice] })
+      : await xero.accountingApi.createInvoices(tenantId, { invoices: [xeroInvoice] });
+    const result = response.body.invoices?.[0];
 
-    return NextResponse.json({ success: true, xeroInvoiceId: created?.invoiceID });
+    if (!isUpdate) {
+      await supabase.from("invoices").update({
+        xero_invoice_id: result?.invoiceID,
+        status: "sent",
+      }).eq("id", invoiceId);
+    }
+
+    return NextResponse.json({ success: true, xeroInvoiceId: result?.invoiceID, updated: isUpdate });
   } catch (err: any) {
     console.error("Push to Xero error:", err);
     return NextResponse.json({ error: err.message ?? "Failed to push to Xero" }, { status: 500 });
