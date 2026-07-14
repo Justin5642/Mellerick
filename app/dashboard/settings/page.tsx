@@ -1,7 +1,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { CheckCircle2, XCircle, ExternalLink, CalendarDays, Wrench } from "lucide-react";
+import { CheckCircle2, XCircle, ExternalLink, CalendarDays, Wrench, Layers } from "lucide-react";
 import Link from "next/link";
 import { GoogleCalendarSyncButton } from "@/components/settings/google-calendar-sync-button";
 import { XeroExpenseAccountCode } from "@/components/settings/xero-expense-account-code";
@@ -188,6 +188,31 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
           <Link href="/dashboard/settings/variation-types">
             <Button variant="outline" className="gap-2">
               <ExternalLink className="w-4 h-4" /> Manage Variation Types
+            </Button>
+          </Link>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <div className="flex items-center justify-between">
+            <div>
+              <CardTitle className="text-base flex items-center gap-2">
+                <Layers className="w-4 h-4 text-blue-600" />
+                Cost Centre Templates
+              </CardTitle>
+              <CardDescription className="mt-1">
+                Standard job stages (Below Ground Drainage / Above Ground Plumbing / Truck Cartage) that can be
+                loaded straight onto a Purchase Order — one group at a time to match Simpro, or several merged
+                into a single PO
+              </CardDescription>
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent>
+          <Link href="/dashboard/settings/cost-centre-templates">
+            <Button variant="outline" className="gap-2">
+              <ExternalLink className="w-4 h-4" /> Manage Cost Centre Templates
             </Button>
           </Link>
         </CardContent>

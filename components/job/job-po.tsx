@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -15,6 +15,14 @@ interface CostCenter {
   code: string | null;
   allocated_amount: number;
   allocated_hours: number;
+}
+
+interface CostCenterTemplate {
+  id: string;
+  group_name: string;
+  name: string;
+  code: string | null;
+  sort_order: number;
 }
 
 interface PurchaseOrder {
@@ -74,6 +82,47 @@ export function JobPO({ jobId, pos: initialPos, totalHoursLogged, onUpdate, over
   const [costCenters, setCostCenters] = useState([{ name: "", code: "", allocated_amount: "", allocated_hours: "" }]);
   const [geocoded, setGeocoded] = useState<{ lat: number; lng: number; display: string } | null>(null);
   const [errors, setErrors] = useState<Record<string, boolean>>({});
+  const [templates, setTemplates] = useState<CostCenterTemplate[]>([]);
+  const [selectedGroups, setSelectedGroups] = useState<Set<string>>(new Set());
+
+  useEffect(() => {
+    supabase
+      .from("cost_center_templates")
+      .select("*")
+      .eq("is_active", true)
+      .order("group_name")
+      .order("sort_order")
+      .then(({ data }) => setTemplates((data as any) ?? []));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Distinct groups in first-seen order (e.g. Below Ground Drainage, Above
+  // Ground Plumbing, Truck Cartage) -- picking just one group recreates
+  // Simpro's habit of a separate PO per group; picking several at once
+  // merges their stages into a single PO.
+  const templateGroups = Array.from(new Set(templates.map((t) => t.group_name)));
+
+  function toggleTemplateGroup(group: string) {
+    setSelectedGroups((prev) => {
+      const next = new Set(prev);
+      if (next.has(group)) next.delete(group);
+      else next.add(group);
+      return next;
+    });
+  }
+
+  function loadTemplateGroups() {
+    const rows = templates
+      .filter((t) => selectedGroups.has(t.group_name))
+      .map((t) => ({ name: t.name, code: t.code ?? "", allocated_amount: "", allocated_hours: "" }));
+    if (rows.length === 0) return;
+    setCostCenters((prev) => {
+      const isBlankOnly = prev.length === 1 && !prev[0].name.trim() && !prev[0].code.trim() && !prev[0].allocated_amount && !prev[0].allocated_hours;
+      return isBlankOnly ? rows : [...prev, ...rows];
+    });
+    setSelectedGroups(new Set());
+    toast.success(`Loaded ${rows.length} stage${rows.length === 1 ? "" : "s"}`);
+  }
 
   function fieldErr(field: string) {
     return errors[field] ? "border-red-500 focus-visible:ring-red-500" : "";
@@ -337,6 +386,35 @@ export function JobPO({ jobId, pos: initialPos, totalHoursLogged, onUpdate, over
                 <p className="text-xs text-slate-400">Click the pin icon to confirm the address for Waze and geo-fencing</p>
               )}
             </div>
+
+            {/* Cost Centre Templates */}
+            {templateGroups.length > 0 && (
+              <div className="rounded-lg border border-dashed border-slate-200 p-3 space-y-2">
+                <Label className="text-xs text-slate-500 uppercase tracking-wide">Load from Template</Label>
+                <div className="flex flex-wrap gap-3">
+                  {templateGroups.map((group) => (
+                    <label key={group} className="flex items-center gap-1.5 text-sm text-slate-600">
+                      <input
+                        type="checkbox"
+                        checked={selectedGroups.has(group)}
+                        onChange={() => toggleTemplateGroup(group)}
+                      />
+                      {group}
+                    </label>
+                  ))}
+                </div>
+                <p className="text-xs text-slate-400">
+                  Select one group for a single Simpro-style PO, or several groups to merge them into one PO.
+                </p>
+                <Button
+                  type="button" variant="outline" size="sm"
+                  onClick={loadTemplateGroups}
+                  disabled={selectedGroups.size === 0}
+                >
+                  Load Selected
+                </Button>
+              </div>
+            )}
 
             {/* Cost Centres */}
             <div>
