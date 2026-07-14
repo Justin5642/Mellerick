@@ -7,15 +7,7 @@ import { Briefcase, Clock, MapPin, Navigation } from "lucide-react";
 import Link from "next/link";
 import { formatTime, formatDate, isTodayInBusinessTZ } from "@/lib/date";
 import { ListPageSkeleton } from "@/components/ui/loading-skeletons";
-
-const statusColors: Record<string, string> = {
-  pending: "bg-yellow-100 text-yellow-800",
-  scheduled: "bg-blue-100 text-blue-800",
-  in_progress: "bg-purple-100 text-purple-800",
-  completed: "bg-green-100 text-green-800",
-  cancelled: "bg-red-100 text-red-800",
-  on_hold: "bg-gray-100 text-gray-700",
-};
+import { jobStatusColors } from "@/lib/badge-colors";
 
 export default function MyJobsPage() {
   const supabase = createClient();
@@ -60,7 +52,7 @@ export default function MyJobsPage() {
         <Link href={`/dashboard/jobs/${job.id}`} className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
             <p className="font-medium text-sm text-slate-900">#{job.job_number} — {job.title}</p>
-            <span className={`text-xs px-2 py-0.5 rounded-full font-medium capitalize ${statusColors[job.status]}`}>
+            <span className={`text-xs px-2 py-0.5 rounded-full font-medium capitalize ${jobStatusColors[job.status]}`}>
               {job.status.replace("_", " ")}
             </span>
           </div>

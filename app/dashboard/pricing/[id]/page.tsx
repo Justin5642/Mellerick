@@ -6,12 +6,7 @@ import Link from "next/link";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { ArrowLeft, Pencil, DollarSign } from "lucide-react";
-
-const typeColors: Record<string, string> = {
-  flat_rate: "bg-blue-100 text-blue-700",
-  hourly: "bg-violet-100 text-violet-700",
-  material: "bg-orange-100 text-orange-700",
-};
+import { pricingTypeColors } from "@/lib/badge-colors";
 
 function money(n: number) {
   return `$${n.toLocaleString("en-AU", { minimumFractionDigits: 2 })}`;
@@ -46,7 +41,7 @@ export default async function PricingDetailPage({ params }: { params: Promise<{ 
         <div>
           <div className="flex items-center gap-2 flex-wrap">
             <h1 className="text-2xl font-bold text-slate-900">{item.name}</h1>
-            <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${typeColors[item.pricing_type] ?? ""}`}>
+            <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${pricingTypeColors[item.pricing_type] ?? ""}`}>
               {item.pricing_type?.replace("_", " ")}
             </span>
             {!item.is_active && (

@@ -7,14 +7,7 @@ import { Receipt, Plus, AlertCircle } from "lucide-react";
 import Link from "next/link";
 import { formatDate } from "@/lib/date";
 import { formatInvoiceNumber } from "@/lib/utils";
-
-const statusColors: Record<string, string> = {
-  draft: "bg-gray-100 text-gray-700",
-  sent: "bg-blue-100 text-blue-700",
-  paid: "bg-green-100 text-green-700",
-  overdue: "bg-red-100 text-red-700",
-  cancelled: "bg-slate-100 text-slate-600",
-};
+import { invoiceStatusColors } from "@/lib/badge-colors";
 
 export default async function InvoicesPage() {
   const supabase = await createClient();
@@ -122,7 +115,7 @@ export default async function InvoicesPage() {
                   </div>
                   <div className="flex items-center gap-3 ml-4 flex-shrink-0">
                     <span className="text-sm font-semibold text-slate-700">${Number(inv.total).toLocaleString("en-AU", { minimumFractionDigits: 2 })}</span>
-                    <span className={`text-xs px-2 py-0.5 rounded-full font-medium capitalize ${statusColors[inv.status]}`}>{inv.status}</span>
+                    <span className={`text-xs px-2 py-0.5 rounded-full font-medium capitalize ${invoiceStatusColors[inv.status]}`}>{inv.status}</span>
                   </div>
                 </Link>
               ))}

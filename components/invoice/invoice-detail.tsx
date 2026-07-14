@@ -20,14 +20,7 @@ import { ArrowLeft, Send, CheckCircle2, ExternalLink, Pencil, FileDown } from "l
 import Link from "next/link";
 import { formatDate } from "@/lib/date";
 import { formatInvoiceNumber } from "@/lib/utils";
-
-const statusColors: Record<string, string> = {
-  draft: "bg-gray-100 text-gray-700",
-  sent: "bg-blue-100 text-blue-700",
-  paid: "bg-green-100 text-green-700",
-  overdue: "bg-red-100 text-red-700",
-  cancelled: "bg-slate-100 text-slate-600",
-};
+import { invoiceStatusColors } from "@/lib/badge-colors";
 
 interface Props {
   invoice: any;
@@ -94,7 +87,7 @@ export function InvoiceDetail({ invoice, xeroConnected }: Props) {
           <div>
             <div className="flex items-center gap-2 flex-wrap">
               <h1 className="text-xl font-bold text-slate-900">{formatInvoiceNumber(invoice.invoice_number)} — {invoice.title}</h1>
-              <span className={`text-xs px-2 py-0.5 rounded-full font-medium capitalize ${statusColors[status] ?? ""}`}>{status}</span>
+              <span className={`text-xs px-2 py-0.5 rounded-full font-medium capitalize ${invoiceStatusColors[status] ?? ""}`}>{status}</span>
             </div>
             <p className="text-sm text-slate-500 mt-0.5">{invoice.customers?.name}</p>
           </div>

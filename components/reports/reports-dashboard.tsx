@@ -15,27 +15,11 @@ import {
   Cell,
 } from "recharts";
 import { DollarSign, TrendingUp, AlertTriangle, Target, Briefcase, Users, HeartPulse, Truck } from "lucide-react";
+import { jobStatusChartColors, quoteStatusChartColors } from "@/lib/badge-colors";
 
 function money(n: number) {
   return `$${n.toLocaleString("en-AU", { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
 }
-
-const quoteStatusColors: Record<string, string> = {
-  draft: "#94a3b8",
-  sent: "#3b82f6",
-  accepted: "#22c55e",
-  declined: "#ef4444",
-  expired: "#f97316",
-};
-
-const jobStatusColors: Record<string, string> = {
-  pending: "#eab308",
-  scheduled: "#3b82f6",
-  in_progress: "#8b5cf6",
-  completed: "#22c55e",
-  cancelled: "#ef4444",
-  on_hold: "#94a3b8",
-};
 
 interface Props {
   revenueByMonth: { month: string; paid: number; outstanding: number }[];
@@ -170,7 +154,7 @@ export function ReportsDashboard({
                   <PieChart>
                     <Pie data={quotePieData} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={90} label={(d: any) => `${d.name} (${d.value})`}>
                       {quotePieData.map((entry) => (
-                        <Cell key={entry.name} fill={quoteStatusColors[entry.name] ?? "#94a3b8"} />
+                        <Cell key={entry.name} fill={quoteStatusChartColors[entry.name] ?? "#94a3b8"} />
                       ))}
                     </Pie>
                     <Tooltip />
@@ -192,7 +176,7 @@ export function ReportsDashboard({
                   <PieChart>
                     <Pie data={jobPieData} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={90} label={(d: any) => `${d.name} (${d.value})`}>
                       {jobPieData.map((entry: any) => (
-                        <Cell key={entry.key} fill={jobStatusColors[entry.key] ?? "#94a3b8"} />
+                        <Cell key={entry.key} fill={jobStatusChartColors[entry.key] ?? "#94a3b8"} />
                       ))}
                     </Pie>
                     <Tooltip />

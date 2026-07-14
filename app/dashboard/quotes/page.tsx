@@ -4,14 +4,7 @@ import { Button } from "@/components/ui/button";
 import { FileText, Plus } from "lucide-react";
 import Link from "next/link";
 import { formatDate } from "@/lib/date";
-
-const statusColors: Record<string, string> = {
-  draft: "bg-gray-100 text-gray-700",
-  sent: "bg-blue-100 text-blue-700",
-  accepted: "bg-green-100 text-green-700",
-  declined: "bg-red-100 text-red-700",
-  expired: "bg-orange-100 text-orange-700",
-};
+import { quoteStatusColors } from "@/lib/badge-colors";
 
 export default async function QuotesPage() {
   const supabase = await createClient();
@@ -52,7 +45,7 @@ export default async function QuotesPage() {
                   </div>
                   <div className="flex items-center gap-3 ml-4 flex-shrink-0">
                     <span className="text-sm font-semibold text-slate-700">${Number(quote.total).toLocaleString("en-AU", { minimumFractionDigits: 2 })}</span>
-                    <span className={`text-xs px-2 py-0.5 rounded-full font-medium capitalize ${statusColors[quote.status]}`}>{quote.status}</span>
+                    <span className={`text-xs px-2 py-0.5 rounded-full font-medium capitalize ${quoteStatusColors[quote.status]}`}>{quote.status}</span>
                   </div>
                 </Link>
               ))}

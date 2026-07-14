@@ -21,14 +21,7 @@ import {
 import { ArrowLeft, Send, CheckCircle2, XCircle, Pencil, Briefcase, FileDown } from "lucide-react";
 import Link from "next/link";
 import { formatDate } from "@/lib/date";
-
-const statusColors: Record<string, string> = {
-  draft: "bg-gray-100 text-gray-700",
-  sent: "bg-blue-100 text-blue-700",
-  accepted: "bg-green-100 text-green-700",
-  declined: "bg-red-100 text-red-700",
-  expired: "bg-orange-100 text-orange-700",
-};
+import { quoteStatusColors } from "@/lib/badge-colors";
 
 interface Props {
   quote: any;
@@ -138,7 +131,7 @@ export function QuoteDetail({ quote }: Props) {
           <div>
             <div className="flex items-center gap-2 flex-wrap">
               <h1 className="text-xl font-bold text-slate-900">#{quote.quote_number} — {quote.title}</h1>
-              <span className={`text-xs px-2 py-0.5 rounded-full font-medium capitalize ${statusColors[status] ?? ""}`}>{status}</span>
+              <span className={`text-xs px-2 py-0.5 rounded-full font-medium capitalize ${quoteStatusColors[status] ?? ""}`}>{status}</span>
             </div>
             <p className="text-sm text-slate-500 mt-0.5">{quote.customers?.name}</p>
           </div>

@@ -6,6 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Briefcase, Users, Receipt, AlertCircle, CheckCircle2, Clock, DollarSign } from "lucide-react";
 import Link from "next/link";
 import { businessDateParts, formatDate } from "@/lib/date";
+import { jobStatusColors, jobPriorityColors } from "@/lib/badge-colors";
 
 function StatCard({ title, value, icon: Icon, color, href }: {
   title: string; value: string | number; icon: React.ElementType; color: string; href: string;
@@ -26,22 +27,6 @@ function StatCard({ title, value, icon: Icon, color, href }: {
     </Link>
   );
 }
-
-const statusColors: Record<string, string> = {
-  pending: "bg-yellow-100 text-yellow-800",
-  scheduled: "bg-blue-100 text-blue-800",
-  in_progress: "bg-purple-100 text-purple-800",
-  completed: "bg-green-100 text-green-800",
-  cancelled: "bg-red-100 text-red-800",
-  on_hold: "bg-gray-100 text-gray-800",
-};
-
-const priorityColors: Record<string, string> = {
-  low: "bg-gray-100 text-gray-600",
-  normal: "bg-blue-100 text-blue-700",
-  high: "bg-orange-100 text-orange-700",
-  urgent: "bg-red-100 text-red-700",
-};
 
 export default async function DashboardPage() {
   const supabase = await createClient();
@@ -115,10 +100,10 @@ export default async function DashboardPage() {
                     </p>
                   </div>
                   <div className="flex items-center gap-2 ml-4 flex-shrink-0">
-                    <span className={`text-xs px-2 py-0.5 rounded-full font-medium capitalize ${priorityColors[job.priority] ?? ""}`}>
+                    <span className={`text-xs px-2 py-0.5 rounded-full font-medium capitalize ${jobPriorityColors[job.priority] ?? ""}`}>
                       {job.priority}
                     </span>
-                    <span className={`text-xs px-2 py-0.5 rounded-full font-medium capitalize ${statusColors[job.status] ?? ""}`}>
+                    <span className={`text-xs px-2 py-0.5 rounded-full font-medium capitalize ${jobStatusColors[job.status] ?? ""}`}>
                       {job.status.replace("_", " ")}
                     </span>
                   </div>

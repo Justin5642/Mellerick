@@ -12,12 +12,7 @@ import { Users, Plus, Mail, Phone, Shield, Wrench, Monitor, RotateCw, DollarSign
 import { StaffCostDialog } from "@/components/staff/staff-cost-dialog";
 import { StaffEditDialog } from "@/components/staff/staff-edit-dialog";
 import { ListPageSkeleton } from "@/components/ui/loading-skeletons";
-
-const roleColors: Record<string, string> = {
-  admin: "bg-purple-100 text-purple-700",
-  office: "bg-blue-100 text-blue-700",
-  technician: "bg-green-100 text-green-700",
-};
+import { staffRoleColors } from "@/lib/badge-colors";
 
 const roleIcons: Record<string, any> = {
   admin: Shield,
@@ -207,7 +202,7 @@ export default function StaffPage() {
                       </div>
                     </div>
                     <div className="flex items-center gap-3">
-                      <span className={`text-xs px-2 py-0.5 rounded-full font-medium flex items-center gap-1 ${roleColors[member.role]}`}>
+                      <span className={`text-xs px-2 py-0.5 rounded-full font-medium flex items-center gap-1 ${staffRoleColors[member.role]}`}>
                         <RoleIcon className="w-3 h-3" />{member.role}
                       </span>
                       {isAdmin && (

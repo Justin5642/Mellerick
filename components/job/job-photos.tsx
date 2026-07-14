@@ -8,13 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Image as ImageIcon, Upload, Trash2, X, ZoomIn } from "lucide-react";
 import { formatDate } from "@/lib/date";
-
-const tagColors: Record<string, string> = {
-  before: "bg-orange-100 text-orange-700",
-  after: "bg-green-100 text-green-700",
-  general: "bg-blue-100 text-blue-700",
-  signature: "bg-purple-100 text-purple-700",
-};
+import { photoTagColors } from "@/lib/badge-colors";
 
 interface Props {
   jobId: string;
@@ -121,7 +115,7 @@ export function JobPhotos({ jobId, photos, onUpdate, currentUserId }: Props) {
               onOpen={() => openLightbox(photo.storage_path)}
               onDelete={() => handleDelete(photo)}
               getUrl={getUrl}
-              tagColors={tagColors}
+              tagColors={photoTagColors}
             />
           ))}
         </div>

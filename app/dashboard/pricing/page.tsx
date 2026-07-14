@@ -3,12 +3,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { DollarSign, Plus } from "lucide-react";
 import Link from "next/link";
-
-const typeColors: Record<string, string> = {
-  flat_rate: "bg-blue-100 text-blue-700",
-  hourly: "bg-violet-100 text-violet-700",
-  material: "bg-orange-100 text-orange-700",
-};
+import { pricingTypeColors } from "@/lib/badge-colors";
 
 export default async function PricingPage() {
   const supabase = await createClient();
@@ -58,7 +53,7 @@ export default async function PricingPage() {
                         {item.description && <p className="text-xs text-slate-500 mt-0.5 truncate">{item.description}</p>}
                       </div>
                       <div className="flex items-center gap-3 ml-4 flex-shrink-0">
-                        <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${typeColors[item.pricing_type]}`}>
+                        <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${pricingTypeColors[item.pricing_type]}`}>
                           {item.pricing_type.replace("_", " ")}
                         </span>
                         <span className="text-sm font-semibold text-slate-700">

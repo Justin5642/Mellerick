@@ -12,13 +12,7 @@ import { Truck, Plus, DollarSign } from "lucide-react";
 import { EquipmentCostDialog } from "@/components/fleet/equipment-cost-dialog";
 import { computeEquipmentCost, EQUIPMENT_CATEGORY_LABELS } from "@/lib/equipment-cost";
 import { ListPageSkeleton } from "@/components/ui/loading-skeletons";
-
-const categoryColors: Record<string, string> = {
-  vehicle: "bg-blue-100 text-blue-700",
-  machinery: "bg-orange-100 text-orange-700",
-  tool: "bg-slate-100 text-slate-600",
-  other: "bg-purple-100 text-purple-700",
-};
+import { equipmentCategoryColors } from "@/lib/badge-colors";
 
 export default function FleetPage() {
   const supabase = createClient();
@@ -171,7 +165,7 @@ export default function FleetPage() {
                           {!item.is_active && <span className="text-xs text-slate-400">(inactive)</span>}
                         </div>
                         <div className="flex items-center gap-3 mt-0.5">
-                          <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${categoryColors[item.category] ?? ""}`}>
+                          <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${equipmentCategoryColors[item.category] ?? ""}`}>
                             {EQUIPMENT_CATEGORY_LABELS[item.category] ?? item.category}
                           </span>
                           {item.registration && <span className="text-xs text-slate-500">{item.registration}</span>}

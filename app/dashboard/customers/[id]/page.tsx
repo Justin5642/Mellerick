@@ -20,31 +20,7 @@ import {
 } from "lucide-react";
 import { formatDate } from "@/lib/date";
 import { formatInvoiceNumber } from "@/lib/utils";
-
-const jobStatusColors: Record<string, string> = {
-  pending: "bg-yellow-100 text-yellow-800",
-  scheduled: "bg-blue-100 text-blue-800",
-  in_progress: "bg-purple-100 text-purple-800",
-  completed: "bg-green-100 text-green-800",
-  cancelled: "bg-red-100 text-red-800",
-  on_hold: "bg-gray-100 text-gray-700",
-};
-
-const quoteStatusColors: Record<string, string> = {
-  draft: "bg-gray-100 text-gray-700",
-  sent: "bg-blue-100 text-blue-700",
-  accepted: "bg-green-100 text-green-700",
-  declined: "bg-red-100 text-red-700",
-  expired: "bg-orange-100 text-orange-700",
-};
-
-const invoiceStatusColors: Record<string, string> = {
-  draft: "bg-gray-100 text-gray-700",
-  sent: "bg-blue-100 text-blue-700",
-  paid: "bg-green-100 text-green-700",
-  overdue: "bg-red-100 text-red-700",
-  cancelled: "bg-slate-100 text-slate-600",
-};
+import { jobStatusColors, quoteStatusColors, invoiceStatusColors } from "@/lib/badge-colors";
 
 function money(n: number) {
   return `$${n.toLocaleString("en-AU", { minimumFractionDigits: 2 })}`;

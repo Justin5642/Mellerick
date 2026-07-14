@@ -19,22 +19,7 @@ import { JobVariations } from "./job-variations";
 import { JobExpenses } from "./job-expenses";
 import { JobEquipment } from "./job-equipment";
 import { JobProfitability } from "./job-profitability";
-
-const statusColors: Record<string, string> = {
-  pending: "bg-yellow-100 text-yellow-800",
-  scheduled: "bg-blue-100 text-blue-800",
-  in_progress: "bg-purple-100 text-purple-800",
-  completed: "bg-green-100 text-green-800",
-  cancelled: "bg-red-100 text-red-800",
-  on_hold: "bg-gray-100 text-gray-700",
-};
-
-const priorityColors: Record<string, string> = {
-  low: "bg-gray-100 text-gray-600",
-  normal: "bg-blue-100 text-blue-700",
-  high: "bg-orange-100 text-orange-700",
-  urgent: "bg-red-100 text-red-700",
-};
+import { jobStatusColors, jobPriorityColors } from "@/lib/badge-colors";
 
 // Kept in sync with the `value`s in the TabsTrigger list below — used to
 // validate a `?tab=` query param (e.g. from the Approvals page's "Price &
@@ -115,10 +100,10 @@ export function JobDetailClient({ job, currentUserId, photos: initialPhotos, doc
             <div>
               <div className="flex items-center gap-2 flex-wrap">
                 <h1 className="text-xl font-bold text-slate-900">#{job.job_number} — {job.title}</h1>
-                <span className={`text-xs px-2 py-0.5 rounded-full font-medium capitalize ${statusColors[job.status]}`}>
+                <span className={`text-xs px-2 py-0.5 rounded-full font-medium capitalize ${jobStatusColors[job.status]}`}>
                   {job.status.replace("_", " ")}
                 </span>
-                <span className={`text-xs px-2 py-0.5 rounded-full font-medium capitalize ${priorityColors[job.priority]}`}>
+                <span className={`text-xs px-2 py-0.5 rounded-full font-medium capitalize ${jobPriorityColors[job.priority]}`}>
                   {job.priority}
                 </span>
               </div>
