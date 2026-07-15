@@ -17,6 +17,11 @@ interface Props {
   staff: any[];
 }
 
+// Radix/shadcn's SelectItem can't take value="", so an explicit "Unassigned"
+// option needs a sentinel value that gets translated back to "" (-> null on
+// save) instead of colliding with a real staff id.
+const UNASSIGNED_VALUE = "__unassigned__";
+
 export function JobOverview({ job, staff }: Props) {
   const supabase = createClient();
   const [saving, setSaving] = useState(false);
@@ -96,9 +101,13 @@ export function JobOverview({ job, staff }: Props) {
               </div>
               <div className="space-y-2">
                 <Label>Assigned Technician</Label>
-                <Select value={form.assigned_to} onValueChange={(v) => set("assigned_to", v)}>
+                <Select
+                  value={form.assigned_to || UNASSIGNED_VALUE}
+                  onValueChange={(v) => set("assigned_to", v === UNASSIGNED_VALUE ? "" : v)}
+                >
                   <SelectTrigger><SelectValue placeholder="Unassigned" /></SelectTrigger>
                   <SelectContent>
+                    <SelectItem value={UNASSIGNED_VALUE}>Unassigned</SelectItem>
                     {staff.map((s) => <SelectItem key={s.id} value={s.id}>{s.full_name} ({s.role})</SelectItem>)}
                   </SelectContent>
                 </Select>

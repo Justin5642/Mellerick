@@ -12,7 +12,12 @@ export default async function SchedulePage() {
       .from("jobs")
       .select("*, customers(name), profiles(full_name), sites(name, address_line1, suburb, state, site_lat, site_lng)")
       .not("scheduled_start", "is", null)
-      .in("status", ["scheduled", "in_progress", "pending"])
+      // Match "My Jobs"' status filter (exclude completed/cancelled only,
+      // rather than allow-listing specific statuses) so a job on_hold still
+      // shows here — otherwise a technician's own "My Jobs" list could show
+      // a job as assigned to them while the Team Schedule showed them free,
+      // since on_hold wasn't in the old allow-list.
+      .not("status", "in", '("completed","cancelled")')
       .order("scheduled_start"),
     supabase
       .from("profiles")

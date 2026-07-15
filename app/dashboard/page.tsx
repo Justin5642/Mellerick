@@ -53,7 +53,10 @@ export default async function DashboardPage() {
     supabase.from("jobs")
       .select("*, customers(name), profiles(full_name)")
       .not("scheduled_start", "is", null)
-      .in("status", ["scheduled", "in_progress", "pending"])
+      // Exclude only completed/cancelled (matching "My Jobs" and the Team
+      // Schedule) instead of allow-listing specific statuses, so an on_hold
+      // job scheduled for today still shows up here.
+      .not("status", "in", '("completed","cancelled")')
       .order("scheduled_start"),
   ]);
 
