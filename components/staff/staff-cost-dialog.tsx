@@ -11,6 +11,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Trash2 } from "lucide-react";
 import { computeLoadedCost, LEAVE_TYPE_LABELS, type StaffCostInputs } from "@/lib/staff-cost";
+import { computeEquipmentCost } from "@/lib/equipment-cost";
 import { formatDate } from "@/lib/date";
 
 interface LeaveEntry {
@@ -48,14 +49,19 @@ export function StaffCostDialog({ staffId, staffName, open, onOpenChange }: Prop
   const [leaveEntries, setLeaveEntries] = useState<LeaveEntry[]>([]);
   const [leaveForm, setLeaveForm] = useState(emptyLeaveForm);
   const [addingLeave, setAddingLeave] = useState(false);
+  const [assignedVehicles, setAssignedVehicles] = useState<{ name: string; costPerHour: number }[]>([]);
 
   useEffect(() => {
     if (!open) return;
     async function load() {
       setLoading(true);
-      const [{ data: profile }, { data: leave }] = await Promise.all([
+      const [{ data: profile }, { data: leave }, { data: vehicles }] = await Promise.all([
         supabase.from("staff_cost_profiles").select("*").eq("staff_id", staffId).maybeSingle(),
         supabase.from("staff_leave").select("*").eq("staff_id", staffId).order("start_date", { ascending: false }),
+        // Vehicle(s) assigned to this staff member (Fleet page) -- their
+        // $/hour cost gets folded into the loaded rate below, so the
+        // technician's true cost reflects the actual vehicle they use.
+        supabase.from("equipment").select("*").eq("assigned_to", staffId).eq("is_active", true),
       ]);
       if (profile) {
         setCostForm({
@@ -70,6 +76,9 @@ export function StaffCostDialog({ staffId, staffName, open, onOpenChange }: Prop
         setCostForm(emptyCostForm);
       }
       setLeaveEntries((leave as any) ?? []);
+      setAssignedVehicles(
+        (vehicles ?? []).map((v: any) => ({ name: v.name, costPerHour: computeEquipmentCost(v).costPerHour }))
+      );
       setLoading(false);
     }
     load();
@@ -139,7 +148,8 @@ export function StaffCostDialog({ staffId, staffName, open, onOpenChange }: Prop
     setLeaveEntries((prev) => prev.filter((l) => l.id !== id));
   }
 
-  const { annualLoadedCost, loadedHourlyRate } = computeLoadedCost(costForm);
+  const vehicleCostPerHour = assignedVehicles.reduce((sum, v) => sum + v.costPerHour, 0);
+  const { annualLoadedCost, loadedHourlyRate } = computeLoadedCost({ ...costForm, vehicle_cost_per_hour: vehicleCostPerHour });
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -182,9 +192,24 @@ export function StaffCostDialog({ staffId, staffName, open, onOpenChange }: Prop
                 <div className="space-y-1.5">
                   <Label>Annual Fixed On-costs ($)</Label>
                   <Input type="number" step="1" value={costForm.annual_fixed_oncosts} onChange={(e) => setField("annual_fixed_oncosts", e.target.value)} />
-                  <p className="text-xs text-slate-400">Vehicle, phone, tools/PPE, training — per year</p>
+                  <p className="text-xs text-slate-400">Phone, tools/PPE, training — per year. Vehicle cost is added automatically below, based on any vehicle assigned to this technician on the Fleet page — don&apos;t also include it here.</p>
                 </div>
               </div>
+
+              {assignedVehicles.length > 0 && (
+                <div className="rounded-lg bg-blue-50 border border-blue-200 p-3">
+                  <p className="text-xs text-blue-700 font-medium mb-1">Assigned Vehicle{assignedVehicles.length > 1 ? "s" : ""}</p>
+                  {assignedVehicles.map((v) => (
+                    <div key={v.name} className="flex items-center justify-between text-sm text-blue-900">
+                      <span>{v.name}</span>
+                      <span>${v.costPerHour.toFixed(2)}/hr</span>
+                    </div>
+                  ))}
+                  <p className="text-xs text-blue-600 mt-1">
+                    +${vehicleCostPerHour.toFixed(2)}/hr folded into the loaded rate below
+                  </p>
+                </div>
+              )}
 
               <div className="rounded-lg bg-slate-50 border border-slate-200 p-3 flex items-center justify-between">
                 <div>

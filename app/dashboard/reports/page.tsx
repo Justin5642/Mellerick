@@ -37,6 +37,18 @@ export default async function ReportsPage() {
     isAdmin = viewerProfile?.role === "admin";
   }
 
+  // Fetched up-front (not payroll-sensitive, same as the Fleet page) so it
+  // can feed both the equipment utilization section below and each
+  // technician's loaded hourly rate in staffEfficiency -- a vehicle
+  // assigned to someone folds its $/hour cost into their true cost rate.
+  const { data: equipmentList } = await supabase.from("equipment").select("*").eq("is_active", true);
+  const vehicleCostPerHourByStaff = new Map<string, number>();
+  (equipmentList ?? []).forEach((eq: any) => {
+    if (!eq.assigned_to) return;
+    const { costPerHour } = computeEquipmentCost(eq);
+    vehicleCostPerHourByStaff.set(eq.assigned_to, (vehicleCostPerHourByStaff.get(eq.assigned_to) ?? 0) + costPerHour);
+  });
+
   let staffEfficiency: {
     name: string;
     loadedHourlyRate: number;
@@ -78,7 +90,8 @@ export default async function ReportsPage() {
 
     staffEfficiency = (costProfiles ?? [])
       .map((cp: any) => {
-        const { annualLoadedCost, loadedHourlyRate } = computeLoadedCost(cp);
+        const vehicle_cost_per_hour = vehicleCostPerHourByStaff.get(cp.staff_id) ?? 0;
+        const { annualLoadedCost, loadedHourlyRate } = computeLoadedCost({ ...cp, vehicle_cost_per_hour });
         const workedHours = workedByStaff.get(cp.staff_id) ?? 0;
         const leaveHours = leaveByStaff.get(cp.staff_id) ?? 0;
         const sickHours = sickByStaff.get(cp.staff_id) ?? 0;
@@ -107,10 +120,10 @@ export default async function ReportsPage() {
   equipmentTwelveMonthsAgo.setFullYear(equipmentTwelveMonthsAgo.getFullYear() - 1);
   const equipmentCutoffDate = equipmentTwelveMonthsAgo.toISOString().slice(0, 10);
 
-  const [{ data: equipmentList }, { data: equipmentUsage }] = await Promise.all([
-    supabase.from("equipment").select("*").eq("is_active", true),
-    supabase.from("equipment_usage_log").select("equipment_id, hours, usage_date").gte("usage_date", equipmentCutoffDate),
-  ]);
+  const { data: equipmentUsage } = await supabase
+    .from("equipment_usage_log")
+    .select("equipment_id, hours, usage_date")
+    .gte("usage_date", equipmentCutoffDate);
 
   const hoursByEquipment = new Map<string, number>();
   (equipmentUsage ?? []).forEach((u: any) => {

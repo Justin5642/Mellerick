@@ -14,9 +14,15 @@ import { computeEquipmentCost, EQUIPMENT_CATEGORY_LABELS } from "@/lib/equipment
 import { ListPageSkeleton } from "@/components/ui/loading-skeletons";
 import { equipmentCategoryColors } from "@/lib/badge-colors";
 
+// Radix/shadcn's SelectItem can't take value="", so an explicit "Unassigned"
+// option needs a sentinel value that gets translated back to "" (-> null on
+// save) instead of colliding with a real staff id.
+const UNASSIGNED_VALUE = "__unassigned__";
+
 export default function FleetPage() {
   const supabase = createClient();
   const [equipment, setEquipment] = useState<any[]>([]);
+  const [staff, setStaff] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -28,12 +34,14 @@ export default function FleetPage() {
 
   useEffect(() => {
     async function load() {
-      const [{ data, error }, { data: { user } }] = await Promise.all([
+      const [{ data, error }, { data: staffData }, { data: { user } }] = await Promise.all([
         supabase.from("equipment").select("*").order("name"),
+        supabase.from("profiles").select("id, full_name, role").eq("is_active", true).order("full_name"),
         supabase.auth.getUser(),
       ]);
       if (error) setFetchError(error.message);
       setEquipment(data ?? []);
+      setStaff(staffData ?? []);
       if (user) {
         const { data: profile } = await supabase.from("profiles").select("role").eq("id", user.id).single();
         setRole(profile?.role ?? null);
@@ -44,6 +52,19 @@ export default function FleetPage() {
   }, []);
 
   const isAdmin = role === "admin";
+
+  async function assignTo(id: string, staffId: string) {
+    const newAssignedTo = staffId === UNASSIGNED_VALUE ? null : staffId;
+    const previous = equipment;
+    setEquipment((eq) => eq.map((e) => (e.id === id ? { ...e, assigned_to: newAssignedTo } : e)));
+    const { error } = await supabase.from("equipment").update({ assigned_to: newAssignedTo }).eq("id", id);
+    if (error) {
+      setEquipment(previous);
+      toast.error("Failed to update assignment");
+      return;
+    }
+    toast.success(newAssignedTo ? "Vehicle assigned" : "Vehicle unassigned");
+  }
 
   function setField(field: string, value: string) {
     setForm((p) => ({ ...p, [field]: value }));
@@ -153,6 +174,7 @@ export default function FleetPage() {
             <div className="divide-y">
               {equipment.map((item) => {
                 const { costPerHour, annualTotalCost } = computeEquipmentCost(item);
+                const assignedStaff = staff.find((s) => s.id === item.assigned_to);
                 return (
                   <div key={item.id} className="flex items-center justify-between px-6 py-4">
                     <div className="flex items-center gap-4">
@@ -172,6 +194,24 @@ export default function FleetPage() {
                           <span className="text-xs text-slate-500">
                             ${costPerHour.toFixed(2)}/hr · ${annualTotalCost.toLocaleString("en-AU", { maximumFractionDigits: 0 })}/yr
                           </span>
+                        </div>
+                        <div className="mt-1">
+                          {isAdmin ? (
+                            <Select
+                              value={item.assigned_to || UNASSIGNED_VALUE}
+                              onValueChange={(v) => assignTo(item.id, v as string)}
+                            >
+                              <SelectTrigger className="h-6 text-xs w-[180px]"><SelectValue placeholder="Unassigned" /></SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value={UNASSIGNED_VALUE}>Unassigned</SelectItem>
+                                {staff.map((s) => <SelectItem key={s.id} value={s.id}>{s.full_name}</SelectItem>)}
+                              </SelectContent>
+                            </Select>
+                          ) : (
+                            <span className="text-xs text-slate-400">
+                              {assignedStaff ? `Assigned to ${assignedStaff.full_name}` : "Unassigned"}
+                            </span>
+                          )}
                         </div>
                       </div>
                     </div>

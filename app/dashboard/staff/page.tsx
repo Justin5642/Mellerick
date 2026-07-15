@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Users, Plus, Mail, Phone, Shield, Wrench, Monitor, RotateCw, DollarSign, Pencil } from "lucide-react";
+import { Users, Plus, Mail, Phone, Shield, Wrench, Monitor, RotateCw, DollarSign, Pencil, Truck } from "lucide-react";
 import { StaffCostDialog } from "@/components/staff/staff-cost-dialog";
 import { StaffEditDialog } from "@/components/staff/staff-edit-dialog";
 import { ListPageSkeleton } from "@/components/ui/loading-skeletons";
@@ -23,6 +23,7 @@ const roleIcons: Record<string, any> = {
 export default function StaffPage() {
   const supabase = createClient();
   const [staff, setStaff] = useState<any[]>([]);
+  const [vehiclesByStaff, setVehiclesByStaff] = useState<Map<string, any[]>>(new Map());
   const [loading, setLoading] = useState(true);
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -36,12 +37,23 @@ export default function StaffPage() {
 
   useEffect(() => {
     async function load() {
-      const [{ data, error }, { data: { user } }] = await Promise.all([
+      const [{ data, error }, { data: equipment }, { data: { user } }] = await Promise.all([
         supabase.from("profiles").select("*").order("full_name"),
+        // Equipment (vehicles) assigned to a staff member -- folded into
+        // that technician's true hourly cost (see StaffCostDialog) and
+        // shown here so it's obvious at a glance who has which vehicle.
+        supabase.from("equipment").select("id, name, assigned_to").not("assigned_to", "is", null),
         supabase.auth.getUser(),
       ]);
       if (error) setFetchError(error.message);
       setStaff(data ?? []);
+      const byStaff = new Map<string, any[]>();
+      (equipment ?? []).forEach((e: any) => {
+        const list = byStaff.get(e.assigned_to) ?? [];
+        list.push(e);
+        byStaff.set(e.assigned_to, list);
+      });
+      setVehiclesByStaff(byStaff);
       if (user) {
         const { data: profile } = await supabase.from("profiles").select("role").eq("id", user.id).single();
         setRole(profile?.role ?? null);
@@ -178,6 +190,7 @@ export default function StaffPage() {
             <div className="divide-y">
               {staff.map(member => {
                 const RoleIcon = roleIcons[member.role] ?? Shield;
+                const vehicles = vehiclesByStaff.get(member.id) ?? [];
                 return (
                   <div key={member.id} className="flex items-center justify-between px-6 py-4">
                     <div className="flex items-center gap-4">
@@ -196,6 +209,11 @@ export default function StaffPage() {
                           {member.phone && (
                             <span className="text-xs text-slate-500 flex items-center gap-1">
                               <Phone className="w-3 h-3" />{member.phone}
+                            </span>
+                          )}
+                          {vehicles.length > 0 && (
+                            <span className="text-xs text-slate-500 flex items-center gap-1">
+                              <Truck className="w-3 h-3" />{vehicles.map((v) => v.name).join(", ")}
                             </span>
                           )}
                         </div>

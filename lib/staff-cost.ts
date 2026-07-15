@@ -11,10 +11,17 @@ export interface StaffCostInputs {
   leave_loading_rate: number;
   annual_fixed_oncosts: number;
   target_hours_per_week: number;
+  // Derived (not stored on staff_cost_profiles itself) from any equipment
+  // rows with equipment.assigned_to = this staff member -- see
+  // lib/equipment-cost.ts's costPerHour, summed across their assigned
+  // vehicle(s). Optional/defaults to 0 so existing callers that don't pass
+  // it (or staff with no assigned vehicle) behave exactly as before.
+  vehicle_cost_per_hour?: number;
 }
 
 export interface StaffCostResult {
   annualPaidHours: number;
+  annualVehicleCost: number;
   annualLoadedCost: number;
   loadedHourlyRate: number;
 }
@@ -30,9 +37,11 @@ export function computeLoadedCost(inputs: StaffCostInputs): StaffCostResult {
   const baseWageAnnual = Number(inputs.hourly_rate || 0) * annualPaidHours;
   const oncostMultiplier =
     1 + (Number(inputs.super_rate || 0) + Number(inputs.workers_comp_rate || 0) + Number(inputs.leave_loading_rate || 0)) / 100;
-  const annualLoadedCost = baseWageAnnual * oncostMultiplier + Number(inputs.annual_fixed_oncosts || 0);
+  const annualVehicleCost = Number(inputs.vehicle_cost_per_hour || 0) * annualPaidHours;
+  const annualLoadedCost =
+    baseWageAnnual * oncostMultiplier + Number(inputs.annual_fixed_oncosts || 0) + annualVehicleCost;
   const loadedHourlyRate = annualPaidHours > 0 ? annualLoadedCost / annualPaidHours : 0;
-  return { annualPaidHours, annualLoadedCost, loadedHourlyRate };
+  return { annualPaidHours, annualVehicleCost, annualLoadedCost, loadedHourlyRate };
 }
 
 export const LEAVE_TYPE_LABELS: Record<string, string> = {
