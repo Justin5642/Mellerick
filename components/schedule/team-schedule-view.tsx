@@ -201,17 +201,19 @@ function DroppableColumn({
 export function TeamScheduleView({
   todayJobs,
   upcomingJobs,
-  unscheduledJobs,
   staff,
 }: {
   todayJobs: Job[];
   upcomingJobs: Job[];
-  unscheduledJobs: Job[];
   staff: StaffMember[];
 }) {
   const supabase = createClient();
   const [tab, setTab] = useState("team");
-  const [jobs, setJobs] = useState<Job[]>(() => [...todayJobs, ...upcomingJobs, ...unscheduledJobs]);
+  // Every job passed in here already has a scheduled_start (the page query
+  // filters that) — jobs with no time yet stay in the general Jobs list
+  // until someone schedules them, rather than flooding this board's
+  // Unassigned column.
+  const [jobs, setJobs] = useState<Job[]>(() => [...todayJobs, ...upcomingJobs]);
   const [activeId, setActiveId] = useState<string | null>(null);
 
   const todayKey = useMemo(() => dateKeyInBusinessTZ(new Date()), []);
@@ -221,28 +223,13 @@ export function TeamScheduleView({
     useSensor(PointerSensor, { activationConstraint: { delay: 200, tolerance: 8 } })
   );
 
-  // Jobs with no scheduled_start at all (nothing to assign a day to yet)
-  // have no date to be filtered by, but still need to be visible somewhere
-  // so they don't get lost — an unassigned or unscheduled job is exactly
-  // the kind of thing this board exists to surface. They show up
-  // regardless of which day is selected, alongside that day's jobs.
-  const unscheduledLive = jobs.filter((j) => !j.scheduled_start);
-  const scheduledLive = jobs.filter((j) => j.scheduled_start);
+  const todayJobsLive = jobs.filter((j) => isTodayInBusinessTZ(j.scheduled_start!));
+  const upcomingJobsLive = jobs.filter((j) => !isTodayInBusinessTZ(j.scheduled_start!));
 
-  const todayJobsLive = scheduledLive.filter((j) => isTodayInBusinessTZ(j.scheduled_start!));
-  const upcomingJobsLive = scheduledLive.filter((j) => !isTodayInBusinessTZ(j.scheduled_start!));
+  const selectedDateJobs = jobs.filter((j) => dateKeyInBusinessTZ(j.scheduled_start!) === selectedDateKey);
 
-  const selectedDateJobs = jobs.filter(
-    (j) => !j.scheduled_start || dateKeyInBusinessTZ(j.scheduled_start) === selectedDateKey
-  );
-
-  // Jobs without a time set float to the top of their column (staff or
-  // unassigned) since they need attention first; among the rest, earliest
-  // first.
   function byScheduleUrgency(a: Job, b: Job) {
-    if (!a.scheduled_start && !b.scheduled_start) return 0;
-    if (!a.scheduled_start) return -1;
-    if (!b.scheduled_start) return 1;
+    if (!a.scheduled_start || !b.scheduled_start) return 0;
     return new Date(a.scheduled_start).getTime() - new Date(b.scheduled_start).getTime();
   }
 
@@ -432,31 +419,6 @@ export function TeamScheduleView({
       </TabsContent>
 
       <TabsContent value="list" className="mt-4 space-y-6">
-        {unscheduledLive.length > 0 && (
-          <Card className="border-amber-300">
-            <CardHeader><CardTitle className="text-base">Needs Scheduling</CardTitle></CardHeader>
-            <CardContent className="p-0">
-              <div className="divide-y">
-                {unscheduledLive.map((job) => (
-                  <Link key={job.id} href={`/dashboard/jobs/${job.id}`} className="flex items-center gap-4 px-6 py-4 hover:bg-slate-50 transition-colors group">
-                    <div className="text-center w-20 flex-shrink-0">
-                      <p className="text-xs font-semibold text-amber-600">No time set</p>
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="font-medium text-sm group-hover:text-blue-600 transition-colors truncate">#{job.job_number} — {job.title}</p>
-                      <p className="text-xs text-slate-500 truncate">{job.customers?.name} {job.profiles?.full_name ? `· ${job.profiles.full_name}` : "· Unassigned"}</p>
-                    </div>
-                    <WazeButton site={job.sites} />
-                    <span className={`text-xs px-2 py-0.5 rounded-full font-medium capitalize flex-shrink-0 ${jobStatusColors[job.status] ?? ""}`}>
-                      {job.status.replace("_", " ")}
-                    </span>
-                  </Link>
-                ))}
-              </div>
-            </CardContent>
-          </Card>
-        )}
-
         <Card>
           <CardHeader><CardTitle className="text-base">Today</CardTitle></CardHeader>
           <CardContent className="p-0">
