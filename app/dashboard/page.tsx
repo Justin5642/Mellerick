@@ -46,12 +46,19 @@ export default async function DashboardPage() {
     supabase.from("customers").select("*", { count: "exact", head: true }).eq("is_active", true),
     supabase.from("invoices").select("*", { count: "exact", head: true }).eq("status", "overdue"),
     supabase.from("jobs")
-      .select("*, customers(name), assigned_to:profiles(full_name)")
+      // jobs has 3 FK columns to profiles (assigned_to, created_by,
+      // overtime_logged_by, voice_report_recorded_by), so an unhinted
+      // "profiles(...)" embed is ambiguous and PostgREST rejects the whole
+      // query (PGRST201) — the query silently returned no rows at all as a
+      // result. Naming the alias "assigned_profile" (rather than
+      // "assigned_to", which collides with the raw uuid column from "*")
+      // and hinting the exact FK fixes both the failure and the collision.
+      .select("*, customers(name), assigned_profile:profiles!jobs_assigned_to_fkey(full_name)")
       .order("created_at", { ascending: false })
       .limit(8),
     supabase.from("profiles").select("full_name").eq("id", user!.id).single(),
     supabase.from("jobs")
-      .select("*, customers(name), profiles(full_name)")
+      .select("*, customers(name), profiles!jobs_assigned_to_fkey(full_name)")
       .not("scheduled_start", "is", null)
       // Exclude only completed/cancelled (matching "My Jobs" and the Team
       // Schedule) instead of allow-listing specific statuses, so an on_hold
@@ -146,7 +153,7 @@ export default async function DashboardPage() {
                     </div>
                     <p className="text-xs text-slate-500 mt-0.5 truncate">
                       {job.customers?.name}
-                      {(job.assigned_to as any)?.full_name ? ` · ${(job.assigned_to as any).full_name}` : ""}
+                      {job.assigned_profile?.full_name ? ` · ${job.assigned_profile.full_name}` : ""}
                     </p>
                   </div>
                   <div className="flex items-center gap-2 ml-4 flex-shrink-0">
