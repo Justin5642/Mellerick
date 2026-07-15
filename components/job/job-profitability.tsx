@@ -16,6 +16,16 @@ import { computeEquipmentCost, type EquipmentCostInputs } from "@/lib/equipment-
 // This only renders for admins (gated by the parent tab list in
 // job-detail-client.tsx) because labour cost is derived from payroll-
 // sensitive staff_cost_profiles data that must never reach technicians.
+//
+// Vehicle cost double-counting guard: a vehicle assigned to a technician
+// (equipment.assigned_to, see lib/staff-cost.ts) already has its $/hour
+// folded into that technician's loaded hourly rate for every hour they
+// work, on any job -- that's how labourCost below is costed. So if the
+// same vehicle also has explicit equipment_usage_log entries against
+// this job, counting those again under "Equipment" would double-charge
+// the job for it. Usage entries for assigned equipment are excluded from
+// the Equipment line for that reason; only unassigned/shared equipment
+// (tools, machinery nobody personally drives home) is costed here.
 
 interface TimeEntry {
   staff_id: string;
@@ -43,6 +53,7 @@ interface EquipmentUsage {
 
 interface EquipmentOption extends EquipmentCostInputs {
   id: string;
+  assigned_to?: string | null;
 }
 
 interface Invoice {
@@ -61,14 +72,36 @@ interface Props {
 }
 
 export function JobProfitability({ timeEntries, staffCostProfiles, expenses, equipmentUsage, equipmentOptions, invoices }: Props) {
-  const rateByStaff = new Map(staffCostProfiles.map((p) => [p.staff_id, computeLoadedCost(p).loadedHourlyRate]));
+  // Vehicles assigned to a staff member fold their $/hour into that staff
+  // member's loaded rate (mirrors the Reports page's staffEfficiency
+  // section) so labourCost below already reflects vehicle cost for
+  // whichever technician drives it.
+  const vehicleCostPerHourByStaff = new Map<string, number>();
+  equipmentOptions.forEach((eq) => {
+    if (!eq.assigned_to) return;
+    vehicleCostPerHourByStaff.set(
+      eq.assigned_to,
+      (vehicleCostPerHourByStaff.get(eq.assigned_to) ?? 0) + computeEquipmentCost(eq).costPerHour
+    );
+  });
+
+  const rateByStaff = new Map(
+    staffCostProfiles.map((p) => [
+      p.staff_id,
+      computeLoadedCost({ ...p, vehicle_cost_per_hour: vehicleCostPerHourByStaff.get(p.staff_id) ?? 0 }).loadedHourlyRate,
+    ])
+  );
   const labourCost = timeEntries.reduce((sum, e) => sum + Number(e.hours ?? 0) * (rateByStaff.get(e.staff_id) ?? 0), 0);
   const labourHours = timeEntries.reduce((sum, e) => sum + Number(e.hours ?? 0), 0);
 
   const materialsCost = expenses.reduce((sum, e) => sum + Number(e.amount ?? 0), 0);
 
   const equipmentById = new Map(equipmentOptions.map((eq) => [eq.id, eq]));
-  const equipmentCost = equipmentUsage.reduce((sum, u) => {
+  // Exclude usage of equipment already assigned to a staff member -- its
+  // cost is already counted above via that staff member's loaded rate.
+  const unassignedEquipmentUsage = equipmentUsage.filter((u) => !equipmentById.get(u.equipment_id)?.assigned_to);
+  const excludedEquipmentUsageCount = equipmentUsage.length - unassignedEquipmentUsage.length;
+  const equipmentCost = unassignedEquipmentUsage.reduce((sum, u) => {
     const eq = equipmentById.get(u.equipment_id);
     const costPerHour = eq ? computeEquipmentCost(eq).costPerHour : 0;
     return sum + Number(u.hours) * costPerHour;
@@ -83,7 +116,11 @@ export function JobProfitability({ timeEntries, staffCostProfiles, expenses, equ
   const rows = [
     { label: "Labour", value: labourCost, detail: `${labourHours.toFixed(1)}h logged` },
     { label: "Materials / Other Expenses", value: materialsCost, detail: `${expenses.length} expense${expenses.length === 1 ? "" : "s"}` },
-    { label: "Equipment", value: equipmentCost, detail: `${equipmentUsage.length} usage entr${equipmentUsage.length === 1 ? "y" : "ies"}` },
+    {
+      label: "Equipment",
+      value: equipmentCost,
+      detail: `${unassignedEquipmentUsage.length} usage entr${unassignedEquipmentUsage.length === 1 ? "y" : "ies"}`,
+    },
   ];
 
   return (
@@ -104,6 +141,13 @@ export function JobProfitability({ timeEntries, staffCostProfiles, expenses, equ
             <span className="font-medium text-slate-700">Total Cost (ex GST)</span>
             <span className="font-bold text-slate-900">${totalCost.toFixed(2)}</span>
           </div>
+          {excludedEquipmentUsageCount > 0 && (
+            <p className="text-xs text-slate-400">
+              {excludedEquipmentUsageCount} equipment usage entr{excludedEquipmentUsageCount === 1 ? "y" : "ies"} for vehicles already
+              assigned to a technician {excludedEquipmentUsageCount === 1 ? "isn't" : "aren't"} counted separately here — that
+              vehicle&apos;s cost is already included in Labour via their loaded hourly rate.
+            </p>
+          )}
         </CardContent>
       </Card>
 
