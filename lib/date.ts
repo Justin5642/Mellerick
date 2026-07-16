@@ -97,6 +97,42 @@ export function fromBusinessInputValue(value: string) {
   return new Date(guess - offset * 60000).toISOString();
 }
 
+// A stable "N days forward/back" step that stays on the same Melbourne
+// calendar date regardless of DST — anchoring at UTC noon means the
+// Melbourne-local clock is always somewhere between 22:00-23:00 the same
+// day (offset is always +10 or +11), so it never rolls over a date line.
+export function shiftDateKey(key: string, days: number) {
+  const [y, m, d] = key.split("-").map(Number);
+  const anchor = new Date(Date.UTC(y, m - 1, d, 12, 0, 0));
+  anchor.setUTCDate(anchor.getUTCDate() + days);
+  return dateKeyInBusinessTZ(anchor);
+}
+
+// A UTC-noon-anchored Date for a "YYYY-MM-DD" key, safe to pass into
+// formatDate/formatTime without drifting across a date line in either
+// direction (see shiftDateKey above for why noon).
+export function anchorForDateKey(key: string) {
+  const [y, m, d] = key.split("-").map(Number);
+  return new Date(Date.UTC(y, m - 1, d, 12, 0, 0));
+}
+
+// Monday of the week containing `key` (AU/ISO convention), as a
+// "YYYY-MM-DD" key.
+export function startOfWeekKey(key: string) {
+  const anchor = anchorForDateKey(key);
+  const dow = anchor.getUTCDay(); // 0 = Sunday ... 6 = Saturday
+  const diffToMonday = dow === 0 ? -6 : 1 - dow;
+  anchor.setUTCDate(anchor.getUTCDate() + diffToMonday);
+  return dateKeyInBusinessTZ(anchor);
+}
+
+// The 7 consecutive "YYYY-MM-DD" keys (Mon-Sun) for the week containing
+// `key`.
+export function weekDateKeys(key: string) {
+  const start = startOfWeekKey(key);
+  return Array.from({ length: 7 }, (_, i) => shiftDateKey(start, i));
+}
+
 export function businessDateParts(value: string | Date = new Date()) {
   const parts = new Intl.DateTimeFormat("en-CA", {
     timeZone: BUSINESS_TIME_ZONE,

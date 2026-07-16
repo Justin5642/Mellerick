@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { Fragment, useMemo, useState } from "react";
 import {
   DndContext,
   DragOverlay,
@@ -20,8 +20,16 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
-import { Navigation, Users, LayoutList, ChevronLeft, ChevronRight, GripVertical } from "lucide-react";
-import { formatTime, formatDate, dateKeyInBusinessTZ, isTodayInBusinessTZ } from "@/lib/date";
+import { Navigation, Users, LayoutList, ChevronLeft, ChevronRight, GripVertical, CalendarDays, CalendarRange } from "lucide-react";
+import {
+  formatTime,
+  formatDate,
+  dateKeyInBusinessTZ,
+  isTodayInBusinessTZ,
+  shiftDateKey,
+  anchorForDateKey,
+  weekDateKeys,
+} from "@/lib/date";
 import { jobStatusColors } from "@/lib/badge-colors";
 import { cn } from "@/lib/utils";
 
@@ -105,20 +113,15 @@ function accentFor(id: string) {
   return accents[hash % accents.length];
 }
 
-// A stable "one day forward/back" step that stays on the same Melbourne
-// calendar date regardless of DST — anchoring at UTC noon means the
-// Melbourne-local clock is always somewhere between 22:00-23:00 the same
-// day (offset is always +10 or +11), so it never rolls over a date line.
-function shiftDateKey(key: string, days: number) {
-  const [y, m, d] = key.split("-").map(Number);
-  const anchor = new Date(Date.UTC(y, m - 1, d, 12, 0, 0));
-  anchor.setUTCDate(anchor.getUTCDate() + days);
-  return dateKeyInBusinessTZ(anchor);
-}
-
-function anchorForDateKey(key: string) {
-  const [y, m, d] = key.split("-").map(Number);
-  return new Date(Date.UTC(y, m - 1, d, 12, 0, 0));
+// AU/ISO convention: weeks in the week view run Monday-Sunday, matching
+// weekDateKeys()/startOfWeekKey() in lib/date.ts.
+function formatWeekRangeLabel(weekKeys: string[]) {
+  const start = anchorForDateKey(weekKeys[0]);
+  const end = anchorForDateKey(weekKeys[weekKeys.length - 1]);
+  const sameMonth = start.getUTCMonth() === end.getUTCMonth() && start.getUTCFullYear() === end.getUTCFullYear();
+  const startLabel = formatDate(start, sameMonth ? { day: "numeric" } : { day: "numeric", month: "short" });
+  const endLabel = formatDate(end, { day: "numeric", month: "short", year: "numeric" });
+  return `${startLabel} – ${endLabel}`;
 }
 
 function JobCard({ job }: { job: Job }) {
@@ -198,6 +201,28 @@ function DroppableColumn({
   );
 }
 
+// Compact job entry for a single day cell in the week grid — the grid is
+// staff (rows) x day (columns), so each cell is narrow; this trades the
+// full JobCard's detail for a glanceable time + job + customer stack.
+// Read-only (no drag-and-drop) — the week view is for at-a-glance
+// overview/planning, reassigning a job still happens in the Day view.
+function WeekJobChip({ job }: { job: Job }) {
+  return (
+    <Link
+      href={`/dashboard/jobs/${job.id}`}
+      className="block px-1.5 py-1 rounded-md border border-slate-200 hover:border-blue-300 hover:bg-blue-50/50 transition-colors"
+    >
+      <p className="text-[10px] font-bold text-blue-600 truncate">
+        {job.scheduled_start ? formatTime(job.scheduled_start) : "No time"}
+      </p>
+      <p className="text-[11px] font-medium text-slate-700 truncate">
+        #{job.job_number} {job.title}
+      </p>
+      {job.customers?.name && <p className="text-[10px] text-slate-400 truncate">{job.customers.name}</p>}
+    </Link>
+  );
+}
+
 export function TeamScheduleView({
   todayJobs,
   upcomingJobs,
@@ -218,6 +243,7 @@ export function TeamScheduleView({
 
   const todayKey = useMemo(() => dateKeyInBusinessTZ(new Date()), []);
   const [selectedDateKey, setSelectedDateKey] = useState(todayKey);
+  const [viewMode, setViewMode] = useState<"day" | "week">("day");
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { delay: 200, tolerance: 8 } })
@@ -246,22 +272,60 @@ export function TeamScheduleView({
   }
   unassigned.sort(byScheduleUrgency);
 
-  // Staff with jobs on the selected day first (busiest first), then
-  // everyone else so it's obvious at a glance who's free and could take
-  // on more work.
+  // Week grid data — staff (rows) x the 7 days (Mon-Sun) containing
+  // selectedDateKey. Built the same way as the day board's jobsByStaff/
+  // unassigned above, just bucketed by day as well as by staff.
+  const weekKeys = useMemo(() => weekDateKeys(selectedDateKey), [selectedDateKey]);
+  const weekKeySet = useMemo(() => new Set(weekKeys), [weekKeys]);
+  const weekJobs = jobs.filter((j) => weekKeySet.has(dateKeyInBusinessTZ(j.scheduled_start!)));
+
+  const jobsByStaffByDay = new Map<string, Map<string, Job[]>>();
+  const unassignedByDay = new Map<string, Job[]>();
+  for (const job of weekJobs) {
+    const dayKey = dateKeyInBusinessTZ(job.scheduled_start!);
+    if (!job.assigned_to) {
+      const list = unassignedByDay.get(dayKey) ?? [];
+      list.push(job);
+      unassignedByDay.set(dayKey, list);
+      continue;
+    }
+    const byDay = jobsByStaffByDay.get(job.assigned_to) ?? new Map<string, Job[]>();
+    const list = byDay.get(dayKey) ?? [];
+    list.push(job);
+    byDay.set(dayKey, list);
+    jobsByStaffByDay.set(job.assigned_to, byDay);
+  }
+  for (const list of unassignedByDay.values()) list.sort(byScheduleUrgency);
+  for (const byDay of jobsByStaffByDay.values()) {
+    for (const list of byDay.values()) list.sort(byScheduleUrgency);
+  }
+  const staffWeekJobCount = new Map<string, number>();
+  for (const [staffId, byDay] of jobsByStaffByDay) {
+    let total = 0;
+    for (const list of byDay.values()) total += list.length;
+    staffWeekJobCount.set(staffId, total);
+  }
+
+  // Staff with the most jobs first (busiest first, in whichever period is
+  // currently showing), then everyone else so it's obvious at a glance
+  // who's free and could take on more work.
   const sortedStaff = [...staff].sort((a, b) => {
-    const diff = (jobsByStaff.get(b.id)?.length ?? 0) - (jobsByStaff.get(a.id)?.length ?? 0);
+    const countA = viewMode === "week" ? staffWeekJobCount.get(a.id) ?? 0 : jobsByStaff.get(a.id)?.length ?? 0;
+    const countB = viewMode === "week" ? staffWeekJobCount.get(b.id) ?? 0 : jobsByStaff.get(b.id)?.length ?? 0;
+    const diff = countB - countA;
     if (diff !== 0) return diff;
     return a.full_name.localeCompare(b.full_name);
   });
 
   const activeJob = activeId ? jobs.find((j) => j.id === activeId) ?? null : null;
   const isSelectedToday = selectedDateKey === todayKey;
+  const isCurrentPeriod = viewMode === "week" ? weekKeySet.has(todayKey) : isSelectedToday;
   const selectedDateLabel = formatDate(anchorForDateKey(selectedDateKey), {
     weekday: "long",
     day: "numeric",
     month: "long",
   });
+  const weekRangeLabel = useMemo(() => formatWeekRangeLabel(weekKeys), [weekKeys]);
 
   function handleDragStart(event: DragStartEvent) {
     setActiveId(event.active.id as string);
@@ -313,91 +377,124 @@ export function TeamScheduleView({
       </TabsList>
 
       <TabsContent value="team" className="mt-4">
-        <div className="flex items-center justify-between mb-3">
+        <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
           <div className="flex items-center gap-2">
-            <Button variant="outline" size="icon" aria-label="Previous day" onClick={() => setSelectedDateKey((k) => shiftDateKey(k, -1))}>
+            <Button
+              variant="outline"
+              size="icon"
+              aria-label={viewMode === "week" ? "Previous week" : "Previous day"}
+              onClick={() => setSelectedDateKey((k) => shiftDateKey(k, viewMode === "week" ? -7 : -1))}
+            >
               <ChevronLeft className="w-4 h-4" />
             </Button>
             <p className="text-sm font-medium text-slate-900 min-w-[180px] text-center">
-              {selectedDateLabel}
-              {isSelectedToday && <span className="text-blue-600"> · Today</span>}
+              {viewMode === "week" ? weekRangeLabel : selectedDateLabel}
+              {viewMode === "day" && isSelectedToday && <span className="text-blue-600"> · Today</span>}
             </p>
-            <Button variant="outline" size="icon" aria-label="Next day" onClick={() => setSelectedDateKey((k) => shiftDateKey(k, 1))}>
+            <Button
+              variant="outline"
+              size="icon"
+              aria-label={viewMode === "week" ? "Next week" : "Next day"}
+              onClick={() => setSelectedDateKey((k) => shiftDateKey(k, viewMode === "week" ? 7 : 1))}
+            >
               <ChevronRight className="w-4 h-4" />
             </Button>
+            {!isCurrentPeriod && (
+              <Button variant="ghost" size="sm" onClick={() => setSelectedDateKey(todayKey)}>
+                {viewMode === "week" ? "Jump to this week" : "Jump to today"}
+              </Button>
+            )}
           </div>
-          {!isSelectedToday && (
-            <Button variant="ghost" size="sm" onClick={() => setSelectedDateKey(todayKey)}>
-              Jump to today
+
+          <div className="inline-flex rounded-md border border-slate-200 p-0.5 bg-slate-50">
+            <Button
+              size="sm"
+              variant={viewMode === "day" ? "default" : "ghost"}
+              className="h-7 px-3 gap-1.5"
+              onClick={() => setViewMode("day")}
+            >
+              <CalendarDays className="w-3.5 h-3.5" />
+              Day
             </Button>
-          )}
+            <Button
+              size="sm"
+              variant={viewMode === "week" ? "default" : "ghost"}
+              className="h-7 px-3 gap-1.5"
+              onClick={() => setViewMode("week")}
+            >
+              <CalendarRange className="w-3.5 h-3.5" />
+              Week
+            </Button>
+          </div>
         </div>
 
-        <p className="text-xs text-slate-400 mb-3">Press and hold a job, then drag it onto a technician to assign it.</p>
+        {viewMode === "day" ? (
+          <>
+            <p className="text-xs text-slate-400 mb-3">Press and hold a job, then drag it onto a technician to assign it.</p>
 
-        <DndContext sensors={sensors} collisionDetection={closestCenter} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
-          <div className="flex gap-4 overflow-x-auto pb-2">
-            <DroppableColumn id={UNASSIGNED_COLUMN_ID} className="w-72 flex-shrink-0 rounded-xl sticky left-0 z-10 bg-slate-50 shadow-[4px_0_8px_-4px_rgba(0,0,0,0.08)]">
-              <Card className={cn("h-full", unassigned.length > 0 ? "border-amber-300" : "")}>
-                <CardHeader className="pb-3">
-                  <div className="flex items-center gap-2">
-                    <div
-                      className={cn(
-                        "w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0",
-                        unassigned.length > 0 ? "bg-amber-100" : "bg-slate-100"
-                      )}
-                    >
-                      <span className={cn("text-xs font-bold", unassigned.length > 0 ? "text-amber-700" : "text-slate-400")}>!</span>
-                    </div>
-                    <div className="min-w-0">
-                      <CardTitle className="text-sm truncate">Unassigned</CardTitle>
-                      <p className={cn("text-xs", unassigned.length > 0 ? "text-amber-600" : "text-slate-400")}>
-                        {unassigned.length === 0 ? "Drop a job here to unassign" : `${unassigned.length} job${unassigned.length === 1 ? "" : "s"} need a tech`}
-                      </p>
-                    </div>
-                  </div>
-                </CardHeader>
-                <CardContent className="space-y-2">
-                  {unassigned.length === 0 ? (
-                    <p className="text-slate-400 text-xs text-center py-6 border border-dashed border-slate-200 rounded-lg">
-                      No unassigned jobs
-                    </p>
-                  ) : (
-                    unassigned.map((job) => <DraggableJobCard key={job.id} job={job} />)
-                  )}
-                </CardContent>
-              </Card>
-            </DroppableColumn>
-
-            {sortedStaff.map((member) => {
-              const memberJobs = (jobsByStaff.get(member.id) ?? []).slice().sort(byScheduleUrgency);
-              return (
-                <DroppableColumn key={member.id} id={`${STAFF_COLUMN_PREFIX}${member.id}`} className="w-72 flex-shrink-0 rounded-xl">
-                  <Card className="h-full">
+            <DndContext sensors={sensors} collisionDetection={closestCenter} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
+              <div className="flex gap-4 overflow-x-auto pb-2">
+                <DroppableColumn id={UNASSIGNED_COLUMN_ID} className="w-72 flex-shrink-0 rounded-xl sticky left-0 z-10 bg-slate-50 shadow-[4px_0_8px_-4px_rgba(0,0,0,0.08)]">
+                  <Card className={cn("h-full", unassigned.length > 0 ? "border-amber-300" : "")}>
                     <CardHeader className="pb-3">
                       <div className="flex items-center gap-2">
-                        <Avatar className="w-8 h-8 flex-shrink-0">
-                          <AvatarFallback className={`text-white text-xs ${accentFor(member.id)}`}>
-                            {initials(member.full_name)}
-                          </AvatarFallback>
-                        </Avatar>
+                        <div
+                          className={cn(
+                            "w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0",
+                            unassigned.length > 0 ? "bg-amber-100" : "bg-slate-100"
+                          )}
+                        >
+                          <span className={cn("text-xs font-bold", unassigned.length > 0 ? "text-amber-700" : "text-slate-400")}>!</span>
+                        </div>
                         <div className="min-w-0">
-                          <CardTitle className="text-sm truncate">{member.full_name}</CardTitle>
-                          <p className="text-xs text-slate-400">
-                            {memberJobs.length === 0 ? "Free" : `${memberJobs.length} job${memberJobs.length === 1 ? "" : "s"}`}
+                          <CardTitle className="text-sm truncate">Unassigned</CardTitle>
+                          <p className={cn("text-xs", unassigned.length > 0 ? "text-amber-600" : "text-slate-400")}>
+                            {unassigned.length === 0 ? "Drop a job here to unassign" : `${unassigned.length} job${unassigned.length === 1 ? "" : "s"} need a tech`}
                           </p>
                         </div>
                       </div>
                     </CardHeader>
                     <CardContent className="space-y-2">
-                      {memberJobs.length === 0 ? (
+                      {unassigned.length === 0 ? (
                         <p className="text-slate-400 text-xs text-center py-6 border border-dashed border-slate-200 rounded-lg">
-                          No jobs scheduled
+                          No unassigned jobs
                         </p>
                       ) : (
-                        memberJobs.map((job) => <DraggableJobCard key={job.id} job={job} />)
+                        unassigned.map((job) => <DraggableJobCard key={job.id} job={job} />)
                       )}
                     </CardContent>
+                  </Card>
+                </DroppableColumn>
+
+                {sortedStaff.map((member) => {
+                  const memberJobs = (jobsByStaff.get(member.id) ?? []).slice().sort(byScheduleUrgency);
+                  return (
+                    <DroppableColumn key={member.id} id={`${STAFF_COLUMN_PREFIX}${member.id}`} className="w-72 flex-shrink-0 rounded-xl">
+                      <Card className="h-full">
+                        <CardHeader className="pb-3">
+                          <div className="flex items-center gap-2">
+                            <Avatar className="w-8 h-8 flex-shrink-0">
+                              <AvatarFallback className={`text-white text-xs ${accentFor(member.id)}`}>
+                                {initials(member.full_name)}
+                              </AvatarFallback>
+                            </Avatar>
+                            <div className="min-w-0">
+                              <CardTitle className="text-sm truncate">{member.full_name}</CardTitle>
+                              <p className="text-xs text-slate-400">
+                                {memberJobs.length === 0 ? "Free" : `${memberJobs.length} job${memberJobs.length === 1 ? "" : "s"}`}
+                              </p>
+                            </div>
+                          </div>
+                        </CardHeader>
+                        <CardContent className="space-y-2">
+                          {memberJobs.length === 0 ? (
+                            <p className="text-slate-400 text-xs text-center py-6 border border-dashed border-slate-200 rounded-lg">
+                              No jobs scheduled
+                            </p>
+                          ) : (
+                            memberJobs.map((job) => <DraggableJobCard key={job.id} job={job} />)
+                          )}
+                        </CardContent>
                   </Card>
                 </DroppableColumn>
               );
@@ -416,6 +513,65 @@ export function TeamScheduleView({
             ) : null}
           </DragOverlay>
         </DndContext>
+          </>
+        ) : (
+          <div className="overflow-x-auto pb-2">
+            <div
+              className="grid min-w-[960px] rounded-xl border border-slate-200 bg-slate-200 gap-px overflow-hidden"
+              style={{ gridTemplateColumns: "160px repeat(7, minmax(120px, 1fr))" }}
+            >
+              <div className="bg-white p-2" />
+              {weekKeys.map((key) => (
+                <div key={key} className={cn("bg-white p-2 text-center", key === todayKey && "bg-blue-50")}>
+                  <p className="text-xs font-semibold text-slate-900">
+                    {formatDate(anchorForDateKey(key), { weekday: "short" })}
+                  </p>
+                  <p className="text-[11px] text-slate-400">
+                    {formatDate(anchorForDateKey(key), { day: "numeric", month: "short" })}
+                  </p>
+                </div>
+              ))}
+
+              <div className="bg-white p-2 flex items-center gap-2 min-w-0">
+                <div className="w-6 h-6 rounded-full bg-amber-100 flex items-center justify-center flex-shrink-0">
+                  <span className="text-[10px] font-bold text-amber-700">!</span>
+                </div>
+                <span className="text-xs font-medium text-slate-700 truncate">Unassigned</span>
+              </div>
+              {weekKeys.map((key) => (
+                <div key={key} className={cn("bg-white p-1.5 space-y-1 min-h-[64px]", key === todayKey && "bg-blue-50/40")}>
+                  {(unassignedByDay.get(key) ?? []).map((job) => (
+                    <WeekJobChip key={job.id} job={job} />
+                  ))}
+                </div>
+              ))}
+
+              {sortedStaff.map((member) => (
+                <Fragment key={member.id}>
+                  <div className="bg-white p-2 flex items-center gap-2 min-w-0">
+                    <Avatar className="w-6 h-6 flex-shrink-0">
+                      <AvatarFallback className={`text-white text-[10px] ${accentFor(member.id)}`}>
+                        {initials(member.full_name)}
+                      </AvatarFallback>
+                    </Avatar>
+                    <span className="text-xs font-medium text-slate-700 truncate">{member.full_name}</span>
+                  </div>
+                  {weekKeys.map((key) => (
+                    <div key={key} className={cn("bg-white p-1.5 space-y-1 min-h-[64px]", key === todayKey && "bg-blue-50/40")}>
+                      {(jobsByStaffByDay.get(member.id)?.get(key) ?? []).map((job) => (
+                        <WeekJobChip key={job.id} job={job} />
+                      ))}
+                    </div>
+                  ))}
+                </Fragment>
+              ))}
+            </div>
+
+            {sortedStaff.length === 0 && (
+              <p className="text-slate-400 text-sm py-4">No active staff found.</p>
+            )}
+          </div>
+        )}
       </TabsContent>
 
       <TabsContent value="list" className="mt-4 space-y-6">
