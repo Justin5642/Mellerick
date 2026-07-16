@@ -3,10 +3,11 @@ export const dynamic = "force-dynamic";
 import { createClient } from "@/lib/supabase/server";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Briefcase, Users, Receipt, AlertCircle, CheckCircle2, Clock, DollarSign } from "lucide-react";
+import { Briefcase, Users, Receipt, AlertCircle, CheckCircle2, Clock, DollarSign, Droplets } from "lucide-react";
 import Link from "next/link";
 import { businessDateParts, formatDate, formatTime, isTodayInBusinessTZ } from "@/lib/date";
 import { jobStatusColors, jobPriorityColors } from "@/lib/badge-colors";
+import { computeNextDueDate, getDueStatus } from "@/lib/backflow";
 
 function StatCard({ title, value, icon: Icon, color, href }: {
   title: string; value: string | number; icon: React.ElementType; color: string; href: string;
@@ -40,6 +41,7 @@ export default async function DashboardPage() {
     { data: recentJobs },
     { data: profile },
     { data: scheduledJobs },
+    { data: backflowDevices },
   ] = await Promise.all([
     supabase.from("jobs").select("*", { count: "exact", head: true }),
     supabase.from("jobs").select("*", { count: "exact", head: true }).in("status", ["pending", "scheduled", "in_progress"]),
@@ -65,9 +67,18 @@ export default async function DashboardPage() {
       // job scheduled for today still shows up here.
       .not("status", "in", '("completed","cancelled")')
       .order("scheduled_start"),
+    supabase.from("backflow_devices").select("test_frequency_months, backflow_tests(test_date, result)").eq("is_active", true),
   ]);
 
   const todaysJobs = (scheduledJobs ?? []).filter((j: any) => isTodayInBusinessTZ(j.scheduled_start));
+
+  const backflowDueCount = (backflowDevices ?? []).filter((device: any) => {
+    const passingTests = (device.backflow_tests ?? []).filter((t: any) => t.result === "pass");
+    const lastPass = passingTests.sort((a: any, b: any) => (a.test_date < b.test_date ? 1 : -1))[0];
+    const nextDueDate = computeNextDueDate(lastPass?.test_date, Number(device.test_frequency_months));
+    const status = getDueStatus(nextDueDate);
+    return status === "overdue" || status === "due_soon";
+  }).length;
 
   const { hour } = businessDateParts();
   const greeting = hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening";
@@ -87,6 +98,7 @@ export default async function DashboardPage() {
         <StatCard title="Total Jobs" value={totalJobs ?? 0} icon={CheckCircle2} color="bg-green-500" href="/dashboard/jobs" />
         <StatCard title="Customers" value={totalCustomers ?? 0} icon={Users} color="bg-violet-500" href="/dashboard/customers" />
         <StatCard title="Overdue Invoices" value={overdueInvoices ?? 0} icon={AlertCircle} color="bg-red-500" href="/dashboard/invoices" />
+        <StatCard title="Backflow Tests Due" value={backflowDueCount} icon={Droplets} color="bg-cyan-600" href="/dashboard/backflow" />
       </div>
 
       {/* Today's Jobs */}

@@ -26,6 +26,13 @@ export default function TabsLayout() {
           tabBarIcon: ({ color, size }) => <Ionicons name="search-outline" size={size} color={color} />,
         }}
       />
+      <Tabs.Screen
+        name="backflow"
+        options={{
+          title: "Backflow",
+          tabBarIcon: ({ color, size }) => <Ionicons name="water-outline" size={size} color={color} />,
+        }}
+      />
     </Tabs>
   );
 }
