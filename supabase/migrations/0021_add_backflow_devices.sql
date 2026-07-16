@@ -41,7 +41,9 @@ create index if not exists backflow_devices_customer_id_idx on backflow_devices(
 create index if not exists backflow_devices_site_id_idx on backflow_devices(site_id);
 
 alter table backflow_devices enable row level security;
+drop policy if exists "Authenticated can view backflow devices" on backflow_devices;
 create policy "Authenticated can view backflow devices" on backflow_devices for select using (auth.role() = 'authenticated');
+drop policy if exists "Authenticated can manage backflow devices" on backflow_devices;
 create policy "Authenticated can manage backflow devices" on backflow_devices for all using (auth.role() = 'authenticated');
 
 create table if not exists backflow_tests (
@@ -84,5 +86,7 @@ create index if not exists backflow_tests_device_id_idx on backflow_tests(device
 create index if not exists backflow_tests_test_date_idx on backflow_tests(test_date);
 
 alter table backflow_tests enable row level security;
+drop policy if exists "Authenticated can view backflow tests" on backflow_tests;
 create policy "Authenticated can view backflow tests" on backflow_tests for select using (auth.role() = 'authenticated');
+drop policy if exists "Authenticated can manage backflow tests" on backflow_tests;
 create policy "Authenticated can manage backflow tests" on backflow_tests for all using (auth.role() = 'authenticated');
