@@ -87,7 +87,9 @@ export function JobTime({ jobId, currentUserId, timeEntries: initial, pos, costC
       .from("time_entries")
       .update({ cost_center_id: costCenterId === "none" ? null : costCenterId })
       .eq("id", entryId)
-      .select("*, profiles(full_name)")
+      // time_entries has two FKs to profiles (staff_id, edited_by) — must
+      // name the exact FK or PostgREST rejects the query as ambiguous.
+      .select("*, profiles!time_entries_staff_id_fkey(full_name)")
       .single();
     setAssigningId(null);
     if (error || !data) {
@@ -134,7 +136,7 @@ export function JobTime({ jobId, currentUserId, timeEntries: initial, pos, costC
             const { data } = await supabase
               .from("time_entries")
               .insert({ job_id: jobId, staff_id: currentUserId, clock_in: new Date().toISOString(), auto_clocked: true })
-              .select("*, profiles(full_name)")
+              .select("*, profiles!time_entries_staff_id_fkey(full_name)")
               .single();
             if (data) {
               setEntries(e => [data as TimeEntry, ...e]);
@@ -157,7 +159,7 @@ export function JobTime({ jobId, currentUserId, timeEntries: initial, pos, costC
               .from("time_entries")
               .update({ clock_out: clockOut, hours })
               .eq("id", open.id)
-              .select("*, profiles(full_name)")
+              .select("*, profiles!time_entries_staff_id_fkey(full_name)")
               .single();
             if (data) {
               setEntries(e => e.map(en => en.id === open.id ? data as TimeEntry : en));
@@ -179,7 +181,7 @@ export function JobTime({ jobId, currentUserId, timeEntries: initial, pos, costC
     const { data } = await supabase
       .from("time_entries")
       .insert({ job_id: jobId, staff_id: currentUserId, clock_in: new Date().toISOString(), auto_clocked: false })
-      .select("*, profiles(full_name)")
+      .select("*, profiles!time_entries_staff_id_fkey(full_name)")
       .single();
     if (data) {
       setEntries(e => [data as TimeEntry, ...e]);
@@ -197,7 +199,7 @@ export function JobTime({ jobId, currentUserId, timeEntries: initial, pos, costC
       .from("time_entries")
       .update({ clock_out: clockOutTime, hours })
       .eq("id", myOpenEntry.id)
-      .select("*, profiles(full_name)")
+      .select("*, profiles!time_entries_staff_id_fkey(full_name)")
       .single();
     if (data) {
       setEntries(e => e.map(en => en.id === myOpenEntry.id ? data as TimeEntry : en));

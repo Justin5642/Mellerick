@@ -34,7 +34,11 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
     supabase.from("pricing_items").select("*").eq("is_active", true).order("category").order("name"),
     supabase.from("profiles").select("id, full_name, role").eq("is_active", true).order("full_name"),
     supabase.from("purchase_orders").select("*, po_cost_centers(*)").eq("job_id", id).order("created_at"),
-    supabase.from("time_entries").select("*, profiles(full_name)").eq("job_id", id).order("clock_in", { ascending: false }),
+    // time_entries has two FKs to profiles (staff_id, edited_by), so an
+    // unhinted "profiles(...)" embed is ambiguous and PostgREST rejects the
+    // whole query (PGRST201) — naming the exact FK fixes it (see
+    // app/dashboard/page.tsx for the same class of bug on "jobs").
+    supabase.from("time_entries").select("*, profiles!time_entries_staff_id_fkey(full_name)").eq("job_id", id).order("clock_in", { ascending: false }),
     supabase.from("job_variations").select("*, variation_types(name), profiles!job_variations_logged_by_fkey(full_name)").eq("job_id", id).order("created_at", { ascending: false }),
     supabase.from("variation_types").select("*").eq("is_active", true).order("name"),
     supabase.from("job_expenses").select("*").eq("job_id", id).order("created_at", { ascending: false }),

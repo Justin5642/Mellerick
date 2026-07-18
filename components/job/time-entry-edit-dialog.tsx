@@ -104,7 +104,9 @@ export function TimeEntryEditDialog({ open, onOpenChange, mode, jobId, currentUs
       const { data, error } = await supabase
         .from("time_entries")
         .insert({ job_id: jobId, staff_id: currentUserId, entry_type: entryType, auto_clocked: false, ...payload })
-        .select("*, profiles(full_name)")
+        // time_entries has two FKs to profiles (staff_id, edited_by) — must
+        // name the exact FK or PostgREST rejects the query as ambiguous.
+        .select("*, profiles!time_entries_staff_id_fkey(full_name)")
         .single();
       setSaving(false);
       if (error || !data) {
@@ -119,7 +121,7 @@ export function TimeEntryEditDialog({ open, onOpenChange, mode, jobId, currentUs
         .from("time_entries")
         .update(payload)
         .eq("id", entry.id)
-        .select("*, profiles(full_name)")
+        .select("*, profiles!time_entries_staff_id_fkey(full_name)")
         .single();
       setSaving(false);
       if (error || !data) {

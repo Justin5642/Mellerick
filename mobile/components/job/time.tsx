@@ -264,7 +264,9 @@ export function JobTimeTab({ jobId, currentUserId }: { jobId: string; currentUse
   const loadEntries = useCallback(async () => {
     const { data } = await supabase
       .from("time_entries")
-      .select("*, profiles(full_name)")
+      // time_entries has two FKs to profiles (staff_id, edited_by) — must
+      // name the exact FK or PostgREST rejects the query as ambiguous.
+      .select("*, profiles!time_entries_staff_id_fkey(full_name)")
       .eq("job_id", jobId)
       .order("clock_in", { ascending: false });
     setEntries((data as any) ?? []);
