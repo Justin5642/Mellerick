@@ -6,12 +6,16 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Users, Plus, Phone, Mail } from "lucide-react";
 import Link from "next/link";
+import { CustomerFavoriteButton } from "@/components/customer-favorite-button";
 
 export default async function CustomersPage() {
   const supabase = await createClient();
   const { data: customers } = await supabase
     .from("customers")
     .select("*, sites(count)")
+    // Favourites first so the handful of repeat customers that matter most
+    // day to day don't get lost scrolling a long alphabetical list.
+    .order("is_favorite", { ascending: false })
     .order("name");
 
   return (
@@ -49,6 +53,7 @@ export default async function CustomersPage() {
                 >
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2">
+                      <CustomerFavoriteButton customerId={customer.id} initialFavorite={!!customer.is_favorite} />
                       <div className="flex items-center justify-center w-8 h-8 rounded-full bg-violet-100 text-violet-700 text-xs font-bold flex-shrink-0">
                         {customer.name.slice(0, 2).toUpperCase()}
                       </div>

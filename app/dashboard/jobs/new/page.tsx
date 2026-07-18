@@ -13,6 +13,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ArrowLeft } from "lucide-react";
 import Link from "next/link";
 import { fromBusinessInputValue, toBusinessInputValue } from "@/lib/date";
+import { CustomerPicker } from "@/components/customer-picker";
 
 // Radix/shadcn's SelectItem can't take value="", so an explicit "Unassigned"
 // option needs a sentinel value that gets translated back to "" (-> null on
@@ -23,7 +24,6 @@ export default function NewJobPage() {
   const router = useRouter();
   const supabase = createClient();
   const [loading, setLoading] = useState(false);
-  const [customers, setCustomers] = useState<any[]>([]);
   const [staff, setStaff] = useState<any[]>([]);
   const [sites, setSites] = useState<any[]>([]);
   const [form, setForm] = useState({
@@ -34,11 +34,7 @@ export default function NewJobPage() {
 
   useEffect(() => {
     async function load() {
-      const [{ data: c }, { data: s }] = await Promise.all([
-        supabase.from("customers").select("id, name").eq("is_active", true).order("name"),
-        supabase.from("profiles").select("id, full_name, role").eq("is_active", true).order("full_name"),
-      ]);
-      setCustomers(c ?? []);
+      const { data: s } = await supabase.from("profiles").select("id, full_name, role").eq("is_active", true).order("full_name");
       setStaff(s ?? []);
     }
     load();
@@ -111,12 +107,7 @@ export default function NewJobPage() {
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label>Customer *</Label>
-                <Select value={form.customer_id} onValueChange={(v) => set("customer_id", v as string)}>
-                  <SelectTrigger><SelectValue placeholder="Select customer" /></SelectTrigger>
-                  <SelectContent>
-                    {customers.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
-                  </SelectContent>
-                </Select>
+                <CustomerPicker value={form.customer_id} onChange={(v) => set("customer_id", v)} placeholder="Search customers..." />
               </div>
               <div className="space-y-2">
                 <Label>Site</Label>

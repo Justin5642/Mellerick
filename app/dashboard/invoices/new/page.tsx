@@ -12,6 +12,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ArrowLeft, Plus, Trash2, GitPullRequestArrow } from "lucide-react";
 import Link from "next/link";
+import { CustomerPicker } from "@/components/customer-picker";
 
 interface LineItem { name: string; description: string; quantity: string; unit_price: string; variationId?: string; }
 interface JobOption {
@@ -49,7 +50,6 @@ function NewInvoiceForm() {
   const router = useRouter();
   const supabase = createClient();
   const [loading, setLoading] = useState(false);
-  const [customers, setCustomers] = useState<any[]>([]);
   const [pricingItems, setPricingItems] = useState<any[]>([]);
   const [allJobs, setAllJobs] = useState<JobOption[]>([]);
   const [jobQuery, setJobQuery] = useState("");
@@ -84,8 +84,7 @@ function NewInvoiceForm() {
 
   useEffect(() => {
     async function load() {
-      const [{ data: c }, { data: p }, { data: j }] = await Promise.all([
-        supabase.from("customers").select("id, name").eq("is_active", true).order("name"),
+      const [{ data: p }, { data: j }] = await Promise.all([
         supabase.from("pricing_items").select("*").eq("is_active", true).order("name"),
         // Loaded once for the job search box below — deliberately not filtered
         // by status or customer, since a job needing a top-up invoice for a
@@ -94,7 +93,6 @@ function NewInvoiceForm() {
         // customer first just to narrow the job list.
         supabase.from("jobs").select(jobSelectFields).neq("status", "cancelled").order("updated_at", { ascending: false }).limit(500),
       ]);
-      setCustomers(c ?? []);
       setPricingItems(p ?? []);
       setAllJobs((j as any) ?? []);
     }
@@ -355,10 +353,12 @@ function NewInvoiceForm() {
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label>Customer *</Label>
-                <Select value={form.customer_id} onValueChange={v => setCustomer(v as string)}>
-                  <SelectTrigger className={err("customer_id")}><SelectValue placeholder="Select customer" /></SelectTrigger>
-                  <SelectContent>{customers.map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}</SelectContent>
-                </Select>
+                <CustomerPicker
+                  value={form.customer_id}
+                  onChange={v => setCustomer(v)}
+                  placeholder="Search customers..."
+                  error={errors.customer_id}
+                />
                 {errors.customer_id && <p className="text-xs text-red-500">Customer is required</p>}
               </div>
               <div className="space-y-2">

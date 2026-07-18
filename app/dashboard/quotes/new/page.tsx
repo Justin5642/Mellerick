@@ -12,6 +12,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ArrowLeft, Plus, Trash2 } from "lucide-react";
 import Link from "next/link";
+import { CustomerPicker } from "@/components/customer-picker";
 
 interface LineItem { name: string; description: string; quantity: string; unit_price: string; }
 
@@ -19,7 +20,6 @@ export default function NewQuotePage() {
   const router = useRouter();
   const supabase = createClient();
   const [loading, setLoading] = useState(false);
-  const [customers, setCustomers] = useState<any[]>([]);
   const [jobs, setJobs] = useState<any[]>([]);
   const [pricingItems, setPricingItems] = useState<any[]>([]);
 
@@ -36,11 +36,7 @@ export default function NewQuotePage() {
 
   useEffect(() => {
     async function load() {
-      const [{ data: c }, { data: p }] = await Promise.all([
-        supabase.from("customers").select("id, name").eq("is_active", true).order("name"),
-        supabase.from("pricing_items").select("*").eq("is_active", true).order("name"),
-      ]);
-      setCustomers(c ?? []);
+      const { data: p } = await supabase.from("pricing_items").select("*").eq("is_active", true).order("name");
       setPricingItems(p ?? []);
     }
     load();
@@ -141,10 +137,12 @@ export default function NewQuotePage() {
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label>Customer *</Label>
-                <Select value={form.customer_id} onValueChange={v => setField("customer_id", v as string)}>
-                  <SelectTrigger className={err("customer_id")}><SelectValue placeholder="Select customer" /></SelectTrigger>
-                  <SelectContent>{customers.map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}</SelectContent>
-                </Select>
+                <CustomerPicker
+                  value={form.customer_id}
+                  onChange={v => setField("customer_id", v)}
+                  placeholder="Search customers..."
+                  error={errors.customer_id}
+                />
                 {errors.customer_id && <p className="text-xs text-red-500">Customer is required</p>}
               </div>
               <div className="space-y-2">
