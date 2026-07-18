@@ -1,7 +1,14 @@
 import { useCallback, useEffect, useState } from "react";
-import { View, Text, StyleSheet, TextInput, TouchableOpacity, FlatList } from "react-native";
+import { View, Text, StyleSheet, TextInput, TouchableOpacity, FlatList, ActivityIndicator } from "react-native";
+import { Ionicons } from "@expo/vector-icons";
 import { supabase } from "../../lib/supabase";
 import { colors } from "../../lib/theme";
+
+// Same "office server" the voice report recorder calls
+// (see components/job/voice-report.tsx) — /api/ai/polish-note on the web
+// app cleans up grammar/voice-to-text artifacts via OpenAI, without
+// requiring the OpenAI SDK on-device.
+const API_BASE_URL = process.env.EXPO_PUBLIC_API_BASE_URL;
 
 interface Note {
   id: string;
@@ -14,6 +21,7 @@ export function JobNotesTab({ jobId, currentUserId }: { jobId: string; currentUs
   const [notes, setNotes] = useState<Note[]>([]);
   const [content, setContent] = useState("");
   const [saving, setSaving] = useState(false);
+  const [polishing, setPolishing] = useState(false);
 
   const loadNotes = useCallback(async () => {
     const { data } = await supabase
@@ -43,19 +51,57 @@ export function JobNotesTab({ jobId, currentUserId }: { jobId: string; currentUs
     setSaving(false);
   }
 
+  // Sends the current draft (typically dictated via the phone's own
+  // voice-to-text keyboard) to the office server for AI cleanup, then drops
+  // the result back into the input for the tech to review/edit — it's never
+  // auto-saved, so a bad rewrite can just be edited or discarded before
+  // tapping Add.
+  async function handlePolish() {
+    if (!content.trim() || polishing) return;
+    if (!API_BASE_URL) return;
+    setPolishing(true);
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const accessToken = sessionData.session?.access_token;
+      if (!accessToken) return;
+      const res = await fetch(`${API_BASE_URL}/api/ai/polish-note`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
+        body: JSON.stringify({ text: content }),
+      });
+      const data = await res.json();
+      if (res.ok && data.polished) setContent(data.polished);
+    } catch {
+      // Silently leave the draft as-is — same low-stakes failure mode as a
+      // failed voice report upload elsewhere in the app.
+    } finally {
+      setPolishing(false);
+    }
+  }
+
   return (
     <View style={styles.container}>
-      <View style={styles.addRow}>
+      <View style={styles.composer}>
         <TextInput
           style={styles.input}
           value={content}
           onChangeText={setContent}
-          placeholder="Add a note..."
+          placeholder="Add a note, or dictate one with your keyboard's mic then tap Polish..."
           multiline
         />
-        <TouchableOpacity style={styles.addButton} onPress={handleAdd} disabled={saving || !content.trim()}>
-          <Text style={styles.addButtonText}>{saving ? "..." : "Add"}</Text>
-        </TouchableOpacity>
+        <View style={styles.buttonRow}>
+          <TouchableOpacity style={styles.polishButton} onPress={handlePolish} disabled={polishing || !content.trim()}>
+            {polishing ? (
+              <ActivityIndicator size="small" color={colors.blue600} />
+            ) : (
+              <Ionicons name="sparkles" size={14} color={colors.blue600} />
+            )}
+            <Text style={styles.polishButtonText}>{polishing ? "Polishing..." : "Polish with AI"}</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.addButton} onPress={handleAdd} disabled={saving || !content.trim()}>
+            <Text style={styles.addButtonText}>{saving ? "..." : "Add"}</Text>
+          </TouchableOpacity>
+        </View>
       </View>
 
       <FlatList
@@ -82,9 +128,8 @@ export function JobNotesTab({ jobId, currentUserId }: { jobId: string; currentUs
 
 const styles = StyleSheet.create({
   container: { padding: 16 },
-  addRow: { flexDirection: "row", gap: 8, alignItems: "flex-end", marginBottom: 16 },
+  composer: { gap: 8, marginBottom: 16 },
   input: {
-    flex: 1,
     borderWidth: 1,
     borderColor: colors.border,
     borderRadius: 10,
@@ -95,6 +140,18 @@ const styles = StyleSheet.create({
     color: colors.slate900,
     minHeight: 44,
   },
+  buttonRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", gap: 8 },
+  polishButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  polishButtonText: { color: colors.slate700, fontWeight: "600", fontSize: 13 },
   addButton: { backgroundColor: colors.blue600, borderRadius: 10, paddingHorizontal: 16, paddingVertical: 12 },
   addButtonText: { color: "#fff", fontWeight: "600", fontSize: 14 },
   noteCard: { backgroundColor: colors.card, borderWidth: 1, borderColor: colors.border, borderRadius: 10, padding: 12, marginBottom: 8 },

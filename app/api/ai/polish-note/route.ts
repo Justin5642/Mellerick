@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 
 // Cleans up rough, often voice-dictated technician job notes into clear,
 // professional wording before they're saved to the job's permanent record.
@@ -15,10 +16,28 @@ Rules:
 - Keep it roughly the same length — don't pad it out or add new sentences.
 - Return only the rewritten note text, with no preamble, quotes, or labels.`;
 
-export async function POST(request: NextRequest) {
+// Called both from the web dashboard (cookie-based session, handled by
+// lib/supabase/server) and from the mobile app (no cookies — instead
+// attaches its Supabase session access token as a Bearer header). Same
+// dual-path auth as app/api/jobs/[id]/transcribe-voice-report/route.ts.
+async function getAuthenticatedUserId(request: NextRequest) {
+  const authHeader = request.headers.get("authorization") ?? "";
+  const token = authHeader.startsWith("Bearer ") ? authHeader.slice("Bearer ".length) : null;
+  if (token) {
+    const anonClient = createSupabaseClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!, {
+      auth: { autoRefreshToken: false, persistSession: false },
+    });
+    const { data, error } = await anonClient.auth.getUser(token);
+    return error || !data.user ? null : data.user.id;
+  }
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+  return user?.id ?? null;
+}
+
+export async function POST(request: NextRequest) {
+  const userId = await getAuthenticatedUserId(request);
+  if (!userId) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
 
   if (!process.env.OPENAI_API_KEY) {
     return NextResponse.json({ error: "OPENAI_API_KEY is not configured on the server" }, { status: 500 });
