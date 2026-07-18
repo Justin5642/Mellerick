@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { toast } from "sonner";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -11,6 +12,7 @@ import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Phone, Mail, MapPin, Calendar, User, Save, Navigation } from "lucide-react";
 import { formatDate, toBusinessInputValue, fromBusinessInputValue } from "@/lib/date";
+import { CustomerPicker } from "@/components/customer-picker";
 
 interface Props {
   job: any;
@@ -21,11 +23,19 @@ interface Props {
 // option needs a sentinel value that gets translated back to "" (-> null on
 // save) instead of colliding with a real staff id.
 const UNASSIGNED_VALUE = "__unassigned__";
+// Same trick for "no site selected" — a job can exist without a site.
+const NO_SITE_VALUE = "__no_site__";
 
 export function JobOverview({ job, staff }: Props) {
+  const router = useRouter();
   const supabase = createClient();
   const [saving, setSaving] = useState(false);
+  const [sites, setSites] = useState<any[]>([]);
   const [form, setForm] = useState({
+    title: job.title ?? "",
+    job_type: job.job_type ?? "service",
+    customer_id: job.customer_id ?? "",
+    site_id: job.site_id ?? "",
     status: job.status,
     priority: job.priority,
     assigned_to: job.assigned_to ?? "",
@@ -35,8 +45,28 @@ export function JobOverview({ job, staff }: Props) {
     notes: job.notes ?? "",
   });
 
+  // Sites belong to a customer, so the site list has to be reloaded whenever
+  // the customer changes — same pattern as the "New Job" form. Also runs
+  // once on mount so the current site shows up in the dropdown immediately.
+  useEffect(() => {
+    async function loadSites() {
+      if (!form.customer_id) { setSites([]); return; }
+      const { data } = await supabase.from("sites").select("id, name, suburb").eq("customer_id", form.customer_id);
+      setSites(data ?? []);
+    }
+    loadSites();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form.customer_id]);
+
   function set(field: string, value: string | null) {
     setForm((prev) => ({ ...prev, [field]: value ?? "" }));
+  }
+
+  // Changing the customer invalidates whatever site was previously selected
+  // (it belongs to the old customer), so clear it rather than silently
+  // keeping a site_id that no longer matches the chosen customer.
+  function setCustomer(customerId: string) {
+    setForm((prev) => ({ ...prev, customer_id: customerId, site_id: "" }));
   }
 
   // Quick-fill a standard 7:00am-3:30pm work day (Melbourne time) instead of
@@ -49,9 +79,19 @@ export function JobOverview({ job, staff }: Props) {
   }
 
   async function save() {
+    if (!form.title.trim()) {
+      toast.error("Job title is required");
+      return;
+    }
+    if (!form.customer_id) {
+      toast.error("Customer is required");
+      return;
+    }
     setSaving(true);
     const { error } = await supabase.from("jobs").update({
       ...form,
+      title: form.title.trim(),
+      site_id: form.site_id || null,
       assigned_to: form.assigned_to || null,
       scheduled_start: form.scheduled_start ? fromBusinessInputValue(form.scheduled_start) : null,
       scheduled_end: form.scheduled_end ? fromBusinessInputValue(form.scheduled_end) : null,
@@ -61,6 +101,10 @@ export function JobOverview({ job, staff }: Props) {
     } else {
       toast.success("Job updated");
       fetch(`/api/jobs/${job.id}/sync-calendar`, { method: "POST" }).catch(() => {});
+      // customer/site changed => the header and the read-only customer/site
+      // cards below (which come from the server-fetched `job` prop, not this
+      // form's local state) need a re-fetch to reflect the change.
+      router.refresh();
     }
     setSaving(false);
   }
@@ -69,6 +113,50 @@ export function JobOverview({ job, staff }: Props) {
     <div className="p-6 grid grid-cols-1 lg:grid-cols-3 gap-6">
       {/* Left — editable fields */}
       <div className="lg:col-span-2 space-y-4">
+        <Card>
+          <CardHeader><CardTitle className="text-base">Job Details</CardTitle></CardHeader>
+          <CardContent className="space-y-4">
+            <div className="space-y-2">
+              <Label>Job Title *</Label>
+              <Input value={form.title} onChange={(e) => set("title", e.target.value)} placeholder="e.g. Fix burst pipe in bathroom" />
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label>Customer *</Label>
+                <CustomerPicker value={form.customer_id} onChange={setCustomer} placeholder="Search customers..." />
+              </div>
+              <div className="space-y-2">
+                <Label>Site</Label>
+                <Select
+                  value={form.site_id || NO_SITE_VALUE}
+                  onValueChange={(v) => set("site_id", v === NO_SITE_VALUE ? "" : (v as string))}
+                  disabled={!form.customer_id}
+                >
+                  <SelectTrigger><SelectValue placeholder={form.customer_id ? "Select site" : "Select customer first"} /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={NO_SITE_VALUE}>No site</SelectItem>
+                    {sites.map((s) => <SelectItem key={s.id} value={s.id}>{s.name} — {s.suburb}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label>Job Type</Label>
+                <Select value={form.job_type} onValueChange={(v) => set("job_type", v)}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="service">Service</SelectItem>
+                    <SelectItem value="installation">Installation</SelectItem>
+                    <SelectItem value="maintenance">Maintenance</SelectItem>
+                    <SelectItem value="emergency">Emergency</SelectItem>
+                    <SelectItem value="quote">Quote</SelectItem>
+                    <SelectItem value="project">Project</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
         <Card>
           <CardHeader><CardTitle className="text-base">Job Status & Assignment</CardTitle></CardHeader>
           <CardContent className="space-y-4">
@@ -111,10 +199,6 @@ export function JobOverview({ job, staff }: Props) {
                     {staff.map((s) => <SelectItem key={s.id} value={s.id}>{s.full_name} ({s.role})</SelectItem>)}
                   </SelectContent>
                 </Select>
-              </div>
-              <div className="space-y-2">
-                <Label>Job Type</Label>
-                <p className="text-sm text-slate-700 capitalize py-2">{job.job_type}</p>
               </div>
               <div className="space-y-2">
                 <div className="flex items-center justify-between">

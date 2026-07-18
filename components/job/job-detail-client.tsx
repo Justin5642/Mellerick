@@ -5,9 +5,10 @@ import { useSearchParams } from "next/navigation";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { ArrowLeft, Briefcase, FileText, Image, List, MessageSquare, PenLine, ClipboardList, Clock, Receipt, GitPullRequestArrow, DollarSign, Truck, TrendingUp } from "lucide-react";
+import { ArrowLeft, Briefcase, FileText, Image, List, MessageSquare, PenLine, ClipboardList, Clock, Receipt, GitPullRequestArrow, DollarSign, Truck, TrendingUp, Trash2 } from "lucide-react";
 import Link from "next/link";
 import { JobOverview } from "./job-overview";
+import { DeleteJobDialog } from "./delete-job-dialog";
 import { JobDocuments } from "./job-documents";
 import { JobPhotos } from "./job-photos";
 import { JobLineItems } from "./job-line-items";
@@ -58,6 +59,7 @@ export function JobDetailClient({ job, currentUserId, photos: initialPhotos, doc
     requestedTab && TAB_VALUES.includes(requestedTab) ? requestedTab : "overview"
   );
   const highlightVariationId = searchParams.get("variation");
+  const [deleteOpen, setDeleteOpen] = useState(false);
 
   const [photos, setPhotos] = useState(initialPhotos);
   const [documents, setDocuments] = useState(initialDocuments);
@@ -127,6 +129,15 @@ export function JobDetailClient({ job, currentUserId, photos: initialPhotos, doc
               <span className="text-xs font-medium px-2.5 py-1 rounded-full bg-amber-100 text-amber-700">
                 Awaiting Invoice
               </span>
+            )}
+            {isAdmin && (
+              <Button
+                variant="ghost" size="sm"
+                className="gap-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50"
+                onClick={() => setDeleteOpen(true)}
+              >
+                <Trash2 className="w-4 h-4" />Delete
+              </Button>
             )}
           </div>
         </div>
@@ -221,6 +232,14 @@ export function JobDetailClient({ job, currentUserId, photos: initialPhotos, doc
           </div>
         </Tabs>
       </div>
+
+      <DeleteJobDialog
+        jobId={job.id}
+        jobNumber={job.job_number}
+        jobTitle={job.title}
+        open={deleteOpen}
+        onOpenChange={setDeleteOpen}
+      />
     </div>
   );
 }
