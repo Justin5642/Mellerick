@@ -126,6 +126,20 @@ export default function NewBackflowDevicePage() {
       toast.error("Customer, water authority, and device type are required");
       return;
     }
+    if (
+      !form.water_authority_property_number ||
+      !form.protection_type ||
+      !form.make ||
+      !form.model ||
+      !form.serial_number ||
+      !form.size_mm ||
+      !form.location_description
+    ) {
+      toast.error(
+        "Water authority property no., protection type, make, model, serial no., size, and location are all required — the water authority will reject a certificate missing these."
+      );
+      return;
+    }
     setLoading(true);
     const { data: { user } } = await supabase.auth.getUser();
     const payload = {
@@ -205,8 +219,8 @@ export default function NewBackflowDevicePage() {
                 <Input type="number" min="1" value={form.test_frequency_months} onChange={(e) => set("test_frequency_months", e.target.value)} />
               </div>
               <div className="space-y-2">
-                <Label>Water Authority Property No.</Label>
-                <Input value={form.water_authority_property_number} onChange={(e) => set("water_authority_property_number", e.target.value)} />
+                <Label>Water Authority Property No. *</Label>
+                <Input required value={form.water_authority_property_number} onChange={(e) => set("water_authority_property_number", e.target.value)} />
               </div>
               <div className="space-y-2">
                 <Label>Water Meter No.</Label>
@@ -258,7 +272,7 @@ export default function NewBackflowDevicePage() {
                 </Select>
               </div>
               <div className="space-y-2">
-                <Label>Protection Type</Label>
+                <Label>Protection Type *</Label>
                 <Select value={form.protection_type} onValueChange={(v) => set("protection_type", v as string)}>
                   <SelectTrigger><SelectValue placeholder="Select protection type" /></SelectTrigger>
                   <SelectContent>
@@ -267,25 +281,25 @@ export default function NewBackflowDevicePage() {
                 </Select>
               </div>
               <div className="space-y-2">
-                <Label>Make</Label>
-                <Input value={form.make} onChange={(e) => set("make", e.target.value)} />
+                <Label>Make *</Label>
+                <Input required value={form.make} onChange={(e) => set("make", e.target.value)} />
               </div>
               <div className="space-y-2">
-                <Label>Model</Label>
-                <Input value={form.model} onChange={(e) => set("model", e.target.value)} />
+                <Label>Model *</Label>
+                <Input required value={form.model} onChange={(e) => set("model", e.target.value)} />
               </div>
               <div className="space-y-2">
-                <Label>Serial No.</Label>
-                <Input value={form.serial_number} onChange={(e) => set("serial_number", e.target.value)} />
+                <Label>Serial No. *</Label>
+                <Input required value={form.serial_number} onChange={(e) => set("serial_number", e.target.value)} />
               </div>
               <div className="space-y-2">
-                <Label>Size (mm)</Label>
-                <Input type="number" value={form.size_mm} onChange={(e) => set("size_mm", e.target.value)} />
+                <Label>Size (mm) *</Label>
+                <Input required type="number" value={form.size_mm} onChange={(e) => set("size_mm", e.target.value)} />
               </div>
             </div>
             <div className="space-y-2">
-              <Label>Location of Device</Label>
-              <Input value={form.location_description} onChange={(e) => set("location_description", e.target.value)} placeholder="e.g. Boundary, front garden" />
+              <Label>Location of Device *</Label>
+              <Input required value={form.location_description} onChange={(e) => set("location_description", e.target.value)} placeholder="e.g. Boundary, front garden" />
             </div>
             <div className="space-y-2">
               <Label>Notes</Label>

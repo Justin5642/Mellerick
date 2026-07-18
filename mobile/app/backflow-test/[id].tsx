@@ -229,6 +229,10 @@ export default function NewBackflowTestScreen() {
 
   function validate(): string | null {
     if (!testerName.trim()) return "Authorised tester's name is required";
+    if (!mainsPressureKpa) return "Mains pressure is required";
+    if (!testKitSerialNumber.trim()) return "Test kit serial number is required";
+    if (!testKitCalibrationDate) return "Test kit calibration date is required";
+    if (!testerLicenceNumber.trim()) return "Tester licence number is required";
     if (result === "fail" && !reasonForFailure) return "Select a reason for failure";
     return null;
   }
@@ -240,9 +244,9 @@ export default function NewBackflowTestScreen() {
       return;
     }
     if (saving) return;
-    // Triggers onOK (if the pad has strokes) or onEmpty (if it's blank) below
-    // — either way we proceed to submit, since the signature is optional
-    // here (unlike the customer sign-off flow on the jobs side).
+    // Triggers onOK (if the pad has strokes) or onEmpty (if it's blank) below.
+    // A signature is mandatory here — the water authority won't accept an
+    // unsigned certificate — so onEmpty shows an alert instead of submitting.
     signatureRef.current?.readSignature();
   }
 
@@ -350,7 +354,7 @@ export default function NewBackflowTestScreen() {
           <ModalPicker label="Test Type" value={testType} options={TEST_TYPES} onChange={setTestType} />
           <DateField label="Date of Test" value={testDate} onChange={setTestDate} />
           <View style={styles.fieldGroup}>
-            <Text style={styles.fieldLabel}>Mains Pressure (kPa)</Text>
+            <Text style={styles.fieldLabel}>Mains Pressure (kPa) *</Text>
             <TextInput style={styles.input} value={mainsPressureKpa} onChangeText={setMainsPressureKpa} keyboardType="decimal-pad" />
           </View>
           <ToggleField label="Permission Received to Turn Off Water" value={permissionToTurnOffWater} onChange={setPermissionToTurnOffWater} />
@@ -490,16 +494,16 @@ export default function NewBackflowTestScreen() {
         <View style={styles.card}>
           <Text style={styles.cardTitle}>Test Kit &amp; Authorised Tester</Text>
           <View style={styles.fieldGroup}>
-            <Text style={styles.fieldLabel}>Test Kit Serial No.</Text>
+            <Text style={styles.fieldLabel}>Test Kit Serial No. *</Text>
             <TextInput style={styles.input} value={testKitSerialNumber} onChangeText={setTestKitSerialNumber} />
           </View>
-          <DateField label="Test Kit Calibration Date" value={testKitCalibrationDate ?? new Date()} onChange={setTestKitCalibrationDate} />
+          <DateField label="Test Kit Calibration Date *" value={testKitCalibrationDate ?? new Date()} onChange={setTestKitCalibrationDate} />
           <View style={styles.fieldGroup}>
             <Text style={styles.fieldLabel}>Authorised Tester's Name *</Text>
             <TextInput style={styles.input} value={testerName} onChangeText={setTesterName} />
           </View>
           <View style={styles.fieldGroup}>
-            <Text style={styles.fieldLabel}>Licence No.</Text>
+            <Text style={styles.fieldLabel}>Licence No. *</Text>
             <TextInput style={styles.input} value={testerLicenceNumber} onChangeText={setTesterLicenceNumber} />
           </View>
           <View style={styles.fieldGroup}>
@@ -513,7 +517,7 @@ export default function NewBackflowTestScreen() {
 
           <View style={styles.fieldGroup}>
             <View style={styles.cardHeaderRow}>
-              <Text style={styles.fieldLabel}>Signature</Text>
+              <Text style={styles.fieldLabel}>Signature *</Text>
               <TouchableOpacity onPress={() => signatureRef.current?.clearSignature()}>
                 <Text style={styles.clearText}>Clear</Text>
               </TouchableOpacity>
@@ -522,7 +526,9 @@ export default function NewBackflowTestScreen() {
               <Signature
                 ref={signatureRef}
                 onOK={(sig) => submitTest(sig)}
-                onEmpty={() => submitTest(null)}
+                onEmpty={() =>
+                  Alert.alert("Signature required", "Please sign before submitting — the water authority won't accept an unsigned certificate.")
+                }
                 descriptionText=""
                 clearText="Clear"
                 confirmText="Confirm"

@@ -173,6 +173,11 @@ export default function NewBackflowTestPage() {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!testerName.trim()) { toast.error("Authorised tester's name is required"); return; }
+    if (!mainsPressureKpa) { toast.error("Mains pressure is required"); return; }
+    if (!testKitSerialNumber.trim()) { toast.error("Test kit serial number is required"); return; }
+    if (!testKitCalibrationDate) { toast.error("Test kit calibration date is required"); return; }
+    if (!testerLicenceNumber.trim()) { toast.error("Tester licence number is required"); return; }
+    if (!hasSignature) { toast.error("Signature is required — the water authority won't accept an unsigned certificate"); return; }
     if (result === "fail" && !reasonForFailure) { toast.error("Select a reason for failure"); return; }
     setSaving(true);
 
@@ -280,8 +285,8 @@ export default function NewBackflowTestPage() {
                 <Input id="testDate" type="date" value={testDate} onChange={(e) => setTestDate(e.target.value)} />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="mainsPressure">Mains Pressure (kPa)</Label>
-                <Input id="mainsPressure" type="number" value={mainsPressureKpa} onChange={(e) => setMainsPressureKpa(e.target.value)} />
+                <Label htmlFor="mainsPressure">Mains Pressure (kPa) *</Label>
+                <Input id="mainsPressure" required type="number" value={mainsPressureKpa} onChange={(e) => setMainsPressureKpa(e.target.value)} />
               </div>
             </div>
             <YesNoField label="Permission Received to Turn Off Water" value={permissionToTurnOffWater} onChange={setPermissionToTurnOffWater} />
@@ -376,10 +381,10 @@ export default function NewBackflowTestPage() {
           <CardHeader><CardTitle className="text-base">Test Kit &amp; Authorised Tester</CardTitle></CardHeader>
           <CardContent className="space-y-4">
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div className="space-y-2"><Label>Test Kit Serial No.</Label><Input value={testKitSerialNumber} onChange={(e) => setTestKitSerialNumber(e.target.value)} /></div>
-              <div className="space-y-2"><Label>Test Kit Calibration Date</Label><Input type="date" value={testKitCalibrationDate} onChange={(e) => setTestKitCalibrationDate(e.target.value)} /></div>
+              <div className="space-y-2"><Label>Test Kit Serial No. *</Label><Input required value={testKitSerialNumber} onChange={(e) => setTestKitSerialNumber(e.target.value)} /></div>
+              <div className="space-y-2"><Label>Test Kit Calibration Date *</Label><Input required type="date" value={testKitCalibrationDate} onChange={(e) => setTestKitCalibrationDate(e.target.value)} /></div>
               <div className="space-y-2"><Label>Authorised Tester's Name *</Label><Input value={testerName} onChange={(e) => setTesterName(e.target.value)} required /></div>
-              <div className="space-y-2"><Label>Licence No.</Label><Input value={testerLicenceNumber} onChange={(e) => setTesterLicenceNumber(e.target.value)} /></div>
+              <div className="space-y-2"><Label>Licence No. *</Label><Input required value={testerLicenceNumber} onChange={(e) => setTesterLicenceNumber(e.target.value)} /></div>
               <div className="space-y-2"><Label>Phone</Label><Input value={testerPhone} onChange={(e) => setTesterPhone(e.target.value)} /></div>
             </div>
             <div className="space-y-2">
@@ -388,7 +393,7 @@ export default function NewBackflowTestPage() {
             </div>
             <div className="space-y-2">
               <div className="flex items-center justify-between">
-                <Label>Signature</Label>
+                <Label>Signature *</Label>
                 <Button type="button" variant="ghost" size="sm" className="gap-1.5 text-xs" onClick={clearSignature}>
                   <RotateCcw className="w-3.5 h-3.5" />Clear
                 </Button>

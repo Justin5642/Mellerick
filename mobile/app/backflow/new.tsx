@@ -188,6 +188,21 @@ export default function NewBackflowDeviceScreen() {
       Alert.alert("Missing info", "Customer, water authority, and device type are required");
       return;
     }
+    if (
+      !waterAuthorityPropertyNumber ||
+      !protectionType ||
+      !make ||
+      !model ||
+      !serialNumber ||
+      !sizeMm ||
+      !locationDescription
+    ) {
+      Alert.alert(
+        "Missing info",
+        "Water authority property no., protection type, make, model, serial no., size, and location are all required — the water authority will reject a certificate missing these."
+      );
+      return;
+    }
     setSaving(true);
     try {
       const { data: userData } = await supabase.auth.getUser();
@@ -260,7 +275,7 @@ export default function NewBackflowDeviceScreen() {
             <TextInput style={styles.input} value={testFrequencyMonths} onChangeText={setTestFrequencyMonths} keyboardType="number-pad" />
           </View>
           <View style={styles.fieldGroup}>
-            <Text style={styles.fieldLabel}>Water Authority Property No.</Text>
+            <Text style={styles.fieldLabel}>Water Authority Property No. *</Text>
             <TextInput style={styles.input} value={waterAuthorityPropertyNumber} onChangeText={setWaterAuthorityPropertyNumber} />
           </View>
           <View style={styles.fieldGroup}>
@@ -293,30 +308,30 @@ export default function NewBackflowDeviceScreen() {
             onChange={setDeviceType}
           />
           <ModalPicker
-            label="Protection Type"
+            label="Protection Type *"
             value={protectionType}
             options={PROTECTION_TYPES.map((p) => ({ value: p.value, label: p.label }))}
             placeholder="Select protection type"
             onChange={setProtectionType}
           />
           <View style={styles.fieldGroup}>
-            <Text style={styles.fieldLabel}>Make</Text>
+            <Text style={styles.fieldLabel}>Make *</Text>
             <TextInput style={styles.input} value={make} onChangeText={setMake} />
           </View>
           <View style={styles.fieldGroup}>
-            <Text style={styles.fieldLabel}>Model</Text>
+            <Text style={styles.fieldLabel}>Model *</Text>
             <TextInput style={styles.input} value={model} onChangeText={setModel} />
           </View>
           <View style={styles.fieldGroup}>
-            <Text style={styles.fieldLabel}>Serial No.</Text>
+            <Text style={styles.fieldLabel}>Serial No. *</Text>
             <TextInput style={styles.input} value={serialNumber} onChangeText={setSerialNumber} />
           </View>
           <View style={styles.fieldGroup}>
-            <Text style={styles.fieldLabel}>Size (mm)</Text>
+            <Text style={styles.fieldLabel}>Size (mm) *</Text>
             <TextInput style={styles.input} value={sizeMm} onChangeText={setSizeMm} keyboardType="decimal-pad" />
           </View>
           <View style={styles.fieldGroup}>
-            <Text style={styles.fieldLabel}>Location of Device</Text>
+            <Text style={styles.fieldLabel}>Location of Device *</Text>
             <TextInput style={styles.input} value={locationDescription} onChangeText={setLocationDescription} placeholder="e.g. Boundary, front garden" />
           </View>
           <View style={styles.fieldGroup}>
