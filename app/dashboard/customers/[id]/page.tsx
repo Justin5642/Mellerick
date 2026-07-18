@@ -17,6 +17,7 @@ import {
   Briefcase,
   FileText,
   Receipt,
+  Plus,
 } from "lucide-react";
 import { formatDate } from "@/lib/date";
 import { formatInvoiceNumber } from "@/lib/utils";
@@ -186,6 +187,13 @@ export default async function CustomerDetailPage({
             </TabsList>
 
             <TabsContent value="jobs">
+              <div className="flex justify-end mb-3">
+                <Link href={`/dashboard/jobs/new?customer_id=${id}`}>
+                  <Button size="sm" className="gap-2">
+                    <Plus className="w-3.5 h-3.5" /> Add Job
+                  </Button>
+                </Link>
+              </div>
               <Card>
                 <CardContent className="p-0">
                   {!jobs || jobs.length === 0 ? (
@@ -225,6 +233,13 @@ export default async function CustomerDetailPage({
             </TabsContent>
 
             <TabsContent value="quotes">
+              <div className="flex justify-end mb-3">
+                <Link href={`/dashboard/quotes/new?customer_id=${id}`}>
+                  <Button size="sm" className="gap-2">
+                    <Plus className="w-3.5 h-3.5" /> Add Quote
+                  </Button>
+                </Link>
+              </div>
               <Card>
                 <CardContent className="p-0">
                   {!quotes || quotes.length === 0 ? (
@@ -267,6 +282,13 @@ export default async function CustomerDetailPage({
             </TabsContent>
 
             <TabsContent value="invoices">
+              <div className="flex justify-end mb-3">
+                <Link href={`/dashboard/invoices/new?customer_id=${id}`}>
+                  <Button size="sm" className="gap-2">
+                    <Plus className="w-3.5 h-3.5" /> Add Invoice
+                  </Button>
+                </Link>
+              </div>
               <Card>
                 <CardContent className="p-0">
                   {!invoices || invoices.length === 0 ? (

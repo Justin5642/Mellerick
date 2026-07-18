@@ -26,8 +26,14 @@ export default function NewJobPage() {
   const [loading, setLoading] = useState(false);
   const [staff, setStaff] = useState<any[]>([]);
   const [sites, setSites] = useState<any[]>([]);
+
+  // Lets links like the Customer detail page's "+ Add Job" button
+  // (/dashboard/jobs/new?customer_id=...) preselect the customer instead of
+  // making staff search for them again — same pattern already used by
+  // quotes/new and invoices/new.
+  const params = typeof window !== "undefined" ? new URLSearchParams(window.location.search) : null;
   const [form, setForm] = useState({
-    title: "", description: "", customer_id: "", site_id: "", assigned_to: "",
+    title: "", description: "", customer_id: params?.get("customer_id") ?? "", site_id: "", assigned_to: "",
     status: "pending", priority: "normal", job_type: "service",
     scheduled_start: "", scheduled_end: "", notes: "",
   });
