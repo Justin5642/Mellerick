@@ -97,6 +97,16 @@ export function fromBusinessInputValue(value: string) {
   return new Date(guess - offset * 60000).toISOString();
 }
 
+// Re-dates an instant onto a different Melbourne calendar day while keeping
+// its wall-clock time-of-day unchanged (e.g. a 9:00am job dragged from
+// Tuesday to Thursday stays a 9:00am job) — used by the schedule board's
+// week-view drag-and-drop, where dropping a job on a different day column
+// needs to move the date without touching the time.
+export function withDateKeyPreservingTime(value: string | Date, newDateKey: string): string {
+  const [, timePart] = toBusinessInputValue(value).split("T");
+  return fromBusinessInputValue(`${newDateKey}T${timePart}`);
+}
+
 // A stable "N days forward/back" step that stays on the same Melbourne
 // calendar date regardless of DST — anchoring at UTC noon means the
 // Melbourne-local clock is always somewhere between 22:00-23:00 the same

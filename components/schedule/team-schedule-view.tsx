@@ -29,6 +29,7 @@ import {
   shiftDateKey,
   anchorForDateKey,
   weekDateKeys,
+  withDateKeyPreservingTime,
 } from "@/lib/date";
 import { jobStatusColors } from "@/lib/badge-colors";
 import { cn } from "@/lib/utils";
@@ -61,6 +62,15 @@ type StaffMember = {
 
 const UNASSIGNED_COLUMN_ID = "unassigned";
 const STAFF_COLUMN_PREFIX = "staff:";
+// Week-grid droppable cells encode both "who" and "which day" in one id
+// (base column id + this separator + a "YYYY-MM-DD" day key) since a cell
+// there is the intersection of a staff/unassigned row and a day column —
+// unlike the day board where a column is just "who".
+const WEEK_CELL_SEPARATOR = "::";
+
+function weekCellId(base: string, dayKey: string) {
+  return `${base}${WEEK_CELL_SEPARATOR}${dayKey}`;
+}
 
 function wazeUrl(site: Job["sites"]): string | null {
   if (!site) return null;
@@ -204,8 +214,6 @@ function DroppableColumn({
 // Compact job entry for a single day cell in the week grid — the grid is
 // staff (rows) x day (columns), so each cell is narrow; this trades the
 // full JobCard's detail for a glanceable time + job + customer stack.
-// Read-only (no drag-and-drop) — the week view is for at-a-glance
-// overview/planning, reassigning a job still happens in the Day view.
 function WeekJobChip({ job }: { job: Job }) {
   return (
     <Link
@@ -220,6 +228,55 @@ function WeekJobChip({ job }: { job: Job }) {
       </p>
       {job.customers?.name && <p className="text-[10px] text-slate-400 truncate">{job.customers.name}</p>}
     </Link>
+  );
+}
+
+// Draggable wrapper for WeekJobChip — same long-press-to-drag pattern as
+// DraggableJobCard on the day board, so a quick tap still passes through as
+// a normal click/navigation.
+function DraggableWeekJobChip({ job }: { job: Job }) {
+  const { setNodeRef, listeners, isDragging } = useDraggable({ id: job.id });
+  return (
+    <div
+      ref={setNodeRef}
+      {...listeners}
+      onContextMenu={(e) => e.preventDefault()}
+      style={{
+        touchAction: "none",
+        WebkitTouchCallout: "none",
+        WebkitUserSelect: "none",
+      }}
+      className={cn("select-none", isDragging && "opacity-30")}
+    >
+      <WeekJobChip job={job} />
+    </div>
+  );
+}
+
+// A single (staff-or-unassigned) x (day) cell in the week grid — droppable
+// so a job can be dragged both onto a different technician's row and/or a
+// different day column at once (reassigning and rescheduling in one drag).
+function DroppableWeekCell({
+  id,
+  isToday,
+  children,
+}: {
+  id: string;
+  isToday?: boolean;
+  children: React.ReactNode;
+}) {
+  const { setNodeRef, isOver } = useDroppable({ id });
+  return (
+    <div
+      ref={setNodeRef}
+      className={cn(
+        "bg-white p-1.5 space-y-1 min-h-[64px] transition-colors",
+        isToday && "bg-blue-50/40",
+        isOver && "ring-2 ring-inset ring-blue-400 bg-blue-50/70"
+      )}
+    >
+      {children}
+    </div>
   );
 }
 
@@ -369,6 +426,73 @@ export function TeamScheduleView({
       });
   }
 
+  // Week grid drop target ids are "<base>::<dayKey>" (see weekCellId) so a
+  // single drag can change who a job's assigned to and/or which day it's
+  // scheduled on. Re-dating uses withDateKeyPreservingTime so the
+  // time-of-day stays put — only the calendar day moves.
+  function handleWeekDragEnd(event: DragEndEvent) {
+    setActiveId(null);
+    const { active, over } = event;
+    if (!over) return;
+
+    const jobId = active.id as string;
+    const overId = over.id as string;
+    const sepIndex = overId.lastIndexOf(WEEK_CELL_SEPARATOR);
+    if (sepIndex === -1) return;
+    const base = overId.slice(0, sepIndex);
+    const targetDayKey = overId.slice(sepIndex + WEEK_CELL_SEPARATOR.length);
+    const newAssignedTo = base === UNASSIGNED_COLUMN_ID ? null : base.slice(STAFF_COLUMN_PREFIX.length);
+
+    const job = jobs.find((j) => j.id === jobId);
+    if (!job || !job.scheduled_start) return;
+
+    const currentDayKey = dateKeyInBusinessTZ(job.scheduled_start);
+    const assignedChanged = (job.assigned_to ?? null) !== newAssignedTo;
+    const dayChanged = currentDayKey !== targetDayKey;
+    if (!assignedChanged && !dayChanged) return; // dropped back on the same cell
+
+    const targetStaff = newAssignedTo ? staff.find((s) => s.id === newAssignedTo) ?? null : null;
+    const previousJobs = jobs;
+
+    const newStart = dayChanged ? withDateKeyPreservingTime(job.scheduled_start, targetDayKey) : job.scheduled_start;
+    const newEnd =
+      dayChanged && job.scheduled_end
+        ? new Date(
+            new Date(newStart).getTime() + (new Date(job.scheduled_end).getTime() - new Date(job.scheduled_start).getTime())
+          ).toISOString()
+        : job.scheduled_end;
+
+    setJobs((prev) =>
+      prev.map((j) =>
+        j.id === jobId
+          ? {
+              ...j,
+              assigned_to: newAssignedTo,
+              scheduled_start: newStart,
+              scheduled_end: newEnd,
+              profiles: targetStaff ? { full_name: targetStaff.full_name } : null,
+            }
+          : j
+      )
+    );
+
+    supabase
+      .from("jobs")
+      .update({ assigned_to: newAssignedTo, scheduled_start: newStart, scheduled_end: newEnd })
+      .eq("id", jobId)
+      .then(({ error }: { error: { message: string } | null }) => {
+        if (error) {
+          setJobs(previousJobs);
+          toast.error(error.message);
+          return;
+        }
+        const changes: string[] = [];
+        if (assignedChanged) changes.push(targetStaff ? `assigned to ${targetStaff.full_name}` : "unassigned");
+        if (dayChanged) changes.push(`moved to ${formatDate(anchorForDateKey(targetDayKey))}`);
+        toast.success(`Job ${changes.join(" and ")}`);
+      });
+  }
+
   return (
     <Tabs value={tab} onValueChange={(v) => typeof v === "string" && setTab(v)}>
       <TabsList variant="line">
@@ -515,62 +639,82 @@ export function TeamScheduleView({
         </DndContext>
           </>
         ) : (
-          <div className="overflow-x-auto pb-2">
-            <div
-              className="grid min-w-[960px] rounded-xl border border-slate-200 bg-slate-200 gap-px overflow-hidden"
-              style={{ gridTemplateColumns: "160px repeat(7, minmax(120px, 1fr))" }}
-            >
-              <div className="bg-white p-2" />
-              {weekKeys.map((key) => (
-                <div key={key} className={cn("bg-white p-2 text-center", key === todayKey && "bg-blue-50")}>
-                  <p className="text-xs font-semibold text-slate-900">
-                    {formatDate(anchorForDateKey(key), { weekday: "short" })}
-                  </p>
-                  <p className="text-[11px] text-slate-400">
-                    {formatDate(anchorForDateKey(key), { day: "numeric", month: "short" })}
-                  </p>
-                </div>
-              ))}
+          <>
+            <p className="text-xs text-slate-400 mb-3">
+              Press and hold a job, then drag it onto another technician and/or another day to reassign and/or reschedule it.
+            </p>
 
-              <div className="bg-white p-2 flex items-center gap-2 min-w-0">
-                <div className="w-6 h-6 rounded-full bg-amber-100 flex items-center justify-center flex-shrink-0">
-                  <span className="text-[10px] font-bold text-amber-700">!</span>
-                </div>
-                <span className="text-xs font-medium text-slate-700 truncate">Unassigned</span>
-              </div>
-              {weekKeys.map((key) => (
-                <div key={key} className={cn("bg-white p-1.5 space-y-1 min-h-[64px]", key === todayKey && "bg-blue-50/40")}>
-                  {(unassignedByDay.get(key) ?? []).map((job) => (
-                    <WeekJobChip key={job.id} job={job} />
-                  ))}
-                </div>
-              ))}
-
-              {sortedStaff.map((member) => (
-                <Fragment key={member.id}>
-                  <div className="bg-white p-2 flex items-center gap-2 min-w-0">
-                    <Avatar className="w-6 h-6 flex-shrink-0">
-                      <AvatarFallback className={`text-white text-[10px] ${accentFor(member.id)}`}>
-                        {initials(member.full_name)}
-                      </AvatarFallback>
-                    </Avatar>
-                    <span className="text-xs font-medium text-slate-700 truncate">{member.full_name}</span>
-                  </div>
+            <DndContext sensors={sensors} collisionDetection={closestCenter} onDragStart={handleDragStart} onDragEnd={handleWeekDragEnd}>
+              <div className="overflow-x-auto pb-2">
+                <div
+                  className="grid min-w-[960px] rounded-xl border border-slate-200 bg-slate-200 gap-px overflow-hidden"
+                  style={{ gridTemplateColumns: "160px repeat(7, minmax(120px, 1fr))" }}
+                >
+                  <div className="bg-white p-2" />
                   {weekKeys.map((key) => (
-                    <div key={key} className={cn("bg-white p-1.5 space-y-1 min-h-[64px]", key === todayKey && "bg-blue-50/40")}>
-                      {(jobsByStaffByDay.get(member.id)?.get(key) ?? []).map((job) => (
-                        <WeekJobChip key={job.id} job={job} />
-                      ))}
+                    <div key={key} className={cn("bg-white p-2 text-center", key === todayKey && "bg-blue-50")}>
+                      <p className="text-xs font-semibold text-slate-900">
+                        {formatDate(anchorForDateKey(key), { weekday: "short" })}
+                      </p>
+                      <p className="text-[11px] text-slate-400">
+                        {formatDate(anchorForDateKey(key), { day: "numeric", month: "short" })}
+                      </p>
                     </div>
                   ))}
-                </Fragment>
-              ))}
-            </div>
 
-            {sortedStaff.length === 0 && (
-              <p className="text-slate-400 text-sm py-4">No active staff found.</p>
-            )}
-          </div>
+                  <div className="bg-white p-2 flex items-center gap-2 min-w-0">
+                    <div className="w-6 h-6 rounded-full bg-amber-100 flex items-center justify-center flex-shrink-0">
+                      <span className="text-[10px] font-bold text-amber-700">!</span>
+                    </div>
+                    <span className="text-xs font-medium text-slate-700 truncate">Unassigned</span>
+                  </div>
+                  {weekKeys.map((key) => (
+                    <DroppableWeekCell key={key} id={weekCellId(UNASSIGNED_COLUMN_ID, key)} isToday={key === todayKey}>
+                      {(unassignedByDay.get(key) ?? []).map((job) => (
+                        <DraggableWeekJobChip key={job.id} job={job} />
+                      ))}
+                    </DroppableWeekCell>
+                  ))}
+
+                  {sortedStaff.map((member) => (
+                    <Fragment key={member.id}>
+                      <div className="bg-white p-2 flex items-center gap-2 min-w-0">
+                        <Avatar className="w-6 h-6 flex-shrink-0">
+                          <AvatarFallback className={`text-white text-[10px] ${accentFor(member.id)}`}>
+                            {initials(member.full_name)}
+                          </AvatarFallback>
+                        </Avatar>
+                        <span className="text-xs font-medium text-slate-700 truncate">{member.full_name}</span>
+                      </div>
+                      {weekKeys.map((key) => (
+                        <DroppableWeekCell
+                          key={key}
+                          id={weekCellId(`${STAFF_COLUMN_PREFIX}${member.id}`, key)}
+                          isToday={key === todayKey}
+                        >
+                          {(jobsByStaffByDay.get(member.id)?.get(key) ?? []).map((job) => (
+                            <DraggableWeekJobChip key={job.id} job={job} />
+                          ))}
+                        </DroppableWeekCell>
+                      ))}
+                    </Fragment>
+                  ))}
+                </div>
+
+                {sortedStaff.length === 0 && (
+                  <p className="text-slate-400 text-sm py-4">No active staff found.</p>
+                )}
+              </div>
+
+              <DragOverlay>
+                {activeJob ? (
+                  <div className="w-48 shadow-lg rounded-lg rotate-1 bg-white">
+                    <WeekJobChip job={activeJob} />
+                  </div>
+                ) : null}
+              </DragOverlay>
+            </DndContext>
+          </>
         )}
       </TabsContent>
 
