@@ -8,7 +8,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Truck, Plus, DollarSign } from "lucide-react";
+import { Truck, Plus, DollarSign, ChevronRight } from "lucide-react";
+import Link from "next/link";
 import { EquipmentCostDialog } from "@/components/fleet/equipment-cost-dialog";
 import { computeEquipmentCost, EQUIPMENT_CATEGORY_LABELS } from "@/lib/equipment-cost";
 import { ListPageSkeleton } from "@/components/ui/loading-skeletons";
@@ -176,14 +177,14 @@ export default function FleetPage() {
                 const { costPerHour, annualTotalCost } = computeEquipmentCost(item);
                 const assignedStaff = staff.find((s) => s.id === item.assigned_to);
                 return (
-                  <div key={item.id} className="flex items-center justify-between px-6 py-4">
-                    <div className="flex items-center gap-4">
-                      <div className="w-10 h-10 rounded-full bg-slate-100 flex items-center justify-center text-slate-500">
+                  <div key={item.id} className="flex items-center justify-between px-6 py-4 gap-4">
+                    <Link href={`/dashboard/fleet/${item.id}`} className="flex items-center gap-4 group flex-1 min-w-0">
+                      <div className="w-10 h-10 rounded-full bg-slate-100 flex items-center justify-center text-slate-500 flex-shrink-0">
                         <Truck className="w-5 h-5" />
                       </div>
-                      <div>
+                      <div className="min-w-0">
                         <div className="flex items-center gap-2">
-                          <p className="font-medium text-sm text-slate-900">{item.name}</p>
+                          <p className="font-medium text-sm text-slate-900 group-hover:text-blue-600 transition-colors">{item.name}</p>
                           {!item.is_active && <span className="text-xs text-slate-400">(inactive)</span>}
                         </div>
                         <div className="flex items-center gap-3 mt-0.5">
@@ -195,27 +196,25 @@ export default function FleetPage() {
                             ${costPerHour.toFixed(2)}/hr · ${annualTotalCost.toLocaleString("en-AU", { maximumFractionDigits: 0 })}/yr
                           </span>
                         </div>
-                        <div className="mt-1">
-                          {isAdmin ? (
-                            <Select
-                              value={item.assigned_to || UNASSIGNED_VALUE}
-                              onValueChange={(v) => assignTo(item.id, v as string)}
-                            >
-                              <SelectTrigger className="h-6 text-xs w-[180px]"><SelectValue placeholder="Unassigned" /></SelectTrigger>
-                              <SelectContent>
-                                <SelectItem value={UNASSIGNED_VALUE}>Unassigned</SelectItem>
-                                {staff.map((s) => <SelectItem key={s.id} value={s.id}>{s.full_name}</SelectItem>)}
-                              </SelectContent>
-                            </Select>
-                          ) : (
-                            <span className="text-xs text-slate-400">
-                              {assignedStaff ? `Assigned to ${assignedStaff.full_name}` : "Unassigned"}
-                            </span>
-                          )}
-                        </div>
                       </div>
-                    </div>
-                    <div className="flex items-center gap-3">
+                    </Link>
+                    <div className="flex items-center gap-3 flex-shrink-0">
+                      {isAdmin ? (
+                        <Select
+                          value={item.assigned_to || UNASSIGNED_VALUE}
+                          onValueChange={(v) => assignTo(item.id, v as string)}
+                        >
+                          <SelectTrigger className="h-6 text-xs w-[180px]"><SelectValue placeholder="Unassigned" /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value={UNASSIGNED_VALUE}>Unassigned</SelectItem>
+                            {staff.map((s) => <SelectItem key={s.id} value={s.id}>{s.full_name}</SelectItem>)}
+                          </SelectContent>
+                        </Select>
+                      ) : (
+                        <span className="text-xs text-slate-400 hidden sm:inline">
+                          {assignedStaff ? `Assigned to ${assignedStaff.full_name}` : "Unassigned"}
+                        </span>
+                      )}
                       <Button
                         variant="ghost" size="sm"
                         className="text-xs h-7 gap-1 text-slate-400 hover:text-green-700"
@@ -232,6 +231,9 @@ export default function FleetPage() {
                           {item.is_active ? "Deactivate" : "Reactivate"}
                         </Button>
                       )}
+                      <Link href={`/dashboard/fleet/${item.id}`} className="text-slate-300 hover:text-blue-600 transition-colors">
+                        <ChevronRight className="w-4 h-4" />
+                      </Link>
                     </div>
                   </div>
                 );
