@@ -14,11 +14,16 @@ import { ArrowLeft } from "lucide-react";
 import Link from "next/link";
 import { fromBusinessInputValue, toBusinessInputValue } from "@/lib/date";
 import { CustomerPicker } from "@/components/customer-picker";
+import { AddSiteDialog } from "@/components/site-add-dialog";
 
 // Radix/shadcn's SelectItem can't take value="", so an explicit "Unassigned"
 // option needs a sentinel value that gets translated back to "" (-> null on
 // save) instead of colliding with a real staff id.
 const UNASSIGNED_VALUE = "__unassigned__";
+// Sentinel picked from the Site dropdown itself to open the "Add New Site"
+// dialog inline, instead of making staff go create the site somewhere else
+// first (there was previously nowhere else to create one at all).
+const ADD_NEW_SITE_VALUE = "__add_new_site__";
 
 export default function NewJobPage() {
   const router = useRouter();
@@ -26,6 +31,7 @@ export default function NewJobPage() {
   const [loading, setLoading] = useState(false);
   const [staff, setStaff] = useState<any[]>([]);
   const [sites, setSites] = useState<any[]>([]);
+  const [addSiteOpen, setAddSiteOpen] = useState(false);
 
   // Lets links like the Customer detail page's "+ Add Job" button
   // (/dashboard/jobs/new?customer_id=...) preselect the customer instead of
@@ -117,9 +123,17 @@ export default function NewJobPage() {
               </div>
               <div className="space-y-2">
                 <Label>Site</Label>
-                <Select value={form.site_id} onValueChange={(v) => set("site_id", v as string)} disabled={!form.customer_id}>
+                <Select
+                  value={form.site_id}
+                  onValueChange={(v) => {
+                    if (v === ADD_NEW_SITE_VALUE) { setAddSiteOpen(true); return; }
+                    set("site_id", v as string);
+                  }}
+                  disabled={!form.customer_id}
+                >
                   <SelectTrigger><SelectValue placeholder={form.customer_id ? "Select site" : "Select customer first"} /></SelectTrigger>
                   <SelectContent>
+                    <SelectItem value={ADD_NEW_SITE_VALUE}>+ Add new site</SelectItem>
                     {sites.map((s) => <SelectItem key={s.id} value={s.id}>{s.name} — {s.suburb}</SelectItem>)}
                   </SelectContent>
                 </Select>
@@ -205,6 +219,16 @@ export default function NewJobPage() {
           <Button type="submit" disabled={loading}>{loading ? "Saving..." : "Create Job"}</Button>
         </div>
       </form>
+
+      <AddSiteDialog
+        customerId={form.customer_id}
+        open={addSiteOpen}
+        onOpenChange={setAddSiteOpen}
+        onCreated={(site) => {
+          setSites((prev) => [...prev, site]);
+          set("site_id", site.id);
+        }}
+      />
     </div>
   );
 }

@@ -13,6 +13,7 @@ import { Input } from "@/components/ui/input";
 import { Phone, Mail, MapPin, Calendar, User, Save, Navigation } from "lucide-react";
 import { formatDate, toBusinessInputValue, fromBusinessInputValue } from "@/lib/date";
 import { CustomerPicker } from "@/components/customer-picker";
+import { AddSiteDialog } from "@/components/site-add-dialog";
 
 interface Props {
   job: any;
@@ -25,12 +26,17 @@ interface Props {
 const UNASSIGNED_VALUE = "__unassigned__";
 // Same trick for "no site selected" — a job can exist without a site.
 const NO_SITE_VALUE = "__no_site__";
+// Sentinel picked from the Site dropdown itself to open the "Add New Site"
+// dialog inline, so a wrong/missing site can be fixed here without a trip to
+// the Customer page — same pattern used on the New Job form.
+const ADD_NEW_SITE_VALUE = "__add_new_site__";
 
 export function JobOverview({ job, staff }: Props) {
   const router = useRouter();
   const supabase = createClient();
   const [saving, setSaving] = useState(false);
   const [sites, setSites] = useState<any[]>([]);
+  const [addSiteOpen, setAddSiteOpen] = useState(false);
   const [form, setForm] = useState({
     title: job.title ?? "",
     job_type: job.job_type ?? "service",
@@ -129,12 +135,16 @@ export function JobOverview({ job, staff }: Props) {
                 <Label>Site</Label>
                 <Select
                   value={form.site_id || NO_SITE_VALUE}
-                  onValueChange={(v) => set("site_id", v === NO_SITE_VALUE ? "" : (v as string))}
+                  onValueChange={(v) => {
+                    if (v === ADD_NEW_SITE_VALUE) { setAddSiteOpen(true); return; }
+                    set("site_id", v === NO_SITE_VALUE ? "" : (v as string));
+                  }}
                   disabled={!form.customer_id}
                 >
                   <SelectTrigger><SelectValue placeholder={form.customer_id ? "Select site" : "Select customer first"} /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value={NO_SITE_VALUE}>No site</SelectItem>
+                    <SelectItem value={ADD_NEW_SITE_VALUE}>+ Add new site</SelectItem>
                     {sites.map((s) => <SelectItem key={s.id} value={s.id}>{s.name} — {s.suburb}</SelectItem>)}
                   </SelectContent>
                 </Select>
@@ -316,6 +326,16 @@ export function JobOverview({ job, staff }: Props) {
           </CardContent>
         </Card>
       </div>
+
+      <AddSiteDialog
+        customerId={form.customer_id}
+        open={addSiteOpen}
+        onOpenChange={setAddSiteOpen}
+        onCreated={(site) => {
+          setSites((prev) => [...prev, site]);
+          set("site_id", site.id);
+        }}
+      />
     </div>
   );
 }
