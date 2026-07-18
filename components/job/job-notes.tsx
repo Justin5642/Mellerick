@@ -5,7 +5,7 @@ import { createClient } from "@/lib/supabase/client";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { MessageSquare, Send } from "lucide-react";
+import { MessageSquare, Send, Sparkles } from "lucide-react";
 import { formatDate, formatTime } from "@/lib/date";
 
 interface Props {
@@ -19,6 +19,7 @@ export function JobNotes({ jobId, notes, onUpdate, currentUserId }: Props) {
   const supabase = createClient();
   const [content, setContent] = useState("");
   const [saving, setSaving] = useState(false);
+  const [polishing, setPolishing] = useState(false);
 
   async function handleAdd() {
     if (!content.trim()) return;
@@ -35,6 +36,29 @@ export function JobNotes({ jobId, notes, onUpdate, currentUserId }: Props) {
     setSaving(false);
   }
 
+  // Sends the current draft (typically dictated via the phone's voice-to-text
+  // keyboard) to the server for AI cleanup, then drops the result back into
+  // the textarea for the tech to review/edit — it's never auto-saved, so a
+  // bad rewrite can just be edited or discarded before hitting Add.
+  async function handlePolish() {
+    if (!content.trim() || polishing) return;
+    setPolishing(true);
+    try {
+      const res = await fetch("/api/ai/polish-note", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: content }),
+      });
+      const data = await res.json();
+      if (!res.ok) { toast.error(data.error ?? "AI polish failed"); return; }
+      setContent(data.polished);
+    } catch {
+      toast.error("AI polish failed");
+    } finally {
+      setPolishing(false);
+    }
+  }
+
   function handleKeyDown(e: React.KeyboardEvent) {
     if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) handleAdd();
   }
@@ -47,19 +71,33 @@ export function JobNotes({ jobId, notes, onUpdate, currentUserId }: Props) {
       </div>
 
       {/* Add note */}
-      <div className="flex gap-2">
+      <div className="flex flex-col gap-2">
         <Textarea
           value={content}
           onChange={(e) => setContent(e.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder="Add a note... (Cmd+Enter to save)"
-          rows={2}
-          className="resize-none flex-1 text-sm"
+          placeholder="Add a note, or dictate one with your keyboard's mic then tap Polish... (Cmd+Enter to save)"
+          rows={3}
+          className="resize-none text-sm"
         />
-        <Button onClick={handleAdd} disabled={saving || !content.trim()} className="self-end gap-2 h-9">
-          <Send className="w-3.5 h-3.5" />
-          {saving ? "..." : "Add"}
-        </Button>
+        <div className="flex items-center justify-between gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={handlePolish}
+            disabled={polishing || !content.trim()}
+            className="gap-1.5 text-slate-600"
+            title="Clean up grammar and voice-to-text artifacts with AI"
+          >
+            <Sparkles className="w-3.5 h-3.5" />
+            {polishing ? "Polishing..." : "Polish with AI"}
+          </Button>
+          <Button onClick={handleAdd} disabled={saving || !content.trim()} className="gap-2 h-9">
+            <Send className="w-3.5 h-3.5" />
+            {saving ? "..." : "Add"}
+          </Button>
+        </div>
       </div>
 
       {/* Notes list */}
