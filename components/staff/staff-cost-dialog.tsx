@@ -46,6 +46,11 @@ export function StaffCostDialog({ staffId, staffName, open, onOpenChange }: Prop
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [costForm, setCostForm] = useState<StaffCostInputs>(emptyCostForm);
+  // Billing (not cost) input -- kept separate from StaffCostInputs/
+  // computeLoadedCost since it's what the customer is charged, not what
+  // this person costs the business. Empty string = no override, fall back
+  // to the company-wide flat/loaded-cost rate (see lib/labour-billing.ts).
+  const [chargeOutRate, setChargeOutRate] = useState<string>("");
   const [leaveEntries, setLeaveEntries] = useState<LeaveEntry[]>([]);
   const [leaveForm, setLeaveForm] = useState(emptyLeaveForm);
   const [addingLeave, setAddingLeave] = useState(false);
@@ -72,8 +77,10 @@ export function StaffCostDialog({ staffId, staffName, open, onOpenChange }: Prop
           annual_fixed_oncosts: Number(profile.annual_fixed_oncosts),
           target_hours_per_week: Number(profile.target_hours_per_week),
         });
+        setChargeOutRate(profile.charge_out_rate != null ? String(profile.charge_out_rate) : "");
       } else {
         setCostForm(emptyCostForm);
+        setChargeOutRate("");
       }
       setLeaveEntries((leave as any) ?? []);
       setAssignedVehicles(
@@ -96,6 +103,7 @@ export function StaffCostDialog({ staffId, staffName, open, onOpenChange }: Prop
     const { error } = await supabase.from("staff_cost_profiles").upsert({
       staff_id: staffId,
       ...costForm,
+      charge_out_rate: chargeOutRate === "" ? null : parseFloat(chargeOutRate),
       updated_at: new Date().toISOString(),
       updated_by: user?.id ?? null,
     });
@@ -168,6 +176,20 @@ export function StaffCostDialog({ staffId, staffName, open, onOpenChange }: Prop
             </TabsList>
 
             <TabsContent value="cost" className="space-y-4 pt-3">
+              <div className="rounded-lg bg-amber-50 border border-amber-200 p-3 space-y-1.5">
+                <Label>Charge Out Rate ($/hr)</Label>
+                <Input
+                  type="number"
+                  step="0.01"
+                  placeholder="Company default"
+                  value={chargeOutRate}
+                  onChange={(e) => setChargeOutRate(e.target.value)}
+                />
+                <p className="text-xs text-amber-700">
+                  What customers are billed for this person&apos;s ordinary hours -- overrides the company flat rate (or, for apprentices, their loaded cost rate + margin). Leave blank to use the company default. Overtime multipliers still apply on top. See Settings for the company-wide default rate.
+                </p>
+              </div>
+
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1.5">
                   <Label>Hourly Rate ($)</Label>

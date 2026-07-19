@@ -20,6 +20,7 @@ interface TimeEntry {
   entry_type?: "work" | "travel";
   cost_center_id: string | null;
   edited_at?: string | null;
+  rate_override?: "normal" | "time_and_half" | "double_time" | null;
   profiles: { full_name: string };
 }
 
@@ -42,6 +43,7 @@ interface Props {
   timeEntries: TimeEntry[];
   pos: PO[];
   costCenters: CostCenterOption[];
+  isAdmin?: boolean;
   onUpdate: (entries: TimeEntry[]) => void;
 }
 
@@ -63,7 +65,16 @@ function formatDate(iso: string) {
   return new Date(iso).toLocaleDateString("en-AU", { weekday: "short", day: "numeric", month: "short", timeZone: BUSINESS_TIME_ZONE });
 }
 
-export function JobTime({ jobId, currentUserId, timeEntries: initial, pos, costCenters, onUpdate }: Props) {
+// Fire-and-forget: regenerates the job's auto-generated labour line item
+// (see app/api/time-entries/[id]/sync-billing/route.ts) right after any
+// write to a time_entries row -- same "insert/update then fetch(/api/...)"
+// pattern already used for a job's Google Calendar sync. The web session
+// cookie rides along automatically since this is a same-origin fetch.
+function syncBilling(entryId: string) {
+  fetch(`/api/time-entries/${entryId}/sync-billing`, { method: "POST" }).catch(() => {});
+}
+
+export function JobTime({ jobId, currentUserId, timeEntries: initial, pos, costCenters, isAdmin, onUpdate }: Props) {
   const supabase = createClient();
   const [entries, setEntries] = useState<TimeEntry[]>(initial);
   const [loading, setLoading] = useState(false);
@@ -141,6 +152,7 @@ export function JobTime({ jobId, currentUserId, timeEntries: initial, pos, costC
             if (data) {
               setEntries(e => [data as TimeEntry, ...e]);
               toast.success("On site — clocked in automatically");
+              syncBilling(data.id);
             }
           }
         } else {
@@ -164,6 +176,7 @@ export function JobTime({ jobId, currentUserId, timeEntries: initial, pos, costC
             if (data) {
               setEntries(e => e.map(en => en.id === open.id ? data as TimeEntry : en));
               toast.success("Left site — clocked out automatically");
+              syncBilling(data.id);
             }
           }
         }
@@ -186,6 +199,7 @@ export function JobTime({ jobId, currentUserId, timeEntries: initial, pos, costC
     if (data) {
       setEntries(e => [data as TimeEntry, ...e]);
       toast.success("Clocked in");
+      syncBilling(data.id);
     }
     setLoading(false);
   }
@@ -204,6 +218,7 @@ export function JobTime({ jobId, currentUserId, timeEntries: initial, pos, costC
     if (data) {
       setEntries(e => e.map(en => en.id === myOpenEntry.id ? data as TimeEntry : en));
       toast.success("Clocked out");
+      syncBilling(data.id);
     }
     setLoading(false);
   }
@@ -350,6 +365,7 @@ export function JobTime({ jobId, currentUserId, timeEntries: initial, pos, costC
         currentUserId={currentUserId}
         entry={editDialog?.entry}
         costCenters={costCenters}
+        isAdmin={isAdmin}
         onSaved={(saved) => {
           setEntries((prev) => {
             const exists = prev.some((e) => e.id === saved.id);

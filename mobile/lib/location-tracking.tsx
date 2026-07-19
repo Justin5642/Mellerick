@@ -13,6 +13,26 @@ const GEOFENCE_RADIUS_METERS = 150;
 // than genuine drive time between two jobs.
 const MAX_PLAUSIBLE_TRAVEL_HOURS = 3;
 
+const API_BASE_URL = process.env.EXPO_PUBLIC_API_BASE_URL;
+
+// Fire-and-forget: regenerates the job's auto-generated labour line item
+// (see app/api/time-entries/[id]/sync-billing/route.ts) right after this
+// geofence watcher writes a time_entries row -- mirrors the same call in
+// mobile/components/job/time.tsx's manual clock in/out UI. Needs the Bearer
+// token (no web session cookie here) since job_items writes are Admin-only
+// RLS and the route authenticates the caller itself.
+function syncBilling(entryId: string) {
+  if (!API_BASE_URL) return;
+  supabase.auth.getSession().then(({ data }) => {
+    const token = data.session?.access_token;
+    if (!token) return;
+    fetch(`${API_BASE_URL}/api/time-entries/${entryId}/sync-billing`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}` },
+    }).catch(() => {});
+  });
+}
+
 interface TrackedSite {
   jobId: string;
   lat: number;
@@ -145,13 +165,18 @@ export function LocationTrackingProvider({ children }: { children: ReactNode }) 
       .maybeSingle();
 
     if (!openEntry) {
-      await supabase.from("time_entries").insert({
-        job_id: jobId,
-        staff_id: staffId,
-        clock_in: arrivalTime,
-        auto_clocked: true,
-        entry_type: "work",
-      });
+      const { data } = await supabase
+        .from("time_entries")
+        .insert({
+          job_id: jobId,
+          staff_id: staffId,
+          clock_in: arrivalTime,
+          auto_clocked: true,
+          entry_type: "work",
+        })
+        .select("id")
+        .single();
+      if (data) syncBilling(data.id);
     }
 
     const departure = departureRef.current;
@@ -188,6 +213,7 @@ export function LocationTrackingProvider({ children }: { children: ReactNode }) 
     if (openEntry) {
       const hours = Math.round(((new Date(departTime).getTime() - new Date(openEntry.clock_in).getTime()) / 3600000) * 100) / 100;
       await supabase.from("time_entries").update({ clock_out: departTime, hours }).eq("id", openEntry.id);
+      syncBilling(openEntry.id);
     }
 
     departureRef.current = { time: departTime, jobId };

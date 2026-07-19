@@ -3,7 +3,7 @@ import { createClient } from "@supabase/supabase-js";
 import { createClient as createServerClient } from "@/lib/supabase/server";
 import { computeLoadedCost } from "@/lib/staff-cost";
 import { computeEquipmentCost, type EquipmentCostInputs } from "@/lib/equipment-cost";
-import { splitHoursByBand, computeLabourCharge, DEFAULT_LABOUR_RATE_CONFIG, type LabourRateConfig } from "@/lib/labour-billing";
+import { splitHoursByBand, computeLabourCharge, applyRateOverride, DEFAULT_LABOUR_RATE_CONFIG, type LabourRateConfig } from "@/lib/labour-billing";
 
 // Regenerates a job's auto-generated labour line item (and, on the first
 // work entry logged, its one-off call-out fee) from a single time_entries
@@ -38,12 +38,17 @@ async function getAuthenticatedUserId(request: NextRequest) {
   return user?.id ?? null;
 }
 
-function describeBreakdown(breakdown: ReturnType<typeof splitHoursByBand>, charge: ReturnType<typeof computeLabourCharge>) {
+function describeBreakdown(breakdown: ReturnType<typeof splitHoursByBand>, charge: ReturnType<typeof computeLabourCharge>, overridden: boolean) {
   const parts: string[] = [];
   if (breakdown.normalHours > 0) parts.push(`${breakdown.normalHours.toFixed(2)}h @ $${charge.ordinaryHourlyRate.toFixed(2)}/hr`);
   if (breakdown.timeAndHalfHours > 0) parts.push(`${breakdown.timeAndHalfHours.toFixed(2)}h @ $${charge.timeAndHalfHourlyRate.toFixed(2)}/hr (1.5x)`);
   if (breakdown.doubleTimeHours > 0) parts.push(`${breakdown.doubleTimeHours.toFixed(2)}h @ $${charge.doubleTimeHourlyRate.toFixed(2)}/hr (2x)`);
-  return parts.join(" + ") || "0h";
+  const description = parts.join(" + ") || "0h";
+  // Flag on the invoice-facing line item itself when an Admin has overridden
+  // the auto-detected band (see lib/labour-billing.ts's applyRateOverride),
+  // so it's obvious later why this doesn't match the entry's clock in/out
+  // times at a glance.
+  return overridden ? `${description} (rate manually overridden)` : description;
 }
 
 export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -56,7 +61,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
 
   const { data: entry, error: entryError } = await admin
     .from("time_entries")
-    .select("id, job_id, staff_id, clock_in, clock_out, hours, entry_type")
+    .select("id, job_id, staff_id, clock_in, clock_out, hours, entry_type, rate_override")
     .eq("id", timeEntryId)
     .maybeSingle();
 
@@ -75,7 +80,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   const [{ data: costProfile }, { data: rateConfigRow }] = await Promise.all([
     admin
       .from("staff_cost_profiles")
-      .select("staff_id, hourly_rate, super_rate, workers_comp_rate, leave_loading_rate, annual_fixed_oncosts, target_hours_per_week, trade_level")
+      .select("staff_id, hourly_rate, super_rate, workers_comp_rate, leave_loading_rate, annual_fixed_oncosts, target_hours_per_week, trade_level, charge_out_rate")
       .eq("staff_id", entry.staff_id)
       .maybeSingle(),
     admin.from("billing_rate_config").select("*").eq("id", true).maybeSingle(),
@@ -116,8 +121,9 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     }).loadedHourlyRate;
   }
 
-  const breakdown = splitHoursByBand(entry.clock_in, entry.clock_out);
-  const charge = computeLabourCharge({ tradeLevel, breakdown, rateConfig, loadedHourlyCost });
+  const breakdown = applyRateOverride(splitHoursByBand(entry.clock_in, entry.clock_out), entry.rate_override);
+  const staffChargeOutRate = costProfile?.charge_out_rate != null ? Number(costProfile.charge_out_rate) : null;
+  const charge = computeLabourCharge({ tradeLevel, breakdown, rateConfig, loadedHourlyCost, staffChargeOutRate });
   const unitPrice = breakdown.totalHours > 0 ? charge.totalCharge / breakdown.totalHours : 0;
 
   const { data: existingItem } = await admin.from("job_items").select("id").eq("time_entry_id", timeEntryId).maybeSingle();
@@ -128,7 +134,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     staff_id: entry.staff_id,
     source: "auto_labour" as const,
     name: "Labour",
-    description: describeBreakdown(breakdown, charge),
+    description: describeBreakdown(breakdown, charge, !!entry.rate_override),
     quantity: Number(breakdown.totalHours.toFixed(2)),
     unit_price: Number(unitPrice.toFixed(2)),
   };

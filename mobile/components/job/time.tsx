@@ -5,6 +5,8 @@ import { Ionicons } from "@expo/vector-icons";
 import { supabase } from "../../lib/supabase";
 import { colors } from "../../lib/theme";
 
+const API_BASE_URL = process.env.EXPO_PUBLIC_API_BASE_URL;
+
 interface TimeEntry {
   id: string;
   staff_id: string;
@@ -47,6 +49,23 @@ function formatDateTime(d: Date) {
     month: "short",
     hour: "2-digit",
     minute: "2-digit",
+  });
+}
+
+// Fire-and-forget: regenerates the job's auto-generated labour line item
+// (see app/api/time-entries/[id]/sync-billing/route.ts) right after any
+// write to a time_entries row -- mirrors the web app's same pattern. Unlike
+// the web dashboard there's no session cookie here, so the route's Bearer-
+// token auth path is used instead (see that route's getAuthenticatedUserId).
+function syncBilling(entryId: string) {
+  if (!API_BASE_URL) return;
+  supabase.auth.getSession().then(({ data }) => {
+    const token = data.session?.access_token;
+    if (!token) return;
+    fetch(`${API_BASE_URL}/api/time-entries/${entryId}/sync-billing`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}` },
+    }).catch(() => {});
   });
 }
 
@@ -297,14 +316,19 @@ export function JobTimeTab({ jobId, currentUserId }: { jobId: string; currentUse
   async function clockIn() {
     if (myOpenEntry || loading) return;
     setLoading(true);
-    await supabase.from("time_entries").insert({
-      job_id: jobId,
-      staff_id: currentUserId,
-      clock_in: new Date().toISOString(),
-      auto_clocked: false,
-    });
+    const { data } = await supabase
+      .from("time_entries")
+      .insert({
+        job_id: jobId,
+        staff_id: currentUserId,
+        clock_in: new Date().toISOString(),
+        auto_clocked: false,
+      })
+      .select("id")
+      .single();
     await loadEntries();
     setLoading(false);
+    if (data) syncBilling(data.id);
   }
 
   async function clockOut() {
@@ -315,6 +339,7 @@ export function JobTimeTab({ jobId, currentUserId }: { jobId: string; currentUse
     await supabase.from("time_entries").update({ clock_out: clockOutTime, hours }).eq("id", myOpenEntry.id);
     await loadEntries();
     setLoading(false);
+    syncBilling(myOpenEntry.id);
   }
 
   async function assignCostCenter(entryId: string, costCenterId: string | null) {
@@ -354,19 +379,25 @@ export function JobTimeTab({ jobId, currentUserId }: { jobId: string; currentUse
       : null;
     const nowIso = new Date().toISOString();
 
+    let syncedId: string | null = editing.entryId ?? null;
     if (editing.mode === "add") {
-      await supabase.from("time_entries").insert({
-        job_id: jobId,
-        staff_id: currentUserId,
-        entry_type: editing.entryType,
-        clock_in: editing.clockIn.toISOString(),
-        clock_out: editing.clockOut ? editing.clockOut.toISOString() : null,
-        hours,
-        cost_center_id: editing.costCenterId,
-        auto_clocked: false,
-        edited_by: currentUserId,
-        edited_at: nowIso,
-      });
+      const { data } = await supabase
+        .from("time_entries")
+        .insert({
+          job_id: jobId,
+          staff_id: currentUserId,
+          entry_type: editing.entryType,
+          clock_in: editing.clockIn.toISOString(),
+          clock_out: editing.clockOut ? editing.clockOut.toISOString() : null,
+          hours,
+          cost_center_id: editing.costCenterId,
+          auto_clocked: false,
+          edited_by: currentUserId,
+          edited_at: nowIso,
+        })
+        .select("id")
+        .single();
+      syncedId = data?.id ?? null;
     } else if (editing.entryId) {
       await supabase
         .from("time_entries")
@@ -383,6 +414,7 @@ export function JobTimeTab({ jobId, currentUserId }: { jobId: string; currentUse
     setSaving(false);
     setEditing(null);
     await loadEntries();
+    if (syncedId) syncBilling(syncedId);
   }
 
   async function deleteEditing() {

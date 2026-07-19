@@ -112,6 +112,24 @@ export function splitHoursByBand(clockIn: string | Date, clockOut: string | Date
   };
 }
 
+// Admin override (time_entries.rate_override, see migration 0025): bills
+// ALL of the entry's hours at one band instead of splitting them by the
+// automatic day/time detection above -- e.g. a job scheduled on a weekend
+// purely for the business's own convenience (not a customer-requested
+// after-hours call-out) should bill at the normal rate rather than the
+// automatic Saturday/Sunday = double-time rule. No-op when override is
+// null/undefined, which is the default (auto-detect, as computed above).
+export function applyRateOverride(breakdown: HourBreakdown, override?: RateBand | null): HourBreakdown {
+  if (!override) return breakdown;
+  const { totalHours } = breakdown;
+  return {
+    normalHours: override === "normal" ? totalHours : 0,
+    timeAndHalfHours: override === "time_and_half" ? totalHours : 0,
+    doubleTimeHours: override === "double_time" ? totalHours : 0,
+    totalHours,
+  };
+}
+
 export interface LabourRateConfig {
   qualifiedBaseRate: number; // $/hr ordinary rate for a qualified tradesperson, e.g. 130
   apprenticeMarginPct: number; // e.g. 30 -> apprentice bills at 1.3x their loaded cost rate
@@ -133,8 +151,17 @@ export interface LabourChargeInputs {
   // Required when tradeLevel === "apprentice" -- their own fully-loaded
   // hourly cost (lib/staff-cost.ts's computeLoadedCost().loadedHourlyRate).
   // Ignored for qualified tradespeople, who bill at the flat base rate
-  // regardless of what they individually cost.
+  // regardless of what they individually cost -- unless staffChargeOutRate
+  // (below) is set.
   loadedHourlyCost?: number;
+  // Optional per-employee override (staff_cost_profiles.charge_out_rate,
+  // migration 0026) -- when set (> 0), this is the ordinary hourly rate
+  // charged for this person's work, taking priority over both the flat
+  // qualifiedBaseRate and the apprentice loaded-cost + margin calculation.
+  // The time-and-a-half/double-time multipliers still stack on top of it
+  // exactly as they would on top of either of those. null/undefined/0 =
+  // fall back to the existing tradeLevel-based calculation below.
+  staffChargeOutRate?: number | null;
 }
 
 export interface LabourChargeResult {
@@ -153,12 +180,17 @@ export interface LabourChargeResult {
 // apprentice bills at their own loaded cost rate plus the configured margin,
 // with the same overtime multipliers stacked on top of THAT marked-up rate
 // (mirrors how the business already treats qualified overtime -- overtime
-// is a multiplier on the normal bill rate, not a separate flat number).
-export function computeLabourCharge({ tradeLevel, breakdown, rateConfig, loadedHourlyCost }: LabourChargeInputs): LabourChargeResult {
+// is a multiplier on the normal bill rate, not a separate flat number). A
+// staffChargeOutRate (per-employee override, migration 0026) takes priority
+// over both of those when set, e.g. so a senior tradesperson can bill out
+// higher than a newer one instead of everyone qualified sharing one rate.
+export function computeLabourCharge({ tradeLevel, breakdown, rateConfig, loadedHourlyCost, staffChargeOutRate }: LabourChargeInputs): LabourChargeResult {
   const ordinaryHourlyRate =
-    tradeLevel === "qualified"
-      ? rateConfig.qualifiedBaseRate
-      : Number(loadedHourlyCost || 0) * (1 + rateConfig.apprenticeMarginPct / 100);
+    staffChargeOutRate && staffChargeOutRate > 0
+      ? staffChargeOutRate
+      : tradeLevel === "qualified"
+        ? rateConfig.qualifiedBaseRate
+        : Number(loadedHourlyCost || 0) * (1 + rateConfig.apprenticeMarginPct / 100);
 
   const timeAndHalfHourlyRate = ordinaryHourlyRate * rateConfig.timeAndHalfMultiplier;
   const doubleTimeHourlyRate = ordinaryHourlyRate * rateConfig.doubleTimeMultiplier;

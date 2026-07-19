@@ -9,6 +9,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
+type RateOverride = "normal" | "time_and_half" | "double_time";
+
 interface TimeEntry {
   id: string;
   staff_id: string;
@@ -19,6 +21,7 @@ interface TimeEntry {
   entry_type?: "work" | "travel";
   cost_center_id: string | null;
   edited_at?: string | null;
+  rate_override?: RateOverride | null;
   profiles: { full_name: string };
 }
 
@@ -37,9 +40,19 @@ interface Props {
   currentUserId: string;
   entry?: TimeEntry;
   costCenters: CostCenterOption[];
+  // Gates the manual billing-rate override control below -- only Admins
+  // can set it (time_entries.rate_override is DB-enforced Admin-only via a
+  // trigger, see migration 0025, so this is just keeping the UI in sync
+  // with what would actually be allowed to save).
+  isAdmin?: boolean;
   onSaved: (entry: TimeEntry) => void;
   onDeleted?: (id: string) => void;
 }
+
+// Sentinel for the Select control -- Radix/shadcn's SelectItem can't take
+// value="", and "auto" reads better than an empty option anyway (mirrors
+// the UNASSIGNED_VALUE pattern used for the cost-center picker).
+const AUTO_RATE_VALUE = "auto";
 
 // datetime-local inputs work in local time with no timezone suffix, so we
 // need to format/parse against local time components rather than ISO/UTC.
@@ -49,13 +62,14 @@ function toLocalInputValue(iso: string) {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
-export function TimeEntryEditDialog({ open, onOpenChange, mode, jobId, currentUserId, entry, costCenters, onSaved, onDeleted }: Props) {
+export function TimeEntryEditDialog({ open, onOpenChange, mode, jobId, currentUserId, entry, costCenters, isAdmin, onSaved, onDeleted }: Props) {
   const supabase = createClient();
   const [entryType, setEntryType] = useState<"work" | "travel">("work");
   const [clockIn, setClockIn] = useState("");
   const [clockOut, setClockOut] = useState("");
   const [stillOpen, setStillOpen] = useState(false);
   const [costCenterId, setCostCenterId] = useState<string>("none");
+  const [rateOverride, setRateOverride] = useState<string>(AUTO_RATE_VALUE);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
@@ -66,6 +80,7 @@ export function TimeEntryEditDialog({ open, onOpenChange, mode, jobId, currentUs
       setClockOut(entry.clock_out ? toLocalInputValue(entry.clock_out) : "");
       setStillOpen(!entry.clock_out);
       setCostCenterId(entry.cost_center_id ?? "none");
+      setRateOverride(entry.rate_override ?? AUTO_RATE_VALUE);
     } else {
       const now = toLocalInputValue(new Date().toISOString());
       setEntryType("work");
@@ -73,6 +88,7 @@ export function TimeEntryEditDialog({ open, onOpenChange, mode, jobId, currentUs
       setClockOut(now);
       setStillOpen(false);
       setCostCenterId("none");
+      setRateOverride(AUTO_RATE_VALUE);
     }
   }, [open, mode, entry]);
 
@@ -98,6 +114,11 @@ export function TimeEntryEditDialog({ open, onOpenChange, mode, jobId, currentUs
       cost_center_id: entryType === "travel" ? null : costCenterId === "none" ? null : costCenterId,
       edited_by: currentUserId,
       edited_at: nowIso,
+      // Non-admins never send this field at all (rather than sending null),
+      // so the request can't clobber whatever an Admin already set -- the
+      // DB trigger from migration 0025 would revert it anyway, but there's
+      // no reason to rely on that as the only line of defence.
+      ...(isAdmin ? { rate_override: rateOverride === AUTO_RATE_VALUE ? null : rateOverride } : {}),
     };
 
     if (mode === "add") {
@@ -116,6 +137,9 @@ export function TimeEntryEditDialog({ open, onOpenChange, mode, jobId, currentUs
       toast.success("Manual entry added");
       onSaved(data as TimeEntry);
       onOpenChange(false);
+      // Fire-and-forget: regenerates the job's auto labour line item from
+      // this entry (see app/api/time-entries/[id]/sync-billing/route.ts).
+      fetch(`/api/time-entries/${data.id}/sync-billing`, { method: "POST" }).catch(() => {});
     } else if (entry) {
       const { data, error } = await supabase
         .from("time_entries")
@@ -131,6 +155,7 @@ export function TimeEntryEditDialog({ open, onOpenChange, mode, jobId, currentUs
       toast.success("Entry updated");
       onSaved(data as TimeEntry);
       onOpenChange(false);
+      fetch(`/api/time-entries/${data.id}/sync-billing`, { method: "POST" }).catch(() => {});
     }
   }
 
@@ -209,6 +234,24 @@ export function TimeEntryEditDialog({ open, onOpenChange, mode, jobId, currentUs
                   ))}
                 </SelectContent>
               </Select>
+            </div>
+          )}
+
+          {entryType !== "travel" && isAdmin && (
+            <div className="space-y-1.5">
+              <Label>Billing Rate</Label>
+              <Select value={rateOverride} onValueChange={(v) => setRateOverride(v ?? AUTO_RATE_VALUE)}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={AUTO_RATE_VALUE}>Auto-detected (normal/overtime by day &amp; time)</SelectItem>
+                  <SelectItem value="normal">Normal rate</SelectItem>
+                  <SelectItem value="time_and_half">Time and a half</SelectItem>
+                  <SelectItem value="double_time">Double time</SelectItem>
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-slate-400">
+                Overrides the automatic weekday/weekend detection -- e.g. use &quot;Normal rate&quot; for a job scheduled on a weekend for convenience rather than a genuine after-hours call-out.
+              </p>
             </div>
           )}
 
