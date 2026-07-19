@@ -10,12 +10,18 @@ import { pollGoogleCalendarChanges } from "@/lib/google";
 // automatically sends "Authorization: Bearer <CRON_SECRET>" on its own
 // cron requests once that env var is set on the project.
 export async function GET(request: NextRequest) {
+  // Fail CLOSED: if CRON_SECRET isn't configured we must refuse, not run.
+  // The old `if (cronSecret)` guard meant a missing/typo'd env var silently
+  // skipped auth entirely, leaving this service-role endpoint publicly
+  // callable against Google Calendar data.
   const cronSecret = process.env.CRON_SECRET;
-  if (cronSecret) {
-    const auth = request.headers.get("authorization");
-    if (auth !== `Bearer ${cronSecret}`) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+  if (!cronSecret) {
+    console.error("CRON_SECRET is not configured — refusing to run poll-calendar");
+    return NextResponse.json({ error: "Server misconfigured" }, { status: 500 });
+  }
+  const auth = request.headers.get("authorization");
+  if (auth !== `Bearer ${cronSecret}`) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
   const supabase = createServiceClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!, {

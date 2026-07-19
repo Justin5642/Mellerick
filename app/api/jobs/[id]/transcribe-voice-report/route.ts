@@ -52,6 +52,16 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     return NextResponse.json({ error: "storagePath is required" }, { status: 400 });
   }
 
+  // The download below runs under the service-role key, which bypasses the
+  // private job-audio bucket's RLS entirely -- so a client-supplied path
+  // must be pinned to THIS job, or a caller could pass any path and read any
+  // file in the bucket. The recorder always uploads to `${jobId}/...` (see
+  // mobile/components/job/voice-report.tsx), so require that prefix and
+  // reject any parent-directory traversal.
+  if (!storagePath.startsWith(`${id}/`) || storagePath.includes("..")) {
+    return NextResponse.json({ error: "storagePath does not belong to this job" }, { status: 403 });
+  }
+
   const supabase = getAdminClient();
 
   try {
