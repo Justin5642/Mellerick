@@ -5,6 +5,7 @@ import {
   StyleSheet,
   TouchableOpacity,
   Image,
+  ImageBackground,
   FlatList,
   Alert,
   ActionSheetIOS,
@@ -272,19 +273,31 @@ export function JobPhotosTab({
         <View style={styles.previewScreen}>
           {pending && (
             <ViewShot ref={shotRef} options={{ format: "jpg", quality: 0.85 }} style={styles.shotWrap}>
-              <Image source={{ uri: pending.uri }} style={styles.previewImage} resizeMode="cover" />
-              <View style={styles.watermarkTag}>
-                <Text style={styles.watermarkTagText}>{COMPANY_NAME}</Text>
-              </View>
-              <View style={styles.stampBar}>
-                <Text style={styles.stampTime}>{formatTimestamp(pending.capturedAt)}</Text>
-                {!!jobRefLine && <Text style={styles.stampMeta}>{jobRefLine}</Text>}
-                {pending.coords && (
-                  <Text style={styles.stampMeta}>
-                    {pending.coords.lat.toFixed(5)}, {pending.coords.lng.toFixed(5)}
-                  </Text>
-                )}
-              </View>
+              {/* Overlays are children of ImageBackground (not siblings layered
+                  over a native <Image>) so react-native-view-shot flattens them
+                  into the same node it snapshots. On the New Architecture
+                  (default in Expo SDK 54) absolutely-positioned siblings over an
+                  <Image> get dropped from the capture; collapsable={false} keeps
+                  Fabric from folding the overlay views out of the tree. */}
+              <ImageBackground
+                source={{ uri: pending.uri }}
+                style={styles.previewImage}
+                resizeMode="cover"
+                collapsable={false}
+              >
+                <View style={styles.watermarkTag} collapsable={false}>
+                  <Text style={styles.watermarkTagText}>{COMPANY_NAME}</Text>
+                </View>
+                <View style={styles.stampBar} collapsable={false}>
+                  <Text style={styles.stampTime}>{formatTimestamp(pending.capturedAt)}</Text>
+                  {!!jobRefLine && <Text style={styles.stampMeta}>{jobRefLine}</Text>}
+                  {pending.coords && (
+                    <Text style={styles.stampMeta}>
+                      {pending.coords.lat.toFixed(5)}, {pending.coords.lng.toFixed(5)}
+                    </Text>
+                  )}
+                </View>
+              </ImageBackground>
             </ViewShot>
           )}
 
