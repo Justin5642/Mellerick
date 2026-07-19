@@ -16,11 +16,12 @@ import {
   DialogFooter,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import { ArrowLeft, Send, CheckCircle2, ExternalLink, Pencil, FileDown } from "lucide-react";
+import { ArrowLeft, Send, CheckCircle2, ExternalLink, Pencil, FileDown, Trash2 } from "lucide-react";
 import Link from "next/link";
 import { formatDate } from "@/lib/date";
 import { formatInvoiceNumber } from "@/lib/utils";
 import { invoiceStatusColors } from "@/lib/badge-colors";
+import { DeleteInvoiceDialog } from "./delete-invoice-dialog";
 
 interface Props {
   invoice: any;
@@ -35,6 +36,7 @@ export function InvoiceDetail({ invoice, xeroConnected }: Props) {
   const [sendTo, setSendTo] = useState(invoice.customers?.email ?? "");
   const [sendMessage, setSendMessage] = useState("");
   const [status, setStatus] = useState(invoice.status);
+  const [deleteOpen, setDeleteOpen] = useState(false);
 
   async function sendInvoice() {
     if (!sendTo.trim()) {
@@ -158,8 +160,26 @@ export function InvoiceDetail({ invoice, xeroConnected }: Props) {
               </Button>
             </Link>
           ) : null}
+
+          <Button
+            variant="outline"
+            size="sm"
+            className="gap-2 text-red-600 hover:text-red-700 hover:bg-red-50 border-red-200"
+            onClick={() => setDeleteOpen(true)}
+          >
+            <Trash2 className="w-3.5 h-3.5" />Delete
+          </Button>
         </div>
       </div>
+
+      <DeleteInvoiceDialog
+        invoiceId={invoice.id}
+        invoiceNumber={invoice.invoice_number}
+        invoiceTitle={invoice.title}
+        inXero={!!invoice.xero_invoice_id}
+        open={deleteOpen}
+        onOpenChange={setDeleteOpen}
+      />
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <Card>
