@@ -94,6 +94,19 @@ export function JobProfitability({ timeEntries, staffCostProfiles, expenses, equ
   const labourCost = timeEntries.reduce((sum, e) => sum + Number(e.hours ?? 0) * (rateByStaff.get(e.staff_id) ?? 0), 0);
   const labourHours = timeEntries.reduce((sum, e) => sum + Number(e.hours ?? 0), 0);
 
+  // Hours logged by staff whose loaded rate resolves to $0 -- either they have
+  // no staff_cost_profiles row, or their profile has hourly_rate/target hours
+  // of 0. Those hours silently cost nothing, which quietly overstates the
+  // margin (e.g. job #829 showed a 91% margin purely because the tech who
+  // logged the time had no wage on file). Surface it instead of hiding it.
+  const uncostedHours = timeEntries.reduce(
+    (sum, e) => sum + ((rateByStaff.get(e.staff_id) ?? 0) === 0 ? Number(e.hours ?? 0) : 0),
+    0
+  );
+  const uncostedStaffCount = new Set(
+    timeEntries.filter((e) => (rateByStaff.get(e.staff_id) ?? 0) === 0 && Number(e.hours ?? 0) > 0).map((e) => e.staff_id)
+  ).size;
+
   const materialsCost = expenses.reduce((sum, e) => sum + Number(e.amount ?? 0), 0);
 
   const equipmentById = new Map(equipmentOptions.map((eq) => [eq.id, eq]));
@@ -141,6 +154,14 @@ export function JobProfitability({ timeEntries, staffCostProfiles, expenses, equ
             <span className="font-medium text-slate-700">Total Cost (ex GST)</span>
             <span className="font-bold text-slate-900">${totalCost.toFixed(2)}</span>
           </div>
+          {uncostedHours > 0 && (
+            <div className="rounded-md bg-amber-50 border border-amber-200 p-3 text-xs text-amber-800">
+              <span className="font-semibold">⚠ Labour is under-costed.</span>{" "}
+              {uncostedHours.toFixed(1)}h logged by {uncostedStaffCount} staff member{uncostedStaffCount === 1 ? "" : "s"} with
+              no hourly rate on file, so {uncostedStaffCount === 1 ? "their" : "those"} hours count as $0 here and the margin
+              above is overstated. Set the rate in each staff member&apos;s cost profile to fix this.
+            </div>
+          )}
           {excludedEquipmentUsageCount > 0 && (
             <p className="text-xs text-slate-400">
               {excludedEquipmentUsageCount} equipment usage entr{excludedEquipmentUsageCount === 1 ? "y" : "ies"} for vehicles already
