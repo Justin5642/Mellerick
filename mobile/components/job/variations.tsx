@@ -12,11 +12,15 @@ import { colors } from "../../lib/theme";
 // can be invoiced). Optional photo evidence uploads to the job-photos
 // bucket under a `<jobId>/variations/` prefix.
 
+// NOTE: techs must never see dollar figures (migration 0027/0028). We read
+// the rate-stripped views (variation_types_public / job_variations_public) --
+// the base tables carrying rate/total_amount are office/admin-only RLS -- so
+// there is deliberately no `rate` / `total_amount` field here. Pricing is
+// applied server-side by the apply_variation_pricing() trigger.
 interface VariationType {
   id: string;
   name: string;
   unit: string;
-  rate: number;
   auto_approve: boolean;
 }
 
@@ -27,8 +31,6 @@ interface Variation {
   description: string | null;
   quantity: number;
   unit: string;
-  rate: number | null;
-  total_amount: number | null;
   photo_storage_path: string | null;
   status: "auto_approved" | "pending_approval" | "approved" | "rejected";
   created_at: string;
@@ -56,8 +58,8 @@ export function JobVariationsTab({ jobId, currentUserId }: { jobId: string; curr
 
   const load = useCallback(async () => {
     const [{ data: v }, { data: t }] = await Promise.all([
-      supabase.from("job_variations").select("*").eq("job_id", jobId).order("created_at", { ascending: false }),
-      supabase.from("variation_types").select("*").eq("is_active", true).order("name"),
+      supabase.from("job_variations_public").select("*").eq("job_id", jobId).order("created_at", { ascending: false }),
+      supabase.from("variation_types_public").select("*").eq("is_active", true).order("name"),
     ]);
     setVariations((v as any) ?? []);
     setTypes((t as any) ?? []);
@@ -127,10 +129,12 @@ export function JobVariationsTab({ jobId, currentUserId }: { jobId: string; curr
     }
 
     const autoApprove = !!selectedType?.auto_approve;
-    const rate = selectedType?.rate ?? null;
     const unit = selectedType?.unit ?? "unit";
-    const total = autoApprove && rate != null ? qty * rate : null;
 
+    // Pricing is applied server-side by the apply_variation_pricing() trigger
+    // (migration 0028) -- we intentionally never send rate / total_amount /
+    // status so a tech can neither see nor set a figure. The trigger fills the
+    // preset rate for auto-approve types and leaves custom ones for the office.
     const { error } = await supabase.from("job_variations").insert({
       job_id: jobId,
       variation_type_id: typeId,
@@ -138,10 +142,7 @@ export function JobVariationsTab({ jobId, currentUserId }: { jobId: string; curr
       description: description.trim() || null,
       quantity: qty,
       unit,
-      rate: autoApprove ? rate : null,
-      total_amount: total,
       photo_storage_path: photoPath,
-      status: autoApprove ? "auto_approved" : "pending_approval",
       logged_by: currentUserId,
       logged_at: new Date().toISOString(),
     });
@@ -181,7 +182,8 @@ export function JobVariationsTab({ jobId, currentUserId }: { jobId: string; curr
                 onPress={() => setTypeId(t.id)}
               >
                 <Text style={[styles.chipText, typeId === t.id && styles.chipTextActive]}>
-                  {t.name} (${Number(t.rate).toFixed(0)}/{t.unit})
+                  {t.name}
+                  {t.unit ? ` (${t.unit})` : ""}
                 </Text>
               </TouchableOpacity>
             ))}
@@ -248,7 +250,6 @@ export function JobVariationsTab({ jobId, currentUserId }: { jobId: string; curr
                   <Text style={[styles.statusBadgeText, { color: s.text }]}>{s.label}</Text>
                 </View>
               </View>
-              {item.total_amount != null && <Text style={styles.cardMeta}>${Number(item.total_amount).toFixed(2)}</Text>}
               {item.description && <Text style={styles.cardDescription}>{item.description}</Text>}
               {item.photo_storage_path && urls[item.photo_storage_path] && (
                 <Image source={{ uri: urls[item.photo_storage_path] }} style={styles.cardPhoto} />
