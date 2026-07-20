@@ -37,6 +37,11 @@ interface CostCenterOption {
   po_number?: string;
 }
 
+interface StaffOption {
+  id: string;
+  full_name: string;
+}
+
 interface Props {
   jobId: string;
   currentUserId: string;
@@ -44,6 +49,8 @@ interface Props {
   pos: PO[];
   costCenters: CostCenterOption[];
   isAdmin?: boolean;
+  // Active staff for the admin "log on behalf of" picker in the edit dialog.
+  staff?: StaffOption[];
   onUpdate: (entries: TimeEntry[]) => void;
 }
 
@@ -74,7 +81,7 @@ function syncBilling(entryId: string) {
   fetch(`/api/time-entries/${entryId}/sync-billing`, { method: "POST" }).catch(() => {});
 }
 
-export function JobTime({ jobId, currentUserId, timeEntries: initial, pos, costCenters, isAdmin, onUpdate }: Props) {
+export function JobTime({ jobId, currentUserId, timeEntries: initial, pos, costCenters, isAdmin, staff, onUpdate }: Props) {
   const supabase = createClient();
   const [entries, setEntries] = useState<TimeEntry[]>(initial);
   const [loading, setLoading] = useState(false);
@@ -298,13 +305,17 @@ export function JobTime({ jobId, currentUserId, timeEntries: initial, pos, costC
             {entries.map(entry => {
               const isTravel = entry.entry_type === "travel";
               const isMine = entry.staff_id === currentUserId;
+              // Admins can open any entry (e.g. to re-attribute time logged by
+              // the wrong person, or correct a tech's hours); everyone else
+              // can only edit their own.
+              const canEdit = isMine || !!isAdmin;
               return (
                 <div key={entry.id} className={`py-2.5 px-3 rounded-lg text-sm space-y-1.5 ${isTravel ? "bg-blue-50/60" : "bg-slate-50"}`}>
                   <button
                     type="button"
-                    className={`flex items-center justify-between w-full text-left ${isMine ? "cursor-pointer" : "cursor-default"}`}
-                    onClick={() => isMine && setEditDialog({ mode: "edit", entry })}
-                    disabled={!isMine}
+                    className={`flex items-center justify-between w-full text-left ${canEdit ? "cursor-pointer" : "cursor-default"}`}
+                    onClick={() => canEdit && setEditDialog({ mode: "edit", entry })}
+                    disabled={!canEdit}
                   >
                     <div className="flex items-center gap-1.5">
                       {isTravel && <Car className="w-3.5 h-3.5 text-blue-500" />}
@@ -326,7 +337,7 @@ export function JobTime({ jobId, currentUserId, timeEntries: initial, pos, costC
                           <span className="ml-2 font-semibold text-slate-800">{Number(entry.hours).toFixed(1)}h</span>
                         )}
                       </span>
-                      {isMine && <Pencil className="w-3 h-3 text-slate-400" />}
+                      {canEdit && <Pencil className="w-3 h-3 text-slate-400" />}
                     </div>
                   </button>
                   {!isTravel && costCenters.length > 0 && (
@@ -366,6 +377,7 @@ export function JobTime({ jobId, currentUserId, timeEntries: initial, pos, costC
         entry={editDialog?.entry}
         costCenters={costCenters}
         isAdmin={isAdmin}
+        staff={staff}
         onSaved={(saved) => {
           setEntries((prev) => {
             const exists = prev.some((e) => e.id === saved.id);

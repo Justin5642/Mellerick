@@ -32,6 +32,11 @@ interface CostCenterOption {
   po_number?: string;
 }
 
+interface StaffOption {
+  id: string;
+  full_name: string;
+}
+
 interface Props {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -45,6 +50,11 @@ interface Props {
   // trigger, see migration 0025, so this is just keeping the UI in sync
   // with what would actually be allowed to save).
   isAdmin?: boolean;
+  // Active staff, used only by the admin "log time on behalf of" picker so an
+  // admin can attribute a manual entry to the technician who actually did the
+  // work (whose staff_cost_profiles rate then costs it correctly), rather than
+  // to themselves. Empty/undefined for non-admins -> picker hidden.
+  staff?: StaffOption[];
   onSaved: (entry: TimeEntry) => void;
   onDeleted?: (id: string) => void;
 }
@@ -62,7 +72,7 @@ function toLocalInputValue(iso: string) {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
-export function TimeEntryEditDialog({ open, onOpenChange, mode, jobId, currentUserId, entry, costCenters, isAdmin, onSaved, onDeleted }: Props) {
+export function TimeEntryEditDialog({ open, onOpenChange, mode, jobId, currentUserId, entry, costCenters, isAdmin, staff, onSaved, onDeleted }: Props) {
   const supabase = createClient();
   const [entryType, setEntryType] = useState<"work" | "travel">("work");
   const [clockIn, setClockIn] = useState("");
@@ -70,7 +80,13 @@ export function TimeEntryEditDialog({ open, onOpenChange, mode, jobId, currentUs
   const [stillOpen, setStillOpen] = useState(false);
   const [costCenterId, setCostCenterId] = useState<string>("none");
   const [rateOverride, setRateOverride] = useState<string>(AUTO_RATE_VALUE);
+  const [staffId, setStaffId] = useState<string>(currentUserId);
   const [saving, setSaving] = useState(false);
+
+  // Show the "who did the work" picker only for admins who have a staff list
+  // to choose from. This is what lets an admin build out a job after the fact
+  // and attribute the hours to the technician who actually worked it.
+  const showStaffPicker = !!isAdmin && !!staff && staff.length > 0;
 
   useEffect(() => {
     if (!open) return;
@@ -81,6 +97,7 @@ export function TimeEntryEditDialog({ open, onOpenChange, mode, jobId, currentUs
       setStillOpen(!entry.clock_out);
       setCostCenterId(entry.cost_center_id ?? "none");
       setRateOverride(entry.rate_override ?? AUTO_RATE_VALUE);
+      setStaffId(entry.staff_id);
     } else {
       const now = toLocalInputValue(new Date().toISOString());
       setEntryType("work");
@@ -89,8 +106,9 @@ export function TimeEntryEditDialog({ open, onOpenChange, mode, jobId, currentUs
       setStillOpen(false);
       setCostCenterId("none");
       setRateOverride(AUTO_RATE_VALUE);
+      setStaffId(currentUserId);
     }
-  }, [open, mode, entry]);
+  }, [open, mode, entry, currentUserId]);
 
   const clockInDate = clockIn ? new Date(clockIn) : null;
   const clockOutDate = !stillOpen && clockOut ? new Date(clockOut) : null;
@@ -119,6 +137,9 @@ export function TimeEntryEditDialog({ open, onOpenChange, mode, jobId, currentUs
       // DB trigger from migration 0025 would revert it anyway, but there's
       // no reason to rely on that as the only line of defence.
       ...(isAdmin ? { rate_override: rateOverride === AUTO_RATE_VALUE ? null : rateOverride } : {}),
+      // Only admins (via the picker) may reassign the entry to another staff
+      // member; everyone else's entries stay attributed to themselves.
+      ...(showStaffPicker ? { staff_id: staffId } : {}),
     };
 
     if (mode === "add") {
@@ -183,6 +204,25 @@ export function TimeEntryEditDialog({ open, onOpenChange, mode, jobId, currentUs
           <p className="text-xs text-slate-400">
             Use this when auto clock-in/out didn&apos;t fire correctly — set the real start/end time.
           </p>
+
+          {showStaffPicker && (
+            <div className="space-y-1.5">
+              <Label>Staff member</Label>
+              <Select value={staffId} onValueChange={(v) => setStaffId(v ?? currentUserId)}>
+                <SelectTrigger><SelectValue placeholder="Who did the work?" /></SelectTrigger>
+                <SelectContent>
+                  {staff!.map((s) => (
+                    <SelectItem key={s.id} value={s.id}>
+                      {s.full_name}{s.id === currentUserId ? " (you)" : ""}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-slate-400">
+                Log this time against the technician who actually did the work so it&apos;s costed at their rate.
+              </p>
+            </div>
+          )}
 
           {mode === "add" && (
             <div className="space-y-1.5">
