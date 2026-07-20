@@ -1,13 +1,13 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Plus, Trash2, List } from "lucide-react";
+import { Plus, Trash2, List, RefreshCw } from "lucide-react";
 
 interface Props {
   jobId: string;
@@ -20,7 +20,36 @@ export function JobLineItems({ jobId, lineItems, pricingItems, onUpdate }: Props
   const supabase = createClient();
   const [adding, setAdding] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [regenerating, setRegenerating] = useState(false);
   const [form, setForm] = useState({ pricing_item_id: "", name: "", description: "", quantity: "1", unit_price: "" });
+
+  // Reconcile the auto-generated Labour / Call Out Fee items from the job's
+  // time entries, then refetch. Self-heals any job whose per-entry billing
+  // sync was dropped (see lib/labour-billing-sync.ts). Runs quietly on open;
+  // the "Regenerate" button reuses it with a toast.
+  const regenerate = useCallback(
+    async (announce: boolean) => {
+      if (announce) setRegenerating(true);
+      try {
+        const res = await fetch(`/api/jobs/${jobId}/sync-billing`, { method: "POST" });
+        if (!res.ok) throw new Error();
+        const { data } = await supabase.from("job_items").select("*").eq("job_id", jobId).order("created_at");
+        onUpdate(data ?? []);
+        if (announce) toast.success("Labour & call-out regenerated");
+      } catch {
+        if (announce) toast.error("Couldn't regenerate charges — try again");
+      } finally {
+        if (announce) setRegenerating(false);
+      }
+    },
+    // onUpdate/supabase are stable enough here; keying on jobId is what matters.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [jobId]
+  );
+
+  useEffect(() => {
+    regenerate(false);
+  }, [regenerate]);
 
   function set(field: string, value: string | null) {
     setForm((prev) => ({ ...prev, [field]: value ?? "" }));
@@ -76,9 +105,15 @@ export function JobLineItems({ jobId, lineItems, pricingItems, onUpdate }: Props
           <h2 className="text-base font-semibold text-slate-900">Line Items</h2>
           <p className="text-sm text-slate-500">Parts and labour used on this job</p>
         </div>
-        <Button onClick={() => setAdding(true)} className="gap-2" disabled={adding}>
-          <Plus className="w-4 h-4" />Add Item
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button variant="outline" onClick={() => regenerate(true)} className="gap-2" disabled={regenerating}>
+            <RefreshCw className={`w-4 h-4 ${regenerating ? "animate-spin" : ""}`} />
+            {regenerating ? "Regenerating..." : "Regenerate labour & call-out"}
+          </Button>
+          <Button onClick={() => setAdding(true)} className="gap-2" disabled={adding}>
+            <Plus className="w-4 h-4" />Add Item
+          </Button>
+        </div>
       </div>
 
       {/* Add item form */}

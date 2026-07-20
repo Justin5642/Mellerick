@@ -3,17 +3,11 @@ import { createClient } from "@supabase/supabase-js";
 import { createClient as createServerClient } from "@/lib/supabase/server";
 import { syncJobBilling } from "@/lib/labour-billing-sync";
 
-// Regenerates a job's auto-generated billing items (the per-entry "Labour"
-// line + the one-off "Call Out Fee") after any time entry is written/edited.
-// Called fire-and-forget right after a client writes a time entry -- same
-// "insert then fetch(/api/...)" pattern used for Google Calendar sync.
-//
-// Despite being keyed on a single time entry, this reconciles the WHOLE job
-// (see lib/labour-billing-sync.ts): recomputing every entry each time makes a
-// dropped request self-healing rather than leaving the job permanently
-// missing a charge. Uses the service-role key because job_items is Admin-only
-// writable (migration 0024) -- the route authenticates the caller itself
-// (mobile Bearer token or web session cookie) then writes on their behalf.
+// Job-level reconcile of the auto-generated billing items (Labour per work
+// entry + one Call Out Fee) -- see lib/labour-billing-sync.ts. Used to
+// self-heal a job whose per-entry sync was dropped (e.g. viewing Line Items,
+// or opening the invoice builder for the job) so what you bill from is always
+// current. Same auth-then-service-role pattern as the per-entry route.
 function getAdminClient() {
   return createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!, {
     auth: { autoRefreshToken: false, persistSession: false },
@@ -36,22 +30,12 @@ async function getAuthenticatedUserId(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const { id: timeEntryId } = await params;
+  const { id: jobId } = await params;
 
   const callerId = await getAuthenticatedUserId(request);
   if (!callerId) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
 
   const admin = getAdminClient();
-
-  const { data: entry, error: entryError } = await admin
-    .from("time_entries")
-    .select("job_id")
-    .eq("id", timeEntryId)
-    .maybeSingle();
-
-  if (entryError) return NextResponse.json({ error: entryError.message }, { status: 500 });
-  if (!entry) return NextResponse.json({ error: "Time entry not found" }, { status: 404 });
-
-  const summary = await syncJobBilling(admin, entry.job_id);
+  const summary = await syncJobBilling(admin, jobId);
   return NextResponse.json({ ok: true, ...summary });
 }

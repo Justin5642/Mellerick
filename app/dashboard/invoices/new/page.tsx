@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo, Suspense } from "react";
+import { useState, useEffect, useMemo, useRef, Suspense } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
@@ -82,6 +82,10 @@ function NewInvoiceForm() {
   const [lineItems, setLineItems] = useState<LineItem[]>([{ name: "", description: "", quantity: "1", unit_price: "" }]);
   const [errors, setErrors] = useState<Record<string, boolean>>({});
   const [unbilledVariations, setUnbilledVariations] = useState<UnbilledVariation[]>([]);
+  const [prefilling, setPrefilling] = useState(false);
+  // The job we've already pulled line items from, so switching jobs re-pulls
+  // but unrelated re-renders don't clobber what the office has since edited.
+  const prefilledJobRef = useRef<string>("");
   const addedVariationIds = lineItems.filter((i) => i.variationId).map((i) => i.variationId as string);
 
   const jobSelectFields = "id, job_number, title, status, customer_id, customers(name), sites(address_line1, suburb)";
@@ -204,6 +208,44 @@ function NewInvoiceForm() {
       setForm((prev) => ({ ...prev, work_description: desc }));
     }
     prefillWorkDescription();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form.job_id]);
+
+  useEffect(() => {
+    // Pull the job's built-up line items (auto labour, the one-off call-out
+    // fee, and any parts added on the job) straight onto the invoice, so
+    // "create invoice from job" starts complete instead of blank. We first
+    // reconcile the job's billing (see /api/jobs/[id]/sync-billing) so a
+    // dropped per-entry sync can't leave labour/call-out missing at bill time.
+    // Runs once per distinct job selection (prefilledJobRef) so it doesn't
+    // wipe edits on unrelated re-renders.
+    async function prefillFromJob() {
+      if (!form.job_id) { prefilledJobRef.current = ""; return; }
+      if (prefilledJobRef.current === form.job_id) return;
+      prefilledJobRef.current = form.job_id;
+      setPrefilling(true);
+      try {
+        await fetch(`/api/jobs/${form.job_id}/sync-billing`, { method: "POST" }).catch(() => {});
+        const { data } = await supabase
+          .from("job_items")
+          .select("name, description, quantity, unit_price")
+          .eq("job_id", form.job_id)
+          .order("created_at");
+        if (data && data.length > 0) {
+          setLineItems(
+            data.map((i: any) => ({
+              name: i.name,
+              description: i.description ?? "",
+              quantity: String(i.quantity),
+              unit_price: String(i.unit_price),
+            }))
+          );
+        }
+      } finally {
+        setPrefilling(false);
+      }
+    }
+    prefillFromJob();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [form.job_id]);
 
@@ -442,6 +484,11 @@ function NewInvoiceForm() {
           <CardHeader className="flex flex-row items-center justify-between pb-3">
             <div>
               <CardTitle className="text-base">Line Items</CardTitle>
+              {prefilling ? (
+                <p className="text-xs text-slate-400 mt-0.5">Pulling labour, call-out &amp; parts from the job…</p>
+              ) : form.job_id ? (
+                <p className="text-xs text-slate-400 mt-0.5">Pulled from the linked job — edit as needed before billing.</p>
+              ) : null}
               {errors.lineItems && <p className="text-xs text-red-500 mt-0.5">Add at least one line item</p>}
             </div>
             <Select onValueChange={v => { const p = pricingItems.find(i => i.id === v); if (p) addFromCatalogue(p); }}>

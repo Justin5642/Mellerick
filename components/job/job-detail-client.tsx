@@ -46,9 +46,10 @@ interface Props {
   isAdmin: boolean;
   staffCostProfiles: any[];
   jobInvoices: any[];
+  minMarginPct: number;
 }
 
-export function JobDetailClient({ job, currentUserId, photos: initialPhotos, documents: initialDocuments, notes: initialNotes, lineItems: initialLineItems, pricingItems, staff, purchaseOrders: initialPOs, timeEntries: initialTimeEntries, variations: initialVariations, variationTypes, expenses: initialExpenses, equipmentOptions, equipmentUsage: initialEquipmentUsage, isAdmin, staffCostProfiles, jobInvoices }: Props) {
+export function JobDetailClient({ job, currentUserId, photos: initialPhotos, documents: initialDocuments, notes: initialNotes, lineItems: initialLineItems, pricingItems, staff, purchaseOrders: initialPOs, timeEntries: initialTimeEntries, variations: initialVariations, variationTypes, expenses: initialExpenses, equipmentOptions, equipmentUsage: initialEquipmentUsage, isAdmin, staffCostProfiles, jobInvoices, minMarginPct }: Props) {
   // Deep-links like /dashboard/jobs/[id]?tab=variations&variation=[id]
   // (used by the Approvals page's "Price & review" link) land here — read
   // them once on mount so the right tab opens and the right variation is
@@ -211,6 +212,9 @@ export function JobDetailClient({ job, currentUserId, photos: initialPhotos, doc
                   equipmentUsage={equipmentUsage}
                   equipmentOptions={equipmentOptions}
                   invoices={jobInvoices}
+                  jobItems={lineItems}
+                  variations={variations}
+                  minMarginPct={minMarginPct}
                 />
               </TabsContent>
             )}

@@ -73,17 +73,20 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
   let isAdmin = false;
   let staffCostProfiles: any[] = [];
   let jobInvoices: any[] = [];
+  let minMarginPct = 30;
   if (user) {
     const { data: viewerProfile } = await supabase.from("profiles").select("role").eq("id", user.id).single();
     isAdmin = viewerProfile?.role === "admin";
   }
   if (isAdmin) {
-    const [{ data: costProfiles }, { data: invoicesForJob }] = await Promise.all([
+    const [{ data: costProfiles }, { data: invoicesForJob }, { data: rateConfig }] = await Promise.all([
       supabase.from("staff_cost_profiles").select("*"),
       supabase.from("invoices").select("id, subtotal, status").eq("job_id", id),
+      supabase.from("billing_rate_config").select("min_margin_pct").eq("id", true).maybeSingle(),
     ]);
     staffCostProfiles = costProfiles ?? [];
     jobInvoices = invoicesForJob ?? [];
+    if (rateConfig?.min_margin_pct != null) minMarginPct = Number(rateConfig.min_margin_pct);
   }
 
   return (
@@ -106,6 +109,7 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
       isAdmin={isAdmin}
       staffCostProfiles={staffCostProfiles}
       jobInvoices={jobInvoices}
+      minMarginPct={minMarginPct}
     />
   );
 }

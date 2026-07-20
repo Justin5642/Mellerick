@@ -1,7 +1,7 @@
 "use client";
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { TrendingUp, TrendingDown } from "lucide-react";
+import { TrendingUp, TrendingDown, AlertTriangle } from "lucide-react";
 import { computeLoadedCost } from "@/lib/staff-cost";
 import { computeEquipmentCost, type EquipmentCostInputs } from "@/lib/equipment-cost";
 
@@ -62,6 +62,17 @@ interface Invoice {
   status: string;
 }
 
+// The job's built-up billable line items (auto labour + call-out + parts).
+interface JobItem {
+  total: number | null;
+}
+
+interface Variation {
+  status: string;
+  invoice_id: string | null;
+  total_amount: number | null;
+}
+
 interface Props {
   timeEntries: TimeEntry[];
   staffCostProfiles: StaffCostProfile[];
@@ -69,9 +80,12 @@ interface Props {
   equipmentUsage: EquipmentUsage[];
   equipmentOptions: EquipmentOption[];
   invoices: Invoice[];
+  jobItems: JobItem[];
+  variations: Variation[];
+  minMarginPct: number;
 }
 
-export function JobProfitability({ timeEntries, staffCostProfiles, expenses, equipmentUsage, equipmentOptions, invoices }: Props) {
+export function JobProfitability({ timeEntries, staffCostProfiles, expenses, equipmentUsage, equipmentOptions, invoices, jobItems, variations, minMarginPct }: Props) {
   // Vehicles assigned to a staff member fold their $/hour into that staff
   // member's loaded rate (mirrors the Reports page's staffEfficiency
   // section) so labourCost below already reflects vehicle cost for
@@ -126,6 +140,21 @@ export function JobProfitability({ timeEntries, staffCostProfiles, expenses, equ
   const margin = revenue - totalCost;
   const marginPct = hasRevenue ? (margin / revenue) * 100 : null;
 
+  // Projected revenue = what this job is currently set up to bill, before an
+  // invoice is raised: the built-up line items (auto labour + call-out fee +
+  // any parts) plus approved variations not yet on an invoice. Lets the
+  // office sanity-check the margin against the company minimum BEFORE billing,
+  // rather than only being able to see it after the invoice exists.
+  const builtUpCharges = jobItems.reduce((sum, i) => sum + Number(i.total ?? 0), 0);
+  const unbilledVariationsRevenue = variations
+    .filter((v) => (v.status === "approved" || v.status === "auto_approved") && !v.invoice_id)
+    .reduce((sum, v) => sum + Number(v.total_amount ?? 0), 0);
+  const projectedRevenue = builtUpCharges + unbilledVariationsRevenue;
+  const hasProjected = projectedRevenue > 0;
+  const projectedMargin = projectedRevenue - totalCost;
+  const projectedMarginPct = hasProjected ? (projectedMargin / projectedRevenue) * 100 : null;
+  const belowMinMargin = projectedMarginPct !== null && projectedMarginPct < minMarginPct;
+
   const rows = [
     { label: "Labour", value: labourCost, detail: `${labourHours.toFixed(1)}h logged` },
     { label: "Materials / Other Expenses", value: materialsCost, detail: `${expenses.length} expense${expenses.length === 1 ? "" : "s"}` },
@@ -167,6 +196,58 @@ export function JobProfitability({ timeEntries, staffCostProfiles, expenses, equ
               {excludedEquipmentUsageCount} equipment usage entr{excludedEquipmentUsageCount === 1 ? "y" : "ies"} for vehicles already
               assigned to a technician {excludedEquipmentUsageCount === 1 ? "isn't" : "aren't"} counted separately here — that
               vehicle&apos;s cost is already included in Labour via their loaded hourly rate.
+            </p>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card className={belowMinMargin ? "border-red-300" : ""}>
+        <CardHeader>
+          <CardTitle className="text-base">Projected Margin — before billing</CardTitle>
+          <p className="text-xs text-slate-400">
+            What this job is set up to bill (labour, call-out, parts{unbilledVariationsRevenue > 0 ? ", unbilled variations" : ""}) vs its true cost.
+          </p>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <div className="flex items-center justify-between text-sm">
+            <span className="text-slate-600">Projected charges (ex GST)</span>
+            <span className="font-medium text-slate-800">${projectedRevenue.toFixed(2)}</span>
+          </div>
+          <div className="flex items-center justify-between text-sm">
+            <span className="text-slate-600">Total Cost</span>
+            <span className="font-medium text-slate-800">${totalCost.toFixed(2)}</span>
+          </div>
+          <div
+            className={`rounded-lg border p-3 flex items-center justify-between mt-2 ${
+              belowMinMargin ? "bg-red-50 border-red-200" : "bg-slate-50 border-slate-200"
+            }`}
+          >
+            <div>
+              <p className="text-xs text-slate-500">Projected Margin</p>
+              <p className={`text-lg font-bold flex items-center gap-1 ${projectedMargin >= 0 ? "text-green-700" : "text-red-600"}`}>
+                {projectedMargin >= 0 ? <TrendingUp className="w-4 h-4" /> : <TrendingDown className="w-4 h-4" />}
+                ${projectedMargin.toFixed(2)}
+              </p>
+            </div>
+            <div className="text-right">
+              <p className="text-xs text-slate-500">Margin %</p>
+              <p className={`text-lg font-bold ${belowMinMargin ? "text-red-600" : projectedMargin >= 0 ? "text-green-700" : "text-red-600"}`}>
+                {projectedMarginPct === null ? "—" : `${projectedMarginPct.toFixed(1)}%`}
+              </p>
+            </div>
+          </div>
+          {belowMinMargin && (
+            <div className="rounded-md bg-red-50 border border-red-200 p-3 text-xs text-red-800 flex items-start gap-2">
+              <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+              <span>
+                <span className="font-semibold">Below your {minMarginPct.toFixed(0)}% minimum margin.</span>{" "}
+                Review the charges before invoicing — either the price is too low or the job ran over cost.
+              </span>
+            </div>
+          )}
+          {!hasProjected && (
+            <p className="text-xs text-slate-400">
+              No billable charges built up yet — log work time (adds labour + the call-out fee) or add line items on the Line Items tab.
             </p>
           )}
         </CardContent>
