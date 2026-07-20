@@ -1,8 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { getGoogleCalendarClient } from "@/lib/google";
+import { requireUser } from "@/lib/api/guards";
 
 export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  // Any authenticated staff member can trigger a calendar sync for a job they
+  // can see; the route previously had no auth check at all.
+  const guard = await requireUser(request);
+  if (!guard.ok) return guard.response;
+
   const { id } = await params;
   const supabase = await createClient();
 

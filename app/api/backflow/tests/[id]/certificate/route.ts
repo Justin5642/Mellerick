@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient as createServiceClient } from "@supabase/supabase-js";
-import { createClient as createServerClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
+import { requireUser } from "@/lib/api/guards";
 
 // Redirects to a short-lived signed URL for the generated report PDF —
 // same idea as job-documents' download button, just via a GET route so it
@@ -9,37 +9,15 @@ import { createClient as createServerClient } from "@/lib/supabase/server";
 // Also callable from the mobile app (no cookies) via a Bearer access token —
 // same dual-auth pattern as the submit route. Mobile passes ?json=1 since it
 // wants the signed URL back as data (to hand to Linking.openURL) rather than
-// following a redirect.
-async function getAuthenticatedUserId(request: NextRequest): Promise<string | null> {
-  const authHeader = request.headers.get("authorization") ?? "";
-  const token = authHeader.startsWith("Bearer ") ? authHeader.slice("Bearer ".length) : null;
-  if (token) {
-    const anonClient = createServiceClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!, {
-      auth: { autoRefreshToken: false, persistSession: false },
-    });
-    const { data, error } = await anonClient.auth.getUser(token);
-    if (!error && data.user) return data.user.id;
-  }
-  const cookieClient = await createServerClient();
-  const { data } = await cookieClient.auth.getUser();
-  return data.user?.id ?? null;
-}
-
-function getAdminClient() {
-  return createServiceClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!, {
-    auth: { autoRefreshToken: false, persistSession: false },
-  });
-}
-
+// following a redirect. Any authenticated staff member may view a certificate
+// (office needs to see tests they didn't perform); the signed URL is short-lived.
 export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
 
-  const callerId = await getAuthenticatedUserId(request);
-  if (!callerId) {
-    return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
-  }
+  const guard = await requireUser(request);
+  if (!guard.ok) return guard.response;
 
-  const supabase = getAdminClient();
+  const supabase = createAdminClient();
 
   const { data: test } = await supabase.from("backflow_tests").select("certificate_storage_path").eq("id", id).single();
   if (!test?.certificate_storage_path) {

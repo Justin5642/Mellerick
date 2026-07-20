@@ -35,3 +35,5 @@ raised with Avi immediately; everything else awaits batch review.
 | D6 | Next.js security patch taken day 1, before test infra (dep bumps exempt from red-green; verified by build + smoke) | Known advisories live in prod |
 | D7 | Mobile app: `expo-doctor` + tsc check only; full device E2E out of scope this branch | Separate deploy pipeline (EAS), no shared infra |
 | D8 | Docker daemon not running at Phase 0 check — Docker Desktop present (v29.1.3). Will start when Phase 3/4 needs the local Supabase stack | Not needed earlier |
+| D9 | Phase 2 authz: sync-billing allows office/admin OR the technician assigned to the job (Q1 default applied); backflow submit allows office/admin OR the tester (`tested_by`); backflow certificate (read) any authenticated staff | Confirm these role boundaries match business intent |
+| D-model | PAL model drift during Phase 2: `openai/gpt-5.6-sol-pro` intermittently failed on OpenRouter (timeout + upstream error); `x-ai/grok-4.1-fast` now deprecated (404 → grok-4.3); `gemini-3-pro-preview` had returned 404 earlier. Used `gemini-2.5-pro` as fallback validator. Consider updating the worker-pool pins | Review model pins |

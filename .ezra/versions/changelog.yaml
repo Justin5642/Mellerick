@@ -27,3 +27,12 @@ log:
     target: ".ezra/decisions/0001-consensus-plan-review.md"
     summary: "DECISION created: 0001-consensus-plan-review.md"
     triggered_by: auto
+  - id: CHG-0004
+    timestamp: "2026-07-20T11:19:21.831Z"
+    version_before: "1.0.3"
+    version_after: "1.0.4"
+    type: DECISION
+    action: CREATED
+    target: ".ezra/decisions/0002-phase2-authz-review.md"
+    summary: "DECISION created: 0002-phase2-authz-review.md"
+    triggered_by: auto

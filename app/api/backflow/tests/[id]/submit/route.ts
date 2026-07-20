@@ -1,46 +1,25 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient as createServiceClient } from "@supabase/supabase-js";
-import { createClient as createServerClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
+import { requireUser } from "@/lib/api/guards";
+import { isOfficeOrAdmin } from "@/lib/api/job-authz";
 import { renderBackflowPdf } from "@/lib/pdf/render-backflow";
 import { businessInfo } from "@/lib/business-info";
 import { getResend, getFromAddress } from "@/lib/resend";
 import { getWaterAuthorityEmail, getWaterAuthorityLabel } from "@/lib/backflow";
+import { escapeHtml } from "@/lib/html";
 
 // Called from both the dashboard (browser session, cookies) and the mobile
 // app (no cookies -- Bearer access token instead, same pattern as
 // transcribe-voice-report). Whichever way the caller authenticates, the
 // actual PDF render + email send always runs under the service-role key so
 // it can read/write regardless of RLS and reach the private storage bucket.
-function getAdminClient() {
-  return createServiceClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!, {
-    auth: { autoRefreshToken: false, persistSession: false },
-  });
-}
-
-async function getAuthenticatedUserId(request: NextRequest): Promise<string | null> {
-  const authHeader = request.headers.get("authorization") ?? "";
-  const token = authHeader.startsWith("Bearer ") ? authHeader.slice("Bearer ".length) : null;
-  if (token) {
-    const anonClient = createServiceClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!, {
-      auth: { autoRefreshToken: false, persistSession: false },
-    });
-    const { data, error } = await anonClient.auth.getUser(token);
-    if (!error && data.user) return data.user.id;
-  }
-  const cookieClient = await createServerClient();
-  const { data } = await cookieClient.auth.getUser();
-  return data.user?.id ?? null;
-}
-
 export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
 
-  const callerId = await getAuthenticatedUserId(request);
-  if (!callerId) {
-    return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
-  }
+  const guard = await requireUser(request);
+  if (!guard.ok) return guard.response;
 
-  const supabase = getAdminClient();
+  const supabase = createAdminClient();
 
   try {
     const { data: test, error: testError } = await supabase
@@ -51,6 +30,13 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
 
     if (testError || !test) {
       return NextResponse.json({ error: "Backflow test not found" }, { status: 404 });
+    }
+
+    // Authorize per-record before submitting to a water authority: office/admin
+    // may submit any test; a technician may submit only one they performed
+    // (backflow_tests.tested_by). Prevents acting on another record by id.
+    if (!(test.tested_by === guard.userId || (await isOfficeOrAdmin(supabase, guard.userId)))) {
+      return NextResponse.json({ error: "Insufficient permissions" }, { status: 403 });
     }
 
     const device = test.backflow_devices;
@@ -103,11 +89,11 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       subject: `Backflow Prevention Device Test Report — ${device.customers?.name ?? "Customer"}${siteAddress ? ` (${siteAddress})` : ""}`,
       html: `
         <div style="font-family: sans-serif; color: #1e293b; line-height: 1.5;">
-          <p>Hi ${authorityLabel} team,</p>
+          <p>Hi ${escapeHtml(authorityLabel)} team,</p>
           <p>Please find attached the completed backflow prevention device inspection and test report for:</p>
-          <p><strong>${device.customers?.name ?? "Customer"}</strong>${siteAddress ? `<br/>${siteAddress}` : ""}</p>
-          <p>Test date: <strong>${test.test_date}</strong> &middot; Result: <strong>${test.result.toUpperCase()}</strong></p>
-          <p>Thanks,<br/>${businessInfo.name}</p>
+          <p><strong>${escapeHtml(device.customers?.name ?? "Customer")}</strong>${siteAddress ? `<br/>${escapeHtml(siteAddress)}` : ""}</p>
+          <p>Test date: <strong>${escapeHtml(test.test_date)}</strong> &middot; Result: <strong>${escapeHtml(String(test.result).toUpperCase())}</strong></p>
+          <p>Thanks,<br/>${escapeHtml(businessInfo.name)}</p>
         </div>
       `,
       attachments: [
