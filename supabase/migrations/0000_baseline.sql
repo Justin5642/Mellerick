@@ -396,3 +396,70 @@ create table xero_tokens (
 
 alter table xero_tokens enable row level security;
 create policy "Authenticated users can manage xero tokens" on xero_tokens for all using (auth.role() = 'authenticated');
+
+-- =============================================
+-- RECONCILED DRIFT (batch 2): job_documents, job_notes, purchase_orders,
+-- po_cost_centers
+-- =============================================
+-- Like time_entries / xero_tokens above, these were created directly in prod
+-- and were missing from the versioned schema (a full `supabase start` failed on
+-- `relation "job_documents" does not exist`). Columns here are reconstructed
+-- from actual app usage (the insert bodies in components/job/*), NOT guessed —
+-- but still verify against a production `supabase db dump` before relying on
+-- them for a prod rebuild. Later migrations layer on: job_documents.simpro_file_id
+-- (0002) and the performance indexes (0029).
+
+create table job_documents (
+  id uuid default uuid_generate_v4() primary key,
+  job_id uuid references jobs(id) on delete cascade not null,
+  uploaded_by uuid references profiles(id),
+  storage_path text not null,
+  file_name text not null,
+  file_size bigint,
+  file_type text,
+  created_at timestamptz default now()
+);
+
+alter table job_documents enable row level security;
+create policy "Authenticated users can manage job documents" on job_documents for all using (auth.role() = 'authenticated');
+
+create table job_notes (
+  id uuid default uuid_generate_v4() primary key,
+  job_id uuid references jobs(id) on delete cascade not null,
+  author_id uuid references profiles(id),
+  content text not null,
+  created_at timestamptz default now()
+);
+
+alter table job_notes enable row level security;
+create policy "Authenticated users can manage job notes" on job_notes for all using (auth.role() = 'authenticated');
+
+create table purchase_orders (
+  id uuid default uuid_generate_v4() primary key,
+  job_id uuid references jobs(id) on delete cascade not null,
+  po_number text not null,
+  client_reference text,
+  site_address text,
+  site_lat double precision,
+  site_lng double precision,
+  total_value decimal(12,2) default 0,
+  total_hours decimal(10,2) default 0,
+  created_at timestamptz default now()
+);
+
+alter table purchase_orders enable row level security;
+create policy "Authenticated users can manage purchase orders" on purchase_orders for all using (auth.role() = 'authenticated');
+
+create table po_cost_centers (
+  id uuid default uuid_generate_v4() primary key,
+  po_id uuid references purchase_orders(id) on delete cascade not null,
+  name text not null,
+  code text,
+  allocated_amount decimal(12,2) default 0,
+  allocated_hours decimal(10,2) default 0,
+  sort_order integer default 0,
+  created_at timestamptz default now()
+);
+
+alter table po_cost_centers enable row level security;
+create policy "Authenticated users can manage po cost centers" on po_cost_centers for all using (auth.role() = 'authenticated');
