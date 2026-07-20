@@ -1,5 +1,56 @@
 import { XeroClient, Invoice } from "xero-node";
 
+/**
+ * Turns a thrown xero-node error into the message Xero actually gave us.
+ * The useful detail lives in the response body, NOT in `err.message` (usually
+ * a bare "HTTP request failed"). Two wrinkles this handles:
+ *  - xero-node (v18) often throws a value whose detail is only reachable by
+ *    stringifying it (String(err) is JSON like {"response":{"body":{...}},
+ *    "body":{...}}) -- `err.response.body` reads back undefined. Confirmed
+ *    against the live connection.
+ *  - Validation failures put per-line reasons in
+ *    body.Elements[].ValidationErrors[].Message (e.g. archived account code,
+ *    missing due date), while auth/other failures use a top-level Title/
+ *    Message + Detail. We check both.
+ * Falls back to err.message.
+ */
+export function describeXeroError(err: any): string {
+  const bodies: any[] = [];
+  const pushBody = (b: any) => {
+    if (b) bodies.push(typeof b === "string" ? safeParse(b) : b);
+  };
+
+  pushBody(err?.response?.body);
+  pushBody(err?.body);
+
+  const asString = typeof err === "string" ? err : typeof err?.toString === "function" ? err.toString() : "";
+  if (asString.startsWith("{")) {
+    const parsed = safeParse(asString);
+    pushBody(parsed?.response?.body);
+    pushBody(parsed?.body);
+  }
+
+  for (const body of bodies) {
+    if (!body) continue;
+    const validationMessages: string[] = (body.Elements ?? [])
+      .flatMap((el: any) => el.ValidationErrors ?? [])
+      .map((ve: any) => ve.Message)
+      .filter(Boolean);
+    if (validationMessages.length > 0) return [...new Set(validationMessages)].join("; ");
+    const headline = body.Message ?? body.Title;
+    if (headline) return body.Detail && body.Detail !== headline ? `${headline}: ${body.Detail}` : headline;
+  }
+  return err?.message ?? "Unknown Xero error";
+}
+
+function safeParse(s: string): any {
+  try {
+    return JSON.parse(s);
+  } catch {
+    return null;
+  }
+}
+
 export function getXeroClient() {
   return new XeroClient({
     clientId: process.env.XERO_CLIENT_ID!,
@@ -56,6 +107,7 @@ export async function getRefreshedXero(supabaseClient?: any) {
     xero,
     tenantId: tokenRow.tenant_id as string,
     defaultExpenseAccountCode: tokenRow.default_expense_account_code as string | null,
+    defaultSalesAccountCode: tokenRow.default_sales_account_code as string | null,
   };
 }
 

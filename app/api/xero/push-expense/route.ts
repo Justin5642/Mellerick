@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getRefreshedXero } from "@/lib/xero";
+import { getRefreshedXero, describeXeroError } from "@/lib/xero";
 import { createClient } from "@/lib/supabase/server";
 import { Invoice, LineItem, Contact, LineAmountTypes } from "xero-node";
 
@@ -69,7 +69,7 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ success: true, xeroBillId: created?.invoiceID });
   } catch (err: any) {
-    console.error("Push expense to Xero error:", err);
-    return NextResponse.json({ error: err.message ?? "Failed to push expense to Xero" }, { status: 500 });
+    console.error("Push expense to Xero error:", err.response?.body ?? err);
+    return NextResponse.json({ error: describeXeroError(err) }, { status: 500 });
   }
 }

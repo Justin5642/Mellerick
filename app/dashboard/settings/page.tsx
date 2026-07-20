@@ -5,6 +5,7 @@ import { CheckCircle2, XCircle, ExternalLink, CalendarDays, Wrench, Layers } fro
 import Link from "next/link";
 import { GoogleCalendarSyncButton } from "@/components/settings/google-calendar-sync-button";
 import { XeroExpenseAccountCode } from "@/components/settings/xero-expense-account-code";
+import { XeroSalesAccountCode } from "@/components/settings/xero-sales-account-code";
 import { XeroInvoiceSyncButton } from "@/components/settings/xero-invoice-sync-button";
 import { formatDateTime } from "@/lib/date";
 
@@ -12,7 +13,7 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
   const params = await searchParams;
   const supabase = await createClient();
   const [{ data: xeroToken }, { data: googleToken }] = await Promise.all([
-    supabase.from("xero_tokens").select("tenant_name, updated_at, default_expense_account_code, xero_invoice_last_synced_at").single(),
+    supabase.from("xero_tokens").select("tenant_name, updated_at, default_expense_account_code, default_sales_account_code, xero_invoice_last_synced_at").single(),
     supabase.from("google_tokens").select("google_email, updated_at, calendar_last_synced_at").single(),
   ]);
 
@@ -260,6 +261,7 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
                 </Link>
                 <XeroInvoiceSyncButton />
               </div>
+              <XeroSalesAccountCode initialValue={xeroToken.default_sales_account_code} />
               <XeroExpenseAccountCode initialValue={xeroToken.default_expense_account_code} />
             </div>
           ) : (
