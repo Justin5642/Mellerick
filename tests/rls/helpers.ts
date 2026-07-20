@@ -33,14 +33,20 @@ export async function makeUser(role: Role, email: string): Promise<{ client: Sup
   // Resolve the id whether freshly created or pre-existing.
   let id = created?.user?.id;
   if (!id) {
-    const { data: list } = await admin.auth.admin.listUsers();
+    const { data: list, error: listErr } = await admin.auth.admin.listUsers();
+    if (listErr) throw listErr;
     id = list.users.find((u) => u.email === email)?.id;
   }
   if (!id) throw new Error(`Could not resolve user id for ${email}`);
 
+  // Ensure password matches what we use for sign-in (helps if user pre-existed).
+  const { error: updateErr } = await admin.auth.admin.updateUserById(id, { password: TEST_USER_PASSWORD });
+  if (updateErr) throw updateErr;
+
   // Ensure the profiles row exists with the right role (the app keys authz off
   // profiles.role, not auth metadata).
-  await admin.from("profiles").upsert({ id, full_name: `${role} tester`, email, role, is_active: true });
+  const { error: profileErr } = await admin.from("profiles").upsert({ id, full_name: `${role} tester`, email, role, is_active: true });
+  if (profileErr) throw profileErr;
 
   const anon = createClient(TEST_URL, TEST_ANON_KEY, { auth: { persistSession: false } });
   const { error: signInErr } = await anon.auth.signInWithPassword({ email, password: TEST_USER_PASSWORD });
