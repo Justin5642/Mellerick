@@ -36,3 +36,12 @@ log:
     target: ".ezra/decisions/0002-phase2-authz-review.md"
     summary: "DECISION created: 0002-phase2-authz-review.md"
     triggered_by: auto
+  - id: CHG-0005
+    timestamp: "2026-07-20T11:38:26.238Z"
+    version_before: "1.0.4"
+    version_after: "1.0.5"
+    type: SCAN
+    action: CREATED
+    target: ".ezra/scans/2026-07-20-route-auth-audit.md"
+    summary: "SCAN created: 2026-07-20-route-auth-audit.md"
+    triggered_by: auto

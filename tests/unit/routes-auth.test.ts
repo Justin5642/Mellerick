@@ -38,6 +38,9 @@ vi.mock("@/lib/supabase/admin", () => ({
 import { POST as expenseCodePOST } from "@/app/api/xero/expense-account-code/route";
 import { POST as disconnectPOST } from "@/app/api/google/disconnect/route";
 import { GET as geocodeGET } from "@/app/api/geocode/route";
+import { GET as xeroAuthGET } from "@/app/api/xero/auth/route";
+import { GET as xeroCallbackGET } from "@/app/api/xero/callback/route";
+import { GET as pollCalendarGET } from "@/app/api/google/poll-calendar/route";
 
 function roleChain(role: string | null) {
   const chain: Record<string, unknown> = {};
@@ -122,5 +125,44 @@ describe("GET /api/geocode (authenticated only)", () => {
     expect(res.status).toBe(401);
     expect(fetchSpy).not.toHaveBeenCalled();
     fetchSpy.mockRestore();
+  });
+});
+
+describe("OAuth connect routes (admin only, both initiation and callback)", () => {
+  it("xero/auth 403s a non-admin before building the consent URL", async () => {
+    serverGetUser.mockResolvedValue({ data: { user: { id: "u1" } } });
+    adminFrom.mockReturnValue(roleChain("office"));
+    const res = await xeroAuthGET(new NextRequest("http://test.local/api/xero/auth"));
+    expect(res.status).toBe(403);
+  });
+
+  it("xero/callback 403s a non-admin before writing tokens", async () => {
+    serverGetUser.mockResolvedValue({ data: { user: { id: "u1" } } });
+    adminFrom.mockReturnValue(roleChain("technician"));
+    const res = await xeroCallbackGET(new NextRequest("http://test.local/api/xero/callback?code=x"));
+    expect(res.status).toBe(403);
+  });
+
+  it("xero/callback 401s an unauthenticated caller", async () => {
+    serverGetUser.mockResolvedValue({ data: { user: null } });
+    const res = await xeroCallbackGET(new NextRequest("http://test.local/api/xero/callback?code=x"));
+    expect(res.status).toBe(401);
+  });
+});
+
+describe("GET /api/google/poll-calendar (cron secret)", () => {
+  it("500s when CRON_SECRET is unset (fails closed)", async () => {
+    delete process.env.CRON_SECRET;
+    const res = await pollCalendarGET(new NextRequest("http://test.local/api/google/poll-calendar"));
+    expect(res.status).toBe(500);
+  });
+
+  it("401s a wrong secret", async () => {
+    process.env.CRON_SECRET = "s3cret";
+    const res = await pollCalendarGET(
+      new NextRequest("http://test.local/api/google/poll-calendar", { headers: { authorization: "Bearer wrong" } })
+    );
+    expect(res.status).toBe(401);
+    delete process.env.CRON_SECRET;
   });
 });

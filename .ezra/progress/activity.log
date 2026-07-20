@@ -47,3 +47,11 @@
 2026-07-20T11:28:20.747Z | Write | C:\Dev\Mellerick\.env.example
 2026-07-20T11:28:32.882Z | Write | C:\Dev\Mellerick\tests\unit\env.test.ts
 2026-07-20T11:28:51.880Z | Write | C:\Dev\Mellerick\README.md
+2026-07-20T11:34:51.465Z | Write | C:\Dev\Mellerick\app\api\xero\auth\route.ts
+2026-07-20T11:34:53.770Z | Write | C:\Dev\Mellerick\app\api\google\auth\route.ts
+2026-07-20T11:35:03.055Z | Edit | C:\Dev\Mellerick\app\api\xero\callback\route.ts
+2026-07-20T11:35:10.509Z | Edit | C:\Dev\Mellerick\app\api\google\callback\route.ts
+2026-07-20T11:35:23.744Z | Edit | C:\Dev\Mellerick\app\api\google\poll-calendar\route.ts
+2026-07-20T11:35:31.799Z | Edit | C:\Dev\Mellerick\tests\unit\routes-auth.test.ts
+2026-07-20T11:35:46.767Z | Edit | C:\Dev\Mellerick\tests\unit\routes-auth.test.ts
+2026-07-20T11:38:26.251Z | Write | C:\Dev\Mellerick\.ezra\scans\2026-07-20-route-auth-audit.md

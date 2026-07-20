@@ -2,8 +2,14 @@ import { NextRequest, NextResponse } from "next/server";
 import { google } from "googleapis";
 import { getGoogleOAuthClient } from "@/lib/google";
 import { createClient } from "@/lib/supabase/server";
+import { requireAdmin } from "@/lib/api/guards";
 
 export async function GET(request: NextRequest) {
+  // Re-check admin at the callback (see xero/callback for the rationale): this
+  // is where google_tokens is deleted and rewritten.
+  const guard = await requireAdmin(request);
+  if (!guard.ok) return guard.response;
+
   const code = request.nextUrl.searchParams.get("code");
   if (!code) {
     return NextResponse.redirect(new URL("/dashboard/settings?google=error", request.url));
