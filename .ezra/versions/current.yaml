@@ -1,0 +1,17 @@
+version: "1.0.5"
+created: "2026-07-20T10:52:07.762Z"
+updated: "2026-07-20T11:38:26.238Z"
+total_changes: 5
+
+counts:
+  decisions: 0
+  documents: 0
+  scans: 0
+  plans: 0
+  risks: 0
+  proposals: 0
+
+integrity:
+  last_health_check: "never"
+  health_score: null
+  governance_compliant: unknown

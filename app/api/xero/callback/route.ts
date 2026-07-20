@@ -1,8 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getXeroClient } from "@/lib/xero";
 import { createClient } from "@/lib/supabase/server";
+import { requireAdmin } from "@/lib/api/guards";
 
 export async function GET(request: NextRequest) {
+  // Re-check admin at the callback, not just at initiation: the callback is
+  // what writes (and first deletes) the org's xero_tokens. Without this, an
+  // attacker who obtains an OAuth code for THEIR own Xero org could repoint the
+  // business's invoicing by hitting this URL directly with their session.
+  const guard = await requireAdmin(request);
+  if (!guard.ok) return guard.response;
+
   const xero = getXeroClient();
 
   try {

@@ -36,6 +36,14 @@ yarn-error.log*
 # vercel
 .vercel
 
+# local agent/editor launcher config (machine-specific)
+/.claude/
+
+# EZRA governance: track decisions/plans/state, ignore runtime logs
+/.ezra/logs/
+/.ezra/progress/
+/.ezra/oversight/
+
 # typescript
 *.tsbuildinfo
 next-env.d.ts

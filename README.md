@@ -1,38 +1,73 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Mellerick
 
-## Getting Started
+Job-management platform for Mellerick Plumbing & Drainage: jobs, scheduling,
+time tracking, quoting/invoicing (with Xero sync), backflow compliance testing,
+fleet/equipment costing, and staff management. A Next.js 15 web dashboard plus a
+React Native (Expo) mobile app for field technicians, sharing one Supabase
+backend.
 
-First, run the development server:
+## Stack
+
+- **Web:** Next.js 15 (App Router), React 19, Tailwind 4, shadcn/base-ui
+- **Backend:** Supabase (Postgres + Auth + Storage), row-level security
+- **Mobile:** Expo (SDK 54), Expo Router — see [`mobile/`](mobile/)
+- **Integrations:** Xero (invoicing), Google Calendar, Resend (email),
+  OpenAI (voice transcription/notes), Anthropic (backflow data-plate scanning)
+- **Hosting:** Vercel (auto-deploys `main` to production)
+
+## Prerequisites
+
+- **Node 22** (pinned in [`.node-version`](.node-version) / `engines`).
+  Node 25 breaks `@supabase/ssr` server-side — use a version manager (`fnm`,
+  `nvm`) to select 22.
+- A Supabase project (URL + keys).
+
+## Getting started
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+npm install
+cp .env.example .env.local     # then fill in the values
+npm run dev                    # http://localhost:3000
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+At minimum you need the three Supabase variables in `.env.local`
+(`NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`,
+`SUPABASE_SERVICE_ROLE_KEY`). Every other variable feature-gates an optional
+integration — see [`.env.example`](.env.example) for the full annotated list.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Scripts
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+| Command | What it does |
+|---|---|
+| `npm run dev` | Start the dev server |
+| `npm run build` | Production build (lint + typecheck enforced) |
+| `npm test` | Run the unit test suite (Vitest) |
+| `npm run test:watch` | Vitest in watch mode |
+| `npm run test:coverage` | Unit tests with a coverage report |
+| `npm run lint` | ESLint |
 
-## Learn More
+## Testing
 
-To learn more about Next.js, take a look at the following resources:
+Unit and route-authorization tests run with Vitest and need no external
+services (Supabase seams are mocked):
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+```bash
+npm test
+```
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+Coverage is scoped to the security- and business-critical modules (pricing,
+cost, authorization) rather than repo-wide. RLS and end-to-end tests (against a
+local Supabase stack) are being added — see the hardening plan in `.ezra/plans/`.
 
-## Deploy on Vercel
+## Database
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+Schema lives in [`supabase/`](supabase/): `schema.sql` is the baseline and
+`migrations/` holds the ordered changes. Apply them with the Supabase CLI
+(`supabase db reset` against a local stack, or `supabase db push` to a project).
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## Deployment
 
-This project auto-deploys to production on every push to `main` via Vercel's GitHub integration.
+Vercel builds and deploys every push to `main` to production. Work on a branch
+and open a pull request; production updates when the PR is merged. Cron routes
+(`/api/xero/poll-invoices`, `/api/google/poll-calendar`) are scheduled in
+[`vercel.json`](vercel.json) and authenticated with `CRON_SECRET`.

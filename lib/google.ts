@@ -77,7 +77,7 @@ export async function pollGoogleCalendarChanges(supabase: any) {
   const calendar = await getGoogleCalendarClient(supabase);
   if (!calendar) return { skipped: true, reason: "Google Calendar not connected" };
 
-  let syncToken: string | undefined = tokenRow.calendar_sync_token ?? undefined;
+  const syncToken: string | undefined = tokenRow.calendar_sync_token ?? undefined;
   let pageToken: string | undefined;
   let nextSyncToken: string | undefined;
   let updated = 0;

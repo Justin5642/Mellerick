@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
-import { createClient as createServerClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
+import { requireUser } from "@/lib/api/guards";
+import { canManageTimeEntryBilling } from "@/lib/api/job-authz";
 import { syncJobBilling } from "@/lib/labour-billing-sync";
 
 // Regenerates a job's auto-generated billing items (the per-entry "Labour"
@@ -12,46 +13,21 @@ import { syncJobBilling } from "@/lib/labour-billing-sync";
 // (see lib/labour-billing-sync.ts): recomputing every entry each time makes a
 // dropped request self-healing rather than leaving the job permanently
 // missing a charge. Uses the service-role key because job_items is Admin-only
-// writable (migration 0024) -- the route authenticates the caller itself
-// (mobile Bearer token or web session cookie) then writes on their behalf.
-function getAdminClient() {
-  return createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!, {
-    auth: { autoRefreshToken: false, persistSession: false },
-  });
-}
-
-async function getAuthenticatedUserId(request: NextRequest) {
-  const authHeader = request.headers.get("authorization") ?? "";
-  const token = authHeader.startsWith("Bearer ") ? authHeader.slice("Bearer ".length) : null;
-  if (token) {
-    const anonClient = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!, {
-      auth: { autoRefreshToken: false, persistSession: false },
-    });
-    const { data, error } = await anonClient.auth.getUser(token);
-    return error || !data.user ? null : data.user.id;
-  }
-  const supabase = await createServerClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  return user?.id ?? null;
-}
-
+// writable (migration 0024) -- so the route authenticates AND authorizes the
+// caller (office/admin, or the technician assigned to the entry's job) before
+// writing on their behalf.
 export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id: timeEntryId } = await params;
 
-  const callerId = await getAuthenticatedUserId(request);
-  if (!callerId) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+  const guard = await requireUser(request);
+  if (!guard.ok) return guard.response;
 
-  const admin = getAdminClient();
+  const admin = createAdminClient();
 
-  const { data: entry, error: entryError } = await admin
-    .from("time_entries")
-    .select("job_id")
-    .eq("id", timeEntryId)
-    .maybeSingle();
+  const { allowed, jobId } = await canManageTimeEntryBilling(admin, guard.userId, timeEntryId);
+  if (!jobId) return NextResponse.json({ error: "Time entry not found" }, { status: 404 });
+  if (!allowed) return NextResponse.json({ error: "Insufficient permissions" }, { status: 403 });
 
-  if (entryError) return NextResponse.json({ error: entryError.message }, { status: 500 });
-  if (!entry) return NextResponse.json({ error: "Time entry not found" }, { status: 404 });
-
-  const summary = await syncJobBilling(admin, entry.job_id);
+  const summary = await syncJobBilling(admin, jobId);
   return NextResponse.json({ ok: true, ...summary });
 }

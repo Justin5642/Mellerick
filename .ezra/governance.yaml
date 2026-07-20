@@ -1,0 +1,33 @@
+# .ezra/governance.yaml
+version: 1
+initialized: 2026-07-20T09:30:00Z
+project:
+  name: mellerick-app
+  language: TypeScript
+  framework: Next.js 15 (App Router) + Supabase; Expo (mobile/)
+
+protected_paths:
+  - pattern: "*.env*"
+    reason: "Environment configuration — changes affect all environments"
+  - pattern: "**/migrations/**"
+    reason: "Database migrations — irreversible in production"
+  - pattern: ".github/workflows/**"
+    reason: "CI/CD pipeline — changes affect all deployments"
+  - pattern: "supabase/schema.sql"
+    reason: "Database baseline — must stay in sync with migrations"
+  - pattern: "lib/supabase/**"
+    reason: "Auth/client seams — security-critical, test seams depend on them"
+  - pattern: "vercel.json"
+    reason: "Cron schedule + deploy config for production"
+
+enforcement:
+  require_decision_for_protected_paths: true
+  require_reconciliation_before_merge: true
+  auto_scan_on_init: false   # deep review already performed this session
+
+standards:
+  strict_types: true
+  no_any: true
+  test_coverage_minimum: 80
+  tdd: "London (API routes) / Detroit (lib, RLS, E2E) — see registered plan"
+  node_version: "22.x pinned (.node-version); Node 25 breaks supabase-js server-side"

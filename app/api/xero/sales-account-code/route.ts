@@ -1,10 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { requireOfficeOrAdmin } from "@/lib/api/guards";
 
 // Saves the office-configured Xero account code that invoice line items post
 // revenue to (see Settings). Sibling of expense-account-code; kept separate
 // from the OAuth callback routes since it's plain business config.
 export async function POST(request: NextRequest) {
+  // Xero billing config is office/admin-only (previously unauthenticated).
+  const guard = await requireOfficeOrAdmin(request);
+  if (!guard.ok) return guard.response;
+
   const { accountCode } = await request.json();
   const supabase = await createClient();
 

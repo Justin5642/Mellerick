@@ -2,11 +2,22 @@
   "name": "mellerick-app",
   "version": "0.1.0",
   "private": true,
+  "engines": {
+    "node": "22.x"
+  },
+  "overrides": {
+    "next": {
+      "postcss": "^8.5.10"
+    }
+  },
   "scripts": {
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "test": "vitest run --project unit",
+    "test:watch": "vitest --project unit",
+    "test:coverage": "vitest run --project unit --coverage"
   },
   "dependencies": {
     "@base-ui/react": "^1.6.0",
@@ -18,7 +29,7 @@
     "clsx": "^2.1.1",
     "googleapis": "^173.0.0",
     "lucide-react": "^1.22.0",
-    "next": "^15.3.9",
+    "next": "^15.5.20",
     "next-themes": "^0.4.6",
     "react": "19.2.4",
     "react-dom": "19.2.4",
@@ -35,9 +46,12 @@
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "@vitest/coverage-v8": "^3.2.7",
+    "cross-env": "^7.0.3",
     "eslint": "^9",
-    "eslint-config-next": "16.2.9",
+    "eslint-config-next": "^15.5.20",
     "tailwindcss": "^4",
-    "typescript": "^5"
+    "typescript": "^5",
+    "vitest": "^3.2.7"
   }
 }
