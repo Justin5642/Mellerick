@@ -78,7 +78,7 @@ jobs:
           cache: npm
       - uses: supabase/setup-cli@v1
         with:
-          version: latest
+          version: 2.109.1
       - run: npm ci
       - name: Disable automatic repo migrations for local CI bootstrap
         run: |
@@ -127,7 +127,7 @@ jobs:
           cache: npm
       - uses: supabase/setup-cli@v1
         with:
-          version: latest
+          version: 2.109.1
       - run: npm ci
       - run: npx playwright install --with-deps chromium
       - name: Disable automatic repo migrations for local CI bootstrap
