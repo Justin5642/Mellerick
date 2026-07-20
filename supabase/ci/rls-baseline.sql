@@ -210,3 +210,11 @@ create table if not exists xero_tokens (
   created_at timestamptz default now(),
   updated_at timestamptz default now()
 );
+
+-- Grant PostgREST roles access to all tables created above.
+-- Supabase's default-privilege setup only fires when migrations run normally;
+-- in CI we apply this file directly via psql, so the grants must be explicit.
+grant usage on schema public to anon, authenticated, service_role;
+grant all on all tables in schema public to anon, authenticated, service_role;
+grant all on all sequences in schema public to anon, authenticated, service_role;
+grant all on all routines in schema public to anon, authenticated, service_role;
