@@ -39,3 +39,11 @@
 2026-07-20T11:13:14.292Z | Write | C:\Dev\Mellerick\tests\unit\html.test.ts
 2026-07-20T11:19:21.866Z | Write | C:\Dev\Mellerick\.ezra\decisions\0002-phase2-authz-review.md
 2026-07-20T11:19:27.732Z | Edit | C:\Dev\Mellerick\DECISIONS-FOR-AVI.md
+2026-07-20T11:26:12.884Z | Write | C:\Dev\Mellerick\eslint.config.mjs
+2026-07-20T11:27:05.472Z | Write | C:\Dev\Mellerick\eslint.config.mjs
+2026-07-20T11:27:34.726Z | Edit | C:\Dev\Mellerick\lib\google.ts
+2026-07-20T11:27:41.843Z | Edit | C:\Dev\Mellerick\next.config.ts
+2026-07-20T11:28:12.593Z | Write | C:\Dev\Mellerick\lib\env.ts
+2026-07-20T11:28:20.747Z | Write | C:\Dev\Mellerick\.env.example
+2026-07-20T11:28:32.882Z | Write | C:\Dev\Mellerick\tests\unit\env.test.ts
+2026-07-20T11:28:51.880Z | Write | C:\Dev\Mellerick\README.md

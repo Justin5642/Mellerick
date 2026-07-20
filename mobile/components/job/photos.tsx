@@ -283,6 +283,10 @@ export function JobPhotosTab({
                 source={{ uri: pending.uri }}
                 style={styles.previewImage}
                 resizeMode="cover"
+                // collapsable is forwarded to the underlying View (needed for the
+                // capture workaround above) but is missing from ImageBackground's
+                // prop types — an RN types gap, not a runtime issue.
+                // @ts-expect-error see above
                 collapsable={false}
               >
                 <View style={styles.watermarkTag} collapsable={false}>
