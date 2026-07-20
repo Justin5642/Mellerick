@@ -358,9 +358,10 @@ create table time_entries (
 );
 
 alter table time_entries enable row level security;
--- Baseline: every authenticated user manages time entries (techs log their own);
--- migration 0030 adds the office/admin-manage-all policy on top.
-create policy "Authenticated users can manage time entries" on time_entries for all using (auth.role() = 'authenticated');
+-- Baseline: users can manage their own time entries; migration 0030 adds the
+-- office/admin-manage-all policy on top.
+create policy "Users can manage own time entries" on time_entries for all
+  using (auth.uid() = staff_id) with check (auth.uid() = staff_id);
 
 -- =============================================
 -- XERO TOKENS (single connected org — mirrors google_tokens)
