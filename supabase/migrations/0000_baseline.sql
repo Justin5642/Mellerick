@@ -13,7 +13,7 @@
 -- history is coherent without recreating existing tables.
 --
 -- Keep this in sync with supabase/schema.sql (kept as the human-readable
--- reference). =============================================
+-- reference).
 
 -- Enable UUID extension
 create extension if not exists "uuid-ossp";
