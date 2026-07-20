@@ -1,0 +1,29 @@
+# EZRA Changelog — APPEND ONLY
+log:
+  - id: CHG-0001
+    timestamp: "2026-07-20T10:52:07.762Z"
+    version_before: "1.0.0"
+    version_after: "1.0.1"
+    type: GOVERNANCE
+    action: UPDATED
+    target: ".ezra/governance.yaml"
+    summary: "GOVERNANCE updated: governance.yaml"
+    triggered_by: auto
+  - id: CHG-0002
+    timestamp: "2026-07-20T10:52:19.939Z"
+    version_before: "1.0.1"
+    version_after: "1.0.2"
+    type: KNOWLEDGE
+    action: UPDATED
+    target: ".ezra/knowledge.yaml"
+    summary: "KNOWLEDGE updated: knowledge.yaml"
+    triggered_by: auto
+  - id: CHG-0003
+    timestamp: "2026-07-20T10:56:25.890Z"
+    version_before: "1.0.2"
+    version_after: "1.0.3"
+    type: DECISION
+    action: CREATED
+    target: ".ezra/decisions/0001-consensus-plan-review.md"
+    summary: "DECISION created: 0001-consensus-plan-review.md"
+    triggered_by: auto

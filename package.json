@@ -2,6 +2,14 @@
   "name": "mellerick-app",
   "version": "0.1.0",
   "private": true,
+  "engines": {
+    "node": "22.x"
+  },
+  "overrides": {
+    "next": {
+      "postcss": "^8.5.10"
+    }
+  },
   "scripts": {
     "dev": "next dev",
     "build": "next build",
@@ -18,7 +26,7 @@
     "clsx": "^2.1.1",
     "googleapis": "^173.0.0",
     "lucide-react": "^1.22.0",
-    "next": "^15.3.9",
+    "next": "^15.5.20",
     "next-themes": "^0.4.6",
     "react": "19.2.4",
     "react-dom": "19.2.4",
