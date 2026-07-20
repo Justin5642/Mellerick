@@ -365,6 +365,7 @@ create table time_entries (
   staff_id uuid references profiles(id) not null,
   clock_in timestamptz not null,
   clock_out timestamptz,
+  notes text,
   auto_clocked boolean default false,
   created_at timestamptz default now()
 );
@@ -415,7 +416,7 @@ create table job_documents (
   uploaded_by uuid references profiles(id),
   storage_path text not null,
   file_name text not null,
-  file_size bigint,
+  file_size integer,
   file_type text,
   created_at timestamptz default now()
 );
@@ -440,11 +441,13 @@ create table purchase_orders (
   po_number text not null,
   client_reference text,
   site_address text,
-  site_lat double precision,
-  site_lng double precision,
+  site_lat numeric,
+  site_lng numeric,
   total_value decimal(12,2) default 0,
   total_hours decimal(10,2) default 0,
-  created_at timestamptz default now()
+  notes text,
+  created_at timestamptz default now(),
+  updated_at timestamptz default now()
 );
 
 alter table purchase_orders enable row level security;
