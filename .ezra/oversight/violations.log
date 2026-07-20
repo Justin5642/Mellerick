@@ -1,2 +1,4 @@
 [2026-07-20T10:56:36.230Z] LOW STD-NAMING: File "DECISIONS-FOR-AVI.md" uses PascalCase, expected camelCase (C:\Dev\Mellerick\DECISIONS-FOR-AVI.md)
 [2026-07-20T11:19:27.240Z] LOW STD-NAMING: File "DECISIONS-FOR-AVI.md" uses PascalCase, expected camelCase (C:\Dev\Mellerick\DECISIONS-FOR-AVI.md)
+[2026-07-20T13:07:54.562Z] HIGH STD-ANY: 'any' type detected at line 26 (C:\Dev\Mellerick\supabase\schema.sql)
+[2026-07-20T13:09:18.604Z] CRITICAL SEC-SECRETS: Possible secret/password at line 18 (C:\Dev\Mellerick\tests\rls\helpers.ts)

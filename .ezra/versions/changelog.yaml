@@ -45,3 +45,12 @@ log:
     target: ".ezra/scans/2026-07-20-route-auth-audit.md"
     summary: "SCAN created: 2026-07-20-route-auth-audit.md"
     triggered_by: auto
+  - id: CHG-0006
+    timestamp: "2026-07-20T13:14:01.955Z"
+    version_before: "1.0.5"
+    version_after: "1.0.6"
+    type: DECISION
+    action: CREATED
+    target: ".ezra/decisions/0003-schema-drift-reconciliation.md"
+    summary: "DECISION created: 0003-schema-drift-reconciliation.md"
+    triggered_by: auto

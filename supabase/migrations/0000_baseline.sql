@@ -1,7 +1,19 @@
 -- =============================================
--- MELLERICK APP — DATABASE SCHEMA
--- Run this in Supabase SQL Editor
+-- MELLERICK APP — BASELINE MIGRATION (0000)
 -- =============================================
+-- This is the initial schema, promoted from supabase/schema.sql so the
+-- migration chain is self-contained: `supabase start` / `db reset` applies
+-- this first, then 0001+ layer on top. Previously the migrations assumed
+-- schema.sql had already been run by hand, so a from-scratch rebuild failed
+-- with `relation "customers" does not exist`.
+--
+-- PRODUCTION NOTE: the prod database already has these tables (built from the
+-- original schema.sql). Do NOT re-run this migration against prod — mark it
+-- applied with `supabase migration repair --status applied 0000` so the CLI
+-- history is coherent without recreating existing tables.
+--
+-- Keep this in sync with supabase/schema.sql (kept as the human-readable
+-- reference).
 
 -- Enable UUID extension
 create extension if not exists "uuid-ossp";

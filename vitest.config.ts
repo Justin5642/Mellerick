@@ -23,6 +23,18 @@ export default defineConfig({
           setupFiles: ["tests/setup/unit.ts"],
         },
       },
+      {
+        extends: true,
+        test: {
+          name: "rls",
+          environment: "node",
+          include: ["tests/rls/**/*.test.ts"],
+          // Requires a running local Supabase stack (`npm run test:rls`, which
+          // boots it). Reads connection details from env — see tests/rls/env.ts.
+          testTimeout: 30_000,
+          hookTimeout: 60_000,
+        },
+      },
     ],
     coverage: {
       provider: "v8",

@@ -5,10 +5,12 @@ on:
   push:
     branches: [main]
 
+permissions:
+  contents: read
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
-
 jobs:
   typecheck:
     runs-on: ubuntu-latest
@@ -48,10 +50,7 @@ jobs:
           NEXT_PUBLIC_SUPABASE_ANON_KEY: ci-placeholder-anon-key
 
   lint:
-    # Non-blocking until Phase 5 aligns eslint-config-next with Next 15 and clears
-    # the accumulated lint debt; then remove continue-on-error and make it required.
     runs-on: ubuntu-latest
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -60,3 +59,99 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run lint
+
+  rls:
+    # RLS policy tests against a local Supabase stack. The Supabase CLI only
+    # replays versioned migrations on `start`, so CI boots the stack without repo
+    # migrations, then loads the minimal baseline these tests need and applies the
+    # security migrations under test.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .node-version
+          cache: npm
+      - uses: supabase/setup-cli@v1
+        with:
+          version: latest
+      - run: npm ci
+      - name: Disable automatic repo migrations for local CI bootstrap
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path("supabase/config.toml")
+          lines = path.read_text().splitlines()
+          in_block = False
+          for i, line in enumerate(lines):
+              stripped = line.strip()
+              if stripped == "[db.migrations]":
+                  in_block = True
+              elif in_block and stripped.startswith("["):
+                  in_block = False
+              elif in_block and stripped == "enabled = true":
+                  lines[i] = line.replace("true", "false", 1)
+                  path.write_text("\n".join(lines) + "\n")
+                  break
+          else:
+              raise SystemExit("Could not disable db.migrations.enabled in supabase/config.toml")
+          PY
+      - name: Start Supabase local stack
+        run: supabase start -x studio,imgproxy,inbucket,edge-runtime,realtime,vector,logflare
+      - name: Bootstrap RLS schema + security migrations
+        run: |
+          export SUPABASE_DB_URL="$(supabase status -o env | grep DB_URL | cut -d= -f2 | tr -d '\"')"
+          psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -f supabase/ci/rls-baseline.sql
+          psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -f supabase/migrations/0027_restrict_financial_tables_to_office_admin.sql
+          psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -f supabase/migrations/0033_add_sales_account_code.sql
+          psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -f supabase/migrations/0034_restrict_xero_tokens_to_office_admin.sql
+      - name: Run RLS tests
+        run: |
+          export SUPABASE_TEST_URL="$(supabase status -o env | grep API_URL | cut -d= -f2 | tr -d '\"')"
+          export SUPABASE_TEST_ANON_KEY="$(supabase status -o env | grep ANON_KEY | cut -d= -f2 | tr -d '\"')"
+          export SUPABASE_TEST_SERVICE_ROLE_KEY="$(supabase status -o env | grep SERVICE_ROLE_KEY | cut -d= -f2 | tr -d '\"')"
+          npm run test:rls
+
+  e2e:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .node-version
+          cache: npm
+      - uses: supabase/setup-cli@v1
+        with:
+          version: latest
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - name: Disable automatic repo migrations for local CI bootstrap
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path("supabase/config.toml")
+          lines = path.read_text().splitlines()
+          in_block = False
+          for i, line in enumerate(lines):
+              stripped = line.strip()
+              if stripped == "[db.migrations]":
+                  in_block = True
+              elif in_block and stripped.startswith("["):
+                  in_block = False
+              elif in_block and stripped == "enabled = true":
+                  lines[i] = line.replace("true", "false", 1)
+                  path.write_text("\n".join(lines) + "\n")
+                  break
+          else:
+              raise SystemExit("Could not disable db.migrations.enabled in supabase/config.toml")
+          PY
+      - name: Start Supabase
+        run: supabase start -x studio,imgproxy,inbucket,edge-runtime,realtime,vector,logflare
+      - name: Build + run E2E smoke
+        run: |
+          export NEXT_PUBLIC_SUPABASE_URL="$(supabase status -o env | grep API_URL | cut -d= -f2 | tr -d '\"')"
+          export NEXT_PUBLIC_SUPABASE_ANON_KEY="$(supabase status -o env | grep ANON_KEY | cut -d= -f2 | tr -d '\"')"
+          export SUPABASE_SERVICE_ROLE_KEY="$(supabase status -o env | grep SERVICE_ROLE_KEY | cut -d= -f2 | tr -d '\"')"
+          npm run build
+          npm run test:e2e
