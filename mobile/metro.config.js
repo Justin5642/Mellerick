@@ -25,6 +25,7 @@
 // https://docs.expo.dev/versions/v54.0.0/config/metro/
 const path = require("path");
 const { getDefaultConfig } = require("expo/metro-config");
+const { withNativeWind } = require("nativewind/metro");
 
 const config = getDefaultConfig(__dirname);
 
@@ -42,4 +43,6 @@ config.resolver.extraNodeModules = {
   react: path.resolve(__dirname, "node_modules/react"),
 };
 
-module.exports = config;
+// NativeWind: processes global.css (Tailwind directives) into RN styles at
+// build time. Wraps — does not replace — the react-pin config above.
+module.exports = withNativeWind(config, { input: "./global.css" });
