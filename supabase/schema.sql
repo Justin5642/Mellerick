@@ -335,3 +335,51 @@ create table google_tokens (
 
 alter table google_tokens enable row level security;
 create policy "Authenticated users can manage google tokens" on google_tokens for all using (auth.role() = 'authenticated');
+
+-- =============================================
+-- TIME ENTRIES (technician clock in/out per job)
+-- =============================================
+-- NOTE: this table and xero_tokens below were originally created directly in
+-- the production database and were missing from this baseline — so the
+-- versioned SQL could not rebuild the schema from scratch. They are restored
+-- here to match how the app uses them; later migrations layer on the columns
+-- they add (hours 0003, entry_type/travel 0005, cost_center 0013, edit audit
+-- 0015, rate_override 0025) via `add column if not exists`, and the office/
+-- admin-manage-all policy (0030). Column set reconstructed from code plus those
+-- migrations; verify against a production dump before applying to prod.
+create table time_entries (
+  id uuid default uuid_generate_v4() primary key,
+  job_id uuid references jobs(id) on delete cascade not null,
+  staff_id uuid references profiles(id) not null,
+  clock_in timestamptz not null,
+  clock_out timestamptz,
+  auto_clocked boolean default false,
+  created_at timestamptz default now()
+);
+
+alter table time_entries enable row level security;
+-- Baseline: every authenticated user manages time entries (techs log their own);
+-- migration 0030 adds the office/admin-manage-all policy on top.
+create policy "Authenticated users can manage time entries" on time_entries for all using (auth.role() = 'authenticated');
+
+-- =============================================
+-- XERO TOKENS (single connected org — mirrors google_tokens)
+-- =============================================
+-- See the note on time_entries above. Later migrations add
+-- default_expense_account_code / default_sales_account_code (0033) and
+-- xero_invoice_last_synced_at (0018). RLS is tightened to office/admin in
+-- migration 0034 — this table holds Xero OAuth tokens and must not be readable
+-- by technicians.
+create table xero_tokens (
+  id uuid default uuid_generate_v4() primary key,
+  access_token text not null,
+  refresh_token text not null,
+  token_expiry timestamptz not null,
+  tenant_id text,
+  tenant_name text,
+  created_at timestamptz default now(),
+  updated_at timestamptz default now()
+);
+
+alter table xero_tokens enable row level security;
+create policy "Authenticated users can manage xero tokens" on xero_tokens for all using (auth.role() = 'authenticated');
