@@ -32,6 +32,8 @@ const styles = StyleSheet.create({
   grandTotalRow: { flexDirection: "row", justifyContent: "space-between", paddingTop: 6, marginTop: 4, borderTop: "1pt solid #1e293b" },
   grandTotalText: { fontWeight: 700 },
   notes: { marginTop: 30, fontSize: 9, color: "#475569" },
+  workBlock: { marginTop: 4, marginBottom: 18, fontSize: 9, color: "#334155" },
+  workText: { marginTop: 4, lineHeight: 1.4 },
   footer: { position: "absolute", bottom: 30, left: 40, right: 40, fontSize: 8, color: "#94a3b8", textAlign: "center" },
 });
 
@@ -55,6 +57,9 @@ export interface DocumentPdfProps {
   dateLabel: string;
   dateValue?: string | null;
   notes?: string | null;
+  // Customer-facing summary of the work performed (invoices only). Rendered
+  // as a "Work Carried Out" block above the line items.
+  workDescription?: string | null;
   business: { name: string; abn?: string; address?: string; phone?: string; email?: string };
   logo?: { data: Buffer; format: "png" | "jpg" };
 }
@@ -71,6 +76,7 @@ export function DocumentPdf({
   dateLabel,
   dateValue,
   notes,
+  workDescription,
   business,
   logo,
 }: DocumentPdfProps) {
@@ -111,6 +117,13 @@ export function DocumentPdf({
             </View>
           )}
         </View>
+
+        {workDescription && (
+          <View style={styles.workBlock}>
+            <Text style={styles.label}>Work Carried Out</Text>
+            <Text style={styles.workText}>{workDescription}</Text>
+          </View>
+        )}
 
         <View>
           <View style={styles.tableHeaderRow}>

@@ -24,7 +24,7 @@ export default function EditInvoicePage() {
   const [loading, setLoading] = useState(false);
   const [fetching, setFetching] = useState(true);
   const [pricingItems, setPricingItems] = useState<any[]>([]);
-  const [form, setForm] = useState({ title: "", customer_id: "", customer_name: "", due_date: "", notes: "" });
+  const [form, setForm] = useState({ title: "", customer_id: "", customer_name: "", due_date: "", notes: "", work_description: "" });
   const [lineItems, setLineItems] = useState<LineItem[]>([]);
   const [errors, setErrors] = useState<Record<string, boolean>>({});
 
@@ -41,6 +41,7 @@ export default function EditInvoicePage() {
           customer_name: "",
           due_date: invoice.due_date ? invoice.due_date.split("T")[0] : "",
           notes: invoice.notes ?? "",
+          work_description: invoice.work_description ?? "",
         });
         setLineItems((invoice.invoice_items ?? []).map((i: any) => ({
           id: i.id,
@@ -94,6 +95,7 @@ export default function EditInvoicePage() {
       title: form.title,
       due_date: form.due_date || null,
       notes: form.notes || null,
+      work_description: form.work_description || null,
       subtotal, tax_amount: gst, total,
     }).eq("id", id);
 
@@ -139,6 +141,16 @@ export default function EditInvoicePage() {
                 <Label>Due Date</Label>
                 <Input type="date" value={form.due_date} onChange={e => setField("due_date", e.target.value)} />
               </div>
+            </div>
+            <div className="space-y-2">
+              <Label>Description of Works</Label>
+              <Textarea
+                value={form.work_description}
+                onChange={e => setField("work_description", e.target.value)}
+                placeholder="What was carried out on-site (shown to the customer on the invoice)..."
+                rows={4}
+              />
+              <p className="text-xs text-slate-400">Shown to the customer as &ldquo;Work Carried Out&rdquo; on the invoice.</p>
             </div>
             <div className="space-y-2">
               <Label>Notes</Label>

@@ -233,6 +233,13 @@ export function InvoiceDetail({ invoice, xeroConnected }: Props) {
         </CardContent>
       </Card>
 
+      {invoice.work_description && (
+        <Card>
+          <CardHeader><CardTitle className="text-sm">Work Carried Out</CardTitle></CardHeader>
+          <CardContent><p className="text-sm text-slate-600 whitespace-pre-wrap">{invoice.work_description}</p></CardContent>
+        </Card>
+      )}
+
       {invoice.notes && (
         <Card>
           <CardHeader><CardTitle className="text-sm">Notes</CardTitle></CardHeader>

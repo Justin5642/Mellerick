@@ -55,6 +55,9 @@ function NewInvoiceForm() {
   const [jobQuery, setJobQuery] = useState("");
   const [showJobResults, setShowJobResults] = useState(false);
   const [titleTouched, setTitleTouched] = useState(false);
+  // Once the office edits the description of works, stop auto-overwriting it
+  // from the linked job (mirrors titleTouched).
+  const [workDescTouched, setWorkDescTouched] = useState(false);
 
   // Reactive, unlike reading window.location.search once: the App Router
   // can navigate from /dashboard/invoices/new?job_id=A to ?job_id=B without
@@ -74,6 +77,7 @@ function NewInvoiceForm() {
     job_id: jobIdParam ?? "",
     due_date: "",
     notes: "",
+    work_description: "",
   });
   const [lineItems, setLineItems] = useState<LineItem[]>([{ name: "", description: "", quantity: "1", unit_price: "" }]);
   const [errors, setErrors] = useState<Record<string, boolean>>({});
@@ -177,6 +181,30 @@ function NewInvoiceForm() {
       setUnbilledVariations((data as any) ?? []);
     }
     loadUnbilledVariations();
+  }, [form.job_id]);
+
+  useEffect(() => {
+    // Pre-fill "Description of Works" from the linked job's on-site record so
+    // the office starts from what the technician actually wrote rather than a
+    // blank box: prefer the typed completion notes, fall back to the Whisper
+    // voice-report transcript. Stops once the office has edited the field
+    // (workDescTouched) so a re-selected job can't clobber their wording.
+    async function prefillWorkDescription() {
+      if (workDescTouched) return;
+      if (!form.job_id) {
+        setForm((prev) => (prev.work_description ? { ...prev, work_description: "" } : prev));
+        return;
+      }
+      const { data } = await supabase
+        .from("jobs")
+        .select("completion_notes, voice_report_transcript")
+        .eq("id", form.job_id)
+        .single();
+      const desc = (data?.completion_notes || data?.voice_report_transcript || "").trim();
+      setForm((prev) => ({ ...prev, work_description: desc }));
+    }
+    prefillWorkDescription();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [form.job_id]);
 
   function addVariationToInvoice(v: UnbilledVariation) {
@@ -365,6 +393,16 @@ function NewInvoiceForm() {
                 <Label>Due Date</Label>
                 <Input type="date" value={form.due_date} onChange={e => setField("due_date", e.target.value)} />
               </div>
+            </div>
+            <div className="space-y-2">
+              <Label>Description of Works</Label>
+              <Textarea
+                value={form.work_description}
+                onChange={e => { setWorkDescTouched(true); setField("work_description", e.target.value); }}
+                placeholder="What was carried out on-site (shown to the customer on the invoice)..."
+                rows={4}
+              />
+              <p className="text-xs text-slate-400">Pre-filled from the linked job&rsquo;s completion notes. Review before sending — this appears on the customer&rsquo;s invoice.</p>
             </div>
             <div className="space-y-2">
               <Label>Notes</Label>

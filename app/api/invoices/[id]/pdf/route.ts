@@ -30,6 +30,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     dateLabel: "Due Date",
     dateValue: invoice.due_date,
     notes: invoice.notes,
+    workDescription: invoice.work_description,
     business: businessInfo,
   });
 
