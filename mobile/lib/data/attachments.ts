@@ -18,3 +18,13 @@ export async function persistOutboxAttachment(sourceUri: string, ext = "jpg"): P
   await FileSystem.copyAsync({ from: sourceUri, to: dest });
   return dest;
 }
+
+// As above, but for content already in memory as base64 (e.g. a signature PNG
+// from react-native-signature-canvas). Writes it to the durable staging dir so
+// it can be queued and uploaded like any other attachment.
+export async function persistOutboxAttachmentFromBase64(base64: string, ext = "bin"): Promise<string> {
+  await FileSystem.makeDirectoryAsync(DIR, { intermediates: true }).catch(() => {});
+  const dest = `${DIR}${cryptoIdGen.newId()}.${ext}`;
+  await FileSystem.writeAsStringAsync(dest, base64, { encoding: FileSystem.EncodingType.Base64 });
+  return dest;
+}

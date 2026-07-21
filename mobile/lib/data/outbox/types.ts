@@ -12,7 +12,10 @@ export type Aggregate =
   | "job_variation"
   | "backflow_test";
 
-export type WriteOp = "insert" | "update" | "delete";
+// "upload" uploads the attachment to Storage and writes NO metadata row — used
+// when a server-side route (not the client) later writes the row from the object
+// (e.g. voice-report transcription).
+export type WriteOp = "insert" | "update" | "delete" | "upload";
 
 // "dead" is terminal — a write that failed too many times to keep retrying.
 export type OpStatus = "pending" | "inflight" | "done" | "failed" | "dead";

@@ -8,6 +8,8 @@ import { cryptoIdGen, type IdGen } from "./ids";
 import { TimeEntriesRepository } from "./repositories/timeEntries";
 import { JobPhotosRepository } from "./repositories/jobPhotos";
 import { JobNotesRepository } from "./repositories/jobNotes";
+import { SignatureRepository } from "./repositories/signature";
+import { VoiceReportRepository } from "./repositories/voiceReport";
 
 // The wired offline stack a screen consumes: repositories for writes, the sync
 // engine to drive them out, and the outbox for the pending/failed badge.
@@ -17,6 +19,8 @@ export interface DataLayer {
   timeEntries: TimeEntriesRepository;
   photos: JobPhotosRepository;
   notes: JobNotesRepository;
+  signature: SignatureRepository;
+  voiceReport: VoiceReportRepository;
 }
 
 export interface DataLayerDeps {
@@ -39,5 +43,7 @@ export function createDataLayer(deps: DataLayerDeps): DataLayer {
   const timeEntries = new TimeEntriesRepository(outbox, ids);
   const photos = new JobPhotosRepository(outbox, ids);
   const notes = new JobNotesRepository(outbox, ids);
-  return { outbox, engine, timeEntries, photos, notes };
+  const signature = new SignatureRepository(outbox, ids);
+  const voiceReport = new VoiceReportRepository(outbox, ids);
+  return { outbox, engine, timeEntries, photos, notes, signature, voiceReport };
 }

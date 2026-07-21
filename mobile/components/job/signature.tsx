@@ -1,12 +1,9 @@
 import { useRef, useState } from "react";
 import { View, Text, StyleSheet, TextInput, TouchableOpacity, Alert } from "react-native";
 import Signature, { SignatureViewRef } from "react-native-signature-canvas";
-import { decode } from "base64-arraybuffer";
-import { supabase } from "../../lib/supabase";
 import { colors } from "../../lib/theme";
 import { VoiceReportRecorder } from "./voice-report";
-
-const API_BASE_URL = process.env.EXPO_PUBLIC_API_BASE_URL;
+import { useSignoff } from "../../lib/data/hooks/useSignoff";
 
 export function JobSignatureTab({
   jobId,
@@ -25,45 +22,30 @@ export function JobSignatureTab({
   const [signerName, setSignerName] = useState("");
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const signoff = useSignoff();
 
   async function handleOK(signature: string) {
+    if (!signoff.ready) return;
     setSaving(true);
-    const base64 = signature.replace(/^data:image\/png;base64,/, "");
-    const path = `${jobId}/signature_${Date.now()}.png`;
-    const { error: uploadError } = await supabase.storage.from("job-photos").upload(path, decode(base64), {
-      contentType: "image/png",
-    });
-    if (uploadError) {
-      Alert.alert("Error", "Failed to save signature");
+    try {
+      // Queue the compound job-completion write (signature image + jobs update +
+      // calendar resync). Durable: a sign-off with no signal completes now and
+      // syncs on reconnect.
+      const base64 = signature.replace(/^data:image\/png;base64,/, "");
+      await signoff.signOff({
+        jobId,
+        uploadedBy: currentUserId,
+        signerName,
+        signatureBase64: base64,
+        signedOffDate: new Date().toLocaleDateString("en-AU"),
+      });
+      setSaved(true);
+      onCompleted?.();
+    } catch (e) {
+      Alert.alert("Error", e instanceof Error ? e.message : "Failed to save signature");
+    } finally {
       setSaving(false);
-      return;
     }
-
-    await supabase.from("job_photos").insert({
-      job_id: jobId,
-      uploaded_by: currentUserId,
-      storage_path: path,
-      photo_type: "signature",
-      caption: signerName || "Customer signature",
-    });
-
-    await supabase
-      .from("jobs")
-      .update({
-        completion_notes: `Signed off by: ${signerName || "Customer"} on ${new Date().toLocaleDateString("en-AU")}`,
-        status: "completed",
-        actual_end: new Date().toISOString(),
-        ready_to_invoice: true,
-      })
-      .eq("id", jobId);
-
-    if (API_BASE_URL) {
-      fetch(`${API_BASE_URL}/api/jobs/${jobId}/sync-calendar`, { method: "POST" }).catch(() => {});
-    }
-
-    setSaving(false);
-    setSaved(true);
-    onCompleted?.();
   }
 
   function handleSavePress() {

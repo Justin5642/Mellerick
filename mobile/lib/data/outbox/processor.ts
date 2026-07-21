@@ -61,6 +61,10 @@ export class Processor {
       await this.gateway.uploadObject(bucket, path, op.attachmentLocalPath);
     }
     switch (op.op) {
+      case "upload":
+        // Upload-only: the object was already uploaded above; no metadata row is
+        // written here (a server-side route writes it from the object later).
+        break;
       case "insert":
         // rowId is the client-generated PK → idempotent upsert on replay.
         await this.gateway.upsertRow(op.table, { id: op.rowId, ...stripInternal(op.payload) });

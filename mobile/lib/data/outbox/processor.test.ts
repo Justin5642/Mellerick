@@ -122,6 +122,21 @@ describe("Processor", () => {
     expect(await outbox.failedCount()).toBe(1);
   });
 
+  it("an upload-only op uploads the object, writes NO row, and cleans up the local file", async () => {
+    const store = new InMemoryOutboxStore();
+    const outbox = new Outbox(store, fixedClock());
+    await outbox.enqueue(
+      write("up-1", { aggregate: "job", table: "", op: "upload", attachmentLocalPath: "/doc/outbox/v.m4a", payload: { bucket: "job-audio", storage_path: "j1/v.m4a" } })
+    );
+    const gw = makeGateway();
+    await new Processor(outbox, gw, makeApi(), online(true)).drain();
+    expect(gw.uploadObject).toHaveBeenCalledWith("job-audio", "j1/v.m4a", "/doc/outbox/v.m4a");
+    expect(gw.upsertRow).not.toHaveBeenCalled(); // no metadata row for an upload-only op
+    expect(gw.updateRow).not.toHaveBeenCalled();
+    expect(gw.cleanupAttachment).toHaveBeenCalledWith("/doc/outbox/v.m4a");
+    expect(await outbox.pendingCount()).toBe(0);
+  });
+
   it("fires a queued side-effect via the api bridge", async () => {
     const store = new InMemoryOutboxStore();
     const outbox = new Outbox(store, fixedClock());
