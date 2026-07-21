@@ -69,6 +69,16 @@ describe("Outbox", () => {
     expect(billing[0].dependsOn).toBe("update-op"); // latest write, not the clock-in insert
   });
 
+  it("does NOT coalesce onto an inflight side-effect (avoids the lost-update on markDone)", async () => {
+    const store = new InMemoryOutboxStore();
+    const box = new Outbox(store, mockClock());
+    await box.enqueue(sideEffect("s1", "transcribe:j1", { payload: { v: 1 } }));
+    await box.markInflight("s1"); // s1 is being dispatched
+    await box.enqueue(sideEffect("s2", "transcribe:j1", { payload: { v: 2 } }));
+    const sides = (await store.all()).filter((o) => o.kind === "side_effect");
+    expect(sides).toHaveLength(2); // a fresh op, NOT coalesced onto the inflight one
+  });
+
   it("does not coalesce side-effects with different keys", async () => {
     const store = new InMemoryOutboxStore();
     const box = new Outbox(store, mockClock());
@@ -163,6 +173,26 @@ describe("Outbox — offline delete/insert ordering + recovery", () => {
     expect(op).toBeUndefined(); // dead ops are never re-selected
     expect(await box.deadCount()).toBe(1);
     expect(await box.failedCount()).toBe(0);
+  });
+
+  it("cascades 'dead' to dependents so a stranded op surfaces instead of hanging pending forever", async () => {
+    const clock = mockClock();
+    const box = new Outbox(new InMemoryOutboxStore(), clock);
+    // chain: A <- B <- C (C dependsOn B dependsOn A)
+    await box.enqueue(write("A", { createdAt: 1 }));
+    await box.enqueue(write("B", { createdAt: 2, dependsOn: "A" }));
+    await box.enqueue(write("C", { createdAt: 3, dependsOn: "B" }));
+    // A dies permanently.
+    let a = await box.nextReady();
+    for (let i = 0; i < MAX_ATTEMPTS; i++) {
+      await box.markFailed(a!, "permanent");
+      clock.advance(backoffMs(20) + 1);
+      a = await box.nextReady();
+    }
+    expect(await box.deadCount()).toBe(1); // only A so far
+    await box.cascadeDeadDependencies();
+    expect(await box.deadCount()).toBe(3); // B and C cascade dead (were pending forever)
+    expect(await box.pendingCount()).toBe(0);
   });
 
   it("pendingRowIds reports outstanding write rows and excludes done/dead", async () => {

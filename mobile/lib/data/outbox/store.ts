@@ -30,8 +30,12 @@ export class InMemoryOutboxStore implements OutboxStore {
   }
 
   async findByCoalesceKey(key: string): Promise<Operation | undefined> {
+    // Only coalesce onto an op that hasn't started dispatching. Coalescing onto
+    // an "inflight" op is a lost-update hazard: the in-flight dispatch's markDone
+    // would clobber the newly-coalesced payload without ever running it. A "dead"
+    // op is terminal and must not be revived.
     const found = this.ops.find(
-      (o) => o.kind === "side_effect" && o.coalesceKey === key && o.status !== "done"
+      (o) => o.kind === "side_effect" && o.coalesceKey === key && (o.status === "pending" || o.status === "failed")
     );
     return found ? { ...found } : undefined;
   }

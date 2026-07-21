@@ -36,6 +36,9 @@ describe("SignatureRepository", () => {
     const [photo, jobUpdate] = writes(ops);
     // 1) signature image
     expect(photo).toMatchObject({ op: "insert", table: "job_photos", rowId: "id-1", attachmentLocalPath: "file:///doc/outbox/sig.png" });
+    // completion is GATED on the signature image landing (no invoice-ready job
+    // without proof of sign-off).
+    expect(jobUpdate.dependsOn).toBe(photo.id);
     expect(photo.payload).toEqual({
       bucket: "job-photos",
       storage_path: "j1/signature_id-1.png",

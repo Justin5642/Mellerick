@@ -102,8 +102,11 @@ export class SqliteOutboxStore implements OutboxStore {
   }
 
   async findByCoalesceKey(key: string): Promise<Operation | undefined> {
+    // Only coalesce onto a not-yet-dispatching op (pending/failed). Coalescing
+    // onto an "inflight" op would be clobbered by its in-flight dispatch's
+    // markDone; a "dead" op is terminal and must not be revived.
     const row = await this.db.getFirstAsync<Row>(
-      "SELECT * FROM outbox WHERE coalesce_key = ? AND status != 'done' LIMIT 1",
+      "SELECT * FROM outbox WHERE coalesce_key = ? AND status IN ('pending', 'failed') LIMIT 1",
       key
     );
     return row ? rowToOp(row) : undefined;

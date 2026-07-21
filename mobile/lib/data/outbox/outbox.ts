@@ -73,6 +73,25 @@ export class Outbox {
     }
   }
 
+  // If an op depends on one that has terminally failed ("dead"), it can never
+  // become ready (nextReady only unblocks on a "done" dependency) — so it would
+  // sit "pending" forever, invisible to the badges. Cascade "dead" through the
+  // dependency chain so a stranded dependent is surfaced (deadCount) instead.
+  async cascadeDeadDependencies(): Promise<void> {
+    let changed = true;
+    while (changed) {
+      changed = false;
+      const all = await this.store.all();
+      const deadIds = new Set(all.filter((o) => o.status === "dead").map((o) => o.id));
+      for (const o of all) {
+        if ((o.status === "pending" || o.status === "failed") && o.dependsOn && deadIds.has(o.dependsOn)) {
+          await this.store.update(o.id, { status: "dead", error: "dependency failed" });
+          changed = true;
+        }
+      }
+    }
+  }
+
   // Row ids of every write still outstanding (not done/dead). A screen merges
   // this with a server read so an optimistic row that hasn't synced yet is not
   // wiped by the reload.

@@ -27,7 +27,10 @@ export class VoiceReportRepository {
 
   async record(input: VoiceReportInput): Promise<{ storagePath: string }> {
     const uploadRowId = this.ids.newId();
-    const storagePath = `${input.jobId}/voice-report-${uploadRowId}.m4a`;
+    // Stable per-job object key: a re-record upserts over the same object instead
+    // of orphaning the prior one in the private bucket (matches the per-job
+    // transcribe coalescing — latest recording wins).
+    const storagePath = `${input.jobId}/voice-report.m4a`;
 
     // 1) upload the audio (upload-only — no client-written row).
     const uploadOpId = this.ids.newId();

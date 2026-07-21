@@ -29,6 +29,8 @@ export class Processor {
       // Recover any op stranded "inflight" by a crash mid-dispatch (drains are
       // serialized, so at this point an inflight op can only be a leftover).
       await this.outbox.reclaimInflight();
+      // Surface dependents whose dependency died so they don't hang forever.
+      await this.outbox.cascadeDeadDependencies();
       let op: Operation | undefined;
       while ((op = await this.outbox.nextReady())) {
         await this.outbox.markInflight(op.id);

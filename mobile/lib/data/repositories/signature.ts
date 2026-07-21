@@ -33,9 +33,10 @@ export class SignatureRepository {
     const caption = input.signerName || "Customer signature";
 
     // 1) the signature image (upload-before-row into job_photos).
+    const photoOpId = this.ids.newId();
     const photoOp: WriteOperation = {
       kind: "write",
-      id: this.ids.newId(),
+      id: photoOpId,
       rowId: photoRowId,
       aggregate: "job_photo",
       op: "insert",
@@ -56,8 +57,12 @@ export class SignatureRepository {
     };
     await this.outbox.enqueue(photoOp);
 
-    // 2) mark the job completed (independent of the photo, matching web — the job
-    //    completes even if the image upload has trouble; the image retries).
+    // 2) mark the job completed — GATED on the signature image landing first
+    //    (dependsOn photoOp). This preserves the web invariant: the old handleOK
+    //    aborted before completing the job if the signature upload failed, so a
+    //    job is never marked completed + ready_to_invoice without its signature
+    //    on file. Failure now leaves the job incomplete (safe) rather than
+    //    invoice-ready-without-proof.
     const jobsOpId = this.ids.newId();
     const jobsOp: WriteOperation = {
       kind: "write",
@@ -66,6 +71,7 @@ export class SignatureRepository {
       aggregate: "job",
       op: "update",
       table: "jobs",
+      dependsOn: photoOpId,
       payload: {
         completion_notes: `Signed off by: ${input.signerName || "Customer"} on ${input.signedOffDate}`,
         status: "completed",
