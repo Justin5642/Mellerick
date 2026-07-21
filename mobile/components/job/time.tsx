@@ -7,6 +7,9 @@ import { colors } from "../../lib/theme";
 import { useTimeClock } from "../../lib/data/hooks/useTimeClock";
 import { hoursBetween } from "../../lib/data/repositories/timeEntries";
 import { netInfoConnectivity } from "../../lib/data/net/connectivity";
+import { useDataLayer } from "../../lib/data/DataProvider";
+import { useSyncSettled } from "../../lib/data/hooks/useSyncSettled";
+import { reconcileRows } from "../../lib/data/reconcile";
 
 interface TimeEntry {
   id: string;
@@ -283,10 +286,12 @@ export function JobTimeTab({ jobId, currentUserId }: { jobId: string; currentUse
   const [editing, setEditing] = useState<EditingEntry | null>(null);
   const [saving, setSaving] = useState(false);
   const timeClock = useTimeClock();
+  const layer = useDataLayer();
 
   // Reads refresh from the server only when online. Offline, local state (which
-  // includes optimistic writes queued in the outbox) is authoritative — a server
-  // refresh can't see un-synced rows yet and would wipe them.
+  // includes optimistic writes queued in the outbox) is authoritative. Even
+  // online, we MERGE rather than replace, so an optimistic row whose write is
+  // still pending isn't wiped by a reload that races the sync.
   const loadEntries = useCallback(async () => {
     if (!(await netInfoConnectivity.isOnline())) return;
     const { data } = await supabase
@@ -296,8 +301,14 @@ export function JobTimeTab({ jobId, currentUserId }: { jobId: string; currentUse
       .select("*, profiles!time_entries_staff_id_fkey(full_name)")
       .eq("job_id", jobId)
       .order("clock_in", { ascending: false });
-    setEntries((data as any) ?? []);
-  }, [jobId]);
+    const rows = (data as unknown as TimeEntry[]) ?? [];
+    const pending = layer ? await layer.outbox.pendingRowIds() : new Set<string>();
+    setEntries((prev) => reconcileRows(prev, rows, pending));
+  }, [jobId, layer]);
+
+  // Reconcile with the server after each sync drain completes (queued writes
+  // have actually landed) — not on a was-online guess.
+  useSyncSettled(loadEntries);
 
   const loadCostCenters = useCallback(async () => {
     const { data } = await supabase
@@ -325,23 +336,22 @@ export function JobTimeTab({ jobId, currentUserId }: { jobId: string; currentUse
     if (myOpenEntry || loading || !timeClock.ready) return;
     setLoading(true);
     const clockInIso = new Date().toISOString();
-    const { id, synced } = await timeClock.clockIn({ jobId, staffId: currentUserId });
-    // Optimistic: show immediately (this is also the offline display path).
+    const { id } = await timeClock.clockIn({ jobId, staffId: currentUserId });
+    // Optimistic: show immediately (this is also the offline display path). The
+    // server row reconciles in via useSyncSettled once the write lands.
     setEntries((prev) => [optimisticEntry(id, currentUserId, clockInIso), ...prev]);
     setLoading(false);
-    if (synced) await loadEntries();
   }
 
   async function clockOut() {
     const open = myOpenEntry;
     if (!open || loading || !timeClock.ready) return;
     setLoading(true);
-    const { synced } = await timeClock.clockOut({ entryId: open.id, clockInIso: open.clock_in });
+    await timeClock.clockOut({ entryId: open.id, clockInIso: open.clock_in });
     const clockOutIso = new Date().toISOString();
     const hours = hoursBetween(open.clock_in, clockOutIso);
     setEntries((prev) => prev.map((e) => (e.id === open.id ? { ...e, clock_out: clockOutIso, hours } : e)));
     setLoading(false);
-    if (synced) await loadEntries();
   }
 
   async function assignCostCenter(entryId: string, costCenterId: string | null) {
@@ -381,9 +391,8 @@ export function JobTimeTab({ jobId, currentUserId }: { jobId: string; currentUse
     const hours = clockOutIso ? hoursBetween(clockInIso, clockOutIso) : null;
     const nowIso = new Date().toISOString();
 
-    let synced = false;
     if (editing.mode === "add") {
-      const res = await timeClock.addManual({
+      const { id } = await timeClock.addManual({
         jobId,
         staffId: currentUserId,
         entryType: editing.entryType,
@@ -391,9 +400,8 @@ export function JobTimeTab({ jobId, currentUserId }: { jobId: string; currentUse
         clockOutIso,
         costCenterId: editing.costCenterId,
       });
-      synced = res.synced;
       const optimistic: TimeEntry = {
-        id: res.id,
+        id,
         staff_id: currentUserId,
         clock_in: clockInIso,
         clock_out: clockOutIso,
@@ -407,14 +415,13 @@ export function JobTimeTab({ jobId, currentUserId }: { jobId: string; currentUse
       setEntries((prev) => [optimistic, ...prev]);
     } else if (editing.entryId) {
       const entryId = editing.entryId;
-      const res = await timeClock.editEntry({
+      await timeClock.editEntry({
         entryId,
         editorId: currentUserId,
         clockInIso,
         clockOutIso,
         costCenterId: editing.costCenterId,
       });
-      synced = res.synced;
       setEntries((prev) =>
         prev.map((e) =>
           e.id === entryId
@@ -425,18 +432,16 @@ export function JobTimeTab({ jobId, currentUserId }: { jobId: string; currentUse
     }
     setSaving(false);
     setEditing(null);
-    if (synced) await loadEntries();
   }
 
   async function deleteEditing() {
     if (!editing?.entryId || saving || !timeClock.ready) return;
     setSaving(true);
     const entryId = editing.entryId;
-    const { synced } = await timeClock.remove(entryId);
+    await timeClock.remove(entryId);
     setEntries((prev) => prev.filter((e) => e.id !== entryId));
     setSaving(false);
     setEditing(null);
-    if (synced) await loadEntries();
   }
 
   return (

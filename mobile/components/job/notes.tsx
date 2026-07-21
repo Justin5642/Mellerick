@@ -5,6 +5,9 @@ import { supabase } from "../../lib/supabase";
 import { colors } from "../../lib/theme";
 import { useJobNotes } from "../../lib/data/hooks/useJobNotes";
 import { netInfoConnectivity } from "../../lib/data/net/connectivity";
+import { useDataLayer } from "../../lib/data/DataProvider";
+import { useSyncSettled } from "../../lib/data/hooks/useSyncSettled";
+import { reconcileRows } from "../../lib/data/reconcile";
 
 // Same "office server" the voice report recorder calls
 // (see components/job/voice-report.tsx) — /api/ai/polish-note on the web
@@ -32,9 +35,11 @@ export function JobNotesTab({ jobId, currentUserId }: { jobId: string; currentUs
   const [saving, setSaving] = useState(false);
   const [polishing, setPolishing] = useState(false);
   const notesComposer = useJobNotes();
+  const layer = useDataLayer();
 
   // Reads refresh from the server only when online; offline, local state (incl.
-  // the optimistic note just queued) is authoritative.
+  // the optimistic note just queued) is authoritative. Even online we MERGE, so
+  // an optimistic note whose write is still pending survives a racing reload.
   const loadNotes = useCallback(async () => {
     if (!(await netInfoConnectivity.isOnline())) return;
     const { data } = await supabase
@@ -42,23 +47,31 @@ export function JobNotesTab({ jobId, currentUserId }: { jobId: string; currentUs
       .select("*, profiles(full_name)")
       .eq("job_id", jobId)
       .order("created_at", { ascending: false });
-    setNotes((data as unknown as Note[]) ?? []);
-  }, [jobId]);
+    const rows = (data as unknown as Note[]) ?? [];
+    const pending = layer ? await layer.outbox.pendingRowIds() : new Set<string>();
+    setNotes((prev) => reconcileRows(prev, rows, pending));
+  }, [jobId, layer]);
 
   useEffect(() => {
     loadNotes();
   }, [loadNotes]);
 
+  // Reconcile after each sync drain completes (the note has actually landed).
+  useSyncSettled(loadNotes);
+
   async function handleAdd() {
     if (!content.trim() || saving || !notesComposer.ready) return;
     setSaving(true);
-    const text = content.trim();
-    const { id, synced } = await notesComposer.addNote({ jobId, authorId: currentUserId, content: text });
-    // Optimistic: show immediately (also the offline path).
-    setNotes((prev) => [optimisticNote(id, text), ...prev]);
-    setContent("");
-    setSaving(false);
-    if (synced) await loadNotes();
+    try {
+      const text = content.trim();
+      const { id } = await notesComposer.addNote({ jobId, authorId: currentUserId, content: text });
+      // Optimistic: show immediately (also the offline path). The server row
+      // reconciles in via useSyncSettled once the write lands.
+      setNotes((prev) => [optimisticNote(id, text), ...prev]);
+      setContent("");
+    } finally {
+      setSaving(false);
+    }
   }
 
   // Sends the current draft (typically dictated via the phone's own

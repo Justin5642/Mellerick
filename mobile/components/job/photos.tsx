@@ -21,6 +21,9 @@ import { supabase } from "../../lib/supabase";
 import { colors, photoTagColors } from "../../lib/theme";
 import { usePhotoLibrary } from "../../lib/data/hooks/usePhotoLibrary";
 import { netInfoConnectivity } from "../../lib/data/net/connectivity";
+import { useDataLayer } from "../../lib/data/DataProvider";
+import { useSyncSettled } from "../../lib/data/hooks/useSyncSettled";
+import { reconcileRows } from "../../lib/data/reconcile";
 
 interface Photo {
   id: string;
@@ -75,9 +78,12 @@ export function JobPhotosTab({
   const [viewingPhoto, setViewingPhoto] = useState<Photo | null>(null);
   const shotRef = useRef<ViewShot>(null);
   const photoLibrary = usePhotoLibrary();
+  const layer = useDataLayer();
 
   // Reads refresh from the server only when online; offline, local state (incl.
-  // optimistic photos shown from their local file) is authoritative.
+  // optimistic photos shown from their local file) is authoritative. Even online
+  // we MERGE, so a queued photo still uploading isn't wiped by a racing reload
+  // (which would also blank its cell once the local file is cleaned up).
   const loadPhotos = useCallback(async () => {
     if (!(await netInfoConnectivity.isOnline())) return;
     const { data } = await supabase
@@ -86,7 +92,8 @@ export function JobPhotosTab({
       .eq("job_id", jobId)
       .order("created_at", { ascending: false });
     const rows = (data as unknown as Photo[]) ?? [];
-    setPhotos(rows);
+    const pendingIds = layer ? await layer.outbox.pendingRowIds() : new Set<string>();
+    setPhotos((prev) => reconcileRows(prev, rows, pendingIds));
     for (const p of rows) {
       supabase.storage
         .from("job-photos")
@@ -95,15 +102,14 @@ export function JobPhotosTab({
           if (signed?.signedUrl) setUrls((prev) => ({ ...prev, [p.storage_path]: signed.signedUrl }));
         });
     }
-  }, [jobId]);
+  }, [jobId, layer]);
 
   // Queue a photo through the offline outbox and show it immediately: the local
   // file renders under its Storage key until the real signed URL replaces it on
-  // the next online reload (same client id => no duplicate). Returns whether the
-  // write synced now.
+  // reconcile (same client id => no duplicate).
   const addPhotoFromUri = useCallback(
-    async (uri: string, type: (typeof PHOTO_TYPES)[number]): Promise<boolean> => {
-      const { id, storagePath, localUri, synced } = await photoLibrary.addPhoto({
+    async (uri: string, type: (typeof PHOTO_TYPES)[number]): Promise<void> => {
+      const { id, storagePath, localUri } = await photoLibrary.addPhoto({
         jobId,
         uploadedBy: currentUserId,
         photoType: type,
@@ -111,7 +117,6 @@ export function JobPhotosTab({
       });
       setPhotos((prev) => [{ id, storage_path: storagePath, photo_type: type, created_at: new Date().toISOString() }, ...prev]);
       setUrls((prev) => ({ ...prev, [storagePath]: localUri }));
-      return synced;
     },
     [jobId, currentUserId, photoLibrary]
   );
@@ -119,6 +124,10 @@ export function JobPhotosTab({
   useEffect(() => {
     loadPhotos();
   }, [loadPhotos]);
+
+  // Reconcile after each sync drain: offline photos get their real signed URL
+  // (and the row is confirmed) right when the queued upload lands.
+  useSyncSettled(loadPhotos);
 
   function chooseType() {
     return new Promise<(typeof PHOTO_TYPES)[number] | null>((resolve) => {
@@ -169,13 +178,15 @@ export function JobPhotosTab({
     if (result.canceled || !result.assets?.length) return;
 
     setUploading(true);
-    let synced = false;
-    for (const asset of result.assets) {
-      const s = await addPhotoFromUri(asset.uri, type);
-      synced = synced || s;
+    try {
+      for (const asset of result.assets) {
+        await addPhotoFromUri(asset.uri, type);
+      }
+    } catch (e) {
+      Alert.alert("Couldn't add photo", e instanceof Error ? e.message : "Please try again.");
+    } finally {
+      setUploading(false); // always clears, even if staging/queueing throws
     }
-    setUploading(false);
-    if (synced) await loadPhotos();
   }
 
   async function confirmPending() {
@@ -184,9 +195,8 @@ export function JobPhotosTab({
     try {
       const capturedUri = await shotRef.current?.capture?.();
       if (!capturedUri) throw new Error("Could not stamp photo");
-      const synced = await addPhotoFromUri(capturedUri, pendingType);
+      await addPhotoFromUri(capturedUri, pendingType);
       setPending(null);
-      if (synced) await loadPhotos();
     } catch (e) {
       Alert.alert("Upload failed", e instanceof Error ? e.message : "Please try again.");
     } finally {

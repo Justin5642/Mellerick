@@ -26,6 +26,9 @@ export class Processor {
     this.draining = true;
     try {
       if (!(await this.connectivity.isOnline())) return;
+      // Recover any op stranded "inflight" by a crash mid-dispatch (drains are
+      // serialized, so at this point an inflight op can only be a leftover).
+      await this.outbox.reclaimInflight();
       let op: Operation | undefined;
       while ((op = await this.outbox.nextReady())) {
         await this.outbox.markInflight(op.id);

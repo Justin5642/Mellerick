@@ -1,4 +1,4 @@
-import type { Operation, OpStatus } from "./types";
+import type { Operation, OpStatus, WriteOperation } from "./types";
 import type { OutboxStore } from "./store";
 
 export interface Clock {
@@ -10,6 +10,11 @@ export const systemClock: Clock = { now: () => Date.now() };
 export function backoffMs(attempts: number): number {
   return Math.min(2 ** attempts * 1000, 5 * 60 * 1000);
 }
+
+// After this many failed attempts a write is considered poison (permanent
+// rejection / corrupt payload) and moved to a terminal "dead" state instead of
+// retrying forever. ~8 attempts spans ~10 min of backoff before giving up.
+export const MAX_ATTEMPTS = 8;
 
 // The write-outbox queue. Owns enqueue (with side-effect coalescing) and the
 // FIFO/dependency-aware selection of the next operation to process. It does NOT
@@ -39,7 +44,45 @@ export class Outbox {
         return;
       }
     }
+    if (op.kind === "write" && op.op === "delete") {
+      // If the target row hasn't synced yet, a queued insert for it still
+      // exists. Make the delete wait for that insert to COMPLETE — otherwise the
+      // delete can run while the insert is merely backed off after a transient
+      // failure, and the insert's later retry would resurrect the deleted row.
+      const { table, rowId } = op;
+      const all = await this.store.all();
+      const pendingInsert = all.find((o) => {
+        if (o.kind !== "write") return false;
+        return o.op === "insert" && o.table === table && o.rowId === rowId && o.status !== "done";
+      });
+      if (pendingInsert) op = { ...op, dependsOn: pendingInsert.id };
+    }
     await this.store.insert(op);
+  }
+
+  // Reset ops stranded in "inflight" by a crash/force-quit mid-dispatch back to
+  // "pending" so they are retried. Safe because replay is idempotent (upsert on
+  // client id, delete tolerates a missing row, upload is upsert). Called at the
+  // start of each drain.
+  async reclaimInflight(): Promise<void> {
+    const all = await this.store.all();
+    for (const o of all) {
+      if (o.status === "inflight") {
+        await this.store.update(o.id, { status: "pending", nextAttemptAt: 0 });
+      }
+    }
+  }
+
+  // Row ids of every write still outstanding (not done/dead). A screen merges
+  // this with a server read so an optimistic row that hasn't synced yet is not
+  // wiped by the reload.
+  async pendingRowIds(): Promise<Set<string>> {
+    const all = await this.store.all();
+    return new Set(
+      all
+        .filter((o): o is WriteOperation => o.kind === "write" && o.status !== "done" && o.status !== "dead")
+        .map((o) => o.rowId)
+    );
   }
 
   // The oldest pending op that is ready to run: its backoff has elapsed and its
@@ -65,10 +108,13 @@ export class Outbox {
   }
 
   // Record a failure and schedule the next attempt with exponential backoff.
+  // Past MAX_ATTEMPTS the op is parked in the terminal "dead" state rather than
+  // retried forever.
   async markFailed(op: Operation, error: string): Promise<void> {
     const attempts = op.attempts + 1;
+    const status: OpStatus = attempts >= MAX_ATTEMPTS ? "dead" : "failed";
     await this.store.update(op.id, {
-      status: "failed",
+      status,
       attempts,
       nextAttemptAt: this.clock.now() + backoffMs(attempts),
       error,
@@ -86,6 +132,11 @@ export class Outbox {
 
   async failedCount(): Promise<number> {
     return this.store.countByStatus("failed");
+  }
+
+  // Terminally-failed writes that gave up retrying — surfaced as needs-attention.
+  async deadCount(): Promise<number> {
+    return this.store.countByStatus("dead");
   }
 }
 

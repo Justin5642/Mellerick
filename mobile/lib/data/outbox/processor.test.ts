@@ -161,6 +161,17 @@ describe("Processor", () => {
     expect(await outbox.pendingCount()).toBe(0);
   });
 
+  it("reclaims a crash-stranded inflight op and processes it on the next drain", async () => {
+    const store = new InMemoryOutboxStore();
+    const outbox = new Outbox(store, fixedClock());
+    await outbox.enqueue(write("te-1", { payload: { job_id: "j1" } }));
+    await outbox.markInflight("te-1"); // simulate a crash mid-dispatch on a prior run
+    const gw = makeGateway();
+    await new Processor(outbox, gw, makeApi(), online(true)).drain();
+    expect(gw.upsertRow).toHaveBeenCalledWith("time_entries", { id: "te-1", job_id: "j1" });
+    expect(await outbox.pendingCount()).toBe(0); // recovered and completed
+  });
+
   it("backs off a failed op (leaves it outstanding) without dropping it", async () => {
     const store = new InMemoryOutboxStore();
     const outbox = new Outbox(store, fixedClock());

@@ -2,11 +2,11 @@ import { useEffect, useState } from "react";
 import { useDataLayer } from "./DataProvider";
 
 export interface SyncStatus {
-  /** Operations still outstanding (pending + failed + inflight). */
+  /** Operations still outstanding and being retried (pending + failed + inflight). */
   pending: number;
-  /** Operations currently in backoff after a failure. */
+  /** Operations that gave up retrying (terminal) — needs user attention. */
   failed: number;
-  /** True while the outbox is empty (everything synced). */
+  /** True while nothing is outstanding and nothing is dead. */
   synced: boolean;
 }
 
@@ -20,8 +20,8 @@ export function useSyncStatus(pollMs = 3000): SyncStatus {
     if (!layer) return;
     let active = true;
     const tick = async () => {
-      const [pending, failed] = await Promise.all([layer.outbox.pendingCount(), layer.outbox.failedCount()]);
-      if (active) setStatus({ pending, failed, synced: pending === 0 });
+      const [pending, dead] = await Promise.all([layer.outbox.pendingCount(), layer.outbox.deadCount()]);
+      if (active) setStatus({ pending, failed: dead, synced: pending === 0 && dead === 0 });
     };
     void tick();
     const iv = setInterval(tick, pollMs);

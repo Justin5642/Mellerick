@@ -10,6 +10,7 @@ import type { Connectivity } from "./net/connectivity";
 export class SyncEngine {
   private unsubscribe?: () => void;
   private started = false;
+  private settledListeners = new Set<() => void>();
 
   constructor(
     private processor: Processor,
@@ -20,9 +21,9 @@ export class SyncEngine {
     if (this.started) return;
     this.started = true;
     this.unsubscribe = this.connectivity.onOnline(() => {
-      void this.processor.drain();
+      void this.drainAndNotify();
     });
-    void this.processor.drain(); // catch up on anything queued offline
+    void this.drainAndNotify(); // catch up on anything queued offline
   }
 
   stop(): void {
@@ -34,6 +35,21 @@ export class SyncEngine {
   // Kick a drain after enqueuing a mutation so a queued write goes out
   // immediately when online (and is a harmless no-op when offline).
   async flush(): Promise<void> {
+    await this.drainAndNotify();
+  }
+
+  // Subscribe to "a drain pass just completed", so a screen can reconcile its
+  // list against the server AFTER queued writes have actually synced — not on a
+  // was-online guess. Returns an unsubscribe fn.
+  onSettled(cb: () => void): () => void {
+    this.settledListeners.add(cb);
+    return () => {
+      this.settledListeners.delete(cb);
+    };
+  }
+
+  private async drainAndNotify(): Promise<void> {
     await this.processor.drain();
+    for (const cb of [...this.settledListeners]) cb();
   }
 }

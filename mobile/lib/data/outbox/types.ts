@@ -14,7 +14,8 @@ export type Aggregate =
 
 export type WriteOp = "insert" | "update" | "delete";
 
-export type OpStatus = "pending" | "inflight" | "done" | "failed";
+// "dead" is terminal — a write that failed too many times to keep retrying.
+export type OpStatus = "pending" | "inflight" | "done" | "failed" | "dead";
 
 // A data mutation against a Supabase table.
 export interface WriteOperation {

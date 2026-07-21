@@ -2,6 +2,11 @@ import { SyncEngine } from "./syncEngine";
 import type { Processor } from "./outbox/processor";
 import type { Connectivity } from "./net/connectivity";
 
+// Let fire-and-forget drains (and their onSettled callbacks) settle.
+async function flushMicrotasks(): Promise<void> {
+  for (let i = 0; i < 20; i++) await Promise.resolve();
+}
+
 function fakeProcessor(): jest.Mocked<Pick<Processor, "drain">> {
   return { drain: jest.fn().mockResolvedValue(undefined) };
 }
@@ -48,6 +53,23 @@ describe("SyncEngine", () => {
     engine.start();
     await engine.flush();
     expect(proc.drain).toHaveBeenCalledTimes(2); // start + flush
+  });
+
+  it("notifies onSettled subscribers after each drain (start, reconnect, flush)", async () => {
+    const proc = fakeProcessor();
+    const net = fakeConnectivity();
+    const engine = new SyncEngine(proc as unknown as Processor, net.connectivity);
+    const settled = jest.fn();
+    const unsub = engine.onSettled(settled);
+    engine.start();
+    await flushMicrotasks();
+    net.goOnline();
+    await flushMicrotasks();
+    await engine.flush();
+    expect(settled).toHaveBeenCalledTimes(3); // start + reconnect + flush
+    unsub();
+    await engine.flush();
+    expect(settled).toHaveBeenCalledTimes(3); // no longer notified after unsub
   });
 
   it("is idempotent on start and unsubscribes on stop", () => {
