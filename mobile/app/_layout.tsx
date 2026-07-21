@@ -83,7 +83,9 @@ function RootNavigation() {
         <Stack.Screen name="(office)" />
         <Stack.Screen name="customers" options={{ headerShown: true }} />
         <Stack.Screen name="quotes" options={{ headerShown: true }} />
+        <Stack.Screen name="quotes/[id]" options={{ headerShown: true }} />
         <Stack.Screen name="invoices" options={{ headerShown: true }} />
+        <Stack.Screen name="invoices/[id]" options={{ headerShown: true }} />
         <Stack.Screen name="pricing" options={{ headerShown: true }} />
         <Stack.Screen name="inventory" options={{ headerShown: true }} />
         <Stack.Screen name="fleet" options={{ headerShown: true }} />
