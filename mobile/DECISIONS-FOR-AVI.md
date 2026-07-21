@@ -23,6 +23,10 @@ are flagged to Avi in real time per the plan's crucial-flag protocol.
 | D5 | Icons switch Ionicons → lucide-react-native | Exact parity with the web icon set |
 | D6 | Background auto-clock: foreground-only for early phases; background build in MP9 | Needs custom dev client; not required for first shippable |
 | D7 | Branch mobile/full-parity off main; MP1 touches shared supabase/ → PR, coordinate with Jason (active on repo) | Avoid colliding with Jason's concurrent work |
+| D8 | Build the offline write-outbox layer NOW (durable SQLite outbox + processor + repositories), behind a swappable data layer, and connect PowerSync later behind the same interfaces ("do both") | Avi asked for both; the outbox needs no browser/password so it unblocked progress while the PowerSync DB-password step (B1) is pending. Repositories are the only place table names live → PowerSync slots in without touching screens |
+| D9 | `WriteOperation` carries a distinct operation-id (outbox PK) AND rowId (target row PK); side-effect coalescing adopts the latest trigger's `dependsOn` | Correctness: without the split, an offline clock-in (insert) + clock-out (update) to the same row collided on the store PK and lost the insert. Both fixed with regression tests |
+| D10 | Offline read model (interim): reads refresh from the server only when online; offline, local state (incl. optimistic writes) is authoritative. **Consequence: offline COLD-START shows an empty time log until the first online load** — within-session offline writes are visible via optimistic rows | Full offline reads = the persisted read-cache (the other half of the outbox design) or PowerSync buckets, deferred. Keeps online UX identical to today and makes offline writes durable + visible without a half-built cache that could show stale/partial data |
+| D11 | Parity: deleting a time entry and assigning a cost-center do NOT resync billing (matches the web app exactly) | Web's deleteEditing/assignCostCenter don't call syncBilling. Deleting an entry that contributed hours arguably should shrink the labour line item — flagged as Q6, a possible pre-existing web bug, not "fixed" unilaterally to preserve parity |
 
 ## Open questions (resolve in cleanup MP11)
 
@@ -31,3 +35,5 @@ are flagged to Avi in real time per the plan's crucial-flag protocol.
 - Q3: Backflow submit server-side dedupe (must not double-email the water authority on retry).
 - Q4: Auth refresh-token lifetime across a long offline workday — confirm acceptable.
 - Q5: Expo SDK: mobile/AGENTS.md says v57 but package.json pins SDK 54 — confirm target SDK.
+- Q6: Web app does not resync billing when a time entry is deleted (or a cost-center is reassigned). Deleting a billed entry may leave a stale labour line item. Confirm intended, or fix in web + mobile together (see D11).
+- Q7: Offline cold-start empty time log (D10) — acceptable interim, or prioritise the persisted read-cache / PowerSync buckets so previously-viewed jobs read offline too?

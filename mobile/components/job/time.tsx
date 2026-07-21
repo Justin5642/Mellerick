@@ -4,8 +4,9 @@ import DateTimePicker, { DateTimePickerEvent } from "@react-native-community/dat
 import { Ionicons } from "@expo/vector-icons";
 import { supabase } from "../../lib/supabase";
 import { colors } from "../../lib/theme";
-
-const API_BASE_URL = process.env.EXPO_PUBLIC_API_BASE_URL;
+import { useTimeClock } from "../../lib/data/hooks/useTimeClock";
+import { hoursBetween } from "../../lib/data/repositories/timeEntries";
+import { netInfoConnectivity } from "../../lib/data/net/connectivity";
 
 interface TimeEntry {
   id: string;
@@ -52,21 +53,23 @@ function formatDateTime(d: Date) {
   });
 }
 
-// Fire-and-forget: regenerates the job's auto-generated labour line item
-// (see app/api/time-entries/[id]/sync-billing/route.ts) right after any
-// write to a time_entries row -- mirrors the web app's same pattern. Unlike
-// the web dashboard there's no session cookie here, so the route's Bearer-
-// token auth path is used instead (see that route's getAuthenticatedUserId).
-function syncBilling(entryId: string) {
-  if (!API_BASE_URL) return;
-  supabase.auth.getSession().then(({ data }) => {
-    const token = data.session?.access_token;
-    if (!token) return;
-    fetch(`${API_BASE_URL}/api/time-entries/${entryId}/sync-billing`, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${token}` },
-    }).catch(() => {});
-  });
+// A provisional row shown the instant a clock-in is queued, so the entry is
+// visible immediately (including fully offline). It carries the same
+// client-generated id as the queued write, so when the outbox syncs and the
+// server list reloads, the real row replaces this one with no duplicate.
+function optimisticEntry(id: string, staffId: string, clockInIso: string): TimeEntry {
+  return {
+    id,
+    staff_id: staffId,
+    clock_in: clockInIso,
+    clock_out: null,
+    hours: null,
+    auto_clocked: false,
+    entry_type: "work",
+    cost_center_id: null,
+    edited_at: null,
+    profiles: { full_name: "You" },
+  };
 }
 
 // Tap-to-open bottom-sheet list, same pattern as overview.tsx's SelectField —
@@ -279,8 +282,13 @@ export function JobTimeTab({ jobId, currentUserId }: { jobId: string; currentUse
   const [assigningId, setAssigningId] = useState<string | null>(null);
   const [editing, setEditing] = useState<EditingEntry | null>(null);
   const [saving, setSaving] = useState(false);
+  const timeClock = useTimeClock();
 
+  // Reads refresh from the server only when online. Offline, local state (which
+  // includes optimistic writes queued in the outbox) is authoritative — a server
+  // refresh can't see un-synced rows yet and would wipe them.
   const loadEntries = useCallback(async () => {
+    if (!(await netInfoConnectivity.isOnline())) return;
     const { data } = await supabase
       .from("time_entries")
       // time_entries has two FKs to profiles (staff_id, edited_by) — must
@@ -314,39 +322,33 @@ export function JobTimeTab({ jobId, currentUserId }: { jobId: string; currentUse
   const totalTravelHours = travelEntries.reduce((sum, e) => sum + (e.hours ? Number(e.hours) : 0), 0);
 
   async function clockIn() {
-    if (myOpenEntry || loading) return;
+    if (myOpenEntry || loading || !timeClock.ready) return;
     setLoading(true);
-    const { data } = await supabase
-      .from("time_entries")
-      .insert({
-        job_id: jobId,
-        staff_id: currentUserId,
-        clock_in: new Date().toISOString(),
-        auto_clocked: false,
-      })
-      .select("id")
-      .single();
-    await loadEntries();
+    const clockInIso = new Date().toISOString();
+    const { id, synced } = await timeClock.clockIn({ jobId, staffId: currentUserId });
+    // Optimistic: show immediately (this is also the offline display path).
+    setEntries((prev) => [optimisticEntry(id, currentUserId, clockInIso), ...prev]);
     setLoading(false);
-    if (data) syncBilling(data.id);
+    if (synced) await loadEntries();
   }
 
   async function clockOut() {
-    if (!myOpenEntry || loading) return;
+    const open = myOpenEntry;
+    if (!open || loading || !timeClock.ready) return;
     setLoading(true);
-    const clockOutTime = new Date().toISOString();
-    const hours = Math.round(((new Date(clockOutTime).getTime() - new Date(myOpenEntry.clock_in).getTime()) / 3600000) * 100) / 100;
-    await supabase.from("time_entries").update({ clock_out: clockOutTime, hours }).eq("id", myOpenEntry.id);
-    await loadEntries();
+    const { synced } = await timeClock.clockOut({ entryId: open.id, clockInIso: open.clock_in });
+    const clockOutIso = new Date().toISOString();
+    const hours = hoursBetween(open.clock_in, clockOutIso);
+    setEntries((prev) => prev.map((e) => (e.id === open.id ? { ...e, clock_out: clockOutIso, hours } : e)));
     setLoading(false);
-    syncBilling(myOpenEntry.id);
+    if (synced) await loadEntries();
   }
 
   async function assignCostCenter(entryId: string, costCenterId: string | null) {
+    if (!timeClock.ready) return;
     setAssigningId(entryId);
-    const { error } = await supabase.from("time_entries").update({ cost_center_id: costCenterId }).eq("id", entryId);
+    await timeClock.assignCostCenter(entryId, costCenterId);
     setAssigningId(null);
-    if (error) return;
     setEntries((prev) => prev.map((e) => (e.id === entryId ? { ...e, cost_center_id: costCenterId } : e)));
   }
 
@@ -372,58 +374,69 @@ export function JobTimeTab({ jobId, currentUserId }: { jobId: string; currentUse
   }
 
   async function saveEditing() {
-    if (!editing || saving) return;
+    if (!editing || saving || !timeClock.ready) return;
     setSaving(true);
-    const hours = editing.clockOut
-      ? Math.round(((editing.clockOut.getTime() - editing.clockIn.getTime()) / 3600000) * 100) / 100
-      : null;
+    const clockInIso = editing.clockIn.toISOString();
+    const clockOutIso = editing.clockOut ? editing.clockOut.toISOString() : null;
+    const hours = clockOutIso ? hoursBetween(clockInIso, clockOutIso) : null;
     const nowIso = new Date().toISOString();
 
-    let syncedId: string | null = editing.entryId ?? null;
+    let synced = false;
     if (editing.mode === "add") {
-      const { data } = await supabase
-        .from("time_entries")
-        .insert({
-          job_id: jobId,
-          staff_id: currentUserId,
-          entry_type: editing.entryType,
-          clock_in: editing.clockIn.toISOString(),
-          clock_out: editing.clockOut ? editing.clockOut.toISOString() : null,
-          hours,
-          cost_center_id: editing.costCenterId,
-          auto_clocked: false,
-          edited_by: currentUserId,
-          edited_at: nowIso,
-        })
-        .select("id")
-        .single();
-      syncedId = data?.id ?? null;
+      const res = await timeClock.addManual({
+        jobId,
+        staffId: currentUserId,
+        entryType: editing.entryType,
+        clockInIso,
+        clockOutIso,
+        costCenterId: editing.costCenterId,
+      });
+      synced = res.synced;
+      const optimistic: TimeEntry = {
+        id: res.id,
+        staff_id: currentUserId,
+        clock_in: clockInIso,
+        clock_out: clockOutIso,
+        hours,
+        auto_clocked: false,
+        entry_type: editing.entryType,
+        cost_center_id: editing.costCenterId,
+        edited_at: nowIso,
+        profiles: { full_name: "You" },
+      };
+      setEntries((prev) => [optimistic, ...prev]);
     } else if (editing.entryId) {
-      await supabase
-        .from("time_entries")
-        .update({
-          clock_in: editing.clockIn.toISOString(),
-          clock_out: editing.clockOut ? editing.clockOut.toISOString() : null,
-          hours,
-          cost_center_id: editing.costCenterId,
-          edited_by: currentUserId,
-          edited_at: nowIso,
-        })
-        .eq("id", editing.entryId);
+      const entryId = editing.entryId;
+      const res = await timeClock.editEntry({
+        entryId,
+        editorId: currentUserId,
+        clockInIso,
+        clockOutIso,
+        costCenterId: editing.costCenterId,
+      });
+      synced = res.synced;
+      setEntries((prev) =>
+        prev.map((e) =>
+          e.id === entryId
+            ? { ...e, clock_in: clockInIso, clock_out: clockOutIso, hours, cost_center_id: editing.costCenterId, edited_at: nowIso }
+            : e
+        )
+      );
     }
     setSaving(false);
     setEditing(null);
-    await loadEntries();
-    if (syncedId) syncBilling(syncedId);
+    if (synced) await loadEntries();
   }
 
   async function deleteEditing() {
-    if (!editing?.entryId || saving) return;
+    if (!editing?.entryId || saving || !timeClock.ready) return;
     setSaving(true);
-    await supabase.from("time_entries").delete().eq("id", editing.entryId);
+    const entryId = editing.entryId;
+    const { synced } = await timeClock.remove(entryId);
+    setEntries((prev) => prev.filter((e) => e.id !== entryId));
     setSaving(false);
     setEditing(null);
-    await loadEntries();
+    if (synced) await loadEntries();
   }
 
   return (

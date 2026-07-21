@@ -5,6 +5,7 @@ import { StatusBar } from "expo-status-bar";
 import { ActivityIndicator, View } from "react-native";
 import { AuthProvider, useAuth } from "../lib/auth-context";
 import { LocationTrackingProvider } from "../lib/location-tracking";
+import { DataProvider } from "../lib/data/DataProvider";
 import { colors } from "../lib/theme";
 
 function RootNavigation() {
@@ -43,10 +44,12 @@ function RootNavigation() {
 export default function RootLayout() {
   return (
     <AuthProvider>
-      <LocationTrackingProvider>
-        <StatusBar style="dark" />
-        <RootNavigation />
-      </LocationTrackingProvider>
+      <DataProvider>
+        <LocationTrackingProvider>
+          <StatusBar style="dark" />
+          <RootNavigation />
+        </LocationTrackingProvider>
+      </DataProvider>
     </AuthProvider>
   );
 }
