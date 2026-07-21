@@ -1,6 +1,6 @@
 import { useCallback } from "react";
 import { useDataLayer } from "../DataProvider";
-import { netInfoConnectivity } from "../net/connectivity";
+import { useFlush } from "./useFlush";
 import type { ManualEntryInput, EditEntryInput } from "../repositories/timeEntries";
 
 // Write-side hook for time tracking. Every action enqueues a durable outbox
@@ -20,15 +20,7 @@ export interface TimeClock {
 
 export function useTimeClock(): TimeClock {
   const layer = useDataLayer();
-
-  // Flush and report whether we were online (so the caller can refresh from the
-  // server only when the server actually has the write).
-  const flush = useCallback(async (): Promise<boolean> => {
-    if (!layer) return false;
-    const online = await netInfoConnectivity.isOnline();
-    await layer.engine.flush();
-    return online;
-  }, [layer]);
+  const flush = useFlush();
 
   const clockIn = useCallback<TimeClock["clockIn"]>(async (input) => {
     if (!layer) throw new Error("Data layer not ready");
