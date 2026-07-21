@@ -35,7 +35,8 @@ export default function OfficeJobsScreen() {
   const runSearch = useCallback(async (q: string) => {
     const id = ++reqId.current;
     const safe = q.replace(/[,()%]/g, " ").trim();
-    let builder = supabase.from("jobs").select(SELECT).order("created_at", { ascending: false }).limit(PAGE);
+    let builder = supabase.from("jobs").select(SELECT).order("created_at", { ascending: false })
+      .order("id", { ascending: false }).limit(PAGE);
     if (safe) {
       const numeric = /^\d+$/.test(safe);
       builder = builder.or(`title.ilike.%${safe}%${numeric ? `,job_number.eq.${safe}` : ""}`);
@@ -66,6 +67,7 @@ export default function OfficeJobsScreen() {
       .from("jobs")
       .select(SELECT)
       .order("created_at", { ascending: false })
+      .order("id", { ascending: false })
       .range(jobs.length, jobs.length + PAGE - 1);
     const next = (data as unknown as OfficeJob[]) ?? [];
     setJobs((prev) => [...prev, ...next]);

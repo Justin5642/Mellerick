@@ -27,7 +27,7 @@ export default function QuotesScreen() {
   const [hasMore, setHasMore] = useState(true);
 
   const loadFirst = useCallback(async () => {
-    const { data } = await supabase.from("quotes").select(SELECT).order("created_at", { ascending: false }).range(0, PAGE - 1);
+    const { data } = await supabase.from("quotes").select(SELECT).order("created_at", { ascending: false }).order("id", { ascending: false }).range(0, PAGE - 1);
     const rows = (data as unknown as Quote[]) ?? [];
     setQuotes(rows);
     setHasMore(rows.length === PAGE);
@@ -46,7 +46,7 @@ export default function QuotesScreen() {
   const loadMore = useCallback(async () => {
     if (loadingMore || !hasMore) return;
     setLoadingMore(true);
-    const { data } = await supabase.from("quotes").select(SELECT).order("created_at", { ascending: false }).range(quotes.length, quotes.length + PAGE - 1);
+    const { data } = await supabase.from("quotes").select(SELECT).order("created_at", { ascending: false }).order("id", { ascending: false }).range(quotes.length, quotes.length + PAGE - 1);
     const next = (data as unknown as Quote[]) ?? [];
     setQuotes((prev) => [...prev, ...next]);
     setHasMore(next.length === PAGE);
