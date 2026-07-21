@@ -6,6 +6,8 @@ import type { Connectivity } from "./net/connectivity";
 import { SyncEngine } from "./syncEngine";
 import { cryptoIdGen, type IdGen } from "./ids";
 import { TimeEntriesRepository } from "./repositories/timeEntries";
+import { JobPhotosRepository } from "./repositories/jobPhotos";
+import { JobNotesRepository } from "./repositories/jobNotes";
 
 // The wired offline stack a screen consumes: repositories for writes, the sync
 // engine to drive them out, and the outbox for the pending/failed badge.
@@ -13,6 +15,8 @@ export interface DataLayer {
   outbox: Outbox;
   engine: SyncEngine;
   timeEntries: TimeEntriesRepository;
+  photos: JobPhotosRepository;
+  notes: JobNotesRepository;
 }
 
 export interface DataLayerDeps {
@@ -33,5 +37,7 @@ export function createDataLayer(deps: DataLayerDeps): DataLayer {
   const engine = new SyncEngine(processor, deps.connectivity);
   const ids = deps.ids ?? cryptoIdGen;
   const timeEntries = new TimeEntriesRepository(outbox, ids);
-  return { outbox, engine, timeEntries };
+  const photos = new JobPhotosRepository(outbox, ids);
+  const notes = new JobNotesRepository(outbox, ids);
+  return { outbox, engine, timeEntries, photos, notes };
 }

@@ -61,13 +61,25 @@ export class Processor {
       case "insert":
         // rowId is the client-generated PK → idempotent upsert on replay.
         await this.gateway.upsertRow(op.table, { id: op.rowId, ...stripInternal(op.payload) });
-        return;
+        break;
       case "update":
         await this.gateway.updateRow(op.table, op.rowId, stripInternal(op.payload));
-        return;
+        break;
       case "delete":
+        // Remove the associated Storage object first (photos carry storage_path),
+        // then the row — mirrors the web delete order; both are idempotent.
+        if (op.payload.storage_path) {
+          const bucket = (op.payload.bucket as string) ?? "job-photos";
+          await this.gateway.removeObject(bucket, op.payload.storage_path as string);
+        }
         await this.gateway.deleteRow(op.table, op.rowId);
-        return;
+        break;
+    }
+    // The row is now durable server-side; drop the queued local attachment so the
+    // outbox attachment dir doesn't grow without bound. Only reached on success —
+    // a failure throws above and the file is kept for the retry. Never throws.
+    if (op.attachmentLocalPath) {
+      await this.gateway.cleanupAttachment(op.attachmentLocalPath);
     }
   }
 }

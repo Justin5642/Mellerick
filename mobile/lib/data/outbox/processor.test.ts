@@ -15,6 +15,8 @@ function makeGateway(): jest.Mocked<SupabaseGateway> {
     updateRow: jest.fn().mockResolvedValue(undefined),
     deleteRow: jest.fn().mockResolvedValue(undefined),
     uploadObject: jest.fn().mockResolvedValue(undefined),
+    removeObject: jest.fn().mockResolvedValue(undefined),
+    cleanupAttachment: jest.fn().mockResolvedValue(undefined),
   };
 }
 const makeApi = (): jest.Mocked<ApiBridge> => ({ callSideEffect: jest.fn().mockResolvedValue(undefined) });
@@ -63,6 +65,61 @@ describe("Processor", () => {
     expect(gw.uploadObject).toHaveBeenCalledWith("job-photos", "job/p.jpg", "/tmp/p.jpg");
     // the internal `bucket` key is not written to the row
     expect(gw.upsertRow.mock.calls[0][1]).not.toHaveProperty("bucket");
+  });
+
+  it("removes the Storage object before the row on a photo delete, then cleans up nothing (no attachment)", async () => {
+    const store = new InMemoryOutboxStore();
+    const outbox = new Outbox(store, fixedClock());
+    await outbox.enqueue(
+      write("del-1", { aggregate: "job_photo", table: "job_photos", op: "delete", rowId: "photo-7", payload: { bucket: "job-photos", storage_path: "j1/photo-7.jpg" } })
+    );
+    const gw = makeGateway();
+    const order: string[] = [];
+    gw.removeObject.mockImplementation(async () => void order.push("removeObject"));
+    gw.deleteRow.mockImplementation(async () => void order.push("deleteRow"));
+    await new Processor(outbox, gw, makeApi(), online(true)).drain();
+    expect(order).toEqual(["removeObject", "deleteRow"]);
+    expect(gw.removeObject).toHaveBeenCalledWith("job-photos", "j1/photo-7.jpg");
+    expect(gw.deleteRow).toHaveBeenCalledWith("job_photos", "photo-7");
+  });
+
+  it("does NOT remove any Storage object on a delete without a storage_path (e.g. a time entry)", async () => {
+    const store = new InMemoryOutboxStore();
+    const outbox = new Outbox(store, fixedClock());
+    await outbox.enqueue(write("del-2", { op: "delete", rowId: "te-1" }));
+    const gw = makeGateway();
+    await new Processor(outbox, gw, makeApi(), online(true)).drain();
+    expect(gw.removeObject).not.toHaveBeenCalled();
+    expect(gw.deleteRow).toHaveBeenCalledWith("time_entries", "te-1");
+  });
+
+  it("cleans up the local attachment only AFTER a successful attachment write", async () => {
+    const store = new InMemoryOutboxStore();
+    const outbox = new Outbox(store, fixedClock());
+    await outbox.enqueue(
+      write("photo-1", { aggregate: "job_photo", table: "job_photos", attachmentLocalPath: "/doc/outbox/p.jpg", payload: { bucket: "job-photos", storage_path: "j1/p.jpg", photo_type: "before" } })
+    );
+    const gw = makeGateway();
+    const order: string[] = [];
+    gw.uploadObject.mockImplementation(async () => void order.push("upload"));
+    gw.upsertRow.mockImplementation(async () => void order.push("insert"));
+    gw.cleanupAttachment.mockImplementation(async () => void order.push("cleanup"));
+    await new Processor(outbox, gw, makeApi(), online(true)).drain();
+    expect(order).toEqual(["upload", "insert", "cleanup"]); // cleanup last
+    expect(gw.cleanupAttachment).toHaveBeenCalledWith("/doc/outbox/p.jpg");
+  });
+
+  it("keeps the local attachment when the metadata write fails (so the retry can re-upload)", async () => {
+    const store = new InMemoryOutboxStore();
+    const outbox = new Outbox(store, fixedClock());
+    await outbox.enqueue(
+      write("photo-2", { aggregate: "job_photo", table: "job_photos", attachmentLocalPath: "/doc/outbox/q.jpg", payload: { bucket: "job-photos", storage_path: "j1/q.jpg" } })
+    );
+    const gw = makeGateway();
+    gw.upsertRow.mockRejectedValueOnce(new Error("network down"));
+    await new Processor(outbox, gw, makeApi(), online(true)).drain();
+    expect(gw.cleanupAttachment).not.toHaveBeenCalled(); // file preserved for retry
+    expect(await outbox.failedCount()).toBe(1);
   });
 
   it("fires a queued side-effect via the api bridge", async () => {

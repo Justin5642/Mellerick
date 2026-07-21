@@ -30,6 +30,27 @@ export const supabaseGateway: SupabaseGateway = {
     });
     if (error) throw new Error(`storage ${bucket}/${path}: ${error.message}`);
   },
+  async removeObject(bucket, path) {
+    // Best-effort, never throws — mirrors the web app's unchecked
+    // storage.remove(). The job-photos bucket has no Storage DELETE policy yet
+    // (see DECISIONS D12), so this is RLS-denied today and objects orphan; if we
+    // threw, every offline photo delete would fail forever and never delete the
+    // row. When a DELETE policy lands this starts actually removing objects with
+    // no code change. "Not found" is likewise success (idempotent replay).
+    try {
+      await supabase.storage.from(bucket).remove([path]);
+    } catch {
+      // ignore — object cleanup must never block the row delete
+    }
+  },
+  async cleanupAttachment(localUri) {
+    // Best-effort: a leftover local file must never fail or block a synced write.
+    try {
+      await FileSystem.deleteAsync(localUri, { idempotent: true });
+    } catch {
+      // ignore — orphaned temp file at worst
+    }
+  },
 };
 
 function guessContentType(path: string): string {

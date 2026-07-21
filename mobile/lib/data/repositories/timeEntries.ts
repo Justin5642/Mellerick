@@ -1,17 +1,10 @@
 import type { Outbox } from "../outbox/outbox";
 import type { IdGen } from "../ids";
 import type { WriteOp, WriteOperation, SideEffectOperation } from "../outbox/types";
+import { systemTime, type TimeSource } from "../time";
 
-// A clock that yields both epoch-ms (for outbox ordering) and an ISO string
-// (for timestamp columns). Injected so the repository is deterministic in tests.
-export interface TimeSource {
-  nowMs(): number;
-  nowIso(): string;
-}
-export const systemTime: TimeSource = {
-  nowMs: () => Date.now(),
-  nowIso: () => new Date().toISOString(),
-};
+// Re-exported for back-compat with existing importers of these from here.
+export { systemTime, type TimeSource };
 
 // Pure: worked hours between two ISO timestamps, rounded to 2dp; null if the
 // end is not strictly after the start. Mirrors the web/mobile inline math

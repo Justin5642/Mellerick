@@ -14,6 +14,8 @@ function makeGateway(): jest.Mocked<SupabaseGateway> {
     updateRow: jest.fn().mockResolvedValue(undefined),
     deleteRow: jest.fn().mockResolvedValue(undefined),
     uploadObject: jest.fn().mockResolvedValue(undefined),
+    removeObject: jest.fn().mockResolvedValue(undefined),
+    cleanupAttachment: jest.fn().mockResolvedValue(undefined),
   };
 }
 const makeApi = (): jest.Mocked<ApiBridge> => ({ callSideEffect: jest.fn().mockResolvedValue(undefined) });
@@ -71,6 +73,29 @@ describe("createDataLayer (end-to-end offline → reconnect)", () => {
     expect(gw.upsertRow).toHaveBeenCalledWith("time_entries", expect.objectContaining({ id: rowId, job_id: "j1", staff_id: "s1" }));
     expect(api.callSideEffect).toHaveBeenCalledWith("sync-billing", { entryId: rowId });
     expect(await layer.outbox.pendingCount()).toBe(0); // fully drained
+  });
+
+  it("flushes an offline photo through upload-before-row-then-cleanup on reconnect", async () => {
+    const net = controllableNet();
+    const gw = makeGateway();
+    const order: string[] = [];
+    gw.uploadObject.mockImplementation(async () => void order.push("upload"));
+    gw.upsertRow.mockImplementation(async () => void order.push("insert"));
+    gw.cleanupAttachment.mockImplementation(async () => void order.push("cleanup"));
+    const layer = createDataLayer({ store: new InMemoryOutboxStore(), gateway: gw, api: makeApi(), connectivity: net.connectivity, ids: seqIds() });
+    layer.engine.start();
+
+    const { id, storagePath } = await layer.photos.add({ jobId: "j1", uploadedBy: "u1", photoType: "before", localUri: "file:///doc/outbox/x.jpg" });
+    await layer.engine.flush(); // offline
+    expect(gw.uploadObject).not.toHaveBeenCalled();
+
+    net.reconnect();
+    await flushMicrotasks();
+
+    expect(order).toEqual(["upload", "insert", "cleanup"]); // strict ordering end-to-end
+    expect(gw.uploadObject).toHaveBeenCalledWith("job-photos", storagePath, "file:///doc/outbox/x.jpg");
+    expect(gw.upsertRow).toHaveBeenCalledWith("job_photos", { id, storage_path: storagePath, job_id: "j1", uploaded_by: "u1", photo_type: "before" });
+    expect(await layer.outbox.pendingCount()).toBe(0);
   });
 });
 
