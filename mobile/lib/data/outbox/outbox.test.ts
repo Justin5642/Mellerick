@@ -195,6 +195,22 @@ describe("Outbox — offline delete/insert ordering + recovery", () => {
     expect(await box.pendingCount()).toBe(0);
   });
 
+  it("retryDead re-queues terminally-failed ops with a fresh attempt budget", async () => {
+    const clock = mockClock();
+    const box = new Outbox(new InMemoryOutboxStore(), clock);
+    await box.enqueue(write("a"));
+    let op = await box.nextReady();
+    for (let i = 0; i < MAX_ATTEMPTS; i++) {
+      await box.markFailed(op!, "permanent");
+      clock.advance(backoffMs(20) + 1);
+      op = await box.nextReady();
+    }
+    expect(await box.deadCount()).toBe(1);
+    await box.retryDead();
+    expect(await box.deadCount()).toBe(0);
+    expect((await box.nextReady())?.id).toBe("a"); // eligible again
+  });
+
   it("pendingRowIds reports outstanding write rows and excludes done/dead", async () => {
     const store = new InMemoryOutboxStore();
     const box = new Outbox(store, mockClock());

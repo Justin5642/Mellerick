@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useDataLayer } from "./DataProvider";
 
 export interface SyncStatus {
@@ -8,20 +8,23 @@ export interface SyncStatus {
   failed: number;
   /** True while nothing is outstanding and nothing is dead. */
   synced: boolean;
+  /** Re-queue every terminally-failed op and kick a drain (the badge's Retry). */
+  retry: () => void;
 }
 
-// Polls the outbox so a header badge can show pending/failed sync state. Cheap
-// COUNT queries; the interval is coarse because this only drives a status pill.
+// Polls the outbox so a badge can show pending/failed sync state and offer a
+// retry. Cheap COUNT queries; the interval is coarse because this only drives a
+// status pill.
 export function useSyncStatus(pollMs = 3000): SyncStatus {
   const layer = useDataLayer();
-  const [status, setStatus] = useState<SyncStatus>({ pending: 0, failed: 0, synced: true });
+  const [counts, setCounts] = useState<{ pending: number; failed: number }>({ pending: 0, failed: 0 });
 
   useEffect(() => {
     if (!layer) return;
     let active = true;
     const tick = async () => {
       const [pending, dead] = await Promise.all([layer.outbox.pendingCount(), layer.outbox.deadCount()]);
-      if (active) setStatus({ pending, failed: dead, synced: pending === 0 && dead === 0 });
+      if (active) setCounts({ pending, failed: dead });
     };
     void tick();
     const iv = setInterval(tick, pollMs);
@@ -31,5 +34,13 @@ export function useSyncStatus(pollMs = 3000): SyncStatus {
     };
   }, [layer, pollMs]);
 
-  return status;
+  const retry = useCallback(() => {
+    if (!layer) return;
+    void (async () => {
+      await layer.outbox.retryDead();
+      await layer.engine.flush();
+    })();
+  }, [layer]);
+
+  return { pending: counts.pending, failed: counts.failed, synced: counts.pending === 0 && counts.failed === 0, retry };
 }

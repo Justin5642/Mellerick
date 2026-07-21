@@ -92,6 +92,18 @@ export class Outbox {
     }
   }
 
+  // Manually retry every terminally-failed ("dead") op — resets it (and any dead
+  // dependents) to pending with a fresh attempt budget. Triggered by the user
+  // tapping the sync badge's Retry. The next drain picks them up.
+  async retryDead(): Promise<void> {
+    const all = await this.store.all();
+    for (const o of all) {
+      if (o.status === "dead") {
+        await this.store.update(o.id, { status: "pending", attempts: 0, nextAttemptAt: 0, error: null });
+      }
+    }
+  }
+
   // Row ids of every write still outstanding (not done/dead). A screen merges
   // this with a server read so an optimistic row that hasn't synced yet is not
   // wiped by the reload.
