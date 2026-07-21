@@ -11,6 +11,7 @@ function write(id: string, over: Partial<WriteOperation> = {}): WriteOperation {
   return {
     kind: "write",
     id,
+    rowId: id,
     aggregate: "time_entry",
     op: "insert",
     table: "time_entries",
@@ -56,6 +57,16 @@ describe("Outbox", () => {
     const billing = all.filter((o) => o.kind === "side_effect");
     expect(billing).toHaveLength(1); // collapsed to one
     expect((billing[0] as SideEffectOperation).payload).toEqual({ v: 2 }); // latest wins
+  });
+
+  it("coalescing adopts the latest trigger's dependency (not the stale first one)", async () => {
+    const store = new InMemoryOutboxStore();
+    const box = new Outbox(store, mockClock());
+    await box.enqueue(sideEffect("s1", "sync-billing:e1", { dependsOn: "insert-op", payload: { entryId: "e1" } }));
+    await box.enqueue(sideEffect("s2", "sync-billing:e1", { dependsOn: "update-op", payload: { entryId: "e1" } }));
+    const billing = (await store.all()).filter((o) => o.kind === "side_effect");
+    expect(billing).toHaveLength(1);
+    expect(billing[0].dependsOn).toBe("update-op"); // latest write, not the clock-in insert
   });
 
   it("does not coalesce side-effects with different keys", async () => {

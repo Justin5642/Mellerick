@@ -59,14 +59,14 @@ export class Processor {
     }
     switch (op.op) {
       case "insert":
-        // id is the client-generated PK → idempotent upsert on replay.
-        await this.gateway.upsertRow(op.table, { id: op.id, ...stripInternal(op.payload) });
+        // rowId is the client-generated PK → idempotent upsert on replay.
+        await this.gateway.upsertRow(op.table, { id: op.rowId, ...stripInternal(op.payload) });
         return;
       case "update":
-        await this.gateway.updateRow(op.table, op.id, stripInternal(op.payload));
+        await this.gateway.updateRow(op.table, op.rowId, stripInternal(op.payload));
         return;
       case "delete":
-        await this.gateway.deleteRow(op.table, op.id);
+        await this.gateway.deleteRow(op.table, op.rowId);
         return;
     }
   }

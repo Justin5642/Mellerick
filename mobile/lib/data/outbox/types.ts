@@ -19,7 +19,8 @@ export type OpStatus = "pending" | "inflight" | "done" | "failed";
 // A data mutation against a Supabase table.
 export interface WriteOperation {
   kind: "write";
-  id: string; // client-generated UUID = the row's PK for inserts (idempotent replay)
+  id: string; // unique operation id (outbox PK) — distinct from the target row
+  rowId: string; // the target row's PK: client-generated UUID for inserts (=> idempotent replay), existing id for update/delete
   aggregate: Aggregate;
   op: WriteOp;
   table: string;

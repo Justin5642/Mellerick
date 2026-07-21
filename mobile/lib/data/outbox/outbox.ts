@@ -27,8 +27,12 @@ export class Outbox {
     if (op.kind === "side_effect") {
       const existing = await this.store.findByCoalesceKey(op.coalesceKey);
       if (existing && existing.kind === "side_effect") {
+        // Latest trigger wins — adopt its payload AND its dependency, so a
+        // billing-sync re-triggered by a clock-out waits for the clock-out's
+        // write, not the stale clock-in write it first coalesced onto.
         await this.store.update(existing.id, {
           payload: op.payload,
+          dependsOn: op.dependsOn ?? null,
           status: "pending",
           nextAttemptAt: this.clock.now(),
         });

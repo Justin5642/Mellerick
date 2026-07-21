@@ -21,7 +21,7 @@ const makeApi = (): jest.Mocked<ApiBridge> => ({ callSideEffect: jest.fn().mockR
 const online = (v: boolean): Connectivity => ({ isOnline: async () => v, onOnline: () => () => {} });
 
 function write(id: string, o: Partial<WriteOperation> = {}): WriteOperation {
-  return { kind: "write", id, aggregate: "time_entry", op: "insert", table: "time_entries", payload: {}, status: "pending", attempts: 0, nextAttemptAt: 0, createdAt: 0, ...o };
+  return { kind: "write", id, rowId: id, aggregate: "time_entry", op: "insert", table: "time_entries", payload: {}, status: "pending", attempts: 0, nextAttemptAt: 0, createdAt: 0, ...o };
 }
 function side(id: string, key: string, o: Partial<SideEffectOperation> = {}): SideEffectOperation {
   return { kind: "side_effect", id, effect: "sync-billing", coalesceKey: key, payload: {}, status: "pending", attempts: 0, nextAttemptAt: 0, createdAt: 0, ...o };
@@ -86,6 +86,22 @@ describe("Processor", () => {
     api.callSideEffect.mockImplementation(async () => void order.push("sideeffect"));
     await new Processor(outbox, gw, api, online(true)).drain();
     expect(order).toEqual(["write", "sideeffect"]);
+  });
+
+  it("keeps BOTH an insert and a later update to the SAME row (distinct op ids, shared rowId)", async () => {
+    // Regression: op id must be distinct from the target row id, or an offline
+    // clock-in (insert) then clock-out (update) to the same row would collide
+    // in the store and lose the insert.
+    const store = new InMemoryOutboxStore();
+    const outbox = new Outbox(store, fixedClock());
+    await outbox.enqueue(write("op-ins", { rowId: "te-1", op: "insert", createdAt: 1, payload: { job_id: "j1" } }));
+    await outbox.enqueue(write("op-upd", { rowId: "te-1", op: "update", createdAt: 2, payload: { clock_out: "12:00" } }));
+    expect(await outbox.pendingCount()).toBe(2); // neither replaced the other
+    const gw = makeGateway();
+    await new Processor(outbox, gw, makeApi(), online(true)).drain();
+    expect(gw.upsertRow).toHaveBeenCalledWith("time_entries", { id: "te-1", job_id: "j1" });
+    expect(gw.updateRow).toHaveBeenCalledWith("time_entries", "te-1", { clock_out: "12:00" });
+    expect(await outbox.pendingCount()).toBe(0);
   });
 
   it("backs off a failed op (leaves it outstanding) without dropping it", async () => {
