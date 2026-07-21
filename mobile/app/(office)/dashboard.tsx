@@ -7,6 +7,7 @@ import { supabase } from "../../lib/supabase";
 import { colors } from "../../lib/theme";
 import { useAuth } from "../../lib/auth-context";
 import { computeNextDueDate, getDueStatus } from "../../lib/backflow";
+import { isTodayInBusinessTZ, formatBusinessTime, businessHour } from "../../lib/date";
 import { StatCard } from "../../design/components/StatCard";
 import { JobListRow } from "../../design/components/JobListRow";
 
@@ -32,17 +33,6 @@ interface Counts {
   customers: number;
   overdue: number;
   backflowDue: number;
-}
-
-function isToday(iso: string | null): boolean {
-  if (!iso) return false;
-  const d = new Date(iso);
-  const now = new Date();
-  return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() && d.getDate() === now.getDate();
-}
-
-function formatTime(iso: string) {
-  return new Date(iso).toLocaleTimeString("en-AU", { hour: "2-digit", minute: "2-digit" });
 }
 
 export default function DashboardScreen() {
@@ -92,7 +82,7 @@ export default function DashboardScreen() {
     });
     setRecent((recentRes.data as unknown as DashJob[]) ?? []);
     const scheduled = (scheduledRes.data as unknown as DashJob[]) ?? [];
-    setToday(scheduled.filter((j) => isToday(j.scheduled_start)));
+    setToday(scheduled.filter((j) => j.scheduled_start != null && isTodayInBusinessTZ(j.scheduled_start)));
   }, []);
 
   useEffect(() => {
@@ -105,7 +95,7 @@ export default function DashboardScreen() {
     setRefreshing(false);
   }, [load]);
 
-  const hour = new Date().getHours();
+  const hour = businessHour();
   const greeting = hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening";
   const firstName = profile?.full_name?.split(" ")[0] ?? "there";
   const dateLabel = new Date().toLocaleDateString("en-AU", { weekday: "long", day: "numeric", month: "long", year: "numeric" });
@@ -142,8 +132,8 @@ export default function DashboardScreen() {
                 status={job.status}
                 leading={
                   <View style={styles.timeCol}>
-                    <Text style={styles.timeStart}>{job.scheduled_start ? formatTime(job.scheduled_start) : ""}</Text>
-                    {job.scheduled_end ? <Text style={styles.timeEnd}>{formatTime(job.scheduled_end)}</Text> : null}
+                    <Text style={styles.timeStart}>{job.scheduled_start ? formatBusinessTime(job.scheduled_start) : ""}</Text>
+                    {job.scheduled_end ? <Text style={styles.timeEnd}>{formatBusinessTime(job.scheduled_end)}</Text> : null}
                   </View>
                 }
                 onPress={() => router.push(`/job/${job.id}`)}

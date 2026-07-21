@@ -5,6 +5,7 @@ import { useRouter } from "expo-router";
 import { supabase } from "../../lib/supabase";
 import { colors } from "../../lib/theme";
 import { JobListRow } from "../../design/components/JobListRow";
+import { businessDayLabel, formatBusinessTime } from "../../lib/date";
 
 interface SchedJob {
   id: string;
@@ -15,14 +16,6 @@ interface SchedJob {
   scheduled_end: string | null;
   customers: { name: string } | null;
   profiles?: { full_name: string } | null;
-}
-
-function dayKey(iso: string): string {
-  const d = new Date(iso);
-  return d.toLocaleDateString("en-AU", { weekday: "long", day: "numeric", month: "long" });
-}
-function formatTime(iso: string) {
-  return new Date(iso).toLocaleTimeString("en-AU", { hour: "2-digit", minute: "2-digit" });
 }
 
 export default function ScheduleScreen() {
@@ -54,7 +47,7 @@ export default function ScheduleScreen() {
   const sections = useMemo(() => {
     const map = new Map<string, SchedJob[]>();
     for (const j of jobs) {
-      const key = dayKey(j.scheduled_start);
+      const key = businessDayLabel(j.scheduled_start);
       const arr = map.get(key);
       if (arr) arr.push(j);
       else map.set(key, [j]);
@@ -83,8 +76,8 @@ export default function ScheduleScreen() {
               status={item.status}
               leading={
                 <View style={styles.timeCol}>
-                  <Text style={styles.timeStart}>{formatTime(item.scheduled_start)}</Text>
-                  {item.scheduled_end ? <Text style={styles.timeEnd}>{formatTime(item.scheduled_end)}</Text> : null}
+                  <Text style={styles.timeStart}>{formatBusinessTime(item.scheduled_start)}</Text>
+                  {item.scheduled_end ? <Text style={styles.timeEnd}>{formatBusinessTime(item.scheduled_end)}</Text> : null}
                 </View>
               }
               onPress={() => router.push(`/job/${item.id}`)}
