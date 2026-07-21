@@ -1,34 +1,11 @@
 import { useCallback, useEffect, useState } from "react";
 import { View, Text, ScrollView, StyleSheet, ActivityIndicator } from "react-native";
 import { Stack, useLocalSearchParams } from "expo-router";
-import { supabase } from "../../lib/supabase";
 import { colors } from "../../lib/theme";
 import { formatQuoteNumber } from "../../lib/finance";
 import { MoneyText } from "../../design/components/MoneyText";
 import { StatusPill } from "../../design/components/StatusPill";
-
-interface QuoteItem {
-  id: string;
-  name: string;
-  description: string | null;
-  quantity: number;
-  unit_price: number;
-  total: number;
-}
-interface QuoteDetail {
-  id: string;
-  quote_number: number | string;
-  title: string;
-  status: string;
-  subtotal: number | null;
-  tax_amount: number | null;
-  total: number | null;
-  valid_until: string | null;
-  created_at: string;
-  notes: string | null;
-  customers: { name: string; email: string | null; phone: string | null } | null;
-  quote_items: QuoteItem[];
-}
+import { getQuote, type QuoteDetail } from "../../lib/data/reads/finance";
 
 function fmtDate(iso: string | null): string {
   return iso ? new Date(iso).toLocaleDateString("en-AU", { day: "numeric", month: "short", year: "numeric" }) : "—";
@@ -40,12 +17,7 @@ export default function QuoteDetailScreen() {
   const [loading, setLoading] = useState(true);
 
   const load = useCallback(async () => {
-    const { data } = await supabase
-      .from("quotes")
-      .select("*, customers(name, email, phone), quote_items(*)")
-      .eq("id", id)
-      .single();
-    setQuote((data as unknown as QuoteDetail) ?? null);
+    setQuote(await getQuote(id));
     setLoading(false);
   }, [id]);
 

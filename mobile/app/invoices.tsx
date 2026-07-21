@@ -2,35 +2,13 @@ import { useCallback, useEffect, useState } from "react";
 import { View, Text, FlatList, StyleSheet, RefreshControl, ActivityIndicator, TouchableOpacity } from "react-native";
 import { Stack, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
-import { supabase } from "../lib/supabase";
 import { colors } from "../lib/theme";
 import { formatInvoiceNumber } from "../lib/finance";
 import { FinanceListRow } from "../design/components/FinanceListRow";
 import { MoneyText } from "../design/components/MoneyText";
-
-interface Invoice {
-  id: string;
-  invoice_number: number | string;
-  title: string;
-  total: number | null;
-  status: string;
-  due_date: string | null;
-  customers: { name: string } | null;
-}
-interface ReadyJob {
-  id: string;
-  job_number: number;
-  title: string;
-  customers: { name: string } | null;
-}
-interface ReadyVariation {
-  id: string;
-  total_amount: number | null;
-  jobs: { id: string; job_number: number; title: string; customers: { name: string } | null } | null;
-}
+import { listInvoices, listReadyToInvoice, type InvoiceListRow as Invoice, type ReadyJob, type ReadyVariation } from "../lib/data/reads/finance";
 
 const PAGE = 50;
-const SELECT = "id, invoice_number, title, total, status, due_date, customers(name)";
 
 export default function InvoicesScreen() {
   const router = useRouter();
@@ -42,19 +20,11 @@ export default function InvoicesScreen() {
   const [hasMore, setHasMore] = useState(true);
 
   const loadFirst = useCallback(async () => {
-    const [invRes, jobsRes, varsRes] = await Promise.all([
-      // id tiebreaker => stable pagination over the non-unique created_at.
-      supabase.from("invoices").select(SELECT).order("created_at", { ascending: false }).order("id", { ascending: false }).range(0, PAGE - 1),
-      // "Ready to invoice" queue (mirrors the web invoices page's 2 extra
-      // sources) so unbilled work still surfaces on mobile.
-      supabase.from("jobs").select("id, job_number, title, customers(name)").eq("ready_to_invoice", true).order("updated_at", { ascending: false }),
-      supabase.from("job_variations").select("id, total_amount, jobs(id, job_number, title, customers(name))").in("status", ["approved", "auto_approved"]).is("invoice_id", null),
-    ]);
-    const rows = (invRes.data as unknown as Invoice[]) ?? [];
+    const [rows, ready] = await Promise.all([listInvoices(0, PAGE), listReadyToInvoice()]);
     setInvoices(rows);
     setHasMore(rows.length === PAGE);
-    setReadyJobs((jobsRes.data as unknown as ReadyJob[]) ?? []);
-    setReadyVars((varsRes.data as unknown as ReadyVariation[]) ?? []);
+    setReadyJobs(ready.jobs);
+    setReadyVars(ready.variations);
   }, []);
 
   useEffect(() => {
@@ -70,13 +40,7 @@ export default function InvoicesScreen() {
   const loadMore = useCallback(async () => {
     if (loadingMore || !hasMore) return;
     setLoadingMore(true);
-    const { data } = await supabase
-      .from("invoices")
-      .select(SELECT)
-      .order("created_at", { ascending: false })
-      .order("id", { ascending: false })
-      .range(invoices.length, invoices.length + PAGE - 1);
-    const next = (data as unknown as Invoice[]) ?? [];
+    const next = await listInvoices(invoices.length, PAGE);
     setInvoices((prev) => [...prev, ...next]);
     setHasMore(next.length === PAGE);
     setLoadingMore(false);

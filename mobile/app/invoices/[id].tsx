@@ -1,36 +1,11 @@
 import { useCallback, useEffect, useState } from "react";
 import { View, Text, ScrollView, StyleSheet, ActivityIndicator } from "react-native";
 import { Stack, useLocalSearchParams } from "expo-router";
-import { supabase } from "../../lib/supabase";
 import { colors } from "../../lib/theme";
 import { formatInvoiceNumber } from "../../lib/finance";
 import { MoneyText } from "../../design/components/MoneyText";
 import { StatusPill } from "../../design/components/StatusPill";
-
-interface InvoiceItem {
-  id: string;
-  name: string;
-  description: string | null;
-  quantity: number;
-  unit_price: number;
-  total: number;
-}
-interface InvoiceDetail {
-  id: string;
-  invoice_number: number | string;
-  title: string;
-  status: string;
-  subtotal: number | null;
-  tax_amount: number | null;
-  total: number | null;
-  due_date: string | null;
-  created_at: string;
-  notes: string | null;
-  work_description: string | null;
-  xero_invoice_id: string | null;
-  customers: { name: string; email: string | null; phone: string | null } | null;
-  invoice_items: InvoiceItem[];
-}
+import { getInvoice, type InvoiceDetail } from "../../lib/data/reads/finance";
 
 function fmtDate(iso: string | null): string {
   return iso ? new Date(iso).toLocaleDateString("en-AU", { day: "numeric", month: "short", year: "numeric" }) : "—";
@@ -42,12 +17,7 @@ export default function InvoiceDetailScreen() {
   const [loading, setLoading] = useState(true);
 
   const load = useCallback(async () => {
-    const { data } = await supabase
-      .from("invoices")
-      .select("*, customers(name, email, phone), invoice_items(*)")
-      .eq("id", id)
-      .single();
-    setInvoice((data as unknown as InvoiceDetail) ?? null);
+    setInvoice(await getInvoice(id));
     setLoading(false);
   }, [id]);
 

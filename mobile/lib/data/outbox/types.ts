@@ -10,7 +10,10 @@ export type Aggregate =
   | "job"
   | "job_note"
   | "job_variation"
-  | "backflow_test";
+  | "backflow_test"
+  | "invoice"
+  | "quote"
+  | "pricing_item";
 
 // "upload" uploads the attachment to Storage and writes NO metadata row — used
 // when a server-side route (not the client) later writes the row from the object

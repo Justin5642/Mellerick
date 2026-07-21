@@ -1,23 +1,12 @@
 import { useCallback, useEffect, useState } from "react";
 import { View, Text, FlatList, StyleSheet, RefreshControl, ActivityIndicator } from "react-native";
 import { Stack, useRouter } from "expo-router";
-import { supabase } from "../lib/supabase";
 import { colors } from "../lib/theme";
 import { formatQuoteNumber } from "../lib/finance";
 import { FinanceListRow } from "../design/components/FinanceListRow";
-
-interface Quote {
-  id: string;
-  quote_number: number | string;
-  title: string;
-  total: number | null;
-  status: string;
-  valid_until: string | null;
-  customers: { name: string } | null;
-}
+import { listQuotes, type QuoteListRow as Quote } from "../lib/data/reads/finance";
 
 const PAGE = 50;
-const SELECT = "id, quote_number, title, total, status, valid_until, customers(name)";
 
 export default function QuotesScreen() {
   const router = useRouter();
@@ -27,8 +16,7 @@ export default function QuotesScreen() {
   const [hasMore, setHasMore] = useState(true);
 
   const loadFirst = useCallback(async () => {
-    const { data } = await supabase.from("quotes").select(SELECT).order("created_at", { ascending: false }).order("id", { ascending: false }).range(0, PAGE - 1);
-    const rows = (data as unknown as Quote[]) ?? [];
+    const rows = await listQuotes(0, PAGE);
     setQuotes(rows);
     setHasMore(rows.length === PAGE);
   }, []);
@@ -46,8 +34,7 @@ export default function QuotesScreen() {
   const loadMore = useCallback(async () => {
     if (loadingMore || !hasMore) return;
     setLoadingMore(true);
-    const { data } = await supabase.from("quotes").select(SELECT).order("created_at", { ascending: false }).order("id", { ascending: false }).range(quotes.length, quotes.length + PAGE - 1);
-    const next = (data as unknown as Quote[]) ?? [];
+    const next = await listQuotes(quotes.length, PAGE);
     setQuotes((prev) => [...prev, ...next]);
     setHasMore(next.length === PAGE);
     setLoadingMore(false);
