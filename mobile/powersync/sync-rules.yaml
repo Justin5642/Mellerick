@@ -1,0 +1,90 @@
+# PowerSync sync rules — Mellerick Field  (PROPOSED / MP3, needs validation)
+# =============================================================================
+# STATUS: starter definition for the (blocked) PowerSync integration. The
+# money-column ALLOW/DENY lists below are AUTHORITATIVE — they are derived from
+# the RLS hardening (migrations 0027 + proposed 0035) and are the security
+# contract this file must enforce. The PowerSync YAML *syntax* (parameter-query
+# form, subquery support) MUST be validated against the target PowerSync version
+# and instance before use — see README.md. Do NOT deploy unreviewed.
+#
+# WHY THIS FILE IS SECURITY-CRITICAL: PowerSync replicates rows from Postgres to
+# plaintext SQLite ON THE DEVICE, bypassing the app's UI money-gating (MoneyText)
+# and the read-repository layer. So the ONLY thing keeping dollar figures off a
+# technician's phone on the sync path is (a) the row-level RLS (0035) AND (b) the
+# per-column SELECTs here that omit rate/price/cost/total columns. Both must hold.
+#
+# HARD RULE: a technician bucket must contain ZERO money columns. The office/admin
+# bucket may contain the full set (they are authorised to see money). Role is read
+# from profiles via a parameter query keyed on the authenticated user id.
+# =============================================================================
+
+bucket_definitions:
+  # ---- Global reference every authenticated employee needs (no money) --------
+  global_reference:
+    data:
+      - SELECT id, full_name, role FROM profiles
+      # Customers/sites carry NO money columns — safe for all roles (techs need
+      # the customer name + site address for their assigned jobs).
+      - SELECT id, name, company, phone, email, mobile, abn, is_active, is_favorite FROM customers
+      - SELECT id, customer_id, name, address_line1, address_line2, suburb, state, postcode, site_lat, site_lng FROM sites
+      # variation_types RATE-STRIPPED (the base table has a preset `rate`; techs
+      # must never receive it — mirrors the variation_types_public view).
+      - SELECT id, name, unit, auto_approve, is_active FROM variation_types
+
+  # ---- TECHNICIAN: only their assigned jobs + children, MONEY STRIPPED -------
+  # This bucket instantiates ONLY for users whose profiles.role = 'technician'.
+  technician_jobs:
+    parameters: |
+      SELECT request.user_id() AS user_id
+      WHERE (SELECT role FROM profiles WHERE id = request.user_id()) = 'technician'
+    data:
+      # jobs has no money columns of its own — full row is safe.
+      - SELECT id, job_number, title, description, notes, status, priority, job_type,
+               customer_id, site_id, assigned_to, scheduled_start, scheduled_end,
+               actual_start, actual_end, completion_notes, voice_report_transcript, created_at
+          FROM jobs
+         WHERE assigned_to = bucket.user_id
+      # job_photos / time entries / backflow for those jobs (no money columns).
+      - SELECT id, job_id, storage_path, photo_type, uploaded_by, created_at
+          FROM job_photos WHERE job_id IN (SELECT id FROM jobs WHERE assigned_to = bucket.user_id)
+      - SELECT id, job_id, staff_id, clock_in, clock_out, hours, entry_type, cost_center_id, notes, created_at
+          FROM time_entries WHERE staff_id = bucket.user_id
+      # job_variations RATE-STRIPPED: OMIT rate, total_amount, admin_notes.
+      - SELECT id, job_id, variation_type_id, custom_name, description, quantity, unit,
+               status, photo_storage_path, logged_by, logged_at
+          FROM job_variations WHERE job_id IN (SELECT id FROM jobs WHERE assigned_to = bucket.user_id)
+      # Backflow devices + tests (compliance data, no money).
+      - SELECT id, customer_id, site_id, location_description, make, model, serial_number,
+               size, hazard_level, is_active, created_at
+          FROM backflow_devices
+      - SELECT id, device_id, tested_by, test_date, result, storage_path, created_at
+          FROM backflow_tests WHERE tested_by = bucket.user_id
+
+  # ---- OFFICE / ADMIN: the broader authorised set (money allowed) ------------
+  # Instantiates for office + admin. These users are authorised to see money, so
+  # the full rows sync (RLS is the backstop). Payroll-only tables
+  # (staff_cost_profiles, billing_rate_config) are ADMIN-only — see README.
+  office_admin_business:
+    parameters: |
+      SELECT request.user_id() AS user_id
+      WHERE (SELECT role FROM profiles WHERE id = request.user_id()) IN ('office', 'admin')
+    data:
+      - SELECT * FROM jobs
+      - SELECT * FROM job_items
+      - SELECT * FROM job_variations
+      - SELECT * FROM job_expenses
+      - SELECT * FROM invoices
+      - SELECT * FROM invoice_items
+      - SELECT * FROM quotes
+      - SELECT * FROM quote_items
+      - SELECT * FROM pricing_items
+      - SELECT * FROM inventory
+      - SELECT * FROM equipment
+      - SELECT * FROM equipment_expenses
+      - SELECT * FROM equipment_usage_log
+      - SELECT * FROM purchase_orders
+      - SELECT * FROM po_cost_centers
+      - SELECT * FROM time_entries
+      - SELECT * FROM job_photos
+      - SELECT * FROM backflow_devices
+      - SELECT * FROM backflow_tests
