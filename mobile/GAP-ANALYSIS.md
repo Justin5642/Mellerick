@@ -89,5 +89,15 @@ reconciliation, Pricing/Inventory/Fleet CRUD + full depth incl. equipment
 documents); **admin** Staff (roles/pay/charge-out/leave), **Reports** (all 5
 analytics tables + KPIs), Settings (variation types + cost-centre templates +
 integration status), full job costing/profitability; expense capture (job +
-equipment) with receipts. **195 unit tests**, `tsc` clean, iOS bundle clean; money
+equipment) with receipts. **200 unit tests**, `tsc` clean, iOS bundle clean; money
 math verified byte-for-byte vs the web (D55, re-verified D66).
+
+**Hardening (D69–D71):** a granular whole-codebase audit — 4 adversarial reviewers
+(offline/outbox, money-safety, read-parity, RN-correctness) + PAL `precommit` with
+`gemini-2.5-pro` (the non-Anthropic validator) — confirmed the money math and
+technician dollar-blindness are structurally intact, found and fixed one **CRITICAL**
+offline data-loss bug (an update landing on a not-yet-synced insert could silently
+drop a clock-out), and remediated every other finding to zero: per-op
+write-acceptance reporting (no more phantom-row navigation), crash-loop
+dead-lettering, error alerts on all write screens, and the last read-visibility
+parity gaps. No audit finding remains open.
