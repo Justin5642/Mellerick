@@ -6,6 +6,7 @@ import { colors } from "../lib/theme";
 import { MoneyText } from "../design/components/MoneyText";
 import { listEquipment, hourlyRate, type Equipment } from "../lib/data/reads/fleet";
 import { useFleet } from "../lib/data/hooks/useFleet";
+import { useIsAdmin } from "../design/guards/useRole";
 
 const CATEGORIES = ["vehicle", "machinery", "tool", "other"] as const;
 
@@ -45,6 +46,7 @@ function toDraft(e: Equipment | null): Draft {
 
 export default function FleetScreen() {
   const fleet = useFleet();
+  const isAdmin = useIsAdmin(); // equipment writes are admin-only (RLS + web)
   const [items, setItems] = useState<Equipment[]>([]);
   const [refreshing, setRefreshing] = useState(false);
   const [draft, setDraft] = useState<Draft | null>(null);
@@ -123,9 +125,9 @@ export default function FleetScreen() {
 
   return (
     <View style={styles.container}>
-      <Stack.Screen options={{ title: "Fleet & Equipment", headerRight: () => (
+      <Stack.Screen options={{ title: "Fleet & Equipment", headerRight: isAdmin ? () => (
         <TouchableOpacity onPress={() => setDraft(toDraft(null))} accessibilityLabel="Add equipment"><Ionicons name="add" size={26} color={colors.blue600} /></TouchableOpacity>
-      ) }} />
+      ) : undefined }} />
       <SectionList
         sections={sections}
         keyExtractor={(i) => i.id}
@@ -134,7 +136,7 @@ export default function FleetScreen() {
         ListEmptyComponent={<Text style={styles.empty}>No equipment. Tap + to add.</Text>}
         renderSectionHeader={({ section }) => <Text style={styles.catHead}>{section.title}</Text>}
         renderItem={({ item }) => (
-          <TouchableOpacity style={styles.row} onPress={() => setDraft(toDraft(item))}>
+          <TouchableOpacity style={styles.row} onPress={() => isAdmin && setDraft(toDraft(item))} activeOpacity={isAdmin ? 0.6 : 1}>
             <View style={styles.body}>
               <Text style={styles.name} numberOfLines={1}>{item.name}</Text>
               <Text style={styles.meta} numberOfLines={1}>{item.registration || item.category}</Text>

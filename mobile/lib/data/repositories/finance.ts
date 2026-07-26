@@ -101,11 +101,13 @@ export class FinanceRepository {
 
   async editInvoice(input: EditInvoiceInput): Promise<void> {
     const { subtotal, gst, total } = computeTotals(input.items);
+    // NOTE: work_description is intentionally NOT in this payload — the mobile
+    // edit form doesn't manage it, and including it would UPDATE it to null and
+    // wipe a customer-facing "Work Carried Out" set on the web. Preserve-on-update.
     const parentOp = await this.write("invoice", "update", "invoices", input.invoiceId, {
       title: input.title,
       due_date: input.dueDateIso ?? null,
       notes: input.notes ?? null,
-      work_description: input.workDescription ?? null,
       subtotal,
       tax_amount: gst,
       total,

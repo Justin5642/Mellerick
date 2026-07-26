@@ -8,6 +8,7 @@ import { formatQuoteNumber } from "../../../lib/finance";
 import { useFinance } from "../../../lib/data/hooks/useFinance";
 import { LineItemsEditor, type EditableItem } from "../../../components/finance/line-items-editor";
 import { getQuote, type QuoteDetail } from "../../../lib/data/reads/finance";
+import { localDateKey } from "../../../lib/date";
 
 export default function EditQuoteScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -50,7 +51,7 @@ export default function EditQuoteScreen() {
     if (lineItems.length === 0) { Alert.alert("Line items required", "Add at least one named line item."); return; }
     setSaving(true);
     try {
-      await finance.editQuote({ quoteId: id, title: title.trim(), validUntilIso: validUntil ? validUntil.toISOString().slice(0, 10) : null, notes: notes.trim() || null, existingItemIds, items: lineItems });
+      await finance.editQuote({ quoteId: id, title: title.trim(), validUntilIso: validUntil ? localDateKey(validUntil) : null, notes: notes.trim() || null, existingItemIds, items: lineItems });
       router.replace(`/quotes/${id}`);
     } finally {
       setSaving(false);

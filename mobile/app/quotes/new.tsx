@@ -6,6 +6,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { colors } from "../../lib/theme";
 import { useFinance } from "../../lib/data/hooks/useFinance";
 import { CustomerPicker } from "../../components/finance/customer-picker";
+import { localDateKey } from "../../lib/date";
 import { LineItemsEditor, newItem, type EditableItem } from "../../components/finance/line-items-editor";
 import type { CustomerListRow } from "../../lib/data/reads/customers";
 
@@ -39,7 +40,7 @@ export default function NewQuoteScreen() {
       const { result, synced } = await finance.createQuote({
         customerId: customer.id,
         title: title.trim(),
-        validUntilIso: validUntil ? validUntil.toISOString().slice(0, 10) : null,
+        validUntilIso: validUntil ? localDateKey(validUntil) : null,
         notes: notes.trim() || null,
         items: lineItems,
       });

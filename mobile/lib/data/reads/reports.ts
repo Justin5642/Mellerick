@@ -4,6 +4,7 @@ export interface ReportSummary {
   revenuePaid: number;
   outstanding: number;
   quotesAccepted: number;
+  quotesDeclined: number;
   quotesTotal: number;
   jobsByStatus: { status: string; count: number }[];
   activeJobs: number;
@@ -31,6 +32,7 @@ export async function getReportSummary(): Promise<ReportSummary> {
     revenuePaid: sum(paidRes.data as { total: number | null }[] | null),
     outstanding: sum(outstandingRes.data as { total: number | null }[] | null),
     quotesAccepted: quotes.filter((q) => q.status === "accepted").length,
+    quotesDeclined: quotes.filter((q) => q.status === "declined").length,
     quotesTotal: quotes.length,
     jobsByStatus,
     activeJobs,

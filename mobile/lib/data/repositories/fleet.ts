@@ -35,7 +35,11 @@ export class EquipmentRepository {
   }
 
   async updateEquipment(id: string, input: EquipmentInput): Promise<void> {
-    await this.write("update", id, this.payload(input));
+    // Omit purchase_date — the mobile form doesn't manage it, and sending it
+    // would UPDATE it to null and wipe a date set on the web. Preserve-on-update.
+    const { purchase_date: _omit, ...patch } = this.payload(input);
+    void _omit;
+    await this.write("update", id, patch);
   }
 
   async deactivateEquipment(id: string): Promise<void> {

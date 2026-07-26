@@ -19,7 +19,10 @@ export default function ReportsScreen() {
   const onRefresh = useCallback(async () => { setRefreshing(true); await load(); setRefreshing(false); }, [load]);
 
   const jobsTotal = summary ? summary.jobsByStatus.reduce((s, j) => s + j.count, 0) : 0;
-  const acceptRate = summary && summary.quotesTotal > 0 ? Math.round((summary.quotesAccepted / summary.quotesTotal) * 100) : 0;
+  // Win rate = accepted / (accepted + declined), matching the web (decided
+  // quotes only, not drafts/sent/expired).
+  const decided = summary ? summary.quotesAccepted + summary.quotesDeclined : 0;
+  const acceptRate = decided > 0 ? Math.round((summary!.quotesAccepted / decided) * 100) : 0;
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.blue600} />}>

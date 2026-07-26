@@ -96,13 +96,14 @@ export default function CustomerDetailScreen() {
       )}
 
       <CustomerFormSheet visible={editing} existing={customer} onClose={() => setEditing(false)} onSaved={() => { setEditing(false); load(); }} />
+      {/* No onRemoved: sites can't be hard-deleted (jobs/quotes FK RESTRICT) and
+          have no is_active column for a soft-delete — see Q17. Edit only. */}
       <SiteFormSheet
         visible={siteDraft !== null}
         customerId={customer.id}
         existing={siteDraft === "new" ? null : siteDraft}
         onClose={() => setSiteDraft(null)}
         onSaved={() => { setSiteDraft(null); load(); }}
-        onRemoved={() => { setSiteDraft(null); load(); }}
       />
     </ScrollView>
   );

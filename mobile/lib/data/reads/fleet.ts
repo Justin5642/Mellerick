@@ -28,8 +28,10 @@ export async function listEquipment(): Promise<Equipment[]> {
 // The web's equipment cost model: total annual cost / target hours + fuel/hr.
 // Depreciation = purchase_cost / estimated_life_years.
 export function hourlyRate(e: Equipment): number {
+  // Match the web: with no target hours there's no meaningful per-hour rate — the
+  // whole expression is 0 (fuel is NOT added on top when hours is 0).
+  if (Number(e.target_hours_per_year) <= 0) return 0;
   const depreciation = e.estimated_life_years > 0 ? Number(e.purchase_cost) / Number(e.estimated_life_years) : 0;
   const annual = depreciation + Number(e.insurance_annual) + Number(e.maintenance_annual) + Number(e.registration_annual) + Number(e.other_annual_costs);
-  const perHour = e.target_hours_per_year > 0 ? annual / Number(e.target_hours_per_year) : 0;
-  return perHour + Number(e.fuel_cost_per_hour);
+  return annual / Number(e.target_hours_per_year) + Number(e.fuel_cost_per_hour);
 }

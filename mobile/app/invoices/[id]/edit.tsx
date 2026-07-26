@@ -8,6 +8,7 @@ import { formatInvoiceNumber } from "../../../lib/finance";
 import { useFinance } from "../../../lib/data/hooks/useFinance";
 import { LineItemsEditor, type EditableItem } from "../../../components/finance/line-items-editor";
 import { getInvoice, type InvoiceDetail } from "../../../lib/data/reads/finance";
+import { localDateKey } from "../../../lib/date";
 
 export default function EditInvoiceScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -50,7 +51,7 @@ export default function EditInvoiceScreen() {
     if (lineItems.length === 0) { Alert.alert("Line items required", "Add at least one named line item."); return; }
     setSaving(true);
     try {
-      await finance.editInvoice({ invoiceId: id, title: title.trim(), dueDateIso: dueDate ? dueDate.toISOString().slice(0, 10) : null, notes: notes.trim() || null, existingItemIds, items: lineItems });
+      await finance.editInvoice({ invoiceId: id, title: title.trim(), dueDateIso: dueDate ? localDateKey(dueDate) : null, notes: notes.trim() || null, existingItemIds, items: lineItems });
       router.replace(`/invoices/${id}`);
     } finally {
       setSaving(false);

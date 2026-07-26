@@ -36,8 +36,9 @@ export async function saveStaff(input: {
   phone: string | null;
   cost: CostProfile;
 }): Promise<void> {
-  await supabase.from("profiles").update({ role: input.role, is_active: input.isActive, phone: input.phone }).eq("id", input.id);
-  await supabase.from("staff_cost_profiles").upsert(
+  const profileRes = await supabase.from("profiles").update({ role: input.role, is_active: input.isActive, phone: input.phone }).eq("id", input.id);
+  if (profileRes.error) throw new Error(`profile: ${profileRes.error.message}`);
+  const costRes = await supabase.from("staff_cost_profiles").upsert(
     {
       staff_id: input.id,
       hourly_rate: input.cost.hourly_rate,
@@ -49,4 +50,5 @@ export async function saveStaff(input: {
     },
     { onConflict: "staff_id" }
   );
+  if (costRes.error) throw new Error(`cost profile: ${costRes.error.message}`);
 }

@@ -24,6 +24,13 @@ export function businessDayLabel(value: string | Date): string {
   return new Date(value).toLocaleDateString("en-AU", { weekday: "long", day: "numeric", month: "long", timeZone: BUSINESS_TIME_ZONE });
 }
 
+// Local calendar date as "YYYY-MM-DD" for a date the user picked in a date
+// picker — they mean the local wall-clock date. `toISOString().slice(0,10)`
+// would convert to UTC first and land a day early for AU (UTC+10/+11) users.
+export function localDateKey(d: Date): string {
+  return d.toLocaleDateString("en-CA"); // en-CA => YYYY-MM-DD, in the device's local TZ
+}
+
 // Hour-of-day (0-23) in business time — for the dashboard greeting.
 export function businessHour(value: string | Date = new Date()): number {
   const parts = new Intl.DateTimeFormat("en-CA", { timeZone: BUSINESS_TIME_ZONE, hour: "2-digit", hourCycle: "h23" }).formatToParts(new Date(value));
