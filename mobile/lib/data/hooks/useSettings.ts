@@ -1,7 +1,7 @@
 import { useCallback } from "react";
 import { useDataLayer } from "../DataProvider";
 import { useFlush } from "./useFlush";
-import type { VariationTypeInput } from "../repositories/settings";
+import type { VariationTypeInput, CostCentreTemplateInput } from "../repositories/settings";
 
 export function useSettings() {
   const layer = useDataLayer();
@@ -21,5 +21,7 @@ export function useSettings() {
     createVariationType: useCallback((i: VariationTypeInput) => run((r) => r.createVariationType(i)), [run]),
     updateVariationType: useCallback((id: string, i: VariationTypeInput) => run((r) => r.updateVariationType(id, i)), [run]),
     setVariationTypeActive: useCallback((id: string, active: boolean) => run((r) => r.setVariationTypeActive(id, active)), [run]),
+    createCostCentreTemplate: useCallback((i: CostCentreTemplateInput) => run((r) => r.createCostCentreTemplate(i)), [run]),
+    setCostCentreTemplateActive: useCallback((id: string, active: boolean) => run((r) => r.setCostCentreTemplateActive(id, active)), [run]),
   };
 }

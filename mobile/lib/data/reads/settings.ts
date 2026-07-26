@@ -19,3 +19,21 @@ export async function listVariationTypes(): Promise<VariationType[]> {
     .order("name");
   return (data as unknown as VariationType[]) ?? [];
 }
+
+export interface CostCentreTemplate {
+  id: string;
+  group_name: string;
+  name: string;
+  code: string | null;
+  is_active: boolean;
+}
+
+export async function listCostCentreTemplates(): Promise<CostCentreTemplate[]> {
+  const { data } = await supabase
+    .from("cost_center_templates")
+    .select("id, group_name, name, code, is_active")
+    .order("group_name")
+    .order("sort_order")
+    .order("name");
+  return (data as unknown as CostCentreTemplate[]) ?? [];
+}

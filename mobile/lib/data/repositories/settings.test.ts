@@ -42,3 +42,19 @@ describe("SettingsRepository — variation types", () => {
     expect(b2.ops[0].payload).toEqual({ is_active: true });
   });
 });
+
+describe("SettingsRepository — cost centre templates", () => {
+  it("createCostCentreTemplate inserts an active row into cost_center_templates", async () => {
+    const { outbox, ops } = captureOutbox();
+    const id = await makeRepo(outbox).createCostCentreTemplate({ groupName: "Excavation", name: "Rock", code: "EX-01" });
+    expect(id).toBe("id-1");
+    expect(ops[0]).toMatchObject({ table: "cost_center_templates", op: "insert", aggregate: "cost_center_template", rowId: "id-1" });
+    expect(ops[0].payload).toEqual({ group_name: "Excavation", name: "Rock", code: "EX-01", is_active: true });
+  });
+
+  it("setCostCentreTemplateActive toggles is_active", async () => {
+    const { outbox, ops } = captureOutbox();
+    await makeRepo(outbox).setCostCentreTemplateActive("t1", false);
+    expect(ops[0]).toMatchObject({ table: "cost_center_templates", op: "update", rowId: "t1", payload: { is_active: false } });
+  });
+});

@@ -10,6 +10,12 @@ export interface VariationTypeInput {
   autoApprove: boolean;
 }
 
+export interface CostCentreTemplateInput {
+  groupName: string;
+  name: string;
+  code?: string | null;
+}
+
 // Offline-first write path for admin Settings config. variation_types has a
 // normal uuid id PK, so it routes through the durable outbox like the other
 // aggregates. Deactivation is a soft-delete (is_active=false) to preserve
@@ -47,14 +53,34 @@ export class SettingsRepository {
     await this.write("update", id, { is_active: isActive });
   }
 
+  // ----- cost centre templates (the standard PO cost-centre stages) -----
+  async createCostCentreTemplate(input: CostCentreTemplateInput): Promise<string> {
+    const id = this.ids.newId();
+    await this.writeTo("cost_center_template", "cost_center_templates", "insert", id, {
+      group_name: input.groupName,
+      name: input.name,
+      code: input.code ?? null,
+      is_active: true,
+    });
+    return id;
+  }
+
+  async setCostCentreTemplateActive(id: string, isActive: boolean): Promise<void> {
+    await this.writeTo("cost_center_template", "cost_center_templates", "update", id, { is_active: isActive });
+  }
+
   private async write(op: WriteOp, rowId: string, payload: Record<string, unknown>): Promise<void> {
+    await this.writeTo("variation_type", "variation_types", op, rowId, payload);
+  }
+
+  private async writeTo(aggregate: WriteOperation["aggregate"], table: string, op: WriteOp, rowId: string, payload: Record<string, unknown>): Promise<void> {
     const write: WriteOperation = {
       kind: "write",
       id: this.ids.newId(),
       rowId,
-      aggregate: "variation_type",
+      aggregate,
       op,
-      table: "variation_types",
+      table,
       payload,
       status: "pending",
       attempts: 0,

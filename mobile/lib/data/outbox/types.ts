@@ -21,6 +21,7 @@ export type Aggregate =
   | "equipment"
   | "equipment_expense"
   | "variation_type"
+  | "cost_center_template"
   | "job_item"
   | "job_expense";
 

@@ -6,7 +6,7 @@ import { supabase } from "../lib/supabase";
 import { colors } from "../lib/theme";
 import { MoneyText } from "../design/components/MoneyText";
 import { useSettings } from "../lib/data/hooks/useSettings";
-import { listVariationTypes, type VariationType } from "../lib/data/reads/settings";
+import { listVariationTypes, listCostCentreTemplates, type VariationType, type CostCentreTemplate } from "../lib/data/reads/settings";
 
 interface Integrations {
   xero: string | null; // tenant name, or null
@@ -25,20 +25,24 @@ async function readIntegrations(): Promise<Integrations> {
 }
 
 interface VtDraft { id: string | null; name: string; unit: string; rate: string; autoApprove: boolean }
+interface CcDraft { groupName: string; name: string; code: string }
 
 export default function SettingsScreen() {
   const settings = useSettings();
   const [state, setState] = useState<Integrations | null>(null);
   const [vTypes, setVTypes] = useState<VariationType[]>([]);
+  const [costCentres, setCostCentres] = useState<CostCentreTemplate[]>([]);
   const [refreshing, setRefreshing] = useState(false);
   const [draft, setDraft] = useState<VtDraft | null>(null);
+  const [ccDraft, setCcDraft] = useState<CcDraft | null>(null);
   const [saving, setSaving] = useState(false);
 
   const load = useCallback(async () => {
     try {
-      const [i, vt] = await Promise.all([readIntegrations(), listVariationTypes()]);
+      const [i, vt, cc] = await Promise.all([readIntegrations(), listVariationTypes(), listCostCentreTemplates()]);
       setState(i);
       setVTypes(vt);
+      setCostCentres(cc);
     } catch {
       setState({ xero: null, google: false });
     }
@@ -73,6 +77,30 @@ export default function SettingsScreen() {
       Alert.alert("Couldn't update", e instanceof Error ? e.message : "Please try again.");
     }
   }
+
+  async function saveCc() {
+    if (!ccDraft || saving || !settings.ready) return;
+    if (!ccDraft.groupName.trim() || !ccDraft.name.trim()) { Alert.alert("Missing details", "Group and stage name are required."); return; }
+    setSaving(true);
+    try {
+      await settings.createCostCentreTemplate({ groupName: ccDraft.groupName.trim(), name: ccDraft.name.trim(), code: ccDraft.code.trim() || null });
+      setCcDraft(null);
+      await load();
+    } catch (e) {
+      Alert.alert("Couldn't save", e instanceof Error ? e.message : "Please try again.");
+    } finally {
+      setSaving(false);
+    }
+  }
+  async function toggleCc(cc: CostCentreTemplate) {
+    try {
+      await settings.setCostCentreTemplateActive(cc.id, !cc.is_active);
+      setCostCentres((prev) => prev.map((c) => (c.id === cc.id ? { ...c, is_active: !c.is_active } : c)));
+    } catch (e) {
+      Alert.alert("Couldn't update", e instanceof Error ? e.message : "Please try again.");
+    }
+  }
+  const ccGroups = Array.from(new Set(costCentres.map((c) => c.group_name)));
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.blue600} />}>
@@ -113,7 +141,33 @@ export default function SettingsScreen() {
           </View>
         ))}
       </View>
-      <Text style={styles.hint}>Tap a type to edit its rate; the eye toggles it active/inactive. Cost-centre templates &amp; Xero account codes are on the web dashboard.</Text>
+      <Text style={styles.hint}>Tap a type to edit its rate; the eye toggles it active/inactive.</Text>
+
+      <View style={styles.sectionHead}>
+        <Text style={styles.section}>Cost-centre templates</Text>
+        <TouchableOpacity onPress={() => setCcDraft({ groupName: ccGroups[0] ?? "", name: "", code: "" })} style={styles.addBtn}>
+          <Ionicons name="add" size={16} color={colors.blue600} /><Text style={styles.addText}>Add</Text>
+        </TouchableOpacity>
+      </View>
+      <View style={styles.card}>
+        {costCentres.length === 0 ? <Text style={styles.empty}>No templates yet.</Text> : ccGroups.map((g) => (
+          <View key={g}>
+            <Text style={styles.ccGroup}>{g}</Text>
+            {costCentres.filter((c) => c.group_name === g).map((cc) => (
+              <View key={cc.id} style={[styles.vtRow, !cc.is_active && styles.vtInactive]}>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.vtName}>{cc.name}{cc.is_active ? "" : " · inactive"}</Text>
+                  {cc.code ? <Text style={styles.vtMeta}>{cc.code}</Text> : null}
+                </View>
+                <TouchableOpacity onPress={() => toggleCc(cc)} hitSlop={8} style={styles.vtToggle}>
+                  <Ionicons name={cc.is_active ? "eye-off-outline" : "refresh-outline"} size={18} color={colors.slate400} />
+                </TouchableOpacity>
+              </View>
+            ))}
+          </View>
+        ))}
+      </View>
+      <Text style={styles.hint}>Xero account codes are configured on the web dashboard.</Text>
 
       <Modal visible={!!draft} transparent animationType="slide" onRequestClose={() => !saving && setDraft(null)}>
         <View style={styles.overlay}>
@@ -131,6 +185,21 @@ export default function SettingsScreen() {
             <View style={styles.actions}>
               <TouchableOpacity style={styles.cancel} onPress={() => setDraft(null)} disabled={saving}><Text style={styles.cancelText}>Cancel</Text></TouchableOpacity>
               <TouchableOpacity style={styles.saveBtn} onPress={saveVt} disabled={saving}><Text style={styles.saveText}>{saving ? "…" : "Save"}</Text></TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal visible={!!ccDraft} transparent animationType="slide" onRequestClose={() => !saving && setCcDraft(null)}>
+        <View style={styles.overlay}>
+          <View style={styles.sheet}>
+            <Text style={styles.sheetTitle}>New cost-centre stage</Text>
+            <Field label="Group (e.g. Excavation)" value={ccDraft?.groupName ?? ""} onChange={(v) => setCcDraft((d) => d && { ...d, groupName: v })} />
+            <Field label="Stage name" value={ccDraft?.name ?? ""} onChange={(v) => setCcDraft((d) => d && { ...d, name: v })} />
+            <Field label="Code (optional)" value={ccDraft?.code ?? ""} onChange={(v) => setCcDraft((d) => d && { ...d, code: v })} />
+            <View style={styles.actions}>
+              <TouchableOpacity style={styles.cancel} onPress={() => setCcDraft(null)} disabled={saving}><Text style={styles.cancelText}>Cancel</Text></TouchableOpacity>
+              <TouchableOpacity style={styles.saveBtn} onPress={saveCc} disabled={saving}><Text style={styles.saveText}>{saving ? "…" : "Save"}</Text></TouchableOpacity>
             </View>
           </View>
         </View>
@@ -181,6 +250,7 @@ const styles = StyleSheet.create({
   noteText: { flex: 1, fontSize: 12, color: colors.slate500, lineHeight: 18 },
   card: { backgroundColor: colors.card, borderWidth: 1, borderColor: colors.border, borderRadius: 12, padding: 12, marginTop: 8 },
   empty: { fontSize: 13, color: colors.slate400, paddingVertical: 8, textAlign: "center" },
+  ccGroup: { fontSize: 12, fontWeight: "700", color: colors.slate500, textTransform: "uppercase", marginTop: 10, marginBottom: 2 },
   vtRow: { flexDirection: "row", alignItems: "center", gap: 10, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: colors.slate100 },
   vtInactive: { opacity: 0.55 },
   vtName: { fontSize: 14, fontWeight: "600", color: colors.slate900 },
