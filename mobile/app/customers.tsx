@@ -4,12 +4,14 @@ import { Stack, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { colors } from "../lib/theme";
 import { listCustomers, type CustomerListRow } from "../lib/data/reads/customers";
+import { useCustomers } from "../lib/data/hooks/useCustomers";
 import { CustomerFormSheet } from "../components/customer/customer-form";
 
 const PAGE = 50;
 
 export default function CustomersScreen() {
   const router = useRouter();
+  const writes = useCustomers();
   const [customers, setCustomers] = useState<CustomerListRow[]>([]);
   const [refreshing, setRefreshing] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -45,6 +47,27 @@ export default function CustomersScreen() {
     setHasMore(next.length === PAGE);
     setLoadingMore(false);
   }, [loadingMore, hasMore, query, customers.length]);
+
+  // Toggle favourite: optimistically flip + re-pin (favourites first, then name),
+  // then persist through the outbox. Revert the row on write failure.
+  const toggleFavorite = useCallback(
+    async (row: CustomerListRow) => {
+      if (!writes.ready) return;
+      const next = !row.is_favorite;
+      const resort = (list: CustomerListRow[]) =>
+        list
+          .map((c) => (c.id === row.id ? { ...c, is_favorite: next } : c))
+          .sort((a, b) => Number(b.is_favorite) - Number(a.is_favorite) || a.name.localeCompare(b.name));
+      setCustomers(resort);
+      try {
+        await writes.setFavorite(row.id, next);
+      } catch {
+        setCustomers((prev) => prev.map((c) => (c.id === row.id ? { ...c, is_favorite: row.is_favorite } : c)));
+        Alert.alert("Couldn't update favourite", "Please try again.");
+      }
+    },
+    [writes]
+  );
 
   return (
     <View style={styles.container}>
@@ -83,6 +106,18 @@ export default function CustomersScreen() {
                 {[item.company, item.phone || item.email].filter(Boolean).join(" · ") || "—"}
               </Text>
             </View>
+            <TouchableOpacity
+              onPress={() => toggleFavorite(item)}
+              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+              accessibilityLabel={item.is_favorite ? "Remove from favourites" : "Add to favourites"}
+              style={styles.star}
+            >
+              <Ionicons
+                name={item.is_favorite ? "star" : "star-outline"}
+                size={20}
+                color={item.is_favorite ? colors.orange700 : colors.slate400}
+              />
+            </TouchableOpacity>
             <Ionicons name="chevron-forward" size={16} color={colors.slate400} />
           </TouchableOpacity>
         )}
@@ -118,5 +153,6 @@ const styles = StyleSheet.create({
   body: { flex: 1, minWidth: 0 },
   name: { fontSize: 14, fontWeight: "600", color: colors.slate900 },
   meta: { fontSize: 12, color: colors.slate500, marginTop: 2 },
+  star: { padding: 2 },
   empty: { textAlign: "center", color: colors.slate400, marginTop: 40, fontSize: 13 },
 });

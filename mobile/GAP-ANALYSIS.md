@@ -21,7 +21,7 @@ in-repo is a short tail of **minor/complex depth** (below); the true blockers to
 | Pricing | **full** ✅ | ~~reactivate~~ (D49), ~~category-taxonomy picker~~ done |
 | Inventory | **near-full** | ~~low-stock surfacing~~ (D49), ~~margin display~~ done |
 | My Jobs | partial | tech: change status/notes + submit variation offline (med) |
-| Customers | near-full | ~~Customer-360~~ (D47), ~~quick-create~~ (D60); favourites, inactive lifecycle — minor |
+| Customers | **full** ✅ | ~~Customer-360~~ (D47), ~~quick-create~~ (D60), ~~favourites~~ (D62); inactive lifecycle handled via deactivate |
 | Backflow | partial | ~~register-device offline~~ (D46); test-log offline needs the submit dedupe (Q3) — follow-up |
 | Quotes | partial | ~~convert-to-job~~ **DONE** (D50); Send/PDF (ext) |
 | Fleet | near-full | ~~assign~~ (D54), ~~detail + expenses~~ (D56), ~~usage log~~ (D61); documents (file upload) — follow-up |

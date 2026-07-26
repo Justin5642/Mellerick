@@ -11,6 +11,7 @@ export interface CustomerListRow {
   phone: string | null;
   email: string | null;
   is_active: boolean;
+  is_favorite: boolean;
 }
 export interface Site {
   id: string;
@@ -32,13 +33,15 @@ export interface CustomerDetail {
   abn: string | null;
   notes: string | null;
   is_active: boolean;
+  is_favorite: boolean;
   sites: Site[];
 }
 
-const LIST = "id, name, company, phone, email, is_active";
+const LIST = "id, name, company, phone, email, is_active, is_favorite";
 
 export async function listCustomers(offset: number, limit: number, query?: string): Promise<CustomerListRow[]> {
-  let builder = supabase.from("customers").select(LIST).eq("is_active", true).order("name").order("id");
+  // Favourites pinned to the top (matches web), then alphabetical.
+  let builder = supabase.from("customers").select(LIST).eq("is_active", true).order("is_favorite", { ascending: false }).order("name").order("id");
   const q = (query ?? "").replace(/[,()%]/g, " ").trim();
   if (q) builder = builder.or(`name.ilike.%${q}%,company.ilike.%${q}%`);
   const { data } = await builder.range(offset, offset + limit - 1);

@@ -23,6 +23,7 @@ export function useCustomers() {
     createCustomer: useCallback((i: CustomerInput) => run((r) => r.createCustomer(i)), [run]),
     updateCustomer: useCallback((id: string, i: CustomerInput) => run((r) => r.updateCustomer(id, i)), [run]),
     deactivateCustomer: useCallback((id: string) => run((r) => r.deactivateCustomer(id)), [run]),
+    setFavorite: useCallback((id: string, fav: boolean) => run((r) => r.setFavorite(id, fav)), [run]),
     createSite: useCallback((i: SiteInput) => run((r) => r.createSite(i)), [run]),
     updateSite: useCallback((id: string, i: SiteInput) => run((r) => r.updateSite(id, i)), [run]),
     removeSite: useCallback((id: string) => run((r) => r.removeSite(id)), [run]),

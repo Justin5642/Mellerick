@@ -46,6 +46,11 @@ export class CustomersRepository {
     await this.write("customer", "update", "customers", id, { is_active: false });
   }
 
+  /** Mark/unmark a customer as a favourite (pinned to the top of lists). */
+  async setFavorite(id: string, isFavorite: boolean): Promise<void> {
+    await this.write("customer", "update", "customers", id, { is_favorite: isFavorite });
+  }
+
   async createSite(input: SiteInput): Promise<string> {
     const id = this.ids.newId();
     await this.write("site", "insert", "sites", id, this.sitePayload(input));

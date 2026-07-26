@@ -5,12 +5,14 @@ import { Ionicons } from "@expo/vector-icons";
 import { colors } from "../../lib/theme";
 import { MoneyText } from "../../design/components/MoneyText";
 import { getCustomer, getCustomerOverview, type CustomerDetail, type CustomerOverview, type Site } from "../../lib/data/reads/customers";
+import { useCustomers } from "../../lib/data/hooks/useCustomers";
 import { CustomerFormSheet } from "../../components/customer/customer-form";
 import { SiteFormSheet } from "../../components/customer/site-form";
 
 export default function CustomerDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
+  const writes = useCustomers();
   const [customer, setCustomer] = useState<CustomerDetail | null>(null);
   const [overview, setOverview] = useState<CustomerOverview | null>(null);
   const [loading, setLoading] = useState(true);
@@ -23,6 +25,18 @@ export default function CustomerDetailScreen() {
     setOverview(o);
     setLoading(false);
   }, [id]);
+
+  // Optimistically flip the star, persist through the outbox, revert on failure.
+  const toggleFavorite = useCallback(async () => {
+    if (!writes.ready || !customer) return;
+    const next = !customer.is_favorite;
+    setCustomer((c) => (c ? { ...c, is_favorite: next } : c));
+    try {
+      await writes.setFavorite(customer.id, next);
+    } catch {
+      setCustomer((c) => (c ? { ...c, is_favorite: !next } : c));
+    }
+  }, [writes, customer]);
 
   useEffect(() => {
     load();
@@ -51,9 +65,21 @@ export default function CustomerDetailScreen() {
         options={{
           title: customer.name,
           headerRight: () => (
-            <TouchableOpacity onPress={() => setEditing(true)} accessibilityLabel="Edit customer">
-              <Ionicons name="create-outline" size={22} color={colors.blue600} />
-            </TouchableOpacity>
+            <View style={styles.headerActions}>
+              <TouchableOpacity
+                onPress={toggleFavorite}
+                accessibilityLabel={customer.is_favorite ? "Remove from favourites" : "Add to favourites"}
+              >
+                <Ionicons
+                  name={customer.is_favorite ? "star" : "star-outline"}
+                  size={22}
+                  color={customer.is_favorite ? colors.orange700 : colors.slate400}
+                />
+              </TouchableOpacity>
+              <TouchableOpacity onPress={() => setEditing(true)} accessibilityLabel="Edit customer">
+                <Ionicons name="create-outline" size={22} color={colors.blue600} />
+              </TouchableOpacity>
+            </View>
           ),
         }}
       />
@@ -213,6 +239,7 @@ const styles = StyleSheet.create({
   content: { padding: 16, gap: 14, paddingBottom: 40 },
   center: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: colors.bg },
   header: {},
+  headerActions: { flexDirection: "row", alignItems: "center", gap: 18 },
   name: { fontSize: 20, fontWeight: "800", color: colors.slate900 },
   company: { fontSize: 14, color: colors.slate500, marginTop: 2 },
   quickRow: { flexDirection: "row", gap: 10 },

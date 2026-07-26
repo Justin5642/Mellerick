@@ -39,6 +39,19 @@ describe("CustomersRepository", () => {
     expect(ops[0]).toMatchObject({ table: "customers", op: "update", rowId: "c1", payload: { is_active: false } });
   });
 
+  it("setFavorite marks a customer as favourite without touching other columns", async () => {
+    const { outbox, ops } = captureOutbox();
+    await new CustomersRepository(outbox, seqIds(), fixedTime()).setFavorite("c1", true);
+    expect(ops[0]).toMatchObject({ table: "customers", op: "update", rowId: "c1", payload: { is_favorite: true } });
+    expect(Object.keys(ops[0].payload)).toEqual(["is_favorite"]);
+  });
+
+  it("setFavorite can clear the favourite flag", async () => {
+    const { outbox, ops } = captureOutbox();
+    await new CustomersRepository(outbox, seqIds(), fixedTime()).setFavorite("c1", false);
+    expect(ops[0].payload).toEqual({ is_favorite: false });
+  });
+
   it("createSite maps the address columns and links the customer", async () => {
     const { outbox, ops } = captureOutbox();
     const id = await new CustomersRepository(outbox, seqIds(), fixedTime()).createSite({
