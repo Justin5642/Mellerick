@@ -1,9 +1,12 @@
 import { useCallback, useEffect, useState } from "react";
 import { View, Text, FlatList, StyleSheet, RefreshControl, TouchableOpacity, Modal, TextInput, Alert, ScrollView, Switch } from "react-native";
 import { Stack } from "expo-router";
+import { Ionicons } from "@expo/vector-icons";
 import { colors } from "../lib/theme";
 import { MoneyText } from "../design/components/MoneyText";
-import { listStaff, saveStaff, type StaffMember } from "../lib/data/reads/staff";
+import { listStaff, saveStaff, listLeave, addLeave, removeLeave, type StaffMember, type LeaveEntry, type LeaveType } from "../lib/data/reads/staff";
+
+const LEAVE_TYPES: LeaveType[] = ["sick", "annual", "public_holiday", "other"];
 
 const ROLES = ["technician", "office", "admin"] as const;
 const roleColor: Record<string, { bg: string; text: string }> = {
@@ -50,10 +53,47 @@ export default function StaffScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [draft, setDraft] = useState<Draft | null>(null);
   const [saving, setSaving] = useState(false);
+  const [leave, setLeave] = useState<LeaveEntry[]>([]);
+  const [leaveDraft, setLeaveDraft] = useState<{ leaveType: LeaveType; startDate: string; endDate: string; hours: string; notes: string } | null>(null);
+  const [leaveSaving, setLeaveSaving] = useState(false);
 
   const load = useCallback(async () => setStaff(await listStaff()), []);
   useEffect(() => { load(); }, [load]);
   const onRefresh = useCallback(async () => { setRefreshing(true); await load(); setRefreshing(false); }, [load]);
+
+  // Load the leave log whenever the editor opens for a staff member.
+  const staffId = draft?.id;
+  useEffect(() => {
+    if (!staffId) { setLeave([]); setLeaveDraft(null); return; }
+    let cancelled = false;
+    listLeave(staffId).then((l) => !cancelled && setLeave(l)).catch(() => {});
+    return () => { cancelled = true; };
+  }, [staffId]);
+
+  async function saveLeave() {
+    if (!leaveDraft || !staffId || leaveSaving) return;
+    const hours = parseFloat(leaveDraft.hours);
+    if (!leaveDraft.startDate.trim() || !leaveDraft.endDate.trim() || Number.isNaN(hours)) {
+      Alert.alert("Missing details", "Start date, end date and hours are required.");
+      return;
+    }
+    setLeaveSaving(true);
+    try {
+      await addLeave({ staffId, leaveType: leaveDraft.leaveType, startDate: leaveDraft.startDate.trim(), endDate: leaveDraft.endDate.trim(), hours, notes: leaveDraft.notes.trim() || null });
+      setLeaveDraft(null);
+      setLeave(await listLeave(staffId));
+    } catch (e) {
+      Alert.alert("Couldn't add leave", e instanceof Error ? e.message : "Please try again.");
+    } finally {
+      setLeaveSaving(false);
+    }
+  }
+  function confirmRemoveLeave(l: LeaveEntry) {
+    Alert.alert("Remove leave", "This cannot be undone.", [
+      { text: "Cancel", style: "cancel" },
+      { text: "Remove", style: "destructive", onPress: async () => { await removeLeave(l.id); if (staffId) setLeave(await listLeave(staffId)); } },
+    ]);
+  }
 
   async function save() {
     if (!draft || saving) return;
@@ -148,6 +188,51 @@ export default function StaffScreen() {
                 <View style={{ flex: 1 }}><Field label="Target hrs/wk" value={draft?.target_hours_per_week ?? ""} onChange={set("target_hours_per_week")} num /></View>
               </View>
               <Field label="Charge-out rate ($/h, optional — blank = default)" value={draft?.charge_out_rate ?? ""} onChange={set("charge_out_rate")} num />
+
+              <View style={styles.leaveHead}>
+                <Text style={styles.section}>Leave log</Text>
+                {!leaveDraft && (
+                  <TouchableOpacity onPress={() => setLeaveDraft({ leaveType: "annual", startDate: "", endDate: "", hours: "", notes: "" })} style={styles.addBtn}>
+                    <Text style={styles.addText}>+ Add</Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+              {leaveDraft ? (
+                <View style={styles.leaveForm}>
+                  <View style={styles.leaveChips}>
+                    {LEAVE_TYPES.map((t) => (
+                      <TouchableOpacity key={t} style={[styles.leaveChip, leaveDraft.leaveType === t && styles.leaveChipActive]} onPress={() => setLeaveDraft((d) => d && { ...d, leaveType: t })}>
+                        <Text style={[styles.leaveChipText, leaveDraft.leaveType === t && styles.leaveChipTextActive]}>{t.replace("_", " ")}</Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                  <View style={styles.twoCol}>
+                    <View style={{ flex: 1 }}><Field label="Start (YYYY-MM-DD)" value={leaveDraft.startDate} onChange={(v) => setLeaveDraft((d) => d && { ...d, startDate: v })} /></View>
+                    <View style={{ flex: 1 }}><Field label="End (YYYY-MM-DD)" value={leaveDraft.endDate} onChange={(v) => setLeaveDraft((d) => d && { ...d, endDate: v })} /></View>
+                  </View>
+                  <View style={styles.twoCol}>
+                    <View style={{ flex: 1 }}><Field label="Hours" value={leaveDraft.hours} onChange={(v) => setLeaveDraft((d) => d && { ...d, hours: v })} num /></View>
+                    <View style={{ flex: 1 }}><Field label="Notes (optional)" value={leaveDraft.notes} onChange={(v) => setLeaveDraft((d) => d && { ...d, notes: v })} /></View>
+                  </View>
+                  <View style={styles.leaveActions}>
+                    <TouchableOpacity style={styles.leaveCancel} onPress={() => setLeaveDraft(null)} disabled={leaveSaving}><Text style={styles.cancelText}>Cancel</Text></TouchableOpacity>
+                    <TouchableOpacity style={styles.leaveSave} onPress={saveLeave} disabled={leaveSaving}><Text style={styles.saveText}>{leaveSaving ? "…" : "Add leave"}</Text></TouchableOpacity>
+                  </View>
+                </View>
+              ) : leave.length === 0 ? (
+                <Text style={styles.leaveEmpty}>No leave logged.</Text>
+              ) : (
+                leave.map((l) => (
+                  <TouchableOpacity key={l.id} style={styles.leaveRow} onLongPress={() => confirmRemoveLeave(l)}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.leaveRowTitle}>{l.leave_type.replace("_", " ")} · {l.hours}h</Text>
+                      <Text style={styles.leaveRowMeta}>{l.start_date} → {l.end_date}{l.notes ? ` · ${l.notes}` : ""}</Text>
+                    </View>
+                    <Ionicons name="trash-outline" size={15} color={colors.slate400} />
+                  </TouchableOpacity>
+                ))
+              )}
+              {leave.length > 0 && !leaveDraft && <Text style={styles.leaveHint}>Long-press a leave entry to remove it.</Text>}
             </ScrollView>
             <View style={styles.actions}>
               <TouchableOpacity style={styles.cancel} onPress={() => setDraft(null)} disabled={saving}><Text style={styles.cancelText}>Cancel</Text></TouchableOpacity>
@@ -204,4 +289,21 @@ const styles = StyleSheet.create({
   cancelText: { color: colors.slate700, fontWeight: "600", fontSize: 14 },
   saveBtn: { flex: 1, paddingVertical: 12, borderRadius: 10, backgroundColor: colors.blue600, alignItems: "center" },
   saveText: { color: "#fff", fontWeight: "700", fontSize: 14 },
+  leaveHead: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginTop: 8 },
+  addBtn: { paddingVertical: 4 },
+  addText: { fontSize: 13, color: colors.blue600, fontWeight: "700" },
+  leaveForm: { backgroundColor: colors.bg, borderRadius: 10, padding: 10, gap: 4, marginTop: 4 },
+  leaveChips: { flexDirection: "row", flexWrap: "wrap", gap: 6, marginBottom: 6 },
+  leaveChip: { paddingHorizontal: 10, paddingVertical: 6, borderRadius: 999, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.card },
+  leaveChipActive: { backgroundColor: colors.blue600, borderColor: colors.blue600 },
+  leaveChipText: { fontSize: 12, fontWeight: "600", color: colors.slate700, textTransform: "capitalize" },
+  leaveChipTextActive: { color: "#fff" },
+  leaveActions: { flexDirection: "row", gap: 10, marginTop: 6 },
+  leaveCancel: { flex: 1, paddingVertical: 10, borderRadius: 10, backgroundColor: colors.card, alignItems: "center", borderWidth: 1, borderColor: colors.border },
+  leaveSave: { flex: 1, paddingVertical: 10, borderRadius: 10, backgroundColor: colors.blue600, alignItems: "center" },
+  leaveEmpty: { fontSize: 13, color: colors.slate400, paddingVertical: 6 },
+  leaveRow: { flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 8, borderTopWidth: 1, borderTopColor: colors.slate100 },
+  leaveRowTitle: { fontSize: 14, fontWeight: "600", color: colors.slate900, textTransform: "capitalize" },
+  leaveRowMeta: { fontSize: 12, color: colors.slate500, marginTop: 1 },
+  leaveHint: { fontSize: 11, color: colors.slate400, marginTop: 6 },
 });

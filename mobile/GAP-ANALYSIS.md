@@ -22,7 +22,7 @@ send-back)**. So the app is broad and usable but **not at full parity**.
 | Backflow | partial | ~~register-device offline~~ (D46); test-log offline needs the submit dedupe (Q3) — follow-up |
 | Quotes | partial | ~~convert-to-job~~ **DONE** (D50); Send/PDF (ext) |
 | Fleet | partial | ~~assign equipment~~ (D54), ~~detail screen + expenses/service history~~ (D56); documents + usage log — follow-ups |
-| Staff | partial | ~~charge-out rate~~ (D53); leave log (med) — follow-up; invite/email (ext) |
+| Staff | near-full | ~~charge-out rate~~ (D53), ~~leave log~~ (D58); invite/resend/edit-email (ext) |
 | Settings | partial | ~~variation-types config~~ (D57); cost-centre templates + account codes (low) — follow-ups |
 | Reports | **full (analytics)** ✅ | all 5 tables done: revenue-by-month, top-customers, jobs-by-staff (D48), staff cost/efficiency (D51), equipment utilisation (D52) |
 | Jobs | partial | ~~reassign/reschedule~~ (D41), ~~status/priority edit~~ (D43), ~~**create job**~~ (D45); edit customer/site/title/type, price+approve variations still open |

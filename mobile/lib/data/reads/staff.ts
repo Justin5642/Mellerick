@@ -54,3 +54,48 @@ export async function saveStaff(input: {
   );
   if (costRes.error) throw new Error(`cost profile: ${costRes.error.message}`);
 }
+
+// ---- Staff leave log (admin-only; direct writes per D33) ----
+
+export type LeaveType = "sick" | "annual" | "public_holiday" | "other";
+export interface LeaveEntry {
+  id: string;
+  leave_type: LeaveType;
+  start_date: string;
+  end_date: string;
+  hours: number;
+  notes: string | null;
+}
+
+export async function listLeave(staffId: string): Promise<LeaveEntry[]> {
+  const { data } = await supabase
+    .from("staff_leave")
+    .select("id, leave_type, start_date, end_date, hours, notes")
+    .eq("staff_id", staffId)
+    .order("start_date", { ascending: false });
+  return (data as unknown as LeaveEntry[]) ?? [];
+}
+
+export async function addLeave(input: {
+  staffId: string;
+  leaveType: LeaveType;
+  startDate: string;
+  endDate: string;
+  hours: number;
+  notes: string | null;
+}): Promise<void> {
+  const { error } = await supabase.from("staff_leave").insert({
+    staff_id: input.staffId,
+    leave_type: input.leaveType,
+    start_date: input.startDate,
+    end_date: input.endDate,
+    hours: input.hours,
+    notes: input.notes,
+  });
+  if (error) throw new Error(error.message);
+}
+
+export async function removeLeave(id: string): Promise<void> {
+  const { error } = await supabase.from("staff_leave").delete().eq("id", id);
+  if (error) throw new Error(error.message);
+}
