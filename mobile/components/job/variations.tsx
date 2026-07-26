@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { View, Text, StyleSheet, TouchableOpacity, TextInput, FlatList, Alert, Image, ActivityIndicator } from "react-native";
 import * as ImagePicker from "expo-image-picker";
-import { decode } from "base64-arraybuffer";
 import { supabase } from "../../lib/supabase";
 import { colors } from "../../lib/theme";
 import { MoneyText } from "../../design/components/MoneyText";
@@ -65,7 +64,6 @@ export function JobVariationsTab({ jobId, currentUserId }: { jobId: string; curr
   const [quantity, setQuantity] = useState("");
   const [description, setDescription] = useState("");
   const [photoUri, setPhotoUri] = useState<string | null>(null);
-  const [photoBase64, setPhotoBase64] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   // Office/admin pricing drafts, keyed by variation id.
   const [pricing, setPricing] = useState<Record<string, { rate: string; quantity: string; notes: string }>>({});
@@ -108,10 +106,9 @@ export function JobVariationsTab({ jobId, currentUserId }: { jobId: string; curr
         Alert.alert("Permission needed", "Camera access is required");
         return;
       }
-      const result = await ImagePicker.launchCameraAsync({ quality: 0.7, base64: true });
+      const result = await ImagePicker.launchCameraAsync({ quality: 0.7 });
       if (result.canceled || !result.assets?.length) return;
       setPhotoUri(result.assets[0].uri);
-      setPhotoBase64(result.assets[0].base64 ?? null);
       return;
     }
     // Library pick -- lets a tech attach an existing photo (e.g. a screenshot
@@ -121,10 +118,9 @@ export function JobVariationsTab({ jobId, currentUserId }: { jobId: string; curr
       Alert.alert("Permission needed", "Photo library access is required");
       return;
     }
-    const result = await ImagePicker.launchImageLibraryAsync({ quality: 0.7, base64: true });
+    const result = await ImagePicker.launchImageLibraryAsync({ quality: 0.7 });
     if (result.canceled || !result.assets?.length) return;
     setPhotoUri(result.assets[0].uri);
-    setPhotoBase64(result.assets[0].base64 ?? null);
   }
 
   async function submit() {
@@ -133,54 +129,47 @@ export function JobVariationsTab({ jobId, currentUserId }: { jobId: string; curr
       Alert.alert("Missing info", "Pick a variation type or name a custom one.");
       return;
     }
+    if (!varWrites.ready) { Alert.alert("Not ready", "Please try again in a moment."); return; }
     setSaving(true);
-
-    let photoPath: string | null = null;
-    if (photoBase64) {
-      photoPath = `${jobId}/variations/${Date.now()}.jpg`;
-      const { error: uploadErr } = await supabase.storage.from("job-photos").upload(photoPath, decode(photoBase64), {
-        contentType: "image/jpeg",
-      });
-      if (uploadErr) {
-        Alert.alert("Photo upload failed", uploadErr.message);
-        setSaving(false);
-        return;
-      }
-    }
 
     const autoApprove = !!selectedType?.auto_approve;
     const unit = selectedType?.unit ?? "unit";
 
-    // Pricing is applied server-side by the apply_variation_pricing() trigger
-    // (migration 0028) -- we intentionally never send rate / total_amount /
-    // status so a tech can neither see nor set a figure. The trigger fills the
-    // preset rate for auto-approve types and leaves custom ones for the office.
-    const { error } = await supabase.from("job_variations").insert({
-      job_id: jobId,
-      variation_type_id: typeId,
-      custom_name: typeId ? null : customName.trim(),
-      description: description.trim() || null,
-      quantity: qty,
-      unit,
-      photo_storage_path: photoPath,
-      logged_by: currentUserId,
-      logged_at: new Date().toISOString(),
-    });
-
-    setSaving(false);
-    if (error) {
-      Alert.alert("Error", error.message);
-      return;
+    // Offline-durable via the outbox: the photo (if any) rides the attachment
+    // queue and the row replays idempotently on reconnect. Pricing/status are
+    // still applied server-side by apply_variation_pricing() (migration 0028) —
+    // the tech never sends rate / total_amount / status.
+    try {
+      const { synced } = await varWrites.submitVariation({
+        jobId,
+        variationTypeId: typeId,
+        customName: typeId ? null : customName.trim(),
+        description: description.trim() || null,
+        quantity: qty,
+        unit,
+        loggedBy: currentUserId,
+        photo: photoUri ? { sourceUri: photoUri, ext: "jpg" } : null,
+      });
+      setShowForm(false);
+      setTypeId(null);
+      setCustomName("");
+      setQuantity("");
+      setDescription("");
+      setPhotoUri(null);
+      Alert.alert(
+        autoApprove ? "Auto-approved" : "Sent for approval",
+        synced
+          ? autoApprove
+            ? "Variation logged and approved."
+            : "Office will price and approve this."
+          : "Saved offline — it'll sync automatically when you're back online."
+      );
+      load();
+    } catch (e) {
+      Alert.alert("Error", e instanceof Error ? e.message : "Please try again.");
+    } finally {
+      setSaving(false);
     }
-    setShowForm(false);
-    setTypeId(null);
-    setCustomName("");
-    setQuantity("");
-    setDescription("");
-    setPhotoUri(null);
-    setPhotoBase64(null);
-    Alert.alert(autoApprove ? "Auto-approved" : "Sent for approval", autoApprove ? "Variation logged and approved." : "Office will price and approve this.");
-    load();
   }
 
   // ---- Office/admin: price + approve, or reject a pending variation ----------

@@ -20,7 +20,7 @@ in-repo is a short tail of **minor/complex depth** (below); the true blockers to
 | Dashboard | **full-parity** | — (one cosmetic empty-state link) |
 | Pricing | **full** ✅ | ~~reactivate~~ (D49), ~~category-taxonomy picker~~ done |
 | Inventory | **near-full** | ~~low-stock surfacing~~ (D49), ~~margin display~~ done |
-| My Jobs | partial | tech: change status/notes + submit variation offline (med) |
+| My Jobs | **full** ✅ | ~~submit variation offline~~ (D68); notes already outbox-backed; tech status is clock-in/sign-off-driven by design (D43) |
 | Customers | **full** ✅ | ~~Customer-360~~ (D47), ~~quick-create~~ (D60), ~~favourites~~ (D62); inactive lifecycle handled via deactivate |
 | Backflow | partial | ~~register-device offline~~ (D46); test-log offline needs the submit dedupe (Q3) — follow-up |
 | Quotes | partial | ~~convert-to-job~~ **DONE** (D50); Send/PDF (ext) |
