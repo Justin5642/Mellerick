@@ -18,7 +18,7 @@ send-back)**. So the app is broad and usable but **not at full parity**.
 | Pricing | partial | ~~reactivate deactivated items~~ **DONE** (D49); category-taxonomy picker — minor |
 | Inventory | **near-full** | ~~low-stock surfacing~~ (D49), ~~margin display~~ done |
 | My Jobs | partial | tech: change status/notes + submit variation offline (med) |
-| Customers | partial | ~~Customer-360 detail + $ rollups~~ **DONE** (D47); favourites, inactive lifecycle, quick-create — follow-ups |
+| Customers | near-full | ~~Customer-360~~ (D47), ~~quick-create~~ (D60); favourites, inactive lifecycle — minor |
 | Backflow | partial | ~~register-device offline~~ (D46); test-log offline needs the submit dedupe (Q3) — follow-up |
 | Quotes | partial | ~~convert-to-job~~ **DONE** (D50); Send/PDF (ext) |
 | Fleet | partial | ~~assign equipment~~ (D54), ~~detail screen + expenses/service history~~ (D56); documents + usage log — follow-ups |

@@ -1,6 +1,6 @@
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { View, Text, ScrollView, StyleSheet, TextInput, TouchableOpacity, Alert, Platform, Modal } from "react-native";
-import { Stack, useRouter } from "expo-router";
+import { Stack, useRouter, useLocalSearchParams } from "expo-router";
 import DateTimePicker, { type DateTimePickerEvent } from "@react-native-community/datetimepicker";
 import { Ionicons } from "@expo/vector-icons";
 import { colors } from "../../lib/theme";
@@ -15,6 +15,7 @@ const PRIORITIES = ["low", "normal", "high", "urgent"] as const;
 
 export default function NewJobScreen() {
   const router = useRouter();
+  const { customerId } = useLocalSearchParams<{ customerId?: string }>();
   const { createJob, ready } = useJobEdit();
   const [title, setTitle] = useState("");
   const [customer, setCustomer] = useState<CustomerListRow | null>(null);
@@ -39,6 +40,18 @@ export default function NewJobScreen() {
     const detail = await getCustomer(c.id);
     setSites(detail?.sites ?? []);
   }
+
+  // Pre-select the customer when launched from a customer's "New Job" shortcut.
+  useEffect(() => {
+    if (!customerId) return;
+    let cancelled = false;
+    getCustomer(customerId).then((detail) => {
+      if (cancelled || !detail) return;
+      setCustomer({ id: detail.id, name: detail.name } as CustomerListRow);
+      setSites(detail.sites ?? []);
+    }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [customerId]);
 
   function openAssignee() {
     if (staff.length === 0) listAssignableStaff().then(setStaff).catch(() => {});

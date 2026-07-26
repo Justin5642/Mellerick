@@ -63,6 +63,12 @@ export default function CustomerDetailScreen() {
         {!!customer.company && <Text style={styles.company}>{customer.company}</Text>}
       </View>
 
+      <View style={styles.quickRow}>
+        <QuickCreate icon="briefcase-outline" label="Job" onPress={() => router.push(`/jobs/new?customerId=${customer.id}`)} />
+        <QuickCreate icon="document-text-outline" label="Quote" onPress={() => router.push(`/quotes/new?customerId=${customer.id}`)} />
+        <QuickCreate icon="receipt-outline" label="Invoice" onPress={() => router.push(`/invoices/new?customerId=${customer.id}`)} />
+      </View>
+
       <Card title="Contact">
         {customer.email ? <Contact icon="mail-outline" value={customer.email} onPress={() => Linking.openURL(`mailto:${customer.email}`)} /> : null}
         {customer.phone ? <Contact icon="call-outline" value={customer.phone} onPress={() => Linking.openURL(`tel:${customer.phone}`)} /> : null}
@@ -173,6 +179,14 @@ function Row({ label, value }: { label: string; value: string }) {
     </View>
   );
 }
+function QuickCreate({ icon, label, onPress }: { icon: keyof typeof Ionicons.glyphMap; label: string; onPress: () => void }) {
+  return (
+    <TouchableOpacity style={styles.quickBtn} onPress={onPress}>
+      <Ionicons name={icon} size={18} color={colors.blue600} />
+      <Text style={styles.quickText}>{label}</Text>
+    </TouchableOpacity>
+  );
+}
 function RelatedSection({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <View style={styles.card}>
@@ -201,6 +215,9 @@ const styles = StyleSheet.create({
   header: {},
   name: { fontSize: 20, fontWeight: "800", color: colors.slate900 },
   company: { fontSize: 14, color: colors.slate500, marginTop: 2 },
+  quickRow: { flexDirection: "row", gap: 10 },
+  quickBtn: { flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, backgroundColor: colors.blue100, borderRadius: 10, paddingVertical: 11 },
+  quickText: { fontSize: 13, fontWeight: "700", color: colors.blue600 },
   card: { backgroundColor: colors.card, borderWidth: 1, borderColor: colors.border, borderRadius: 12, padding: 14, gap: 8 },
   cardTitle: { fontSize: 12, fontWeight: "700", color: colors.slate500, textTransform: "uppercase", marginBottom: 2 },
   finRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },

@@ -1,17 +1,19 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { View, Text, ScrollView, StyleSheet, TextInput, TouchableOpacity, Alert, Platform } from "react-native";
-import { Stack, useRouter } from "expo-router";
+import { Stack, useRouter, useLocalSearchParams } from "expo-router";
 import DateTimePicker, { type DateTimePickerEvent } from "@react-native-community/datetimepicker";
 import { Ionicons } from "@expo/vector-icons";
 import { colors } from "../../lib/theme";
 import { useFinance } from "../../lib/data/hooks/useFinance";
 import { CustomerPicker } from "../../components/finance/customer-picker";
+import { getCustomer } from "../../lib/data/reads/customers";
 import { localDateKey } from "../../lib/date";
 import { LineItemsEditor, newItem, type EditableItem } from "../../components/finance/line-items-editor";
 import type { CustomerListRow } from "../../lib/data/reads/customers";
 
 export default function NewQuoteScreen() {
   const router = useRouter();
+  const { customerId } = useLocalSearchParams<{ customerId?: string }>();
   const finance = useFinance();
   const [customer, setCustomer] = useState<CustomerListRow | null>(null);
   const [pickCustomer, setPickCustomer] = useState(false);
@@ -21,6 +23,14 @@ export default function NewQuoteScreen() {
   const [items, setItems] = useState<EditableItem[]>([newItem()]);
   const [notes, setNotes] = useState("");
   const [saving, setSaving] = useState(false);
+
+  // Pre-select the customer when launched from a customer's "New Quote" shortcut.
+  useEffect(() => {
+    if (!customerId) return;
+    let cancelled = false;
+    getCustomer(customerId).then((c) => !cancelled && c && setCustomer({ id: c.id, name: c.name } as CustomerListRow)).catch(() => {});
+    return () => { cancelled = true; };
+  }, [customerId]);
 
   function onDateChange(event: DateTimePickerEvent, selected?: Date) {
     setShowDate(Platform.OS === "ios");

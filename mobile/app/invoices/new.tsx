@@ -9,6 +9,7 @@ import { CustomerPicker } from "../../components/finance/customer-picker";
 import { localDateKey } from "../../lib/date";
 import { LineItemsEditor, newItem, type EditableItem } from "../../components/finance/line-items-editor";
 import { getInvoiceJobPrefill } from "../../lib/data/reads/finance";
+import { getCustomer } from "../../lib/data/reads/customers";
 import type { CustomerListRow } from "../../lib/data/reads/customers";
 
 interface UnbilledVariation { id: string; name: string; description: string; unitPrice: number }
@@ -16,7 +17,7 @@ interface UnbilledVariation { id: string; name: string; description: string; uni
 export default function NewInvoiceScreen() {
   const router = useRouter();
   const finance = useFinance();
-  const { jobId } = useLocalSearchParams<{ jobId?: string }>();
+  const { jobId, customerId } = useLocalSearchParams<{ jobId?: string; customerId?: string }>();
   const [customer, setCustomer] = useState<CustomerListRow | null>(null);
   const [pickCustomer, setPickCustomer] = useState(false);
   const [title, setTitle] = useState("");
@@ -48,6 +49,15 @@ export default function NewInvoiceScreen() {
     })();
     return () => { cancelled = true; };
   }, [jobId]);
+
+  // Pre-select the customer when launched from a customer's "New Invoice"
+  // shortcut (only when not already prefilling from a job).
+  useEffect(() => {
+    if (!customerId || jobId) return;
+    let cancelled = false;
+    getCustomer(customerId).then((c) => !cancelled && c && setCustomer({ id: c.id, name: c.name } as CustomerListRow)).catch(() => {});
+    return () => { cancelled = true; };
+  }, [customerId, jobId]);
 
   function onDateChange(event: DateTimePickerEvent, selected?: Date) {
     setShowDate(Platform.OS === "ios");
