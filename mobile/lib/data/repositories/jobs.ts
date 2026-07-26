@@ -24,6 +24,16 @@ export interface CreateJobInput {
   description?: string | null;
 }
 
+export interface ConvertQuoteInput {
+  quoteId: string;
+  title: string;
+  notes?: string | null; // → the new job's description (matches web)
+  customerId: string;
+  siteId?: string | null;
+  items: { name: string; description: string | null; quantity: number; unitPrice: number }[];
+  createdBy?: string | null;
+}
+
 // Offline-first edits to a job's own fields (status / priority / type /
 // description / internal notes). Preserve-on-update: ONLY the fields explicitly
 // provided are written, so a status change never wipes the description and
@@ -84,6 +94,56 @@ export class JobsRepository {
       await this.outbox.enqueue(cal);
     }
     return rowId;
+  }
+
+  // Convert an accepted quote into a job (office/admin), mirroring the web
+  // quote-detail convertToJob: create a pending service job from the quote,
+  // copy the quote's line items to job_items, and link the quote back
+  // (quotes.job_id). Compound + durable: the items and the quote link are gated
+  // on the job insert (dependsOn) so they never land before the job exists.
+  async createJobFromQuote(input: ConvertQuoteInput): Promise<string> {
+    const jobId = this.ids.newId();
+    const jobOpId = await this.enqueueWrite("job", "insert", "jobs", jobId, {
+      title: input.title,
+      description: input.notes ?? null,
+      customer_id: input.customerId,
+      site_id: input.siteId ?? null,
+      job_type: "service",
+      status: "pending",
+      created_by: input.createdBy ?? null,
+    });
+    for (const it of input.items) {
+      await this.enqueueWrite("job_item", "insert", "job_items", this.ids.newId(), {
+        job_id: jobId,
+        name: it.name,
+        description: it.description ?? null,
+        quantity: it.quantity,
+        unit_price: it.unitPrice,
+        // total is a DB GENERATED column — never sent.
+      }, jobOpId);
+    }
+    await this.enqueueWrite("quote", "update", "quotes", input.quoteId, { job_id: jobId }, jobOpId);
+    return jobId;
+  }
+
+  private async enqueueWrite(aggregate: WriteOperation["aggregate"], op: WriteOperation["op"], table: string, rowId: string, payload: Record<string, unknown>, dependsOn?: string): Promise<string> {
+    const id = this.ids.newId();
+    const write: WriteOperation = {
+      kind: "write",
+      id,
+      rowId,
+      aggregate,
+      op,
+      table,
+      payload,
+      dependsOn: dependsOn ?? null,
+      status: "pending",
+      attempts: 0,
+      nextAttemptAt: 0,
+      createdAt: this.time.nowMs(),
+    };
+    await this.outbox.enqueue(write);
+    return id;
   }
 
   /** Update only the provided fields. No-op if nothing was provided. */

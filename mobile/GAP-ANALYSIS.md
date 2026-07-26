@@ -20,7 +20,7 @@ send-back)**. So the app is broad and usable but **not at full parity**.
 | My Jobs | partial | tech: change status/notes + submit variation offline (med) |
 | Customers | partial | ~~Customer-360 detail + $ rollups~~ **DONE** (D47); favourites, inactive lifecycle, quick-create — follow-ups |
 | Backflow | partial | ~~register-device offline~~ (D46); test-log offline needs the submit dedupe (Q3) — follow-up |
-| Quotes | partial | convert-to-job (med); Send/PDF (ext) |
+| Quotes | partial | ~~convert-to-job~~ **DONE** (D50); Send/PDF (ext) |
 | Fleet | partial | assign equipment, equipment expenses/docs/usage (med ×4) |
 | Staff | partial | leave log, charge-out rate (med); invite/email (ext) |
 | Settings | partial | variation-types / cost-centre-template / account-code config (med/low) |

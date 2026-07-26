@@ -106,3 +106,43 @@ describe("JobsRepository.createJob", () => {
     expect(cal.payload).toEqual({ jobId: "id-1" });
   });
 });
+
+describe("JobsRepository.createJobFromQuote", () => {
+  it("creates a pending service job, copies quote items (gated on the job), and links the quote", async () => {
+    const { outbox, ops } = captureOutbox();
+    const jobId = await makeRepo(outbox).createJobFromQuote({
+      quoteId: "q1",
+      title: "New install",
+      notes: "as quoted",
+      customerId: "c1",
+      siteId: "s1",
+      createdBy: "u1",
+      items: [{ name: "Labour", description: null, quantity: 2, unitPrice: 90 }],
+    });
+    expect(jobId).toBe("id-1");
+
+    const jobW = writes(ops).find((w) => w.table === "jobs" && w.op === "insert")!;
+    expect(jobW.rowId).toBe("id-1");
+    expect(jobW.dependsOn).toBeNull();
+    expect(jobW.payload).toEqual({ title: "New install", description: "as quoted", customer_id: "c1", site_id: "s1", job_type: "service", status: "pending", created_by: "u1" });
+    expect(jobW.payload).not.toHaveProperty("job_number"); // DB serial
+
+    const item = writes(ops).find((w) => w.table === "job_items")!;
+    expect(item.dependsOn).toBe(jobW.id); // never before the job exists
+    expect(item.payload).toMatchObject({ job_id: "id-1", name: "Labour", quantity: 2, unit_price: 90 });
+    expect(item.payload).not.toHaveProperty("total"); // DB GENERATED
+
+    const link = writes(ops).find((w) => w.table === "quotes")!;
+    expect(link).toMatchObject({ op: "update", rowId: "q1" });
+    expect(link.dependsOn).toBe(jobW.id);
+    expect(link.payload).toEqual({ job_id: "id-1" });
+  });
+
+  it("converts a quote with no items (job + link only)", async () => {
+    const { outbox, ops } = captureOutbox();
+    await makeRepo(outbox).createJobFromQuote({ quoteId: "q2", title: "T", customerId: "c1", items: [] });
+    expect(writes(ops).some((w) => w.table === "job_items")).toBe(false);
+    expect(writes(ops).find((w) => w.table === "jobs")).toBeDefined();
+    expect(writes(ops).find((w) => w.table === "quotes")!.payload).toEqual({ job_id: "id-1" });
+  });
+});

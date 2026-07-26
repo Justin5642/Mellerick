@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { View, Text, ScrollView, StyleSheet, ActivityIndicator, TouchableOpacity } from "react-native";
+import { View, Text, ScrollView, StyleSheet, ActivityIndicator, TouchableOpacity, Alert } from "react-native";
 import { Stack, useLocalSearchParams, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { colors } from "../../lib/theme";
@@ -8,6 +8,8 @@ import { MoneyText } from "../../design/components/MoneyText";
 import { StatusPill } from "../../design/components/StatusPill";
 import { getQuote, type QuoteDetail } from "../../lib/data/reads/finance";
 import { useFinance } from "../../lib/data/hooks/useFinance";
+import { useJobEdit } from "../../lib/data/hooks/useJobEdit";
+import { useAuth } from "../../lib/auth-context";
 
 function fmtDate(iso: string | null): string {
   return iso ? new Date(iso).toLocaleDateString("en-AU", { day: "numeric", month: "short", year: "numeric" }) : "—";
@@ -17,6 +19,8 @@ export default function QuoteDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
   const finance = useFinance();
+  const jobEdit = useJobEdit();
+  const { profile } = useAuth();
   const [quote, setQuote] = useState<QuoteDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [updating, setUpdating] = useState(false);
@@ -36,6 +40,30 @@ export default function QuoteDetailScreen() {
       setUpdating(false);
     }
   }, [id, finance, updating]);
+
+  const convert = useCallback(async () => {
+    if (!quote || updating || !jobEdit.ready) return;
+    if (quote.job_id) { router.push(`/job/${quote.job_id}`); return; }
+    setUpdating(true);
+    try {
+      const { id: newJobId, synced } = await jobEdit.convertQuoteToJob({
+        quoteId: quote.id,
+        title: quote.title,
+        notes: quote.notes,
+        customerId: quote.customer_id,
+        siteId: quote.site_id,
+        createdBy: profile?.id ?? null,
+        items: quote.quote_items.map((i) => ({ name: i.name, description: i.description ?? null, quantity: Number(i.quantity), unitPrice: Number(i.unit_price) })),
+      });
+      setQuote((q) => (q ? { ...q, job_id: newJobId } : q)); // optimistic
+      if (synced) router.push(`/job/${newJobId}`);
+      else Alert.alert("Saved offline", "The job is queued and will sync when you're back online.");
+    } catch (e) {
+      Alert.alert("Couldn't convert", e instanceof Error ? e.message : "Please try again.");
+    } finally {
+      setUpdating(false);
+    }
+  }, [quote, updating, jobEdit, profile, router]);
 
   useEffect(() => {
     load();
@@ -91,6 +119,21 @@ export default function QuoteDetailScreen() {
             <Text style={styles.acceptText}>Accept</Text>
           </TouchableOpacity>
         </View>
+      )}
+
+      {quote.status === "accepted" && (
+        quote.job_id ? (
+          <TouchableOpacity style={styles.convertedRow} onPress={() => router.push(`/job/${quote.job_id}`)}>
+            <Ionicons name="checkmark-circle" size={16} color={colors.green600} />
+            <Text style={styles.convertedText}>Converted to a job — open</Text>
+            <Ionicons name="chevron-forward" size={16} color={colors.green600} />
+          </TouchableOpacity>
+        ) : (
+          <TouchableOpacity style={styles.convertBtn} onPress={convert} disabled={updating}>
+            <Ionicons name="briefcase-outline" size={16} color="#fff" />
+            <Text style={styles.convertText}>{updating ? "Creating job…" : "Convert to Job"}</Text>
+          </TouchableOpacity>
+        )
       )}
 
       {c && (
@@ -178,6 +221,10 @@ const styles = StyleSheet.create({
   declineText: { color: colors.red600, fontWeight: "700", fontSize: 14 },
   accept: { backgroundColor: colors.green600 },
   acceptText: { color: "#fff", fontWeight: "700", fontSize: 14 },
+  convertBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, backgroundColor: colors.blue600, borderRadius: 10, paddingVertical: 13 },
+  convertText: { color: "#fff", fontWeight: "700", fontSize: 14 },
+  convertedRow: { flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: colors.green100, borderRadius: 10, paddingVertical: 12, paddingHorizontal: 14 },
+  convertedText: { flex: 1, color: colors.green600, fontWeight: "700", fontSize: 13 },
   number: { fontSize: 13, fontWeight: "700", color: colors.blue600 },
   title: { fontSize: 18, fontWeight: "800", color: colors.slate900, marginTop: 2 },
   card: { backgroundColor: colors.card, borderWidth: 1, borderColor: colors.border, borderRadius: 12, padding: 14, gap: 6 },

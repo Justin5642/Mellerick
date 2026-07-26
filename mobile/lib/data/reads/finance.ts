@@ -77,6 +77,9 @@ export interface QuoteDetail {
   valid_until: string | null;
   created_at: string;
   notes: string | null;
+  customer_id: string;
+  site_id: string | null;
+  job_id: string | null; // set once the quote has been converted to a job
   customers: { name: string; email: string | null; phone: string | null } | null;
   quote_items: QuoteItem[];
 }

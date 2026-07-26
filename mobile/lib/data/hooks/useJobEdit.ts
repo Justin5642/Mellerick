@@ -1,7 +1,7 @@
 import { useCallback } from "react";
 import { useDataLayer } from "../DataProvider";
 import { useFlush } from "./useFlush";
-import type { JobFieldsInput, CreateJobInput } from "../repositories/jobs";
+import type { JobFieldsInput, CreateJobInput, ConvertQuoteInput } from "../repositories/jobs";
 
 export function useJobEdit() {
   const layer = useDataLayer();
@@ -21,6 +21,14 @@ export function useJobEdit() {
       async (input: CreateJobInput): Promise<{ id: string; synced: boolean }> => {
         if (!layer) throw new Error("Data layer not ready");
         const id = await layer.jobs.createJob(input);
+        return { id, synced: await flush() };
+      },
+      [layer, flush]
+    ),
+    convertQuoteToJob: useCallback(
+      async (input: ConvertQuoteInput): Promise<{ id: string; synced: boolean }> => {
+        if (!layer) throw new Error("Data layer not ready");
+        const id = await layer.jobs.createJobFromQuote(input);
         return { id, synced: await flush() };
       },
       [layer, flush]
