@@ -95,6 +95,7 @@ function RootNavigation() {
         <Stack.Screen name="inventory" options={{ headerShown: true }} />
         <Stack.Screen name="fleet" options={{ headerShown: true }} />
         <Stack.Screen name="reports" options={{ headerShown: true }} />
+        <Stack.Screen name="job/[id]/billing" options={{ headerShown: true }} />
       </Stack.Protected>
 
       <Stack.Protected guard={!!session && isAdmin}>

@@ -1,9 +1,11 @@
 import { useCallback, useState } from "react";
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { useFocusEffect, useLocalSearchParams } from "expo-router";
+import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
+import { Ionicons } from "@expo/vector-icons";
 import { supabase } from "../../lib/supabase";
 import { colors, statusColors } from "../../lib/theme";
+import { useIsOfficeOrAdmin } from "../../design/guards/useRole";
 import { JobOverviewTab } from "../../components/job/overview";
 import { JobNotesTab } from "../../components/job/notes";
 import { JobPhotosTab } from "../../components/job/photos";
@@ -26,6 +28,8 @@ type TabKey = (typeof TABS)[number]["key"];
 
 export default function JobDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
+  const router = useRouter();
+  const isOfficeOrAdmin = useIsOfficeOrAdmin();
   const [job, setJob] = useState<any>(null);
   const [userId, setUserId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -70,6 +74,12 @@ export default function JobDetailScreen() {
         <Text style={styles.title} numberOfLines={1}>
           #{job.job_number} — {job.title}
         </Text>
+        {isOfficeOrAdmin && (
+          <TouchableOpacity style={styles.billingBtn} onPress={() => router.push(`/job/${id}/billing`)} accessibilityLabel="Job billing">
+            <Ionicons name="cash-outline" size={14} color={colors.blue600} />
+            <Text style={styles.billingText}>Billing</Text>
+          </TouchableOpacity>
+        )}
         <View style={[styles.badge, { backgroundColor: sc.bg }]}>
           <Text style={[styles.badgeText, { color: sc.text }]}>{job.status.replace("_", " ")}</Text>
         </View>
@@ -129,6 +139,8 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   title: { fontSize: 17, fontWeight: "700", color: colors.slate900, flex: 1 },
+  billingBtn: { flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 999, borderWidth: 1, borderColor: colors.blue100, backgroundColor: colors.blue100 },
+  billingText: { fontSize: 12, fontWeight: "700", color: colors.blue600 },
   badge: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 999 },
   badgeText: { fontSize: 11, fontWeight: "600", textTransform: "capitalize" },
   subtitle: { fontSize: 13, color: colors.slate500, paddingHorizontal: 16, marginTop: 2 },
