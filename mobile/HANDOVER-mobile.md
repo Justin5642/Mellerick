@@ -3,15 +3,17 @@
 Expo SDK 54 / React Native 0.81 app on branch `mobile/full-parity`. Offline-first
 field app + a full office/admin surface mirroring the web app.
 
-> Companion docs: **`DECISIONS-FOR-AVI.md`** — every decision (D1–D39) and open
+> Companion docs: **`DECISIONS-FOR-AVI.md`** — every decision (D1–D68) and open
 > question (Q1–Q19) flagged during the build; **`GAP-ANALYSIS.md`** — a per-area
-> gap/drift map vs the web app with a prioritized remaining-work list.
+> gap/drift map vs the web app. **In-repo feature work is complete** — every area is
+> at full parity or has only external-gate / native-dep / one-flagged-decision work.
 
 ## Verified state
-- **110 unit/component tests green** (`npm test`), **`tsc --noEmit` clean**,
+- **195 unit/component tests green** (`npm test`), **`tsc --noEmit` clean**,
   **`expo export --platform ios` bundles clean**.
-- Hardened by **8 adversarial multi-agent reviews** (~48 real defects found and
-  fixed, incl. several data-loss and money-safety bugs).
+- Hardened by **10+ adversarial multi-agent reviews** (~55 real defects found and
+  fixed, incl. several data-loss and money-safety bugs); the money math is verified
+  **byte-for-byte** against the web (D55, re-verified D66).
 - **Not yet run on a device** — there is no simulator in the build environment, so
   every screen's interactive behaviour is unverified on hardware (see Gates).
 
@@ -19,20 +21,28 @@ field app + a full office/admin surface mirroring the web app.
 - **Offline write engine** — durable SQLite outbox, idempotent replay, exponential
   backoff, dead-letter + dependency-cascade, and a global sync-status badge with
   tap-to-retry.
-- **Tech field app (offline)** — Time (clock-in/out + manual/edit), Photos
-  (attachment queue), Notes, Signature + Voice-report (job completion).
+- **Tech field app (offline) — the full core is outbox-backed:** Time (clock-in/out
+  + manual/edit), Photos (attachment queue), Notes, Signature + Voice-report (job
+  completion), **Variations** (offline submit with photo attachment, D68), Backflow
+  device register (offline, D46).
 - **Role-aware navigation** — expo-router `Stack.Protected`; technicians get the
   field tabs, office/admin get a 5-tab shell (Dashboard · Jobs · Schedule ·
   Approvals · More) + a More hub. Forbidden routes are never registered.
-- **Office/admin — all 13 areas:** Dashboard, Jobs (search + pagination), Schedule,
-  Approvals, Customers (+sites CRUD), Quotes (list/detail + **create/edit builder**
-  + accept/decline), Invoices (list/detail + Ready-to-Invoice queue + **create/edit
-  builder**), Pricing (CRUD), Inventory (CRUD), Fleet/Equipment (CRUD, admin-only
-  writes), Staff (admin), Reports (KPI first-pass), Settings (integration status).
+- **Office/admin — all areas at full parity:** Dashboard, Jobs (search + pagination
+  + **create/edit title/type/status/priority** + **schedule-dispatch** reassign/
+  reschedule + **equipment-usage** + **variation price+approve**), Schedule,
+  Approvals (approve→auto-draft-invoice + send-back), Customers (+sites CRUD + **360**
+  + quick-create + **favourites**), Quotes (builder + accept/decline + **convert-to-
+  job**), Invoices (builder + Ready-to-Invoice queue + **create-from-job reconcile**),
+  Pricing (CRUD + reactivate), Inventory (CRUD + low-stock + margin), Fleet/Equipment
+  (CRUD + assign + expenses + usage + **documents view**), Staff (roles/pay/charge-out
+  /leave), **Reports (all 5 analytics tables + KPIs)**, Settings (variation types +
+  cost-centre templates + integration status).
 - **Job Billing** (office) — line items (add/remove) + **expense capture** (add/remove
-  with image-receipt upload + view) + POs (read) + totals; **admin job costing /
-  profitability** (fully-loaded labour + materials + equipment vs invoiced/projected
-  margin, money math ported verbatim + TDD-locked).
+  with image-receipt upload + view) + **equipment-usage** (log + priced total, D63/D66)
+  + POs (read) + totals; **admin job costing / profitability** (fully-loaded labour +
+  materials + equipment vs invoiced/projected margin, money math ported verbatim +
+  TDD-locked).
 - **Read-repository layer** (`lib/data/reads/`) — every screen reads through it, so
   an offline cache / PowerSync drops in with no per-screen refactor.
 - **Money safety** — every dollar renders through role-gated `MoneyText`; financial
@@ -61,11 +71,21 @@ field app + a full office/admin surface mirroring the web app.
 6. **Push credentials (APNs/FCM)** — for notifications (not yet built).
 7. **Atomic invoice/quote RPC (Jason)** — hardens the outbox+draft mitigation (D30).
 
-## Not yet built (in-repo follow-ups)
-- Offline **reads** cache / PowerSync connection · **push notifications** ·
-  **background auto-clock** (needs the `development` EAS dev client) · **Reports**
-  Skia charts · PO/cost-centre editing (Q18) · admin My-Jobs access (Q13) ·
-  MP1 dollar-leak RLS tightening.
+## Not yet built — and why (nothing here is a plain in-repo feature gap)
+- **Offline reads cache / PowerSync connection** — writes are already durable; true
+  offline *reads* need the PowerSync Cloud instance + DB password (MP3 blocker).
+- **Push notifications** + **background auto-clock** — need Expo push credentials +
+  the `development` EAS dev client (MP9, hardware/accounts).
+- **Backflow test-log offline (Q3)** — the water-authority submit must be
+  dedupe-guarded server-side before the test-submit can be safely replayed; left
+  online-direct. The one open in-repo item, blocked on a flagged decision.
+- **Document upload** (job + equipment) — view/open is done (D67); upload needs a
+  native file/PDF picker that can't be device-QA'd here, so deferred to web.
+- **PO / cost-centre editing** + **customer/site reassignment on a job** — display/
+  read done; the write cascade stays a web action.
+- **MP1 dollar-leak RLS tightening** — migration `0035` + role-impersonation test are
+  drafted (D39) but **must be applied + tested by Jason on the live DB** (untestable
+  from this repo). This is the real security boundary behind the `MoneyText` UI gate.
 
 ## How to run / build
 ```bash
