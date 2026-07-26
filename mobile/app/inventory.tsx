@@ -149,6 +149,9 @@ export default function InventoryScreen() {
                   <Text style={[styles.qtyText, low && styles.qtyLowText]}>{item.quantity_on_hand} {item.unit ?? ""}</Text>
                 </View>
                 <MoneyText amount={item.unit_sell} style={styles.sell} />
+                {Number(item.unit_sell) > 0 && (
+                  <Text style={styles.margin}>{Math.round(((Number(item.unit_sell) - Number(item.unit_cost)) / Number(item.unit_sell)) * 100)}% margin</Text>
+                )}
               </View>
             </TouchableOpacity>
           );
@@ -215,6 +218,7 @@ const styles = StyleSheet.create({
   qtyText: { fontSize: 12, fontWeight: "600", color: colors.slate700 },
   qtyLowText: { color: colors.red600 },
   sell: { fontSize: 13, fontWeight: "700", color: colors.slate900 },
+  margin: { fontSize: 11, color: colors.slate400 },
   empty: { textAlign: "center", color: colors.slate400, marginTop: 40, fontSize: 13 },
   overlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.4)", justifyContent: "flex-end" },
   sheet: { backgroundColor: colors.card, borderTopLeftRadius: 16, borderTopRightRadius: 16, padding: 16, paddingBottom: 28, maxHeight: "88%" },
