@@ -19,7 +19,7 @@ send-back)**. So the app is broad and usable but **not at full parity**.
 | Inventory | partial | low-stock surfacing, margin display (low) |
 | My Jobs | partial | tech: change status/notes + submit variation offline (med) |
 | Customers | partial | Customer-360 detail w/ jobs/quotes/invoices + $ rollups (**high**) |
-| Backflow | partial | offline-durable backflow writes (**high**) |
+| Backflow | partial | ~~register-device offline~~ (D46); test-log offline needs the submit dedupe (Q3) — follow-up |
 | Quotes | partial | convert-to-job (med); Send/PDF (ext) |
 | Fleet | partial | assign equipment, equipment expenses/docs/usage (med ×4) |
 | Staff | partial | leave log, charge-out rate (med); invite/email (ext) |

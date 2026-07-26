@@ -10,6 +10,7 @@ export type Aggregate =
   | "job"
   | "job_note"
   | "job_variation"
+  | "backflow_device"
   | "backflow_test"
   | "invoice"
   | "quote"
