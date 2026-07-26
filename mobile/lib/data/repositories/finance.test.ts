@@ -151,5 +151,9 @@ describe("FinanceRepository quotes + pricing", () => {
     const box2 = captureOutbox();
     await new FinanceRepository(box2.outbox, seqIds(), fixedTime()).deactivatePricingItem("p1");
     expect(box2.ops[0]).toMatchObject({ table: "pricing_items", op: "update", rowId: "p1", payload: { is_active: false } });
+
+    const box3 = captureOutbox();
+    await new FinanceRepository(box3.outbox, seqIds(), fixedTime()).reactivatePricingItem("p1");
+    expect(box3.ops[0]).toMatchObject({ table: "pricing_items", op: "update", rowId: "p1", payload: { is_active: true } });
   });
 });

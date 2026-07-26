@@ -203,3 +203,15 @@ export async function listPricing(): Promise<PricingItem[]> {
     .order("name");
   return (data as unknown as PricingItem[]) ?? [];
 }
+
+// Deactivated catalogue items — for the "Show inactive" view where they can be
+// reactivated (they're hidden from the main list + the invoice/quote pickers).
+export async function listInactivePricing(): Promise<PricingItem[]> {
+  const { data } = await supabase
+    .from("pricing_items")
+    .select("id, name, description, category, pricing_type, unit_price, unit")
+    .eq("is_active", false)
+    .order("category")
+    .order("name");
+  return (data as unknown as PricingItem[]) ?? [];
+}

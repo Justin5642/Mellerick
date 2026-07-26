@@ -38,5 +38,6 @@ export function useFinance() {
     createPricingItem: useCallback((i: PricingItemInput) => run((f) => f.createPricingItem(i)), [run]),
     updatePricingItem: useCallback((id: string, i: PricingItemInput) => run((f) => f.updatePricingItem(id, i)), [run]),
     deactivatePricingItem: useCallback((id: string) => run((f) => f.deactivatePricingItem(id)), [run]),
+    reactivatePricingItem: useCallback((id: string) => run((f) => f.reactivatePricingItem(id)), [run]),
   };
 }

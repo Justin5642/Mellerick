@@ -4,7 +4,7 @@ import { Stack } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { colors } from "../lib/theme";
 import { MoneyText } from "../design/components/MoneyText";
-import { listPricing, type PricingItem } from "../lib/data/reads/finance";
+import { listPricing, listInactivePricing, type PricingItem } from "../lib/data/reads/finance";
 import { useFinance } from "../lib/data/hooks/useFinance";
 
 const PRICING_TYPES = ["flat_rate", "hourly", "material"] as const;
@@ -41,6 +41,8 @@ export default function PricingScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [draft, setDraft] = useState<Draft | null>(null);
   const [saving, setSaving] = useState(false);
+  const [showInactive, setShowInactive] = useState(false);
+  const [inactive, setInactive] = useState<PricingItem[]>([]);
 
   const load = useCallback(async () => {
     setItems(await listPricing());
@@ -121,6 +123,47 @@ export default function PricingScreen() {
     }
   }
 
+  async function toggleInactive() {
+    const next = !showInactive;
+    setShowInactive(next);
+    if (next) setInactive(await listInactivePricing());
+  }
+
+  async function reactivate(item: PricingItem) {
+    if (saving || !finance.ready) return;
+    setSaving(true);
+    try {
+      await finance.reactivatePricingItem(item.id);
+      setInactive((prev) => prev.filter((it) => it.id !== item.id)); // optimistic
+      setItems((prev) => [...prev, item]); // reappears in the active list
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const InactiveHeader = (
+    <View style={styles.inactiveWrap}>
+      <TouchableOpacity style={styles.inactiveToggle} onPress={toggleInactive}>
+        <Ionicons name={showInactive ? "chevron-down" : "chevron-forward"} size={16} color={colors.slate500} />
+        <Text style={styles.inactiveToggleText}>{showInactive ? "Hide" : "Show"} inactive items{showInactive ? ` (${inactive.length})` : ""}</Text>
+      </TouchableOpacity>
+      {showInactive && inactive.length === 0 && <Text style={styles.inactiveEmpty}>No inactive items.</Text>}
+      {showInactive &&
+        inactive.map((it) => (
+          <View key={it.id} style={styles.inactiveRow}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.inactiveName} numberOfLines={1}>{it.name}</Text>
+              <Text style={styles.inactiveMeta}>{it.category} · {humanize(it.pricing_type)}</Text>
+            </View>
+            <MoneyText amount={it.unit_price} style={styles.inactivePrice} />
+            <TouchableOpacity style={styles.reactivateBtn} onPress={() => reactivate(it)} disabled={saving}>
+              <Text style={styles.reactivateText}>Reactivate</Text>
+            </TouchableOpacity>
+          </View>
+        ))}
+    </View>
+  );
+
   return (
     <View style={styles.container}>
       <Stack.Screen
@@ -136,6 +179,7 @@ export default function PricingScreen() {
       <SectionList
         sections={sections}
         keyExtractor={(i) => i.id}
+        ListHeaderComponent={InactiveHeader}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.blue600} />}
         stickySectionHeadersEnabled={false}
         ListEmptyComponent={<Text style={styles.empty}>No pricing items. Tap + to add one.</Text>}
@@ -245,4 +289,14 @@ const styles = StyleSheet.create({
   cancelText: { color: colors.slate700, fontWeight: "600", fontSize: 14 },
   saveBtn: { flex: 1, paddingVertical: 12, borderRadius: 10, backgroundColor: colors.blue600, alignItems: "center" },
   saveText: { color: "#fff", fontWeight: "700", fontSize: 14 },
+  inactiveWrap: { paddingHorizontal: 12, paddingTop: 10 },
+  inactiveToggle: { flexDirection: "row", alignItems: "center", gap: 6, paddingVertical: 6 },
+  inactiveToggleText: { fontSize: 13, fontWeight: "600", color: colors.slate500 },
+  inactiveEmpty: { fontSize: 13, color: colors.slate400, paddingVertical: 8, paddingHorizontal: 4 },
+  inactiveRow: { flexDirection: "row", alignItems: "center", gap: 10, paddingVertical: 10, borderTopWidth: 1, borderTopColor: colors.slate100 },
+  inactiveName: { fontSize: 14, fontWeight: "600", color: colors.slate700 },
+  inactiveMeta: { fontSize: 12, color: colors.slate400, textTransform: "capitalize", marginTop: 1 },
+  inactivePrice: { fontSize: 13, fontWeight: "700", color: colors.slate500 },
+  reactivateBtn: { paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8, borderWidth: 1, borderColor: colors.blue600, backgroundColor: colors.blue100 },
+  reactivateText: { fontSize: 12, fontWeight: "700", color: colors.blue600 },
 });

@@ -205,6 +205,11 @@ export class FinanceRepository {
     await this.write("pricing_item", "update", "pricing_items", id, { is_active: false });
   }
 
+  /** Restore a previously-deactivated catalogue item. */
+  async reactivatePricingItem(id: string): Promise<void> {
+    await this.write("pricing_item", "update", "pricing_items", id, { is_active: true });
+  }
+
   private async insertItems(
     aggregate: Aggregate,
     table: string,

@@ -15,8 +15,8 @@ send-back)**. So the app is broad and usable but **not at full parity**.
 | Area | Mobile status | Biggest remaining gap(s) |
 |---|---|---|
 | Dashboard | **full-parity** | — (one cosmetic empty-state link) |
-| Pricing | partial | reactivate deactivated items (med) |
-| Inventory | partial | low-stock surfacing, margin display (low) |
+| Pricing | partial | ~~reactivate deactivated items~~ **DONE** (D49); category-taxonomy picker — minor |
+| Inventory | partial | ~~low-stock surfacing~~ **DONE** (D49); margin display — minor |
 | My Jobs | partial | tech: change status/notes + submit variation offline (med) |
 | Customers | partial | ~~Customer-360 detail + $ rollups~~ **DONE** (D47); favourites, inactive lifecycle, quick-create — follow-ups |
 | Backflow | partial | ~~register-device offline~~ (D46); test-log offline needs the submit dedupe (Q3) — follow-up |

@@ -5,6 +5,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { colors } from "../lib/theme";
 import { MoneyText } from "../design/components/MoneyText";
 import { listInventory, type InventoryItem } from "../lib/data/reads/inventory";
+import { lowStockItems } from "../lib/inventoryStock";
 import { useInventory } from "../lib/data/hooks/useInventory";
 
 interface Draft {
@@ -112,6 +113,16 @@ export default function InventoryScreen() {
 
   const set = (k: keyof Draft) => (v: string) => setDraft((d) => d && { ...d, [k]: v });
 
+  const lowStock = useMemo(() => lowStockItems(items), [items]);
+  const LowStockBanner = lowStock.length === 0 ? null : (
+    <View style={styles.lowBanner}>
+      <Ionicons name="alert-circle" size={16} color={colors.orange700} />
+      <Text style={styles.lowBannerText}>
+        {lowStock.length} item{lowStock.length > 1 ? "s" : ""} at or below reorder level: {lowStock.map((i) => i.name).join(", ")}
+      </Text>
+    </View>
+  );
+
   return (
     <View style={styles.container}>
       <Stack.Screen options={{ title: "Inventory", headerRight: () => (
@@ -120,6 +131,7 @@ export default function InventoryScreen() {
       <SectionList
         sections={sections}
         keyExtractor={(i) => i.id}
+        ListHeaderComponent={LowStockBanner}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.blue600} />}
         stickySectionHeadersEnabled={false}
         ListEmptyComponent={<Text style={styles.empty}>No inventory. Tap + to add.</Text>}
@@ -190,6 +202,8 @@ function Field({ label, value, onChange, keyboardType, multiline }: { label: str
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.bg },
+  lowBanner: { flexDirection: "row", alignItems: "flex-start", gap: 8, backgroundColor: colors.orange100, marginHorizontal: 12, marginTop: 12, borderRadius: 10, padding: 10 },
+  lowBannerText: { flex: 1, fontSize: 12, color: colors.orange700, lineHeight: 16 },
   catHead: { fontSize: 13, fontWeight: "700", color: colors.slate500, paddingHorizontal: 16, paddingTop: 16, paddingBottom: 4, textTransform: "capitalize" },
   row: { flexDirection: "row", alignItems: "center", gap: 12, paddingHorizontal: 16, paddingVertical: 12, backgroundColor: colors.card, borderTopWidth: 1, borderTopColor: colors.border },
   body: { flex: 1, minWidth: 0 },
