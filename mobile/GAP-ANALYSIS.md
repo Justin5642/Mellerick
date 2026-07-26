@@ -24,7 +24,7 @@ in-repo is a short tail of **minor/complex depth** (below); the true blockers to
 | Customers | near-full | ~~Customer-360~~ (D47), ~~quick-create~~ (D60); favourites, inactive lifecycle — minor |
 | Backflow | partial | ~~register-device offline~~ (D46); test-log offline needs the submit dedupe (Q3) — follow-up |
 | Quotes | partial | ~~convert-to-job~~ **DONE** (D50); Send/PDF (ext) |
-| Fleet | partial | ~~assign equipment~~ (D54), ~~detail screen + expenses/service history~~ (D56); documents + usage log — follow-ups |
+| Fleet | near-full | ~~assign~~ (D54), ~~detail + expenses~~ (D56), ~~usage log~~ (D61); documents (file upload) — follow-up |
 | Staff | near-full | ~~charge-out rate~~ (D53), ~~leave log~~ (D58); invite/resend/edit-email (ext) |
 | Settings | near-full | ~~variation-types~~ (D57), ~~cost-centre templates~~ (D59); Xero account codes + OAuth connect (web/ext) |
 | Reports | **full (analytics)** ✅ | all 5 tables done: revenue-by-month, top-customers, jobs-by-staff (D48), staff cost/efficiency (D51), equipment utilisation (D52) |

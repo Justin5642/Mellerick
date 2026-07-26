@@ -20,6 +20,7 @@ export type Aggregate =
   | "inventory"
   | "equipment"
   | "equipment_expense"
+  | "equipment_usage"
   | "variation_type"
   | "cost_center_template"
   | "job_item"

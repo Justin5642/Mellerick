@@ -113,6 +113,52 @@ export class EquipmentRepository {
     return { id: rowId, receiptStoragePath };
   }
 
+  // Log general (non-job) usage hours against an item — feeds the utilisation
+  // report. job_id stays null (job-linked usage is logged from the job).
+  async addEquipmentUsage(input: { equipmentId: string; loggedBy: string; usageDate?: string | null; hours: number; notes?: string | null }): Promise<string> {
+    const rowId = this.ids.newId();
+    const payload: Record<string, unknown> = {
+      equipment_id: input.equipmentId,
+      hours: input.hours,
+      logged_by: input.loggedBy,
+      notes: input.notes ?? null,
+      job_id: null,
+    };
+    if (input.usageDate) payload.usage_date = input.usageDate; // else DB default current_date
+    const op: WriteOperation = {
+      kind: "write",
+      id: this.ids.newId(),
+      rowId,
+      aggregate: "equipment_usage",
+      op: "insert",
+      table: "equipment_usage_log",
+      payload,
+      status: "pending",
+      attempts: 0,
+      nextAttemptAt: 0,
+      createdAt: this.time.nowMs(),
+    };
+    await this.outbox.enqueue(op);
+    return rowId;
+  }
+
+  async removeEquipmentUsage(id: string): Promise<void> {
+    const op: WriteOperation = {
+      kind: "write",
+      id: this.ids.newId(),
+      rowId: id,
+      aggregate: "equipment_usage",
+      op: "delete",
+      table: "equipment_usage_log",
+      payload: {},
+      status: "pending",
+      attempts: 0,
+      nextAttemptAt: 0,
+      createdAt: this.time.nowMs(),
+    };
+    await this.outbox.enqueue(op);
+  }
+
   async removeEquipmentExpense(input: { id: string; receiptStoragePath?: string | null }): Promise<void> {
     const payload: Record<string, unknown> = {};
     if (input.receiptStoragePath) {

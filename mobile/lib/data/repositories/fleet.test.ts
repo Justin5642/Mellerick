@@ -102,4 +102,22 @@ describe("EquipmentRepository", () => {
     expect(b2.ops[0].attachmentPathField).toBeUndefined();
     expect(b2.ops[0].payload).toEqual({});
   });
+
+  it("addEquipmentUsage inserts general (job_id null) usage; date optional", async () => {
+    const { outbox, ops } = captureOutbox();
+    const id = await new EquipmentRepository(outbox, seqIds(), fixedTime()).addEquipmentUsage({ equipmentId: "eq1", loggedBy: "u1", hours: 6.5, usageDate: "2026-07-25", notes: "site A" });
+    expect(id).toBe("id-1");
+    expect(ops[0]).toMatchObject({ table: "equipment_usage_log", op: "insert", aggregate: "equipment_usage", rowId: "id-1" });
+    expect(ops[0].payload).toEqual({ equipment_id: "eq1", hours: 6.5, logged_by: "u1", notes: "site A", job_id: null, usage_date: "2026-07-25" });
+
+    const b2 = captureOutbox();
+    await new EquipmentRepository(b2.outbox, seqIds(), fixedTime()).addEquipmentUsage({ equipmentId: "eq1", loggedBy: "u1", hours: 3 });
+    expect(b2.ops[0].payload).not.toHaveProperty("usage_date"); // DB default current_date
+  });
+
+  it("removeEquipmentUsage is a plain delete", async () => {
+    const { outbox, ops } = captureOutbox();
+    await new EquipmentRepository(outbox, seqIds(), fixedTime()).removeEquipmentUsage("u9");
+    expect(ops[0]).toMatchObject({ table: "equipment_usage_log", op: "delete", rowId: "u9" });
+  });
 });

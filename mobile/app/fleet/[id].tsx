@@ -6,7 +6,7 @@ import * as ImagePicker from "expo-image-picker";
 import { colors } from "../../lib/theme";
 import { MoneyText } from "../../design/components/MoneyText";
 import { computeEquipmentCost } from "../../lib/costing";
-import { getEquipment, listEquipmentExpenses, getEquipmentReceiptSignedUrl, type Equipment, type EquipmentExpense } from "../../lib/data/reads/fleet";
+import { getEquipment, listEquipmentExpenses, listEquipmentUsage, getEquipmentReceiptSignedUrl, type Equipment, type EquipmentExpense, type EquipmentUsage } from "../../lib/data/reads/fleet";
 import { useFleet } from "../../lib/data/hooks/useFleet";
 import { useAuth } from "../../lib/auth-context";
 import type { EquipmentExpenseCategory } from "../../lib/data/repositories/fleet";
@@ -31,17 +31,44 @@ export default function EquipmentDetailScreen() {
   const { profile } = useAuth();
   const [equipment, setEquipment] = useState<Equipment | null>(null);
   const [expenses, setExpenses] = useState<EquipmentExpense[]>([]);
+  const [usage, setUsage] = useState<EquipmentUsage[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [draft, setDraft] = useState<Draft | null>(null);
   const [saving, setSaving] = useState(false);
+  const [usageDraft, setUsageDraft] = useState<{ usageDate: string; hours: string; notes: string } | null>(null);
+  const [usageSaving, setUsageSaving] = useState(false);
 
   const load = useCallback(async () => {
-    const [e, ex] = await Promise.all([getEquipment(id), listEquipmentExpenses(id)]);
+    const [e, ex, us] = await Promise.all([getEquipment(id), listEquipmentExpenses(id), listEquipmentUsage(id)]);
     setEquipment(e);
     setExpenses(ex);
+    setUsage(us);
     setLoading(false);
   }, [id]);
+
+  async function addUsage() {
+    if (!usageDraft || usageSaving || !fleet.ready) return;
+    const hours = parseFloat(usageDraft.hours);
+    if (Number.isNaN(hours) || hours <= 0) { Alert.alert("Missing details", "A valid number of hours is required."); return; }
+    if (!profile?.id) { Alert.alert("Not ready", "Your profile is still loading — please try again."); return; }
+    setUsageSaving(true);
+    try {
+      await fleet.addEquipmentUsage({ equipmentId: id, loggedBy: profile.id, usageDate: usageDraft.usageDate.trim() || null, hours, notes: usageDraft.notes.trim() || null });
+      setUsageDraft(null);
+      await load();
+    } catch (e) {
+      Alert.alert("Couldn't save", e instanceof Error ? e.message : "Please try again.");
+    } finally {
+      setUsageSaving(false);
+    }
+  }
+  function confirmRemoveUsage(u: EquipmentUsage) {
+    Alert.alert("Remove usage", "This cannot be undone.", [
+      { text: "Cancel", style: "cancel" },
+      { text: "Remove", style: "destructive", onPress: async () => { await fleet.removeEquipmentUsage(u.id); await load(); } },
+    ]);
+  }
   useEffect(() => { load(); }, [load]);
   const onRefresh = useCallback(async () => { setRefreshing(true); await load(); setRefreshing(false); }, [load]);
 
@@ -150,6 +177,43 @@ export default function EquipmentDetailScreen() {
         )}
       </View>
       {expenses.length > 0 && <Text style={styles.hint}>Long-press an expense to remove it.</Text>}
+
+      <View style={styles.sectionHead}>
+        <Text style={styles.section}>Usage log</Text>
+        {!usageDraft && (
+          <TouchableOpacity onPress={() => setUsageDraft({ usageDate: "", hours: "", notes: "" })} style={styles.addBtn}>
+            <Ionicons name="add" size={16} color={colors.blue600} /><Text style={styles.addText}>Add</Text>
+          </TouchableOpacity>
+        )}
+      </View>
+      <View style={styles.card}>
+        {usageDraft ? (
+          <View>
+            <View style={styles.twoCol}>
+              <View style={{ flex: 1 }}><Field label="Date (YYYY-MM-DD)" value={usageDraft.usageDate} onChange={(v) => setUsageDraft((d) => d && { ...d, usageDate: v })} /></View>
+              <View style={{ flex: 1 }}><Field label="Hours" value={usageDraft.hours} onChange={(v) => setUsageDraft((d) => d && { ...d, hours: v })} num /></View>
+            </View>
+            <Field label="Notes (optional)" value={usageDraft.notes} onChange={(v) => setUsageDraft((d) => d && { ...d, notes: v })} />
+            <View style={styles.actions}>
+              <TouchableOpacity style={styles.cancel} onPress={() => setUsageDraft(null)} disabled={usageSaving}><Text style={styles.cancelText}>Cancel</Text></TouchableOpacity>
+              <TouchableOpacity style={styles.saveBtn} onPress={addUsage} disabled={usageSaving}><Text style={styles.saveText}>{usageSaving ? "…" : "Add"}</Text></TouchableOpacity>
+            </View>
+          </View>
+        ) : usage.length === 0 ? <Text style={styles.empty}>No usage logged.</Text> : (
+          <>
+            {usage.map((u) => (
+              <TouchableOpacity key={u.id} style={styles.expRow} onLongPress={() => confirmRemoveUsage(u)}>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.expName}>{u.hours}h{u.job_id ? " · on a job" : ""}</Text>
+                  <Text style={styles.expMeta}>{new Date(u.usage_date).toLocaleDateString("en-AU")}{u.notes ? ` · ${u.notes}` : ""}</Text>
+                </View>
+              </TouchableOpacity>
+            ))}
+            <View style={[styles.costRow, styles.totalRow]}><Text style={styles.totalLabel}>Total hours</Text><Text style={styles.totalValue}>{usage.reduce((s, u) => s + Number(u.hours ?? 0), 0)}h</Text></View>
+          </>
+        )}
+      </View>
+      {usage.length > 0 && !usageDraft && <Text style={styles.hint}>Long-press a usage entry to remove it.</Text>}
 
       <Modal visible={!!draft} transparent animationType="slide" onRequestClose={() => !saving && setDraft(null)}>
         <View style={styles.overlay}>

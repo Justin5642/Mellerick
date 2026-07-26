@@ -54,6 +54,24 @@ export async function listEquipmentExpenses(equipmentId: string): Promise<Equipm
   return (data as unknown as EquipmentExpense[]) ?? [];
 }
 
+export interface EquipmentUsage {
+  id: string;
+  usage_date: string;
+  hours: number;
+  notes: string | null;
+  job_id: string | null;
+}
+
+export async function listEquipmentUsage(equipmentId: string): Promise<EquipmentUsage[]> {
+  const { data } = await supabase
+    .from("equipment_usage_log")
+    .select("id, usage_date, hours, notes, job_id")
+    .eq("equipment_id", equipmentId)
+    .order("usage_date", { ascending: false })
+    .order("created_at", { ascending: false });
+  return (data as unknown as EquipmentUsage[]) ?? [];
+}
+
 // Short-lived signed URL for an equipment-expense receipt (equipment-documents
 // bucket). Online-only; null if unavailable.
 export async function getEquipmentReceiptSignedUrl(storagePath: string): Promise<string | null> {
