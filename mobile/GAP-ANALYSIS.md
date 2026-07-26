@@ -27,13 +27,13 @@ send-back)**. So the app is broad and usable but **not at full parity**.
 | Reports | partial | staff cost & efficiency table (**high**) + 4 analytics tables (med) |
 | Jobs | partial | **create job**, edit/reassign/reschedule, price+approve variations (**high ×3**) |
 | Invoices | partial | prefill-from-job + add unbilled variations (**high ×2**); Send/PDF/Xero (ext) |
-| Approvals | **read-only** | approve→auto-invoice, send-back/reject (**high ×3**) |
+| Approvals | partial ✅ | ~~approve→auto-invoice, send-back~~ **DONE** (D40); Xero auto-push (ext) |
 | Schedule | **read-only** | assign/unassign, reschedule (**high ×2**) |
 
 ## Prioritized in-repo remaining work (buildable without external gates)
 
 **P1 — core office/admin workflows (highest impact):**
-1. **Approvals actions** — approve a completed job (`admin_status=approved` + notes) → auto-create the draft invoice + items from the job's line items (with the web's duplicate guard); Send-Back/reject (`admin_status=rejected`, `status=in_progress`, `ready_to_invoice=false`, required note, calendar resync). *(Xero auto-push on approve is an external gate.)*
+1. ~~**Approvals actions**~~ — **DONE (D40)**: approve→auto-draft-invoice (+ items, dup-guard) + Send-Back/reject with note + calendar resync. *(Xero auto-push on approve remains an external gate.)*
 2. **Schedule dispatch** — assign/unassign a job to a technician and reschedule (change `scheduled_start/end`) from the schedule board; ideally offline-durable.
 3. **Jobs create + edit** — a create-job flow (title/customer/site/assignee/type/priority/schedule/notes) and edit of an existing job (reassign, reschedule, change customer/site/title/type); admin delete. Unlocks the Dashboard/Recent-Jobs "create" affordance too.
 4. **Invoice-from-job (Q15)** — prefill invoice items from a linked job's `job_items` + add approved-but-unbilled variations and mark them billed + reset `ready_to_invoice`. Closes the reconciliation gap the generic builder leaves open.
