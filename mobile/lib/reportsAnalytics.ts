@@ -22,15 +22,20 @@ export function topCustomersBySpend(invoices: InvoiceRow[], limit = 8): { custom
 }
 
 // Revenue bucketed by month: paid (status 'paid') vs outstanding (sent/overdue),
-// for the given month keys ("YYYY-MM"). An invoice's month is its created_at's
-// calendar month (UTC — fine for a monthly rollup). Returns one row per key, in
-// the order given.
-export function revenueByMonth(invoices: InvoiceRow[], monthKeys: string[]): { monthKey: string; paid: number; outstanding: number }[] {
+// for the given month keys ("YYYY-MM"). `monthOf` maps an invoice's created_at
+// to its month key — the reads layer passes a Melbourne-business-TZ extractor to
+// match the web (an invoice near a month boundary must land in the same month on
+// both apps); the default (UTC slice) keeps the pure tests deterministic.
+export function revenueByMonth(
+  invoices: InvoiceRow[],
+  monthKeys: string[],
+  monthOf: (createdAtIso: string) => string = (iso) => (iso ?? "").slice(0, 7)
+): { monthKey: string; paid: number; outstanding: number }[] {
   return monthKeys.map((monthKey) => {
     let paid = 0;
     let outstanding = 0;
     for (const inv of invoices) {
-      if ((inv.created_at ?? "").slice(0, 7) !== monthKey) continue;
+      if (monthOf(inv.created_at ?? "") !== monthKey) continue;
       const amt = Number(inv.total ?? 0);
       if (inv.status === "paid") paid += amt;
       else if (inv.status === "sent" || inv.status === "overdue") outstanding += amt;
@@ -40,11 +45,13 @@ export function revenueByMonth(invoices: InvoiceRow[], monthKeys: string[]): { m
 }
 
 // Jobs by staff member: total assigned + completed + completion rate (%),
-// highest total first. Null assignee groups as "Unassigned".
+// highest total first. UNASSIGNED jobs are excluded (matches the web Reports
+// page's `if (!j.assigned_to) return`).
 export function jobsByStaff(jobs: JobStaffRow[]): { name: string; completed: number; total: number; rate: number }[] {
   const byStaff = new Map<string, { completed: number; total: number }>();
   for (const j of jobs) {
-    const name = j.assignee_name ?? "Unassigned";
+    if (!j.assignee_name) continue; // no assignee → not counted (web parity)
+    const name = j.assignee_name;
     const cur = byStaff.get(name) ?? { completed: 0, total: 0 };
     cur.total += 1;
     if (j.status === "completed") cur.completed += 1;

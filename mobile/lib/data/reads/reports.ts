@@ -1,5 +1,6 @@
 import { supabase } from "../../supabase";
 import { topCustomersBySpend, revenueByMonth, jobsByStaff, type InvoiceRow, type JobStaffRow } from "../../reportsAnalytics";
+import { dateKeyInBusinessTZ } from "../../date";
 import { computeStaffEfficiency, type StaffEffProfile, type StaffEffRow, type StaffEffInput } from "../../staffEfficiency";
 import { computeEquipmentUtilization, type EquipUtilRow, type EquipUtilInput } from "../../equipmentUtilization";
 
@@ -48,13 +49,15 @@ export interface ReportAnalytics {
   jobsByStaff: { name: string; completed: number; total: number; rate: number }[];
 }
 
-// The last `n` calendar-month keys ("YYYY-MM"), oldest→newest, ending this month.
+// The last `n` calendar-month keys ("YYYY-MM"), oldest→newest, ending this month
+// in BUSINESS (Melbourne) time — so the window matches the web regardless of the
+// device timezone. Months are stepped via a UTC-anchored date (DST-safe).
 function lastNMonthKeys(n: number): string[] {
-  const now = new Date();
+  const [y, m] = dateKeyInBusinessTZ(new Date()).slice(0, 7).split("-").map(Number);
   const keys: string[] = [];
   for (let i = n - 1; i >= 0; i--) {
-    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
-    keys.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`);
+    const d = new Date(Date.UTC(y, m - 1 - i, 1));
+    keys.push(`${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`);
   }
   return keys;
 }
@@ -131,7 +134,7 @@ export async function getReportAnalytics(): Promise<ReportAnalytics> {
 
   return {
     topCustomers: topCustomersBySpend(invoices, 8),
-    revenueByMonth: revenueByMonth(invoices, lastNMonthKeys(6)),
+    revenueByMonth: revenueByMonth(invoices, lastNMonthKeys(6), (iso) => dateKeyInBusinessTZ(iso).slice(0, 7)),
     jobsByStaff: jobsByStaff(jobs),
   };
 }

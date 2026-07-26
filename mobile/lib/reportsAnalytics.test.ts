@@ -35,17 +35,18 @@ describe("revenueByMonth", () => {
 });
 
 describe("jobsByStaff", () => {
-  it("counts total + completed per assignee with a completion rate, highest total first", () => {
+  it("counts total + completed per assignee with a completion rate, highest total first, EXCLUDING unassigned (web parity)", () => {
     const jobs: JobStaffRow[] = [
       { assignee_name: "Sam", status: "completed" },
       { assignee_name: "Sam", status: "completed" },
       { assignee_name: "Sam", status: "in_progress" },
       { assignee_name: "Jo", status: "completed" },
-      { assignee_name: null, status: "pending" },
+      { assignee_name: null, status: "pending" }, // unassigned → excluded
     ];
     const r = jobsByStaff(jobs);
     expect(r[0]).toEqual({ name: "Sam", completed: 2, total: 3, rate: (2 / 3) * 100 });
     expect(r).toContainEqual({ name: "Jo", completed: 1, total: 1, rate: 100 });
-    expect(r).toContainEqual({ name: "Unassigned", completed: 0, total: 1, rate: 0 });
+    expect(r.some((x) => x.name === "Unassigned")).toBe(false); // no unassigned row
+    expect(r).toHaveLength(2);
   });
 });
