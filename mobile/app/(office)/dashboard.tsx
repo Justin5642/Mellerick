@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { View, Text, ScrollView, StyleSheet, RefreshControl } from "react-native";
+import { View, Text, ScrollView, StyleSheet, RefreshControl, TouchableOpacity } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
@@ -144,7 +144,10 @@ export default function DashboardScreen() {
 
         <Section title="Recent Jobs" action="View all" onAction={() => router.push("/jobs")}>
           {recent.length === 0 ? (
-            <Empty icon="briefcase-outline" text="No jobs yet." />
+            <TouchableOpacity onPress={() => router.push("/jobs/new")} style={styles.empty}>
+              <Ionicons name="add-circle-outline" size={28} color={colors.blue600} />
+              <Text style={[styles.emptyText, { color: colors.blue600, fontWeight: "600" }]}>Create your first job</Text>
+            </TouchableOpacity>
           ) : (
             recent.map((job) => (
               <JobListRow

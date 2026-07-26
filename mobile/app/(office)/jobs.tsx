@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { View, Text, FlatList, StyleSheet, RefreshControl, TextInput, ActivityIndicator } from "react-native";
+import { View, Text, FlatList, StyleSheet, RefreshControl, TextInput, ActivityIndicator, TouchableOpacity } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
@@ -78,7 +78,13 @@ export default function OfficeJobsScreen() {
   return (
     <SafeAreaView style={styles.safe} edges={["top"]}>
       <View style={styles.header}>
-        <Text style={styles.h1}>Jobs</Text>
+        <View style={styles.titleRow}>
+          <Text style={styles.h1}>Jobs</Text>
+          <TouchableOpacity style={styles.newBtn} onPress={() => router.push("/jobs/new")} accessibilityLabel="New job">
+            <Ionicons name="add" size={18} color="#fff" />
+            <Text style={styles.newText}>New</Text>
+          </TouchableOpacity>
+        </View>
         <View style={styles.search}>
           <Ionicons name="search" size={16} color={colors.slate400} />
           <TextInput
@@ -117,7 +123,10 @@ export default function OfficeJobsScreen() {
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.bg },
   header: { paddingHorizontal: 16, paddingTop: 8, paddingBottom: 10, gap: 10 },
+  titleRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
   h1: { fontSize: 22, fontWeight: "800", color: colors.slate900 },
+  newBtn: { flexDirection: "row", alignItems: "center", gap: 4, backgroundColor: colors.blue600, borderRadius: 999, paddingHorizontal: 12, paddingVertical: 7 },
+  newText: { color: "#fff", fontWeight: "700", fontSize: 13 },
   search: { flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: colors.card, borderWidth: 1, borderColor: colors.border, borderRadius: 10, paddingHorizontal: 10, paddingVertical: 8 },
   searchInput: { flex: 1, fontSize: 14, color: colors.slate900, padding: 0 },
   empty: { textAlign: "center", color: colors.slate400, marginTop: 40, fontSize: 13 },
