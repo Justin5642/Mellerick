@@ -83,7 +83,23 @@ export default function PricingScreen() {
         unitPrice: price,
         unit: draft.unit.trim() || "each",
       };
-      const { synced } = draft.id ? await finance.updatePricingItem(draft.id, input) : await finance.createPricingItem(input);
+      const editingId = draft.id;
+      const { result, synced } = editingId
+        ? await finance.updatePricingItem(editingId, input)
+        : await finance.createPricingItem(input);
+      const rowId = editingId ?? (result as string);
+      // Optimistic: reflect the change immediately (also the offline path). Same
+      // read-shape as listPricing so the SectionList regroups correctly.
+      const optimistic: PricingItem = {
+        id: rowId,
+        name: input.name,
+        description: input.description,
+        category: input.category,
+        pricing_type: input.pricingType,
+        unit_price: input.unitPrice,
+        unit: input.unit,
+      };
+      setItems((prev) => (editingId ? prev.map((it) => (it.id === editingId ? optimistic : it)) : [...prev, optimistic]));
       setDraft(null);
       if (synced) await load();
     } finally {
@@ -95,7 +111,9 @@ export default function PricingScreen() {
     if (!draft?.id || saving) return;
     setSaving(true);
     try {
-      const { synced } = await finance.deactivatePricingItem(draft.id);
+      const id = draft.id;
+      const { synced } = await finance.deactivatePricingItem(id);
+      setItems((prev) => prev.filter((it) => it.id !== id)); // optimistic remove
       setDraft(null);
       if (synced) await load();
     } finally {
