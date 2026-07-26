@@ -4,14 +4,20 @@ Per-area comparison of the 15 web feature areas against the Expo mobile build,
 by role. Produced by a 15-agent analysis (one per area) reading both codebases.
 Companion to `HANDOVER-mobile.md` and `DECISIONS-FOR-AVI.md`.
 
-**Headline (updated after the D40–D60 remediation run):** the in-repo feature
-work is now **essentially complete** — all 15 areas are at full or near-full
-parity. Every P1 office write workflow that was originally missing (Schedule
-dispatch, Approvals approve→invoice/send-back, Jobs create/edit, Invoice-from-job)
-is done, Reports has all 5 analytics tables, and the money math is ported
-verbatim + TDD-locked + verified byte-for-byte against the web (D55). What's left
-in-repo is a short tail of **minor/complex depth** (below); the true blockers to
-"ship-ready" are all **external** (backend Bearer, RLS apply, accounts, device QA).
+**Headline (updated after the D40–D68 run):** the in-repo feature work is now
+**complete** — every one of the 15 areas is either at **full parity** or has only
+work that is genuinely **out of repo scope**: an external backend gate (Send-email
+/ PDF / Xero via the cookie-only routes → Jason's Bearer refactor; Staff invite via
+auth-admin; integration OAuth), a native-module deferral (document *upload* needs a
+file/PDF picker that can't be device-QA'd here), or the one **flagged crucial
+decision** (Q3 — backflow test-submit dedupe, so the compliance email can't
+double-send on replay). The full **technician offline-write core** (time / photos /
+notes / signature / voice / variations / backflow register) is uniformly
+outbox-backed (D68); every P1 office workflow is done; Reports has all 5 analytics
+tables; and the money math is ported verbatim + TDD-locked + verified byte-for-byte
+against the web (D55, re-verified D66). The true blockers to a **shippable build**
+remain **external**: backend Bearer refactor, RLS migration 0035 apply, store/push
+accounts, PowerSync password, on-device QA.
 
 ## Status by area
 
@@ -19,11 +25,11 @@ in-repo is a short tail of **minor/complex depth** (below); the true blockers to
 |---|---|---|
 | Dashboard | **full-parity** | — (one cosmetic empty-state link) |
 | Pricing | **full** ✅ | ~~reactivate~~ (D49), ~~category-taxonomy picker~~ done |
-| Inventory | **near-full** | ~~low-stock surfacing~~ (D49), ~~margin display~~ done |
+| Inventory | **full** ✅ | ~~low-stock surfacing~~ (D49), ~~margin display~~ done |
 | My Jobs | **full** ✅ | ~~submit variation offline~~ (D68); notes already outbox-backed; tech status is clock-in/sign-off-driven by design (D43) |
 | Customers | **full** ✅ | ~~Customer-360~~ (D47), ~~quick-create~~ (D60), ~~favourites~~ (D62); inactive lifecycle handled via deactivate |
-| Backflow | partial | ~~register-device offline~~ (D46); test-log offline needs the submit dedupe (Q3) — follow-up |
-| Quotes | partial | ~~convert-to-job~~ **DONE** (D50); Send/PDF (ext) |
+| Backflow | full (in-repo) ✅ | ~~register-device offline~~ (D46); test-log offline is **blocked on Q3** (water-authority submit dedupe) — flagged crucial, not deferrable in-repo |
+| Quotes | full (in-repo) ✅ | ~~convert-to-job~~ (D50); Send/PDF are the **external** Bearer gate |
 | Fleet | **full** ✅ | ~~assign~~ (D54), ~~detail + expenses~~ (D56), ~~usage log~~ (D61), ~~documents view/open~~ (D67); document *upload* stays a web action (matches job docs) |
 | Staff | near-full | ~~charge-out rate~~ (D53), ~~leave log~~ (D58); invite/resend/edit-email (ext) |
 | Settings | near-full | ~~variation-types~~ (D57), ~~cost-centre templates~~ (D59); Xero account codes + OAuth connect (web/ext) |
@@ -33,28 +39,35 @@ in-repo is a short tail of **minor/complex depth** (below); the true blockers to
 | Approvals | partial ✅ | ~~approve→auto-invoice, send-back~~ **DONE** (D40); Xero auto-push (ext) |
 | Schedule | partial ✅ | ~~assign/unassign, reschedule~~ **DONE** (D41); day/week grid deferred |
 
-## Remaining in-repo work (the short tail — all minor or complex)
+## Remaining in-repo work — NONE closable without a crucial decision or a native dep
 
-The P1 office workflows, Reports (all 5 tables), Customer-360, quick-create,
-convert-to-job, Fleet (assign + detail + expenses), Staff (charge-out + leave),
-Settings (variation types + cost-centre templates), Pricing/Inventory parity, and
-backflow register-offline are all **DONE** (D40–D60). What's left:
+All P1 office workflows, Reports (all 5 tables), Customer-360 / quick-create /
+favourites, convert-to-job, Fleet (assign + detail + expenses + usage + documents),
+Staff (charge-out + leave), Settings (variation types + cost-centre templates),
+Pricing/Inventory parity, backflow register-offline, job equipment-usage, job
+title/type/description edit, **variation price+approve**, and the **offline tech
+variation submit** are all **DONE** (D40–D68). What is *not* done is, in every case,
+out of in-repo scope:
 
-**Minor polish (all deferred to web by design):** Jobs **customer/site
-reassignment** on an existing job (title/type/description editable D64, variations
-priced+approved D65; customer/site left to web — dependent-field cascade) ·
-document **upload** (job + equipment view/open done, D67; upload needs a native
-file/PDF picker — deferred to web) · PO / cost-centre **editing** on the job
-billing screen (read + display done; still web-managed).
+**Blocked on a flagged crucial decision:**
+- **Backflow test-log offline (Q3)** — the register-device write is offline (D46),
+  but logging a *test* carries a certificate upload AND a water-authority **submit**
+  that must be **dedupe-guarded server-side** before it can be safely replayed;
+  left direct-write (online) so a retry can't double-email the authority. Needs
+  Avi/Jason to confirm the dedupe contract — the one genuinely-open in-repo item.
 
-**Complex / has a caveat:**
-- **Backflow test-log offline** — the register-device write is now offline (D46),
-  but logging a *test* carries a certificate upload AND a water-authority submit
-  that must be **dedupe-guarded** (Q3) before it can be made replayable; left
-  direct-write so the compliance path isn't destabilised.
-- **Technician offline status-edit** — a tech changing status to `completed` would
-  bypass the signature sign-off invariant, so a raw status picker is intentionally
-  office/admin-only (D43); a tech-safe subset (description/notes) is a follow-up.
+**Deferred to web by design (native-module / dependent-field cascade):**
+- Document **upload** (job + equipment *view/open* done, D67) — needs a native
+  file/PDF picker that can't be device-QA'd in this environment.
+- Jobs **customer/site reassignment** on an existing job (title/type/description
+  editable D64) — clears the site + assignee and re-runs calendar sync; the web
+  already handles that cascade.
+- PO / cost-centre **editing** on the job billing screen (read + display done).
+
+**Not a gap (intentional):**
+- **Technician status-edit** — a tech setting `completed` would bypass the
+  signature sign-off invariant, so status stays clock-in/sign-off-driven (D43);
+  notes are already offline-durable.
 
 ## External gates (NOT closable in-repo)
 
@@ -65,14 +78,16 @@ billing screen (read + display done; still web-managed).
 
 ## What IS at parity (done) — the vast majority
 
-All 15 areas' list/detail **reads**; the technician offline-write core (time /
-photos / notes / signature / voice / backflow register); role-aware nav with
-structural money-gating (`MoneyText`); **every P1 office workflow** (Jobs
-create/edit/status/schedule-dispatch, Approvals approve→invoice/send-back,
-Customers CRUD + 360 + quick-create, Quotes builder + accept/decline +
-convert-to-job, Invoices builder + create-from-job reconciliation, Pricing/
-Inventory/Fleet CRUD + depth); **admin** Staff (roles/pay/charge-out/leave),
-**Reports** (all 5 analytics tables + KPIs), Settings (variation types +
-cost-centre templates + integration status), full job costing/profitability;
-expense capture (job + equipment) with receipts. **184 unit tests**, `tsc`
-clean, iOS bundle clean; money math verified byte-for-byte vs the web (D55).
+All 15 areas' list/detail **reads**; the **full** technician offline-write core
+(time / photos / notes / signature / voice / **variations** / backflow register —
+all uniformly outbox-backed, D68); role-aware nav with structural money-gating
+(`MoneyText`); **every P1 office workflow** (Jobs create/edit/status/type/
+schedule-dispatch + **equipment-usage** + **variation price+approve**, Approvals
+approve→invoice/send-back, Customers CRUD + 360 + quick-create + favourites, Quotes
+builder + accept/decline + convert-to-job, Invoices builder + create-from-job
+reconciliation, Pricing/Inventory/Fleet CRUD + full depth incl. equipment
+documents); **admin** Staff (roles/pay/charge-out/leave), **Reports** (all 5
+analytics tables + KPIs), Settings (variation types + cost-centre templates +
+integration status), full job costing/profitability; expense capture (job +
+equipment) with receipts. **195 unit tests**, `tsc` clean, iOS bundle clean; money
+math verified byte-for-byte vs the web (D55, re-verified D66).
