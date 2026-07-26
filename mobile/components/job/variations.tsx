@@ -79,17 +79,23 @@ export function JobVariationsTab({ jobId, currentUserId }: { jobId: string; curr
       variationsP,
       supabase.from("variation_types_public").select("*").eq("is_active", true).order("name"),
     ]);
-    setVariations((v as any) ?? []);
-    setTypes((t as any) ?? []);
-    for (const item of (v as any) ?? []) {
-      if (item.photo_storage_path) {
-        supabase.storage
-          .from("job-photos")
-          .createSignedUrl(item.photo_storage_path, 3600)
-          .then(({ data: signed }) => {
-            if (signed?.signedUrl) setUrls((prev) => ({ ...prev, [item.photo_storage_path]: signed.signedUrl }));
-          });
-      }
+    const rows = (v as Variation[]) ?? [];
+    setVariations(rows);
+    setTypes((t as VariationType[]) ?? []);
+    // Resolve every photo's signed URL in parallel, then commit them in ONE
+    // setUrls (a per-photo setState in the loop caused an extra re-render each).
+    const withPhotos = rows.filter((item) => !!item.photo_storage_path);
+    if (withPhotos.length > 0) {
+      const resolved = await Promise.all(
+        withPhotos.map(async (item) => {
+          const path = item.photo_storage_path as string;
+          const { data: signed } = await supabase.storage.from("job-photos").createSignedUrl(path, 3600);
+          return [path, signed?.signedUrl] as const;
+        })
+      );
+      const next: Record<string, string> = {};
+      for (const [path, url] of resolved) if (url) next[path] = url;
+      if (Object.keys(next).length > 0) setUrls((prev) => ({ ...prev, ...next }));
     }
   }, [jobId, isOfficeOrAdmin]);
 
@@ -184,7 +190,11 @@ export function JobVariationsTab({ jobId, currentUserId }: { jobId: string; curr
     if (!varWrites.ready || approvingId) return;
     const d = draftFor(v);
     const rate = parseFloat(d.rate);
-    const qty = parseFloat(d.quantity) || v.quantity;
+    // Blank/invalid quantity falls back to the technician's submitted quantity
+    // (the office usually only prices the rate); but a DELIBERATE 0 is honored —
+    // `|| v.quantity` would swallow it (0 is falsy), so distinguish empty from 0.
+    const qtyStr = d.quantity.trim();
+    const qty = qtyStr !== "" && !Number.isNaN(parseFloat(qtyStr)) ? parseFloat(qtyStr) : v.quantity;
     if (Number.isNaN(rate) || rate < 0) { Alert.alert("Rate required", "Enter a rate to price this variation."); return; }
     setApprovingId(v.id);
     try {

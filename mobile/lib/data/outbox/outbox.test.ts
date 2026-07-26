@@ -150,6 +150,48 @@ describe("Outbox — offline delete/insert ordering + recovery", () => {
     expect((await box.nextReady())?.id).toBe("del"); // runs immediately
   });
 
+  it("makes an UPDATE depend on a not-yet-synced insert for the same row (no silent 0-row update)", async () => {
+    // Canonical offline clock-in then clock-out: insert then update of the same
+    // row, both queued before any sync. Without the guard, a transient insert
+    // failure lets the update run first against a row that doesn't exist yet —
+    // updateRow matches 0 rows (a no-op, not an error), the update is marked done,
+    // and the clock-out's hours are silently lost when the insert finally lands.
+    const store = new InMemoryOutboxStore();
+    const box = new Outbox(store, mockClock());
+    await box.enqueue(write("ins", { rowId: "T", op: "insert", table: "time_entries", createdAt: 1 }));
+    await box.enqueue(write("upd", { rowId: "T", op: "update", table: "time_entries", createdAt: 2 }));
+
+    const upd = (await store.all()).find((o) => o.id === "upd");
+    expect(upd?.dependsOn).toBe("ins"); // update waits for the insert to complete
+
+    // Insert fails/backs off → the update must NOT become eligible.
+    await box.markFailed((await store.all()).find((o) => o.id === "ins")!, "transient");
+    expect(await box.nextReady()).toBeUndefined();
+    // Once the insert completes, the update runs.
+    await box.markDone("ins");
+    expect((await box.nextReady())?.id).toBe("upd");
+  });
+
+  it("does NOT override an update's author-set dependency (compound writes keep their ordering)", async () => {
+    const store = new InMemoryOutboxStore();
+    const box = new Outbox(store, mockClock());
+    await box.enqueue(write("ins", { rowId: "R", op: "insert", table: "invoices", createdAt: 1 }));
+    // An update that already declares a dependency (e.g. a compound-write child)
+    // must keep it, not be re-pointed at the same-row insert.
+    await box.enqueue(write("upd", { rowId: "R", op: "update", table: "invoices", createdAt: 2, dependsOn: "parentOp" }));
+    const upd = (await store.all()).find((o) => o.id === "upd");
+    expect(upd?.dependsOn).toBe("parentOp");
+  });
+
+  it("does NOT add a dependency when updating an already-synced row (no queued insert)", async () => {
+    const store = new InMemoryOutboxStore();
+    const box = new Outbox(store, mockClock());
+    await box.enqueue(write("upd", { rowId: "R", op: "update", table: "jobs" }));
+    const upd = (await store.all()).find((o) => o.id === "upd");
+    expect(upd?.dependsOn ?? null).toBeNull();
+    expect((await box.nextReady())?.id).toBe("upd"); // runs immediately
+  });
+
   it("reclaims inflight ops (crash recovery) back to pending", async () => {
     const store = new InMemoryOutboxStore();
     const box = new Outbox(store, mockClock());

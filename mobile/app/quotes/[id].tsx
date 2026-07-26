@@ -35,7 +35,9 @@ export default function QuoteDetailScreen() {
     setUpdating(true);
     try {
       await finance.setQuoteStatus(id, status);
-      setQuote((q) => (q ? { ...q, status } : q)); // optimistic
+      setQuote((q) => (q ? { ...q, status } : q)); // apply once the write is queued/synced
+    } catch (e) {
+      Alert.alert("Couldn't update quote", e instanceof Error ? e.message : "Please try again.");
     } finally {
       setUpdating(false);
     }

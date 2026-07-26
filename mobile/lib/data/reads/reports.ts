@@ -14,7 +14,10 @@ export interface ReportSummary {
   activeJobs: number;
 }
 
-const JOB_STATUSES = ["pending", "scheduled", "in_progress", "completed", "cancelled"] as const;
+// Includes on_hold — the web reports dashboard counts all six job statuses, so
+// omitting it would drop that whole bucket and the per-status counts wouldn't
+// sum to the job total.
+const JOB_STATUSES = ["pending", "scheduled", "in_progress", "on_hold", "completed", "cancelled"] as const;
 
 export async function getReportSummary(): Promise<ReportSummary> {
   const jobCountQueries = JOB_STATUSES.map((s) =>

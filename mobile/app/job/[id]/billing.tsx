@@ -67,7 +67,7 @@ export default function JobBillingScreen() {
   const lineTotal = data ? data.lineItems.reduce((s, i) => s + Number(i.total ?? 0), 0) : 0;
   const expenseTotal = data ? data.expenses.reduce((s, e) => s + Number(e.amount ?? 0), 0) : 0;
   const equipHours = equipment ? equipment.usage.reduce((s, u) => s + Number(u.hours), 0) : 0;
-  const equipCost = equipment ? equipment.usage.reduce((s, u) => s + Number(u.hours) * Number(u.cost_per_hour), 0) : 0;
+  const equipCost = equipment ? equipment.usage.reduce((s, u) => s + Number(u.total_cost), 0) : 0;
 
   async function addEquipmentUsage() {
     if (!equipDraft || savingEquip || !fleet.ready) return;
@@ -110,6 +110,8 @@ export default function JobBillingScreen() {
       await billing.addLineItem({ jobId: id, name: draft.name.trim(), description: draft.description.trim() || null, quantity: qty, unitPrice: price });
       setDraft(null);
       await load();
+    } catch (e) {
+      Alert.alert("Couldn't add line item", e instanceof Error ? e.message : "Please try again.");
     } finally {
       setSaving(false);
     }
@@ -263,7 +265,7 @@ export default function JobBillingScreen() {
                   {u.hours.toFixed(1)}h{u.usage_date ? ` · ${u.usage_date}` : ""}{u.notes ? ` · ${u.notes}` : ""}
                 </Text>
               </View>
-              <MoneyText amount={u.hours * u.cost_per_hour} style={styles.lineTotal} />
+              <MoneyText amount={u.total_cost} style={styles.lineTotal} />
             </TouchableOpacity>
           ))
         )}

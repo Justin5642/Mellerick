@@ -216,7 +216,7 @@ export default function EquipmentDetailScreen() {
               <TouchableOpacity key={u.id} style={styles.expRow} onLongPress={() => confirmRemoveUsage(u)}>
                 <View style={{ flex: 1 }}>
                   <Text style={styles.expName}>{u.hours}h{u.job_id ? " · on a job" : ""}</Text>
-                  <Text style={styles.expMeta}>{new Date(u.usage_date).toLocaleDateString("en-AU")}{u.notes ? ` · ${u.notes}` : ""}</Text>
+                  <Text style={styles.expMeta}>{u.usage_date ? new Date(u.usage_date).toLocaleDateString("en-AU") : "No date"}{u.notes ? ` · ${u.notes}` : ""}</Text>
                 </View>
               </TouchableOpacity>
             ))}

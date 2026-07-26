@@ -44,11 +44,18 @@ export class Outbox {
         return;
       }
     }
-    if (op.kind === "write" && op.op === "delete") {
-      // If the target row hasn't synced yet, a queued insert for it still
-      // exists. Make the delete wait for that insert to COMPLETE — otherwise the
-      // delete can run while the insert is merely backed off after a transient
-      // failure, and the insert's later retry would resurrect the deleted row.
+    if (op.kind === "write" && (op.op === "delete" || op.op === "update") && !op.dependsOn) {
+      // If the target row hasn't synced yet, a queued insert for it still exists.
+      // Make the delete/update wait for that insert to COMPLETE — otherwise it can
+      // run while the insert is merely backed off after a transient failure:
+      //   • a delete's later insert-retry would resurrect the deleted row;
+      //   • an update would hit ZERO rows (updateRow on a not-yet-existing id is a
+      //     no-op, not an error, so it'd be marked done) and its change — e.g. a
+      //     clock-out's hours — would be silently lost when the insert lands with
+      //     only the original columns.
+      // Only applied when the op has no author-set dependency (compound writes
+      // already encode their own ordering); a plain edit-after-offline-create is
+      // exactly the unguarded case this closes.
       const { table, rowId } = op;
       const all = await this.store.all();
       const pendingInsert = all.find((o) => {
@@ -68,7 +75,17 @@ export class Outbox {
     const all = await this.store.all();
     for (const o of all) {
       if (o.status === "inflight") {
-        await this.store.update(o.id, { status: "pending", nextAttemptAt: 0 });
+        // Count the crash as an attempt. An op that strands "inflight" by hard-
+        // crashing the runtime mid-dispatch (e.g. an OOM in uploadObject) would
+        // otherwise reclaim→dispatch→crash→reclaim forever without ever accruing
+        // attempts — never reaching the terminal "dead" state. Charging an attempt
+        // makes a genuine poison-crash op dead-letter after MAX_ATTEMPTS instead.
+        const attempts = o.attempts + 1;
+        if (attempts >= MAX_ATTEMPTS) {
+          await this.store.update(o.id, { status: "dead", attempts, error: "crashed repeatedly mid-dispatch" });
+        } else {
+          await this.store.update(o.id, { status: "pending", attempts, nextAttemptAt: 0 });
+        }
       }
     }
   }

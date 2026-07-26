@@ -8,6 +8,7 @@ import { useFinance } from "../../lib/data/hooks/useFinance";
 import { CustomerPicker } from "../../components/finance/customer-picker";
 import { localDateKey } from "../../lib/date";
 import { LineItemsEditor, newItem, type EditableItem } from "../../components/finance/line-items-editor";
+import { MoneyText } from "../../design/components/MoneyText";
 import { getInvoiceJobPrefill } from "../../lib/data/reads/finance";
 import { getCustomer } from "../../lib/data/reads/customers";
 import type { CustomerListRow } from "../../lib/data/reads/customers";
@@ -103,6 +104,8 @@ export default function NewInvoiceScreen() {
         Alert.alert("Saved offline", "The draft invoice is queued and will sync when you're back online.");
         router.back();
       }
+    } catch (e) {
+      Alert.alert("Couldn't create invoice", e instanceof Error ? e.message : "Please try again.");
     } finally {
       setSaving(false);
     }
@@ -141,7 +144,8 @@ export default function NewInvoiceScreen() {
             {availableVariations.map((v) => (
               <TouchableOpacity key={v.id} style={styles.varChip} onPress={() => addVariation(v)}>
                 <Ionicons name="add" size={14} color={colors.blue600} />
-                <Text style={styles.varChipText} numberOfLines={1}>{v.name} · ${v.unitPrice.toFixed(2)}</Text>
+                <Text style={styles.varChipText} numberOfLines={1}>{v.name} · </Text>
+                <MoneyText amount={v.unitPrice} style={styles.varChipText} />
               </TouchableOpacity>
             ))}
           </View>

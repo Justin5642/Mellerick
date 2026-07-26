@@ -45,7 +45,7 @@ export async function getJobBilling(jobId: string): Promise<JobBilling | null> {
     supabase.from("jobs").select("job_number, title").eq("id", jobId).single(),
     supabase.from("job_items").select("id, name, description, quantity, unit_price, total").eq("job_id", jobId).order("created_at"),
     supabase.from("job_expenses").select("id, supplier_name, category, description, amount, gst_amount, invoice_number, invoice_date, receipt_storage_path").eq("job_id", jobId).order("created_at", { ascending: false }),
-    supabase.from("purchase_orders").select("id, po_number, client_reference, total_value, po_cost_centers(id, name, allocated_amount)").eq("job_id", jobId),
+    supabase.from("purchase_orders").select("id, po_number, client_reference, total_value, po_cost_centers(id, name, allocated_amount)").eq("job_id", jobId).order("created_at"),
   ]);
   const job = jobRes.data as { job_number: number | null; title: string } | null;
   if (!job) return null;
@@ -77,6 +77,7 @@ export interface JobEquipmentUsage {
   hours: number;
   notes: string | null;
   cost_per_hour: number;
+  total_cost: number;
 }
 export interface JobEquipmentOption {
   id: string;
@@ -110,16 +111,21 @@ export async function getJobEquipment(jobId: string): Promise<JobEquipment> {
   const costById = new Map(optionRows.map((e) => [e.id, computeEquipmentCost(e).costPerHour]));
 
   type UsageRow = { id: string; equipment_id: string; usage_date: string; hours: number; notes: string | null; equipment: { name: string; category: string } | null };
-  const usage: JobEquipmentUsage[] = ((usageRes.data as unknown as UsageRow[]) ?? []).map((r) => ({
-    id: r.id,
-    equipment_id: r.equipment_id,
-    equipment_name: r.equipment?.name ?? "Unknown equipment",
-    category: r.equipment?.category ?? "",
-    usage_date: r.usage_date,
-    hours: Number(r.hours),
-    notes: r.notes,
-    cost_per_hour: costById.get(r.equipment_id) ?? 0,
-  }));
+  const usage: JobEquipmentUsage[] = ((usageRes.data as unknown as UsageRow[]) ?? []).map((r) => {
+    const hours = Number(r.hours);
+    const costPerHour = costById.get(r.equipment_id) ?? 0;
+    return {
+      id: r.id,
+      equipment_id: r.equipment_id,
+      equipment_name: r.equipment?.name ?? "Unknown equipment",
+      category: r.equipment?.category ?? "",
+      usage_date: r.usage_date,
+      hours,
+      notes: r.notes,
+      cost_per_hour: costPerHour,
+      total_cost: hours * costPerHour,
+    };
+  });
 
   const options: JobEquipmentOption[] = optionRows.map((e) => ({
     id: e.id,

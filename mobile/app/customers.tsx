@@ -49,20 +49,25 @@ export default function CustomersScreen() {
   }, [loadingMore, hasMore, query, customers.length]);
 
   // Toggle favourite: optimistically flip + re-pin (favourites first, then name),
-  // then persist through the outbox. Revert the row on write failure.
+  // then persist through the outbox. Revert (and re-sort) the row on write failure.
   const toggleFavorite = useCallback(
     async (row: CustomerListRow) => {
       if (!writes.ready) return;
       const next = !row.is_favorite;
-      const resort = (list: CustomerListRow[]) =>
+      // Favourites-first, then name — mirrors the server ordering in listCustomers.
+      const resortWith = (list: CustomerListRow[], fav: boolean) =>
         list
-          .map((c) => (c.id === row.id ? { ...c, is_favorite: next } : c))
+          .map((c) => (c.id === row.id ? { ...c, is_favorite: fav } : c))
           .sort((a, b) => Number(b.is_favorite) - Number(a.is_favorite) || a.name.localeCompare(b.name));
-      setCustomers(resort);
+      // Invalidate any in-flight/debounced search so a late server response can't
+      // land after this optimistic toggle and visibly un-flip the star before the
+      // write has synced (search() bails when its id != reqId.current).
+      reqId.current++;
+      setCustomers((prev) => resortWith(prev, next));
       try {
         await writes.setFavorite(row.id, next);
       } catch {
-        setCustomers((prev) => prev.map((c) => (c.id === row.id ? { ...c, is_favorite: row.is_favorite } : c)));
+        setCustomers((prev) => resortWith(prev, row.is_favorite)); // revert + re-sort
         Alert.alert("Couldn't update favourite", "Please try again.");
       }
     },

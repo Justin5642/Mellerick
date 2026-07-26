@@ -116,10 +116,23 @@ export default function JobDetailScreen() {
     }
   }, [details, id, job, jobEdit, savingEdit]);
 
-  if (loading || !job) {
+  if (loading) {
     return (
       <SafeAreaView style={styles.center} edges={["bottom", "left", "right"]}>
         <ActivityIndicator size="large" color={colors.blue600} />
+      </SafeAreaView>
+    );
+  }
+  // Loaded but no job → not found / no access / offline (the row read failed).
+  // Show a clear message like every sibling detail screen, not an endless spinner.
+  if (!job) {
+    return (
+      <SafeAreaView style={styles.center} edges={["bottom", "left", "right"]}>
+        <Text style={styles.notFound}>Job not found.</Text>
+        <Text style={styles.notFoundHint}>It may have been removed, you may not have access, or you&apos;re offline.</Text>
+        <TouchableOpacity style={styles.notFoundBtn} onPress={() => router.back()}>
+          <Text style={styles.notFoundBtnText}>Go back</Text>
+        </TouchableOpacity>
       </SafeAreaView>
     );
   }
@@ -269,7 +282,11 @@ export default function JobDetailScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.bg },
-  center: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: colors.bg },
+  center: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: colors.bg, padding: 24 },
+  notFound: { fontSize: 16, fontWeight: "700", color: colors.slate900 },
+  notFoundHint: { fontSize: 13, color: colors.slate500, textAlign: "center", marginTop: 6 },
+  notFoundBtn: { marginTop: 16, paddingHorizontal: 20, paddingVertical: 10, borderRadius: 10, backgroundColor: colors.blue600 },
+  notFoundBtnText: { color: "#fff", fontWeight: "700", fontSize: 14 },
   header: {
     flexDirection: "row",
     justifyContent: "space-between",
