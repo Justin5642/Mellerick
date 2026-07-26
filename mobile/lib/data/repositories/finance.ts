@@ -31,6 +31,11 @@ export interface CreateInvoiceInput {
   notes?: string | null;
   workDescription?: string | null;
   items: LineItemInput[];
+  /** Create-from-job reconciliation (requires jobId): mark these approved
+   * variations billed (set their invoice_id) and clear the job's
+   * ready_to_invoice flag so it drops off the queue — mirrors the web
+   * invoices/new "create from job" flow. */
+  reconcile?: { markVariationIds: string[] } | null;
 }
 export interface EditInvoiceInput {
   invoiceId: string;
@@ -96,6 +101,16 @@ export class FinanceRepository {
       status: "draft",
     });
     await this.insertItems("invoice", "invoice_items", "invoice_id", invoiceId, input.items, parentOp);
+    // Create-from-job reconciliation: mark the pulled-in variations billed and
+    // clear the job's ready_to_invoice, both gated on the invoice row landing
+    // first (so a partial failure never marks a variation billed against a
+    // non-existent invoice). Only runs when a jobId + reconcile were supplied.
+    if (input.jobId && input.reconcile) {
+      for (const vid of input.reconcile.markVariationIds) {
+        await this.write("job_variation", "update", "job_variations", vid, { invoice_id: invoiceId }, parentOp);
+      }
+      await this.write("job", "update", "jobs", input.jobId, { ready_to_invoice: false }, parentOp);
+    }
     return invoiceId;
   }
 

@@ -26,7 +26,7 @@ send-back)**. So the app is broad and usable but **not at full parity**.
 | Settings | partial | variation-types / cost-centre-template / account-code config (med/low) |
 | Reports | partial | staff cost & efficiency table (**high**) + 4 analytics tables (med) |
 | Jobs | partial | ~~reassign/reschedule~~ (D41), ~~status/priority edit~~ (D43); **create job**, edit customer/site/title/type, price+approve variations still open |
-| Invoices | partial | prefill-from-job + add unbilled variations (**high ×2**); Send/PDF/Xero (ext) |
+| Invoices | partial | ~~prefill-from-job + add unbilled variations~~ **DONE** (D44/Q15); Send/PDF/Xero (ext) |
 | Approvals | partial ✅ | ~~approve→auto-invoice, send-back~~ **DONE** (D40); Xero auto-push (ext) |
 | Schedule | partial ✅ | ~~assign/unassign, reschedule~~ **DONE** (D41); day/week grid deferred |
 
@@ -36,7 +36,7 @@ send-back)**. So the app is broad and usable but **not at full parity**.
 1. ~~**Approvals actions**~~ — **DONE (D40)**: approve→auto-draft-invoice (+ items, dup-guard) + Send-Back/reject with note + calendar resync. *(Xero auto-push on approve remains an external gate.)*
 2. ~~**Schedule dispatch**~~ — **DONE (D41)**: reassign/unassign + reschedule (DST-safe, offline-durable, calendar resync). Day/week grid + drag-drop deferred (touch action sheet is the mobile equivalent).
 3. **Jobs create + edit** — a create-job flow (title/customer/site/assignee/type/priority/schedule/notes) and edit of an existing job (reassign, reschedule, change customer/site/title/type); admin delete. Unlocks the Dashboard/Recent-Jobs "create" affordance too.
-4. **Invoice-from-job (Q15)** — prefill invoice items from a linked job's `job_items` + add approved-but-unbilled variations and mark them billed + reset `ready_to_invoice`. Closes the reconciliation gap the generic builder leaves open.
+4. ~~**Invoice-from-job (Q15)**~~ — **DONE (D44)**: prefill from `job_items` + work description + variations; reconcile marks variations billed + clears `ready_to_invoice`, durable via the outbox.
 
 **P2 — technician + field:**
 5. **Backflow offline-durable writes** — route register-device / log-test / signature / authority-submit through the outbox (they're currently direct writes, so not offline-safe — the one place the tech app isn't fully offline).

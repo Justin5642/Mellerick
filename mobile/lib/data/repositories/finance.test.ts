@@ -60,6 +60,42 @@ describe("FinanceRepository.createInvoice", () => {
     }
     expect(items[0].payload).toMatchObject({ name: "Labour", quantity: 2, unit_price: 90 });
   });
+
+  it("create-from-job: reconcile marks variations billed and clears ready_to_invoice, all gated on the invoice", async () => {
+    const { outbox, ops } = captureOutbox();
+    const repo = new FinanceRepository(outbox, seqIds(), fixedTime());
+    const id = await repo.createInvoice({
+      customerId: "cust-1",
+      jobId: "job-1",
+      title: "#42 — Fix",
+      items: [{ name: "Labour", quantity: 1, unitPrice: 100 }],
+      reconcile: { markVariationIds: ["var-1", "var-2"] },
+    });
+    const [inv] = byTable(ops, "invoices");
+
+    const varUpdates = byTable(ops, "job_variations");
+    expect(varUpdates).toHaveLength(2);
+    for (const v of varUpdates) {
+      expect(v.op).toBe("update");
+      expect(v.dependsOn).toBe(inv.id); // never mark billed before the invoice exists
+      expect(v.payload).toEqual({ invoice_id: id });
+    }
+    expect(varUpdates.map((v) => v.rowId).sort()).toEqual(["var-1", "var-2"]);
+
+    const [jobUpdate] = byTable(ops, "jobs");
+    expect(jobUpdate.op).toBe("update");
+    expect(jobUpdate.rowId).toBe("job-1");
+    expect(jobUpdate.dependsOn).toBe(inv.id);
+    expect(jobUpdate.payload).toEqual({ ready_to_invoice: false });
+  });
+
+  it("does NOT reconcile when no reconcile is supplied (plain create leaves the job/variations alone)", async () => {
+    const { outbox, ops } = captureOutbox();
+    const repo = new FinanceRepository(outbox, seqIds(), fixedTime());
+    await repo.createInvoice({ customerId: "c1", jobId: "job-1", title: "X", items: [{ name: "L", quantity: 1, unitPrice: 10 }] });
+    expect(byTable(ops, "job_variations")).toHaveLength(0);
+    expect(byTable(ops, "jobs")).toHaveLength(0);
+  });
 });
 
 describe("FinanceRepository.editInvoice", () => {

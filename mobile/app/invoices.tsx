@@ -60,20 +60,23 @@ export default function InvoicesScreen() {
         <Text style={styles.readyTitle}>Ready to Invoice ({readyCount})</Text>
       </View>
       {readyJobs.map((j) => (
-        <TouchableOpacity key={`job-${j.id}`} style={styles.readyRow} onPress={() => router.push(`/job/${j.id}`)}>
-          <Text style={styles.readyRowText} numberOfLines={1}>#{j.job_number} — {j.title}</Text>
-          <Text style={styles.readyRowSub} numberOfLines={1}>{j.customers?.name ?? "—"}</Text>
+        <TouchableOpacity key={`job-${j.id}`} style={styles.readyRow} onPress={() => router.push(`/invoices/new?jobId=${j.id}`)}>
+          <View style={styles.readyVarRow}>
+            <Text style={styles.readyRowText} numberOfLines={1}>#{j.job_number} — {j.title}</Text>
+            <Ionicons name="chevron-forward" size={14} color={colors.orange700} />
+          </View>
+          <Text style={styles.readyRowSub} numberOfLines={1}>{j.customers?.name ?? "—"} · tap to invoice</Text>
         </TouchableOpacity>
       ))}
       {readyVars.map((v) => (
-        <TouchableOpacity key={`var-${v.id}`} style={styles.readyRow} onPress={() => v.jobs?.id && router.push(`/job/${v.jobs.id}`)} disabled={!v.jobs?.id}>
+        <TouchableOpacity key={`var-${v.id}`} style={styles.readyRow} onPress={() => v.jobs?.id && router.push(`/invoices/new?jobId=${v.jobs.id}`)} disabled={!v.jobs?.id}>
           <View style={styles.readyVarRow}>
             <Text style={styles.readyRowText} numberOfLines={1}>
               {v.jobs ? `#${v.jobs.job_number} — ${v.jobs.title}` : "Variation"} (variation)
             </Text>
             <MoneyText amount={v.total_amount} style={styles.readyAmount} />
           </View>
-          <Text style={styles.readyRowSub} numberOfLines={1}>{v.jobs?.customers?.name ?? "—"}</Text>
+          <Text style={styles.readyRowSub} numberOfLines={1}>{v.jobs?.customers?.name ?? "—"} · tap to invoice</Text>
         </TouchableOpacity>
       ))}
     </View>

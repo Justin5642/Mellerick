@@ -125,6 +125,56 @@ export async function listReadyToInvoice(): Promise<{ jobs: ReadyJob[]; variatio
   };
 }
 
+export interface InvoiceJobPrefill {
+  customerId: string;
+  customerName: string | null;
+  title: string;
+  workDescription: string | null;
+  items: { name: string; description: string | null; quantity: number; unitPrice: number }[];
+  unbilledVariations: { id: string; name: string; description: string; unitPrice: number }[];
+}
+
+// "Create invoice from job" prefill — mirrors the web invoices/new. Line items
+// come from the job's built-up job_items (NOTE: unlike the web this does not
+// first call /api/jobs/[id]/sync-billing — that route is cookie-only and rejects
+// a mobile Bearer token, an external gate; items may be slightly stale). Unbilled
+// approved variations are offered to add; work description prefers the completion
+// notes then the voice-report transcript.
+export async function getInvoiceJobPrefill(jobId: string): Promise<InvoiceJobPrefill | null> {
+  const [jobRes, itemsRes, varsRes] = await Promise.all([
+    supabase.from("jobs").select("customer_id, title, completion_notes, voice_report_transcript, customers(name)").eq("id", jobId).single(),
+    supabase.from("job_items").select("name, description, quantity, unit_price").eq("job_id", jobId).order("created_at"),
+    supabase.from("job_variations").select("id, custom_name, quantity, unit, rate, total_amount, variation_types(name)").eq("job_id", jobId).in("status", ["approved", "auto_approved"]).is("invoice_id", null),
+  ]);
+  const job = jobRes.data as { customer_id: string; title: string; completion_notes: string | null; voice_report_transcript: string | null; customers: { name: string } | null } | null;
+  if (!job) return null;
+
+  type ItemRow = { name: string; description: string | null; quantity: number; unit_price: number };
+  const items = ((itemsRes.data as unknown as ItemRow[]) ?? []).map((i) => ({
+    name: i.name,
+    description: i.description ?? null,
+    quantity: Number(i.quantity),
+    unitPrice: Number(i.unit_price),
+  }));
+
+  type VarRow = { id: string; custom_name: string | null; quantity: number; unit: string | null; rate: number | null; total_amount: number | null; variation_types: { name: string } | null };
+  const unbilledVariations = ((varsRes.data as unknown as VarRow[]) ?? []).map((v) => ({
+    id: v.id,
+    name: v.variation_types?.name ?? v.custom_name ?? "Variation",
+    description: `${v.quantity} ${v.unit ?? ""}${v.rate != null ? ` @ $${Number(v.rate).toFixed(2)}` : ""}`.trim(),
+    unitPrice: Number(v.total_amount ?? Number(v.rate ?? 0) * Number(v.quantity)),
+  }));
+
+  return {
+    customerId: job.customer_id,
+    customerName: job.customers?.name ?? null,
+    title: job.title,
+    workDescription: (job.completion_notes || job.voice_report_transcript || "").trim() || null,
+    items,
+    unbilledVariations,
+  };
+}
+
 export async function listQuotes(offset: number, limit: number): Promise<QuoteListRow[]> {
   const { data } = await supabase
     .from("quotes")

@@ -13,6 +13,9 @@ export interface EditableItem {
   description: string;
   quantity: string;
   unit_price: string;
+  /** Set when this line was pulled from an unbilled job variation (create-from-
+   * job flow) — so it can be marked billed on save. Not user-editable. */
+  variationId?: string;
 }
 
 let counter = 0;
