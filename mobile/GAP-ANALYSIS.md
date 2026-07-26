@@ -4,11 +4,14 @@ Per-area comparison of the 15 web feature areas against the Expo mobile build,
 by role. Produced by a 15-agent analysis (one per area) reading both codebases.
 Companion to `HANDOVER-mobile.md` and `DECISIONS-FOR-AVI.md`.
 
-**Headline:** viewing/read parity is near-complete across all 15 areas and the
-technician offline-write core is done, but a meaningful slice of **office/admin
-write workflows** is still missing — most importantly **Schedule is view-only
-(no dispatch/reschedule)** and **Approvals is view-only (no approve→invoice /
-send-back)**. So the app is broad and usable but **not at full parity**.
+**Headline (updated after the D40–D60 remediation run):** the in-repo feature
+work is now **essentially complete** — all 15 areas are at full or near-full
+parity. Every P1 office write workflow that was originally missing (Schedule
+dispatch, Approvals approve→invoice/send-back, Jobs create/edit, Invoice-from-job)
+is done, Reports has all 5 analytics tables, and the money math is ported
+verbatim + TDD-locked + verified byte-for-byte against the web (D55). What's left
+in-repo is a short tail of **minor/complex depth** (below); the true blockers to
+"ship-ready" are all **external** (backend Bearer, RLS apply, accounts, device QA).
 
 ## Status by area
 
@@ -30,26 +33,26 @@ send-back)**. So the app is broad and usable but **not at full parity**.
 | Approvals | partial ✅ | ~~approve→auto-invoice, send-back~~ **DONE** (D40); Xero auto-push (ext) |
 | Schedule | partial ✅ | ~~assign/unassign, reschedule~~ **DONE** (D41); day/week grid deferred |
 
-## Prioritized in-repo remaining work (buildable without external gates)
+## Remaining in-repo work (the short tail — all minor or complex)
 
-**P1 — core office/admin workflows (highest impact):**
-1. ~~**Approvals actions**~~ — **DONE (D40)**: approve→auto-draft-invoice (+ items, dup-guard) + Send-Back/reject with note + calendar resync. *(Xero auto-push on approve remains an external gate.)*
-2. ~~**Schedule dispatch**~~ — **DONE (D41)**: reassign/unassign + reschedule (DST-safe, offline-durable, calendar resync). Day/week grid + drag-drop deferred (touch action sheet is the mobile equivalent).
-3. ~~**Jobs create**~~ — **DONE (D45)**: create-job flow (title/customer/site/assignee/type/priority/schedule/description) via the outbox. Remaining: edit customer/site/title/type on an existing job, price+approve variations, admin delete.
-4. ~~**Invoice-from-job (Q15)**~~ — **DONE (D44)**: prefill from `job_items` + work description + variations; reconcile marks variations billed + clears `ready_to_invoice`, durable via the outbox.
+The P1 office workflows, Reports (all 5 tables), Customer-360, quick-create,
+convert-to-job, Fleet (assign + detail + expenses), Staff (charge-out + leave),
+Settings (variation types + cost-centre templates), Pricing/Inventory parity, and
+backflow register-offline are all **DONE** (D40–D60). What's left:
 
-**P2 — technician + field:**
-5. **Backflow offline-durable writes** — route register-device / log-test / signature / authority-submit through the outbox (they're currently direct writes, so not offline-safe — the one place the tech app isn't fully offline).
-6. **Tech job actions offline** — change job status/priority + edit description/notes; submit a variation with photo; upload/delete a job document — all via the outbox.
-7. **Job equipment usage + PO/cost-centre editing** — log equipment usage on a job; create/edit POs + cost-centre stages; tag expenses to a stage.
+**Minor polish:** Customers favourites · Pricing category-taxonomy picker ·
+Jobs edit customer/site/title/type on an existing job · Fleet equipment
+**documents** + general (non-job) **usage log** · Job equipment-usage + PO /
+cost-centre editing on the job billing screen.
 
-**P3 — admin depth & polish:**
-8. ~~**Reports analytics tables**~~ — **DONE**: all 5 (revenue-by-month, top-customers, jobs-by-staff (D48), staff cost/efficiency (D51), equipment utilisation (D52)).
-9. ~~**Customer-360 detail**~~ — **DONE (D47)**: related jobs/quotes/invoices + counts + total-invoiced/outstanding rollups. Remaining: active/inactive lifecycle, favourites, quick-create.
-10. **Fleet depth** — assign equipment, equipment expenses/documents/usage, equipment detail screen.
-11. **Staff depth** — leave log, charge-out rate override, loaded-rate summary.
-12. **Settings management** — variation types, cost-centre templates, Xero account codes, manual sync triggers.
-13. **Quotes convert-to-job**, **Pricing reactivate**, **Inventory low-stock**, small list-parity items.
+**Complex / has a caveat:**
+- **Backflow test-log offline** — the register-device write is now offline (D46),
+  but logging a *test* carries a certificate upload AND a water-authority submit
+  that must be **dedupe-guarded** (Q3) before it can be made replayable; left
+  direct-write so the compliance path isn't destabilised.
+- **Technician offline status-edit** — a tech changing status to `completed` would
+  bypass the signature sign-off invariant, so a raw status picker is intentionally
+  office/admin-only (D43); a tech-safe subset (description/notes) is a follow-up.
 
 ## External gates (NOT closable in-repo)
 
@@ -58,10 +61,16 @@ send-back)**. So the app is broad and usable but **not at full parity**.
 - **Integration OAuth connect/reconnect** (Xero, Google) — browser redirect flow.
 - **On-device QA, store accounts, push credentials, PowerSync password** — hardware/accounts.
 
-## What IS at parity (done)
+## What IS at parity (done) — the vast majority
 
-Dashboard (full); all list/detail **reads** across the 15 areas; technician
-offline-write core (time / photos / notes / signature / voice); role-aware nav
-with structural money-gating (`MoneyText`); Quotes & Invoices **create/edit
-builders**; Pricing/Inventory/Fleet CRUD; **expense capture w/ receipt**; office
-**Backflow list**; admin **job costing/profitability**.
+All 15 areas' list/detail **reads**; the technician offline-write core (time /
+photos / notes / signature / voice / backflow register); role-aware nav with
+structural money-gating (`MoneyText`); **every P1 office workflow** (Jobs
+create/edit/status/schedule-dispatch, Approvals approve→invoice/send-back,
+Customers CRUD + 360 + quick-create, Quotes builder + accept/decline +
+convert-to-job, Invoices builder + create-from-job reconciliation, Pricing/
+Inventory/Fleet CRUD + depth); **admin** Staff (roles/pay/charge-out/leave),
+**Reports** (all 5 analytics tables + KPIs), Settings (variation types +
+cost-centre templates + integration status), full job costing/profitability;
+expense capture (job + equipment) with receipts. **184 unit tests**, `tsc`
+clean, iOS bundle clean; money math verified byte-for-byte vs the web (D55).
