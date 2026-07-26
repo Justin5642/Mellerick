@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { View, Text, SectionList, StyleSheet, RefreshControl, TouchableOpacity, Modal, TextInput, Alert, ScrollView } from "react-native";
-import { Stack } from "expo-router";
+import { Stack, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { colors } from "../lib/theme";
 import { MoneyText } from "../design/components/MoneyText";
@@ -47,6 +47,7 @@ function toDraft(e: Equipment | null): Draft {
 
 export default function FleetScreen() {
   const fleet = useFleet();
+  const router = useRouter();
   const isAdmin = useIsAdmin(); // equipment writes are admin-only (RLS + web)
   const [items, setItems] = useState<Equipment[]>([]);
   const [refreshing, setRefreshing] = useState(false);
@@ -171,6 +172,9 @@ export default function FleetScreen() {
               <MoneyText amount={hourlyRate(item)} style={styles.rate} />
               <Text style={styles.rateUnit}>/ hr (est.)</Text>
             </View>
+            <TouchableOpacity onPress={() => router.push(`/fleet/${item.id}`)} style={styles.detailBtn} accessibilityLabel="Equipment details" hitSlop={8}>
+              <Ionicons name="chevron-forward" size={18} color={colors.slate400} />
+            </TouchableOpacity>
           </TouchableOpacity>
         )}
       />
@@ -260,6 +264,7 @@ const styles = StyleSheet.create({
   name: { fontSize: 14, fontWeight: "600", color: colors.slate900 },
   meta: { fontSize: 12, color: colors.slate500, marginTop: 2, textTransform: "capitalize" },
   rateCol: { alignItems: "flex-end" },
+  detailBtn: { paddingLeft: 8, paddingVertical: 8 },
   rate: { fontSize: 14, fontWeight: "700", color: colors.slate900 },
   rateUnit: { fontSize: 11, color: colors.slate400 },
   empty: { textAlign: "center", color: colors.slate400, marginTop: 40, fontSize: 13 },

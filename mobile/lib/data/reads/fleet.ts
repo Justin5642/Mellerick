@@ -27,6 +27,40 @@ export async function listEquipment(): Promise<Equipment[]> {
   return (data as unknown as Equipment[]) ?? [];
 }
 
+export async function getEquipment(id: string): Promise<Equipment | null> {
+  const { data } = await supabase.from("equipment").select(SELECT).eq("id", id).single();
+  return (data as unknown as Equipment) ?? null;
+}
+
+export interface EquipmentExpense {
+  id: string;
+  category: string;
+  supplier_name: string | null;
+  description: string | null;
+  invoice_number: string | null;
+  expense_date: string | null;
+  amount: number;
+  gst_amount: number;
+  receipt_storage_path: string | null;
+}
+
+export async function listEquipmentExpenses(equipmentId: string): Promise<EquipmentExpense[]> {
+  const { data } = await supabase
+    .from("equipment_expenses")
+    .select("id, category, supplier_name, description, invoice_number, expense_date, amount, gst_amount, receipt_storage_path")
+    .eq("equipment_id", equipmentId)
+    .order("expense_date", { ascending: false })
+    .order("created_at", { ascending: false });
+  return (data as unknown as EquipmentExpense[]) ?? [];
+}
+
+// Short-lived signed URL for an equipment-expense receipt (equipment-documents
+// bucket). Online-only; null if unavailable.
+export async function getEquipmentReceiptSignedUrl(storagePath: string): Promise<string | null> {
+  const { data } = await supabase.storage.from("equipment-documents").createSignedUrl(storagePath, 60);
+  return data?.signedUrl ?? null;
+}
+
 // The web's equipment cost model: total annual cost / target hours + fuel/hr.
 // Depreciation = purchase_cost / estimated_life_years.
 export function hourlyRate(e: Equipment): number {

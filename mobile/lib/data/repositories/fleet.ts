@@ -19,6 +19,25 @@ export interface EquipmentInput {
   notes?: string | null;
 }
 
+// equipment_expenses.category is CHECK-constrained to exactly these values.
+export type EquipmentExpenseCategory = "service" | "repair" | "fuel" | "tyres" | "registration" | "insurance" | "other";
+
+export interface EquipmentExpenseInput {
+  equipmentId: string;
+  loggedBy: string;
+  category: EquipmentExpenseCategory;
+  supplierName?: string | null;
+  description?: string | null;
+  invoiceNumber?: string | null;
+  expenseDate?: string | null; // YYYY-MM-DD; omit → DB default current_date
+  amount: number;
+  gstAmount: number;
+  receipt?: { localUri: string; ext?: string } | null;
+}
+
+// Equipment expense receipts share the web's private equipment-documents bucket.
+const EQUIP_RECEIPT_BUCKET = "equipment-documents";
+
 // Offline-first write path for fleet/equipment (office/admin). All cost fields
 // are money — rendered via MoneyText on the read side.
 export class EquipmentRepository {
@@ -51,6 +70,70 @@ export class EquipmentRepository {
    * (see costing/staff-efficiency). Preserve-on-update: only assigned_to. */
   async assignEquipment(id: string, assignedTo: string | null): Promise<void> {
     await this.write("update", id, { assigned_to: assignedTo });
+  }
+
+  // Log an actual dated spend against a vehicle/equipment item. With a receipt,
+  // the object uploads to Storage first (attachmentPathField → receipt_storage_path),
+  // key derived from the client rowId → idempotent replay. Same pattern as job
+  // expenses (see JobBillingRepository.addExpense).
+  async addEquipmentExpense(input: EquipmentExpenseInput): Promise<{ id: string; receiptStoragePath: string | null }> {
+    const rowId = this.ids.newId();
+    const receiptStoragePath = input.receipt ? `${input.equipmentId}/expense-${rowId}.${input.receipt.ext ?? "jpg"}` : null;
+    const payload: Record<string, unknown> = {
+      equipment_id: input.equipmentId,
+      category: input.category,
+      supplier_name: input.supplierName ?? null,
+      description: input.description ?? null,
+      invoice_number: input.invoiceNumber ?? null,
+      amount: input.amount,
+      gst_amount: input.gstAmount,
+      logged_by: input.loggedBy,
+    };
+    if (input.expenseDate) payload.expense_date = input.expenseDate; // else DB default current_date
+    if (input.receipt) {
+      payload.bucket = EQUIP_RECEIPT_BUCKET; // transport-only; stripped before the row
+      payload.receipt_storage_path = receiptStoragePath;
+    }
+    const op: WriteOperation = {
+      kind: "write",
+      id: this.ids.newId(),
+      rowId,
+      aggregate: "equipment_expense",
+      op: "insert",
+      table: "equipment_expenses",
+      attachmentLocalPath: input.receipt ? input.receipt.localUri : undefined,
+      attachmentPathField: input.receipt ? "receipt_storage_path" : undefined,
+      payload,
+      status: "pending",
+      attempts: 0,
+      nextAttemptAt: 0,
+      createdAt: this.time.nowMs(),
+    };
+    await this.outbox.enqueue(op);
+    return { id: rowId, receiptStoragePath };
+  }
+
+  async removeEquipmentExpense(input: { id: string; receiptStoragePath?: string | null }): Promise<void> {
+    const payload: Record<string, unknown> = {};
+    if (input.receiptStoragePath) {
+      payload.bucket = EQUIP_RECEIPT_BUCKET;
+      payload.receipt_storage_path = input.receiptStoragePath;
+    }
+    const op: WriteOperation = {
+      kind: "write",
+      id: this.ids.newId(),
+      rowId: input.id,
+      aggregate: "equipment_expense",
+      op: "delete",
+      table: "equipment_expenses",
+      attachmentPathField: input.receiptStoragePath ? "receipt_storage_path" : undefined,
+      payload,
+      status: "pending",
+      attempts: 0,
+      nextAttemptAt: 0,
+      createdAt: this.time.nowMs(),
+    };
+    await this.outbox.enqueue(op);
   }
 
   private payload(input: EquipmentInput): Record<string, unknown> {

@@ -51,4 +51,55 @@ describe("EquipmentRepository", () => {
     await new EquipmentRepository(b2.outbox, seqIds(), fixedTime()).assignEquipment("e1", null);
     expect(b2.ops[0].payload).toEqual({ assigned_to: null });
   });
+
+  it("addEquipmentExpense (with receipt) uploads before the row: idempotent key + transport bucket", async () => {
+    const { outbox, ops } = captureOutbox();
+    const res = await new EquipmentRepository(outbox, seqIds(), fixedTime()).addEquipmentExpense({
+      equipmentId: "eq1",
+      loggedBy: "u1",
+      category: "service",
+      supplierName: "Ultra Tune",
+      amount: 350,
+      gstAmount: 35,
+      expenseDate: "2026-07-20",
+      receipt: { localUri: "file:///doc/r.jpg" },
+    });
+    expect(res).toEqual({ id: "id-1", receiptStoragePath: "eq1/expense-id-1.jpg" });
+    const w = ops[0];
+    expect(w).toMatchObject({ table: "equipment_expenses", op: "insert", aggregate: "equipment_expense", rowId: "id-1" });
+    expect(w.attachmentLocalPath).toBe("file:///doc/r.jpg");
+    expect(w.attachmentPathField).toBe("receipt_storage_path");
+    expect(w.payload).toMatchObject({
+      equipment_id: "eq1",
+      category: "service",
+      supplier_name: "Ultra Tune",
+      amount: 350,
+      gst_amount: 35,
+      logged_by: "u1",
+      expense_date: "2026-07-20",
+      bucket: "equipment-documents",
+      receipt_storage_path: "eq1/expense-id-1.jpg",
+    });
+  });
+
+  it("addEquipmentExpense (no receipt / no date) omits attachment + lets the DB default the date", async () => {
+    const { outbox, ops } = captureOutbox();
+    const res = await new EquipmentRepository(outbox, seqIds(), fixedTime()).addEquipmentExpense({ equipmentId: "eq1", loggedBy: "u1", category: "fuel", amount: 90, gstAmount: 9 });
+    expect(res.receiptStoragePath).toBeNull();
+    expect(ops[0].attachmentLocalPath).toBeUndefined();
+    expect(ops[0].payload).not.toHaveProperty("receipt_storage_path");
+    expect(ops[0].payload).not.toHaveProperty("expense_date");
+    expect(ops[0].payload).not.toHaveProperty("bucket");
+  });
+
+  it("removeEquipmentExpense carries the receipt key for cleanup, or a plain delete without one", async () => {
+    const b1 = captureOutbox();
+    await new EquipmentRepository(b1.outbox, seqIds(), fixedTime()).removeEquipmentExpense({ id: "x1", receiptStoragePath: "eq1/expense-x1.jpg" });
+    expect(b1.ops[0]).toMatchObject({ op: "delete", rowId: "x1", attachmentPathField: "receipt_storage_path", payload: { bucket: "equipment-documents", receipt_storage_path: "eq1/expense-x1.jpg" } });
+
+    const b2 = captureOutbox();
+    await new EquipmentRepository(b2.outbox, seqIds(), fixedTime()).removeEquipmentExpense({ id: "x2" });
+    expect(b2.ops[0].attachmentPathField).toBeUndefined();
+    expect(b2.ops[0].payload).toEqual({});
+  });
 });

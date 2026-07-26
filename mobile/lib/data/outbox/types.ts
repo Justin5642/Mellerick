@@ -19,6 +19,7 @@ export type Aggregate =
   | "site"
   | "inventory"
   | "equipment"
+  | "equipment_expense"
   | "job_item"
   | "job_expense";
 
