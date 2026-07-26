@@ -13,7 +13,9 @@ export type Aggregate =
   | "backflow_test"
   | "invoice"
   | "quote"
-  | "pricing_item";
+  | "pricing_item"
+  | "customer"
+  | "site";
 
 // "upload" uploads the attachment to Storage and writes NO metadata row — used
 // when a server-side route (not the client) later writes the row from the object

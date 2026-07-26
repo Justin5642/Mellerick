@@ -82,6 +82,7 @@ function RootNavigation() {
       <Stack.Protected guard={!!session && isOffice}>
         <Stack.Screen name="(office)" />
         <Stack.Screen name="customers" options={{ headerShown: true }} />
+        <Stack.Screen name="customers/[id]" options={{ headerShown: true }} />
         <Stack.Screen name="quotes" options={{ headerShown: true }} />
         <Stack.Screen name="quotes/[id]" options={{ headerShown: true }} />
         <Stack.Screen name="invoices" options={{ headerShown: true }} />
