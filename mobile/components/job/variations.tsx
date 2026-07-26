@@ -4,6 +4,10 @@ import * as ImagePicker from "expo-image-picker";
 import { decode } from "base64-arraybuffer";
 import { supabase } from "../../lib/supabase";
 import { colors } from "../../lib/theme";
+import { MoneyText } from "../../design/components/MoneyText";
+import { useIsOfficeOrAdmin } from "../../design/guards/useRole";
+import { useVariations } from "../../lib/data/hooks/useVariations";
+import { getJobVariationsForApproval } from "../../lib/data/reads/variations";
 
 // Mobile side of CRM spec items "Variations — Auto Approve" and
 // "Variations — Manual Approval". Crew picks a standard variation type
@@ -34,6 +38,12 @@ interface Variation {
   photo_storage_path: string | null;
   status: "auto_approved" | "pending_approval" | "approved" | "rejected";
   created_at: string;
+  // Office/admin-only money columns (present only when read from the base table
+  // via the approval path; the technician public view never returns them).
+  rate?: number | null;
+  total_amount?: number | null;
+  admin_notes?: string | null;
+  variation_types?: { name: string } | null;
 }
 
 const STATUS_STYLE: Record<string, { bg: string; text: string; label: string }> = {
@@ -44,6 +54,8 @@ const STATUS_STYLE: Record<string, { bg: string; text: string; label: string }> 
 };
 
 export function JobVariationsTab({ jobId, currentUserId }: { jobId: string; currentUserId: string }) {
+  const isOfficeOrAdmin = useIsOfficeOrAdmin();
+  const varWrites = useVariations();
   const [variations, setVariations] = useState<Variation[]>([]);
   const [types, setTypes] = useState<VariationType[]>([]);
   const [urls, setUrls] = useState<Record<string, string>>({});
@@ -55,10 +67,18 @@ export function JobVariationsTab({ jobId, currentUserId }: { jobId: string; curr
   const [photoUri, setPhotoUri] = useState<string | null>(null);
   const [photoBase64, setPhotoBase64] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  // Office/admin pricing drafts, keyed by variation id.
+  const [pricing, setPricing] = useState<Record<string, { rate: string; quantity: string; notes: string }>>({});
+  const [approvingId, setApprovingId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
-    const [{ data: v }, { data: t }] = await Promise.all([
-      supabase.from("job_variations_public").select("*").eq("job_id", jobId).order("created_at", { ascending: false }),
+    // Office/admin read the base table (with rate/total_amount) so they can price
+    // and approve; technicians read the rate-stripped public view.
+    const variationsP = isOfficeOrAdmin
+      ? getJobVariationsForApproval(jobId)
+      : supabase.from("job_variations_public").select("*").eq("job_id", jobId).order("created_at", { ascending: false }).then(({ data }) => (data as any) ?? []);
+    const [v, { data: t }] = await Promise.all([
+      variationsP,
       supabase.from("variation_types_public").select("*").eq("is_active", true).order("name"),
     ]);
     setVariations((v as any) ?? []);
@@ -73,7 +93,7 @@ export function JobVariationsTab({ jobId, currentUserId }: { jobId: string; curr
           });
       }
     }
-  }, [jobId]);
+  }, [jobId, isOfficeOrAdmin]);
 
   useEffect(() => {
     load();
@@ -163,6 +183,45 @@ export function JobVariationsTab({ jobId, currentUserId }: { jobId: string; curr
     load();
   }
 
+  // ---- Office/admin: price + approve, or reject a pending variation ----------
+  function draftFor(v: Variation) {
+    return pricing[v.id] ?? { rate: v.rate != null ? String(v.rate) : "", quantity: String(v.quantity), notes: v.admin_notes ?? "" };
+  }
+  function setDraft(id: string, patch: Partial<{ rate: string; quantity: string; notes: string }>) {
+    setPricing((prev) => ({ ...prev, [id]: { ...(prev[id] ?? { rate: "", quantity: "", notes: "" }), ...patch } }));
+  }
+
+  async function approveVariation(v: Variation) {
+    if (!varWrites.ready || approvingId) return;
+    const d = draftFor(v);
+    const rate = parseFloat(d.rate);
+    const qty = parseFloat(d.quantity) || v.quantity;
+    if (Number.isNaN(rate) || rate < 0) { Alert.alert("Rate required", "Enter a rate to price this variation."); return; }
+    setApprovingId(v.id);
+    try {
+      await varWrites.priceAndApprove({ id: v.id, rate, quantity: qty, approvedBy: currentUserId, notes: d.notes.trim() || null });
+      await load();
+    } catch (e) {
+      Alert.alert("Couldn't approve", e instanceof Error ? e.message : "Please try again.");
+    } finally {
+      setApprovingId(null);
+    }
+  }
+
+  async function rejectVariation(v: Variation) {
+    if (!varWrites.ready || approvingId) return;
+    const d = draftFor(v);
+    setApprovingId(v.id);
+    try {
+      await varWrites.reject({ id: v.id, approvedBy: currentUserId, notes: d.notes.trim() || null });
+      await load();
+    } catch (e) {
+      Alert.alert("Couldn't reject", e instanceof Error ? e.message : "Please try again.");
+    } finally {
+      setApprovingId(null);
+    }
+  }
+
   return (
     <View style={styles.container}>
       {!showForm && (
@@ -240,11 +299,14 @@ export function JobVariationsTab({ jobId, currentUserId }: { jobId: string; curr
         ListEmptyComponent={!showForm ? <Text style={styles.emptyText}>No variations logged yet</Text> : null}
         renderItem={({ item }) => {
           const s = STATUS_STYLE[item.status];
+          const d = draftFor(item);
+          const busy = approvingId === item.id;
+          const canPrice = isOfficeOrAdmin && item.status === "pending_approval";
           return (
             <View style={styles.card}>
               <View style={styles.cardRow}>
                 <Text style={styles.cardTitle}>
-                  {item.custom_name ?? "Variation"} · {item.quantity} {item.unit}
+                  {item.custom_name ?? item.variation_types?.name ?? "Variation"} · {item.quantity} {item.unit}
                 </Text>
                 <View style={[styles.statusBadge, { backgroundColor: s.bg }]}>
                   <Text style={[styles.statusBadgeText, { color: s.text }]}>{s.label}</Text>
@@ -253,6 +315,47 @@ export function JobVariationsTab({ jobId, currentUserId }: { jobId: string; curr
               {item.description && <Text style={styles.cardDescription}>{item.description}</Text>}
               {item.photo_storage_path && urls[item.photo_storage_path] && (
                 <Image source={{ uri: urls[item.photo_storage_path] }} style={styles.cardPhoto} />
+              )}
+
+              {/* Priced total for approved/auto-approved (office/admin only; MoneyText
+                  is itself role-gated so a technician build shows nothing). */}
+              {isOfficeOrAdmin && item.total_amount != null && (item.status === "approved" || item.status === "auto_approved") && (
+                <View style={styles.totalRow}>
+                  <Text style={styles.totalLabel}>Total{item.rate != null ? ` (@ ` : ""}</Text>
+                  {item.rate != null ? <MoneyText amount={item.rate} style={styles.totalLabel} /> : null}
+                  {item.rate != null ? <Text style={styles.totalLabel}>{`/${item.unit})`}</Text> : null}
+                  <View style={{ flex: 1 }} />
+                  <MoneyText amount={item.total_amount} style={styles.totalValue} />
+                </View>
+              )}
+              {isOfficeOrAdmin && item.status === "rejected" && item.admin_notes ? (
+                <Text style={styles.rejectNote}>Rejected: {item.admin_notes}</Text>
+              ) : null}
+
+              {/* Office/admin pricing + approval controls for pending variations. */}
+              {canPrice && (
+                <View style={styles.approvePanel}>
+                  <View style={styles.priceRow}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.priceLabel}>Rate ($/{item.unit})</Text>
+                      <TextInput style={styles.priceInput} value={d.rate} onChangeText={(v) => setDraft(item.id, { rate: v })} keyboardType="decimal-pad" placeholder="0.00" placeholderTextColor={colors.slate400} />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.priceLabel}>Quantity</Text>
+                      <TextInput style={styles.priceInput} value={d.quantity} onChangeText={(v) => setDraft(item.id, { quantity: v })} keyboardType="decimal-pad" placeholder={String(item.quantity)} placeholderTextColor={colors.slate400} />
+                    </View>
+                  </View>
+                  <Text style={styles.priceLabel}>Notes (optional)</Text>
+                  <TextInput style={styles.priceInput} value={d.notes} onChangeText={(v) => setDraft(item.id, { notes: v })} placeholder="Admin note" placeholderTextColor={colors.slate400} />
+                  <View style={styles.approveActions}>
+                    <TouchableOpacity style={styles.rejectBtn} onPress={() => rejectVariation(item)} disabled={busy}>
+                      <Text style={styles.rejectBtnText}>Reject</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity style={styles.approveBtn} onPress={() => approveVariation(item)} disabled={busy}>
+                      {busy ? <ActivityIndicator color="#fff" /> : <Text style={styles.approveBtnText}>Price &amp; Approve</Text>}
+                    </TouchableOpacity>
+                  </View>
+                </View>
               )}
             </View>
           );
@@ -303,4 +406,17 @@ const styles = StyleSheet.create({
   statusBadge: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 999 },
   statusBadgeText: { fontSize: 10, fontWeight: "700" },
   emptyText: { textAlign: "center", color: colors.slate400, marginTop: 10, fontSize: 13 },
+  totalRow: { flexDirection: "row", alignItems: "center", gap: 2, marginTop: 8, paddingTop: 8, borderTopWidth: 1, borderTopColor: colors.slate100 },
+  totalLabel: { fontSize: 12, color: colors.slate500 },
+  totalValue: { fontSize: 14, fontWeight: "700", color: colors.slate900 },
+  rejectNote: { fontSize: 12, color: colors.red600, marginTop: 8, fontStyle: "italic" },
+  approvePanel: { marginTop: 10, paddingTop: 10, borderTopWidth: 1, borderTopColor: colors.slate100, gap: 8 },
+  priceRow: { flexDirection: "row", gap: 10 },
+  priceLabel: { fontSize: 12, fontWeight: "600", color: colors.slate500, marginBottom: 4 },
+  priceInput: { borderWidth: 1, borderColor: colors.border, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 8, fontSize: 14, backgroundColor: colors.bg, color: colors.slate900 },
+  approveActions: { flexDirection: "row", gap: 10, marginTop: 4 },
+  rejectBtn: { flex: 1, borderRadius: 8, paddingVertical: 10, alignItems: "center", borderWidth: 1, borderColor: colors.red600 },
+  rejectBtnText: { color: colors.red600, fontWeight: "700", fontSize: 13 },
+  approveBtn: { flex: 2, backgroundColor: colors.blue600, borderRadius: 8, paddingVertical: 10, alignItems: "center" },
+  approveBtnText: { color: "#fff", fontWeight: "700", fontSize: 13 },
 });
