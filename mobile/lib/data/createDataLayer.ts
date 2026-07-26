@@ -19,6 +19,7 @@ import { ApprovalsRepository } from "./repositories/approvals";
 import { ScheduleRepository } from "./repositories/schedule";
 import { JobsRepository } from "./repositories/jobs";
 import { BackflowRepository } from "./repositories/backflow";
+import { SettingsRepository } from "./repositories/settings";
 
 // The wired offline stack a screen consumes: repositories for writes, the sync
 // engine to drive them out, and the outbox for the pending/failed badge.
@@ -39,6 +40,7 @@ export interface DataLayer {
   schedule: ScheduleRepository;
   jobs: JobsRepository;
   backflow: BackflowRepository;
+  settings: SettingsRepository;
 }
 
 export interface DataLayerDeps {
@@ -72,5 +74,6 @@ export function createDataLayer(deps: DataLayerDeps): DataLayer {
   const schedule = new ScheduleRepository(outbox, ids);
   const jobs = new JobsRepository(outbox, ids);
   const backflow = new BackflowRepository(outbox, ids);
-  return { outbox, engine, timeEntries, photos, notes, signature, voiceReport, finance, customers, inventory, equipment, jobBilling, approvals, schedule, jobs, backflow };
+  const settings = new SettingsRepository(outbox, ids);
+  return { outbox, engine, timeEntries, photos, notes, signature, voiceReport, finance, customers, inventory, equipment, jobBilling, approvals, schedule, jobs, backflow, settings };
 }

@@ -20,6 +20,7 @@ export type Aggregate =
   | "inventory"
   | "equipment"
   | "equipment_expense"
+  | "variation_type"
   | "job_item"
   | "job_expense";
 
