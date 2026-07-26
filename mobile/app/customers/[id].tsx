@@ -1,21 +1,26 @@
 import { useCallback, useEffect, useState } from "react";
 import { View, Text, ScrollView, StyleSheet, ActivityIndicator, TouchableOpacity, Linking } from "react-native";
-import { Stack, useLocalSearchParams } from "expo-router";
+import { Stack, useLocalSearchParams, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { colors } from "../../lib/theme";
-import { getCustomer, type CustomerDetail, type Site } from "../../lib/data/reads/customers";
+import { MoneyText } from "../../design/components/MoneyText";
+import { getCustomer, getCustomerOverview, type CustomerDetail, type CustomerOverview, type Site } from "../../lib/data/reads/customers";
 import { CustomerFormSheet } from "../../components/customer/customer-form";
 import { SiteFormSheet } from "../../components/customer/site-form";
 
 export default function CustomerDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
+  const router = useRouter();
   const [customer, setCustomer] = useState<CustomerDetail | null>(null);
+  const [overview, setOverview] = useState<CustomerOverview | null>(null);
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState(false);
   const [siteDraft, setSiteDraft] = useState<Site | "new" | null>(null);
 
   const load = useCallback(async () => {
-    setCustomer(await getCustomer(id));
+    const [c, o] = await Promise.all([getCustomer(id), getCustomerOverview(id)]);
+    setCustomer(c);
+    setOverview(o);
     setLoading(false);
   }, [id]);
 
@@ -65,6 +70,41 @@ export default function CustomerDetailScreen() {
         {customer.abn ? <Row label="ABN" value={customer.abn} /> : null}
         {!customer.email && !customer.phone && !customer.mobile && !customer.abn ? <Text style={styles.muted}>No contact details.</Text> : null}
       </Card>
+
+      {overview && (
+        <Card title="Financials">
+          <View style={styles.finRow}>
+            <Text style={styles.finLabel}>Total invoiced</Text>
+            <MoneyText amount={overview.totalInvoiced} style={styles.finValue} />
+          </View>
+          <View style={styles.finRow}>
+            <Text style={styles.finLabel}>Outstanding</Text>
+            <MoneyText amount={overview.outstanding} style={[styles.finValue, overview.outstanding > 0 ? { color: colors.orange700 } : null]} />
+          </View>
+        </Card>
+      )}
+
+      {overview && overview.jobs.length > 0 && (
+        <RelatedSection title={`Jobs (${overview.jobs.length})`}>
+          {overview.jobs.slice(0, 6).map((j) => (
+            <RelatedRow key={j.id} label={`#${j.job_number} — ${j.title}`} sub={j.status.replace("_", " ")} onPress={() => router.push(`/job/${j.id}`)} />
+          ))}
+        </RelatedSection>
+      )}
+      {overview && overview.quotes.length > 0 && (
+        <RelatedSection title={`Quotes (${overview.quotes.length})`}>
+          {overview.quotes.slice(0, 6).map((q) => (
+            <RelatedRow key={q.id} label={q.title} sub={q.status} amount={q.total} onPress={() => router.push(`/quotes/${q.id}`)} />
+          ))}
+        </RelatedSection>
+      )}
+      {overview && overview.invoices.length > 0 && (
+        <RelatedSection title={`Invoices (${overview.invoices.length})`}>
+          {overview.invoices.slice(0, 6).map((inv) => (
+            <RelatedRow key={inv.id} label={inv.title} sub={inv.status} amount={inv.total} onPress={() => router.push(`/invoices/${inv.id}`)} />
+          ))}
+        </RelatedSection>
+      )}
 
       <View style={styles.sitesHead}>
         <Text style={styles.sectionTitle}>Sites ({customer.sites.length})</Text>
@@ -133,6 +173,26 @@ function Row({ label, value }: { label: string; value: string }) {
     </View>
   );
 }
+function RelatedSection({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <View style={styles.card}>
+      <Text style={styles.cardTitle}>{title}</Text>
+      {children}
+    </View>
+  );
+}
+function RelatedRow({ label, sub, amount, onPress }: { label: string; sub?: string; amount?: number | null; onPress: () => void }) {
+  return (
+    <TouchableOpacity style={styles.relRow} onPress={onPress}>
+      <View style={{ flex: 1, minWidth: 0 }}>
+        <Text style={styles.relLabel} numberOfLines={1}>{label}</Text>
+        {sub ? <Text style={styles.relSub}>{sub}</Text> : null}
+      </View>
+      {amount != null ? <MoneyText amount={amount} style={styles.relAmount} /> : null}
+      <Ionicons name="chevron-forward" size={14} color={colors.slate400} />
+    </TouchableOpacity>
+  );
+}
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.bg },
@@ -143,6 +203,13 @@ const styles = StyleSheet.create({
   company: { fontSize: 14, color: colors.slate500, marginTop: 2 },
   card: { backgroundColor: colors.card, borderWidth: 1, borderColor: colors.border, borderRadius: 12, padding: 14, gap: 8 },
   cardTitle: { fontSize: 12, fontWeight: "700", color: colors.slate500, textTransform: "uppercase", marginBottom: 2 },
+  finRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
+  finLabel: { fontSize: 14, color: colors.slate500 },
+  finValue: { fontSize: 16, fontWeight: "800", color: colors.slate900 },
+  relRow: { flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 8, borderTopWidth: 1, borderTopColor: colors.slate100 },
+  relLabel: { fontSize: 14, fontWeight: "600", color: colors.slate900 },
+  relSub: { fontSize: 12, color: colors.slate500, textTransform: "capitalize", marginTop: 1 },
+  relAmount: { fontSize: 13, fontWeight: "700", color: colors.slate700 },
   muted: { fontSize: 13, color: colors.slate500 },
   mutedPad: { fontSize: 13, color: colors.slate400, paddingHorizontal: 4 },
   body: { fontSize: 14, color: colors.slate700, lineHeight: 20 },

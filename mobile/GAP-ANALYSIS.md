@@ -18,7 +18,7 @@ send-back)**. So the app is broad and usable but **not at full parity**.
 | Pricing | partial | reactivate deactivated items (med) |
 | Inventory | partial | low-stock surfacing, margin display (low) |
 | My Jobs | partial | tech: change status/notes + submit variation offline (med) |
-| Customers | partial | Customer-360 detail w/ jobs/quotes/invoices + $ rollups (**high**) |
+| Customers | partial | ~~Customer-360 detail + $ rollups~~ **DONE** (D47); favourites, inactive lifecycle, quick-create — follow-ups |
 | Backflow | partial | ~~register-device offline~~ (D46); test-log offline needs the submit dedupe (Q3) — follow-up |
 | Quotes | partial | convert-to-job (med); Send/PDF (ext) |
 | Fleet | partial | assign equipment, equipment expenses/docs/usage (med ×4) |
@@ -45,7 +45,7 @@ send-back)**. So the app is broad and usable but **not at full parity**.
 
 **P3 — admin depth & polish:**
 8. **Reports analytics tables** — staff cost & efficiency (admin), equipment cost & utilization, revenue-by-month trend, top customers, jobs-by-staff. (Charts can be pure `react-native-svg`, no Skia dep needed.)
-9. **Customer-360 detail** — related jobs/quotes/invoices + counts + total-invoiced/outstanding rollups; active/inactive lifecycle; favourites.
+9. ~~**Customer-360 detail**~~ — **DONE (D47)**: related jobs/quotes/invoices + counts + total-invoiced/outstanding rollups. Remaining: active/inactive lifecycle, favourites, quick-create.
 10. **Fleet depth** — assign equipment, equipment expenses/documents/usage, equipment detail screen.
 11. **Staff depth** — leave log, charge-out rate override, loaded-rate summary.
 12. **Settings management** — variation types, cost-centre templates, Xero account codes, manual sync triggers.
