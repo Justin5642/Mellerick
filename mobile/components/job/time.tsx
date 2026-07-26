@@ -448,12 +448,12 @@ export function JobTimeTab({ jobId, currentUserId }: { jobId: string; currentUse
     <View style={styles.container}>
       <View style={styles.clockRow}>
         {!myOpenEntry ? (
-          <TouchableOpacity style={styles.clockInButton} onPress={clockIn} disabled={loading}>
+          <TouchableOpacity testID="clock-in" style={styles.clockInButton} onPress={clockIn} disabled={loading}>
             <Text style={styles.clockInText}>{loading ? "..." : "Clock In"}</Text>
           </TouchableOpacity>
         ) : (
           <>
-            <TouchableOpacity style={styles.clockOutButton} onPress={clockOut} disabled={loading}>
+            <TouchableOpacity testID="clock-out" style={styles.clockOutButton} onPress={clockOut} disabled={loading}>
               <Text style={styles.clockOutText}>{loading ? "..." : "Clock Out"}</Text>
             </TouchableOpacity>
             <Text style={styles.sinceText}>Since {formatTime(myOpenEntry.clock_in)}</Text>

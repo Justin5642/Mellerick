@@ -1,0 +1,32 @@
+# Security invariant — a technician must NEVER see a dollar figure anywhere.
+# Structural enforcement (MoneyText + route gating) is unit-tested; this is the
+# end-to-end backstop on a real build: navigate the technician's reachable
+# surfaces and assert no "$" renders, and that office-only money surfaces are not
+# even present.
+appId: au.com.mellerick.field
+env:
+  EMAIL: ${TECH_EMAIL}
+  PASSWORD: ${TECH_PASSWORD}
+---
+- runFlow:
+    file: ../subflows/login.yaml
+    env:
+      EMAIL: ${TECH_EMAIL}
+      PASSWORD: ${TECH_PASSWORD}
+- assertVisible: "My Jobs"
+# The technician shell must not expose office/admin money areas.
+- assertNotVisible: "Billing"
+- assertNotVisible: "Approvals"
+- assertNotVisible: "Reports"
+# No dollar figure on the jobs list.
+- assertNotVisible: ".*\\$[0-9].*"
+# Open a job and sweep its tabs — none may show a dollar amount.
+- tapOn:
+    id: "job-list-row"
+    index: 0
+- assertNotVisible: "Billing"
+- assertNotVisible: ".*\\$[0-9].*"
+- tapOn: "Variations"
+- assertNotVisible: ".*\\$[0-9].*"
+- tapOn: "Time"
+- assertNotVisible: ".*\\$[0-9].*"

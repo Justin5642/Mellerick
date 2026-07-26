@@ -208,7 +208,7 @@ export default function ApprovalsScreen() {
 
                           {isAdmin ? (
                             <View style={styles.actions}>
-                              <TouchableOpacity style={[styles.approveBtn, busy && styles.btnDisabled]} onPress={() => onApprove(job.id)} disabled={busy}>
+                              <TouchableOpacity testID="approve-job" style={[styles.approveBtn, busy && styles.btnDisabled]} onPress={() => onApprove(job.id)} disabled={busy}>
                                 {busy ? <ActivityIndicator color="#fff" size="small" /> : <Ionicons name="checkmark-circle" size={16} color="#fff" />}
                                 <Text style={styles.approveText}>Approve &amp; Queue Invoice</Text>
                               </TouchableOpacity>

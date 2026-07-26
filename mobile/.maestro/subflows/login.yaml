@@ -1,0 +1,23 @@
+# Reusable login subflow. Callers pass EMAIL / PASSWORD via `env:` so the same
+# flow logs in as a technician, office, or admin account depending on the caller.
+# No credentials are committed — they come from the environment at run time.
+appId: au.com.mellerick.field
+---
+- launchApp:
+    clearState: true
+    permissions:
+      camera: allow
+      photos: allow
+      location: allow
+- assertVisible: "Sign In"
+- tapOn:
+    id: "login-email"
+- inputText: ${EMAIL}
+- tapOn:
+    id: "login-password"
+- inputText: ${PASSWORD}
+- tapOn:
+    id: "login-submit"
+# Login succeeded once we leave the auth screen (role-specific landing is
+# asserted by the calling flow: technicians → My Jobs, office/admin → Dashboard).
+- assertNotVisible: "Sign In"

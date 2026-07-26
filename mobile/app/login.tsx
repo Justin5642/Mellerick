@@ -50,6 +50,7 @@ export default function LoginScreen() {
 
         <Text style={styles.label}>Email</Text>
         <TextInput
+          testID="login-email"
           style={styles.input}
           value={email}
           onChangeText={setEmail}
@@ -61,6 +62,7 @@ export default function LoginScreen() {
 
         <Text style={styles.label}>Password</Text>
         <TextInput
+          testID="login-password"
           style={styles.input}
           value={password}
           onChangeText={setPassword}
@@ -69,7 +71,7 @@ export default function LoginScreen() {
           autoCapitalize="none"
         />
 
-        <TouchableOpacity style={styles.button} onPress={handleLogin} disabled={loading}>
+        <TouchableOpacity testID="login-submit" style={styles.button} onPress={handleLogin} disabled={loading}>
           {loading ? <ActivityIndicator color="#fff" /> : <Text style={styles.buttonText}>Sign In</Text>}
         </TouchableOpacity>
       </View>

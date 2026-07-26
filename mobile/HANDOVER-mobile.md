@@ -68,8 +68,12 @@ field app + a full office/admin surface mirroring the web app.
    **Xero push** routes (which additionally need the Xero OAuth connection).
 2. **On-device QA** — first real interactive test is on hardware; a full human QA
    pass (navigation, forms, layout, touch targets, dark mode) is required.
-3. **Cross-system e2e** — create on mobile → verify on web/DB (and Maestro/Detox
-   automation) — not yet written.
+3. **Cross-system e2e** — the **Maestro flows are authored** (`.maestro/`, D73):
+   technician clock-in, office approve, technician money-gating, offline clock-in +
+   a login subflow, with a README. They are **not yet executed** here (no
+   emulator/seeded backend) — run them on a device/emulator with per-role test
+   accounts as part of on-device QA (`maestro test .maestro`). Cross-check
+   create-on-mobile → verify-on-web/DB manually alongside.
 4. **Store accounts** — Apple Developer + Google Play Console (fill the placeholders
    in `eas.json` `submit.production`).
 5. **PowerSync DB password** — for true offline *reads* (writes are already durable).

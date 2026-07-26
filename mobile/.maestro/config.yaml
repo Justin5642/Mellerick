@@ -1,0 +1,5 @@
+# Maestro workspace config. Only files under flows/ are standalone e2e flows;
+# subflows/ holds reusable fragments invoked via `runFlow` and must NOT be run
+# directly. See ./README.md for prerequisites and how to run.
+flows:
+  - "flows/*.yaml"

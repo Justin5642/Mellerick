@@ -1,0 +1,30 @@
+# Critical path — technician: login → My Jobs → open a job → clock in → clock out.
+# Mirrors the plan's DoD flow "login→my-jobs→clock-in→complete".
+appId: au.com.mellerick.field
+env:
+  EMAIL: ${TECH_EMAIL}
+  PASSWORD: ${TECH_PASSWORD}
+---
+- runFlow:
+    file: ../subflows/login.yaml
+    env:
+      EMAIL: ${TECH_EMAIL}
+      PASSWORD: ${TECH_PASSWORD}
+- assertVisible: "My Jobs"
+# Open the first job in the list (rows carry testID="job-list-row").
+- tapOn:
+    id: "job-list-row"
+    index: 0
+# The role-aware job detail defaults to the Overview tab; switch to Time.
+- assertVisible: "Time"
+- tapOn: "Time"
+# Clock in, then confirm the clock-out affordance appears (we are on the clock).
+- tapOn:
+    id: "clock-in"
+- assertVisible:
+    id: "clock-out"
+# Clock out, then confirm we are back to the clock-in state.
+- tapOn:
+    id: "clock-out"
+- assertVisible:
+    id: "clock-in"
