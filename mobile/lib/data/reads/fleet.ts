@@ -15,10 +15,12 @@ export interface Equipment {
   fuel_cost_per_hour: number;
   target_hours_per_year: number;
   notes: string | null;
+  assigned_to: string | null;
+  assigned_profile: { full_name: string } | null;
 }
 
 const SELECT =
-  "id, name, category, registration, purchase_cost, purchase_date, estimated_life_years, insurance_annual, maintenance_annual, registration_annual, other_annual_costs, fuel_cost_per_hour, target_hours_per_year, notes";
+  "id, name, category, registration, purchase_cost, purchase_date, estimated_life_years, insurance_annual, maintenance_annual, registration_annual, other_annual_costs, fuel_cost_per_hour, target_hours_per_year, notes, assigned_to, assigned_profile:profiles!equipment_assigned_to_fkey(full_name)";
 
 export async function listEquipment(): Promise<Equipment[]> {
   const { data } = await supabase.from("equipment").select(SELECT).eq("is_active", true).order("category").order("name");

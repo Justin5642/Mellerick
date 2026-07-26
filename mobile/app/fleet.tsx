@@ -5,6 +5,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { colors } from "../lib/theme";
 import { MoneyText } from "../design/components/MoneyText";
 import { listEquipment, hourlyRate, type Equipment } from "../lib/data/reads/fleet";
+import { listAssignableStaff, type AssignableStaff } from "../lib/data/reads/schedule";
 import { useFleet } from "../lib/data/hooks/useFleet";
 import { useIsAdmin } from "../design/guards/useRole";
 
@@ -51,9 +52,29 @@ export default function FleetScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [draft, setDraft] = useState<Draft | null>(null);
   const [saving, setSaving] = useState(false);
+  const [assignFor, setAssignFor] = useState<Equipment | null>(null);
+  const [staff, setStaff] = useState<AssignableStaff[]>([]);
 
   const load = useCallback(async () => setItems(await listEquipment()), []);
   useEffect(() => { load(); }, [load]);
+
+  function openAssign(item: Equipment) {
+    if (staff.length === 0) listAssignableStaff().then(setStaff).catch(() => {});
+    setAssignFor(item);
+  }
+  async function doAssign(staffId: string | null) {
+    if (!assignFor || saving || !fleet.ready) return;
+    setSaving(true);
+    try {
+      await fleet.assignEquipment(assignFor.id, staffId);
+      setAssignFor(null);
+      await load();
+    } catch (e) {
+      Alert.alert("Couldn't assign", e instanceof Error ? e.message : "Please try again.");
+    } finally {
+      setSaving(false);
+    }
+  }
   const onRefresh = useCallback(async () => { setRefreshing(true); await load(); setRefreshing(false); }, [load]);
 
   const sections = useMemo(() => {
@@ -98,8 +119,10 @@ export default function FleetScreen() {
         purchase_cost: input.purchaseCost, purchase_date: null, estimated_life_years: input.estimatedLifeYears,
         insurance_annual: input.insuranceAnnual, maintenance_annual: input.maintenanceAnnual, registration_annual: input.registrationAnnual,
         other_annual_costs: input.otherAnnualCosts, fuel_cost_per_hour: input.fuelCostPerHour, target_hours_per_year: input.targetHoursPerYear, notes: input.notes,
+        assigned_to: null, assigned_profile: null,
       };
-      setItems((prev) => (editingId ? prev.map((it) => (it.id === editingId ? optimistic : it)) : [...prev, optimistic]));
+      // Editing cost fields must not wipe the current assignee optimistically.
+      setItems((prev) => (editingId ? prev.map((it) => (it.id === editingId ? { ...optimistic, assigned_to: it.assigned_to, assigned_profile: it.assigned_profile } : it)) : [...prev, optimistic]));
       setDraft(null);
       if (synced) await load();
     } finally {
@@ -136,10 +159,13 @@ export default function FleetScreen() {
         ListEmptyComponent={<Text style={styles.empty}>No equipment. Tap + to add.</Text>}
         renderSectionHeader={({ section }) => <Text style={styles.catHead}>{section.title}</Text>}
         renderItem={({ item }) => (
-          <TouchableOpacity style={styles.row} onPress={() => isAdmin && setDraft(toDraft(item))} activeOpacity={isAdmin ? 0.6 : 1}>
+          <TouchableOpacity style={styles.row} onPress={() => isAdmin && setDraft(toDraft(item))} onLongPress={() => isAdmin && openAssign(item)} activeOpacity={isAdmin ? 0.6 : 1}>
             <View style={styles.body}>
               <Text style={styles.name} numberOfLines={1}>{item.name}</Text>
-              <Text style={styles.meta} numberOfLines={1}>{item.registration || item.category}</Text>
+              <Text style={styles.meta} numberOfLines={1}>
+                {item.registration || item.category}
+                {item.assigned_profile?.full_name ? ` · ${item.assigned_profile.full_name}` : ""}
+              </Text>
             </View>
             <View style={styles.rateCol}>
               <MoneyText amount={hourlyRate(item)} style={styles.rate} />
@@ -190,6 +216,29 @@ export default function FleetScreen() {
           </View>
         </View>
       </Modal>
+
+      <Modal visible={!!assignFor} transparent animationType="slide" onRequestClose={() => !saving && setAssignFor(null)}>
+        <View style={styles.overlay}>
+          <View style={styles.sheet}>
+            <Text style={styles.sheetTitle}>Assign {assignFor?.name}</Text>
+            <ScrollView style={{ maxHeight: 360 }}>
+              <TouchableOpacity style={styles.assignRow} onPress={() => doAssign(null)} disabled={saving}>
+                <Ionicons name="close-circle-outline" size={18} color={colors.slate500} />
+                <Text style={styles.assignName}>Unassign</Text>
+                {!assignFor?.assigned_to && <Ionicons name="checkmark" size={18} color={colors.blue600} />}
+              </TouchableOpacity>
+              {staff.map((s) => (
+                <TouchableOpacity key={s.id} style={styles.assignRow} onPress={() => doAssign(s.id)} disabled={saving}>
+                  <Ionicons name="person-circle-outline" size={18} color={colors.slate500} />
+                  <Text style={styles.assignName}>{s.full_name}</Text>
+                  {assignFor?.assigned_to === s.id && <Ionicons name="checkmark" size={18} color={colors.blue600} />}
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+            <TouchableOpacity style={styles.cancel} onPress={() => setAssignFor(null)} disabled={saving}><Text style={styles.cancelText}>Cancel</Text></TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -216,6 +265,8 @@ const styles = StyleSheet.create({
   empty: { textAlign: "center", color: colors.slate400, marginTop: 40, fontSize: 13 },
   overlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.4)", justifyContent: "flex-end" },
   sheet: { backgroundColor: colors.card, borderTopLeftRadius: 16, borderTopRightRadius: 16, padding: 16, paddingBottom: 28, maxHeight: "90%" },
+  assignRow: { flexDirection: "row", alignItems: "center", gap: 12, paddingVertical: 12, borderTopWidth: 1, borderTopColor: colors.slate100 },
+  assignName: { flex: 1, fontSize: 15, fontWeight: "600", color: colors.slate900 },
   sheetTitle: { fontSize: 16, fontWeight: "800", color: colors.slate900, marginBottom: 12 },
   field: { marginBottom: 12 },
   fieldLabel: { fontSize: 12, fontWeight: "700", color: colors.slate500, textTransform: "uppercase", marginBottom: 6 },

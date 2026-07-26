@@ -21,7 +21,7 @@ send-back)**. So the app is broad and usable but **not at full parity**.
 | Customers | partial | ~~Customer-360 detail + $ rollups~~ **DONE** (D47); favourites, inactive lifecycle, quick-create — follow-ups |
 | Backflow | partial | ~~register-device offline~~ (D46); test-log offline needs the submit dedupe (Q3) — follow-up |
 | Quotes | partial | ~~convert-to-job~~ **DONE** (D50); Send/PDF (ext) |
-| Fleet | partial | assign equipment, equipment expenses/docs/usage (med ×4) |
+| Fleet | partial | ~~assign equipment~~ (D54); equipment expenses/docs/usage log (med) — follow-ups |
 | Staff | partial | ~~charge-out rate~~ (D53); leave log (med) — follow-up; invite/email (ext) |
 | Settings | partial | variation-types / cost-centre-template / account-code config (med/low) |
 | Reports | **full (analytics)** ✅ | all 5 tables done: revenue-by-month, top-customers, jobs-by-staff (D48), staff cost/efficiency (D51), equipment utilisation (D52) |

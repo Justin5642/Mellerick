@@ -40,4 +40,15 @@ describe("EquipmentRepository", () => {
     await new EquipmentRepository(b2.outbox, seqIds(), fixedTime()).deactivateEquipment("e1");
     expect(b2.ops[0]).toMatchObject({ op: "update", rowId: "e1", payload: { is_active: false } });
   });
+
+  it("assignEquipment updates only assigned_to (assign + unassign)", async () => {
+    const b1 = captureOutbox();
+    await new EquipmentRepository(b1.outbox, seqIds(), fixedTime()).assignEquipment("e1", "tech-1");
+    expect(b1.ops[0]).toMatchObject({ op: "update", rowId: "e1", payload: { assigned_to: "tech-1" } });
+    expect(Object.keys(b1.ops[0].payload)).toEqual(["assigned_to"]); // preserve-on-update
+
+    const b2 = captureOutbox();
+    await new EquipmentRepository(b2.outbox, seqIds(), fixedTime()).assignEquipment("e1", null);
+    expect(b2.ops[0].payload).toEqual({ assigned_to: null });
+  });
 });

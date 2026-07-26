@@ -46,6 +46,13 @@ export class EquipmentRepository {
     await this.write("update", id, { is_active: false });
   }
 
+  /** Assign (or unassign, with null) equipment to a staff member. A vehicle
+   * assigned to someone folds its $/hour into that person's loaded cost rate
+   * (see costing/staff-efficiency). Preserve-on-update: only assigned_to. */
+  async assignEquipment(id: string, assignedTo: string | null): Promise<void> {
+    await this.write("update", id, { assigned_to: assignedTo });
+  }
+
   private payload(input: EquipmentInput): Record<string, unknown> {
     return {
       name: input.name,
