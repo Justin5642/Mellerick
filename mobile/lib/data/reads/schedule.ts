@@ -17,5 +17,7 @@ export async function listAssignableStaff(): Promise<AssignableStaff[]> {
     .order("full_name");
   const rows = (data as unknown as AssignableStaff[]) ?? [];
   const rank = (r: string) => (r === "technician" ? 0 : r === "office" ? 1 : 2);
-  return [...rows].sort((a, b) => rank(a.role) - rank(b.role));
+  // Stable: role first, then alphabetical (the query's full_name order isn't
+  // preserved by a role-only sort).
+  return [...rows].sort((a, b) => rank(a.role) - rank(b.role) || a.full_name.localeCompare(b.full_name));
 }

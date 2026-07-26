@@ -71,9 +71,14 @@ export default function ScheduleScreen() {
     if (!job || busy || !schedule.ready) return;
     setBusy(true);
     try {
+      const tech = staff.find((s) => s.id === assignedTo);
       await schedule.reassign(job.id, assignedTo);
+      // Optimistic: reflect the change immediately (the outbox syncs in the
+      // background — offline, a server reload would show stale data).
+      setJobs((cur) =>
+        cur.map((j) => (j.id === job.id ? { ...j, assigned_to: assignedTo, profiles: assignedTo ? { full_name: tech?.full_name ?? "" } : null } : j))
+      );
       setReassignJob(null);
-      await load();
     } catch (e) {
       Alert.alert("Couldn't reassign", e instanceof Error ? e.message : "Please try again.");
     } finally {
@@ -89,8 +94,13 @@ export default function ScheduleScreen() {
     try {
       const { scheduledStartIso, scheduledEndIso } = computeReschedule(job.scheduled_start, job.scheduled_end, localDateKey(selected));
       await schedule.reschedule(job.id, scheduledStartIso, scheduledEndIso);
+      // Optimistic: update + re-sort by start so it lands in the right day section.
+      setJobs((cur) =>
+        cur
+          .map((j) => (j.id === job.id ? { ...j, scheduled_start: scheduledStartIso, scheduled_end: scheduledEndIso } : j))
+          .sort((a, b) => a.scheduled_start.localeCompare(b.scheduled_start))
+      );
       setDatePickerFor(null);
-      await load();
     } catch (e) {
       Alert.alert("Couldn't reschedule", e instanceof Error ? e.message : "Please try again.");
     } finally {
