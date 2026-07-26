@@ -3,8 +3,9 @@
 Expo SDK 54 / React Native 0.81 app on branch `mobile/full-parity`. Offline-first
 field app + a full office/admin surface mirroring the web app.
 
-> Companion doc: **`DECISIONS-FOR-AVI.md`** — every decision (D1–D34) and open
-> question (Q1–Q18) flagged during the build, indexed for cleanup.
+> Companion docs: **`DECISIONS-FOR-AVI.md`** — every decision (D1–D39) and open
+> question (Q1–Q19) flagged during the build; **`GAP-ANALYSIS.md`** — a per-area
+> gap/drift map vs the web app with a prioritized remaining-work list.
 
 ## Verified state
 - **110 unit/component tests green** (`npm test`), **`tsc --noEmit` clean**,
