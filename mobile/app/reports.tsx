@@ -4,17 +4,25 @@ import { Stack } from "expo-router";
 import { colors, statusColors } from "../lib/theme";
 import { MoneyText } from "../design/components/MoneyText";
 import { StatCard } from "../design/components/StatCard";
-import { getReportSummary, type ReportSummary } from "../lib/data/reads/reports";
+import { getReportSummary, getReportAnalytics, type ReportSummary, type ReportAnalytics } from "../lib/data/reads/reports";
 
 function humanize(v: string): string {
   return v.replace(/_/g, " ");
 }
+function monthLabel(monthKey: string): string {
+  return new Date(`${monthKey}-01T00:00:00`).toLocaleDateString("en-AU", { month: "short" });
+}
 
 export default function ReportsScreen() {
   const [summary, setSummary] = useState<ReportSummary | null>(null);
+  const [analytics, setAnalytics] = useState<ReportAnalytics | null>(null);
   const [refreshing, setRefreshing] = useState(false);
 
-  const load = useCallback(async () => setSummary(await getReportSummary()), []);
+  const load = useCallback(async () => {
+    const [s, a] = await Promise.all([getReportSummary(), getReportAnalytics()]);
+    setSummary(s);
+    setAnalytics(a);
+  }, []);
   useEffect(() => { load(); }, [load]);
   const onRefresh = useCallback(async () => { setRefreshing(true); await load(); setRefreshing(false); }, [load]);
 
@@ -61,7 +69,58 @@ export default function ReportsScreen() {
             })}
           </View>
 
-          <Text style={styles.footnote}>Detailed charts (revenue trend, payroll cost) are available on the web dashboard.</Text>
+          {analytics && (
+            <>
+              <Text style={styles.section}>Revenue by month</Text>
+              <View style={styles.card}>
+                {(() => {
+                  const max = Math.max(1, ...analytics.revenueByMonth.map((m) => m.paid + m.outstanding));
+                  return analytics.revenueByMonth.map((m) => (
+                    <View key={m.monthKey} style={styles.barRow}>
+                      <Text style={styles.barLabel}>{monthLabel(m.monthKey)}</Text>
+                      <View style={styles.stackTrack}>
+                        <View style={{ width: `${(m.paid / max) * 100}%`, backgroundColor: "#22c55e" }} />
+                        <View style={{ width: `${(m.outstanding / max) * 100}%`, backgroundColor: "#f59e0b" }} />
+                      </View>
+                      <MoneyText amount={m.paid + m.outstanding} style={styles.barMoney} />
+                    </View>
+                  ));
+                })()}
+                <Text style={styles.legend}>Green = paid · Amber = outstanding</Text>
+              </View>
+
+              {analytics.topCustomers.length > 0 && (
+                <>
+                  <Text style={styles.section}>Top customers by spend</Text>
+                  <View style={styles.card}>
+                    {analytics.topCustomers.map((c, i) => (
+                      <View key={c.customerId} style={styles.listRow}>
+                        <Text style={styles.rank}>{i + 1}</Text>
+                        <Text style={styles.listName} numberOfLines={1}>{c.name}</Text>
+                        <MoneyText amount={c.total} style={styles.listValue} />
+                      </View>
+                    ))}
+                  </View>
+                </>
+              )}
+
+              {analytics.jobsByStaff.length > 0 && (
+                <>
+                  <Text style={styles.section}>Jobs by staff</Text>
+                  <View style={styles.card}>
+                    {analytics.jobsByStaff.map((s) => (
+                      <View key={s.name} style={styles.listRow}>
+                        <Text style={styles.listName} numberOfLines={1}>{s.name}</Text>
+                        <Text style={styles.staffMeta}>{s.completed}/{s.total} done · {Math.round(s.rate)}%</Text>
+                      </View>
+                    ))}
+                  </View>
+                </>
+              )}
+            </>
+          )}
+
+          <Text style={styles.footnote}>Staff cost/efficiency + equipment utilization tables are on the web dashboard.</Text>
         </>
       )}
     </ScrollView>
@@ -93,5 +152,13 @@ const styles = StyleSheet.create({
   barTrack: { flex: 1, height: 8, borderRadius: 4, backgroundColor: colors.slate100, overflow: "hidden" },
   barFill: { height: 8, borderRadius: 4 },
   barCount: { width: 32, textAlign: "right", fontSize: 13, fontWeight: "700", color: colors.slate900 },
+  stackTrack: { flex: 1, height: 10, borderRadius: 5, backgroundColor: colors.slate100, overflow: "hidden", flexDirection: "row" },
+  barMoney: { width: 72, textAlign: "right", fontSize: 12, fontWeight: "700", color: colors.slate900 },
+  legend: { fontSize: 11, color: colors.slate400, marginTop: 2 },
+  listRow: { flexDirection: "row", alignItems: "center", gap: 10, paddingVertical: 8, borderTopWidth: 1, borderTopColor: colors.slate100 },
+  rank: { width: 18, fontSize: 12, fontWeight: "700", color: colors.slate400 },
+  listName: { flex: 1, fontSize: 14, fontWeight: "600", color: colors.slate900 },
+  listValue: { fontSize: 14, fontWeight: "700", color: colors.slate900 },
+  staffMeta: { fontSize: 13, fontWeight: "600", color: colors.slate500 },
   footnote: { fontSize: 11, color: colors.slate400, textAlign: "center", marginTop: 14 },
 });
