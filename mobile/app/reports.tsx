@@ -4,7 +4,9 @@ import { Stack } from "expo-router";
 import { colors, statusColors } from "../lib/theme";
 import { MoneyText } from "../design/components/MoneyText";
 import { StatCard } from "../design/components/StatCard";
-import { getReportSummary, getReportAnalytics, type ReportSummary, type ReportAnalytics } from "../lib/data/reads/reports";
+import { getReportSummary, getReportAnalytics, getStaffEfficiency, type ReportSummary, type ReportAnalytics } from "../lib/data/reads/reports";
+import { type StaffEffRow } from "../lib/staffEfficiency";
+import { useIsAdmin } from "../design/guards/useRole";
 
 function humanize(v: string): string {
   return v.replace(/_/g, " ");
@@ -14,15 +16,18 @@ function monthLabel(monthKey: string): string {
 }
 
 export default function ReportsScreen() {
+  const isAdmin = useIsAdmin();
   const [summary, setSummary] = useState<ReportSummary | null>(null);
   const [analytics, setAnalytics] = useState<ReportAnalytics | null>(null);
+  const [staffEff, setStaffEff] = useState<StaffEffRow[] | null>(null);
   const [refreshing, setRefreshing] = useState(false);
 
   const load = useCallback(async () => {
     const [s, a] = await Promise.all([getReportSummary(), getReportAnalytics()]);
     setSummary(s);
     setAnalytics(a);
-  }, []);
+    if (isAdmin) setStaffEff(await getStaffEfficiency());
+  }, [isAdmin]);
   useEffect(() => { load(); }, [load]);
   const onRefresh = useCallback(async () => { setRefreshing(true); await load(); setRefreshing(false); }, [load]);
 
@@ -120,7 +125,39 @@ export default function ReportsScreen() {
             </>
           )}
 
-          <Text style={styles.footnote}>Staff cost/efficiency + equipment utilization tables are on the web dashboard.</Text>
+          {isAdmin && staffEff && staffEff.length > 0 && (
+            <>
+              <Text style={styles.section}>Staff cost &amp; efficiency</Text>
+              <Text style={styles.sectionNote}>Last 12 months · true cost = fully-loaded annual cost ÷ hours worked</Text>
+              <View style={styles.card}>
+                {staffEff.map((s) => (
+                  <View key={s.name} style={styles.staffRow}>
+                    <View style={{ flex: 1, minWidth: 0 }}>
+                      <Text style={styles.staffName} numberOfLines={1}>{s.name}</Text>
+                      <Text style={styles.staffSub}>
+                        {s.workedHours.toFixed(0)}h worked · {s.leaveHours.toFixed(0)}h leave
+                        {s.utilizationPct != null ? ` · ${Math.round(s.utilizationPct)}% util` : ""}
+                      </Text>
+                    </View>
+                    <View style={{ alignItems: "flex-end" }}>
+                      {s.trueCostPerWorkedHour != null ? (
+                        <MoneyText amount={s.trueCostPerWorkedHour} style={styles.staffCost} />
+                      ) : (
+                        <Text style={styles.staffCostMuted}>—</Text>
+                      )}
+                      <View style={styles.rateRow}>
+                        <Text style={styles.staffRate}>loaded </Text>
+                        <MoneyText amount={s.loadedHourlyRate} style={styles.staffRate} />
+                        <Text style={styles.staffRate}>/h</Text>
+                      </View>
+                    </View>
+                  </View>
+                ))}
+              </View>
+            </>
+          )}
+
+          <Text style={styles.footnote}>Equipment cost/utilization is on the web dashboard.</Text>
         </>
       )}
     </ScrollView>
@@ -160,5 +197,13 @@ const styles = StyleSheet.create({
   listName: { flex: 1, fontSize: 14, fontWeight: "600", color: colors.slate900 },
   listValue: { fontSize: 14, fontWeight: "700", color: colors.slate900 },
   staffMeta: { fontSize: 13, fontWeight: "600", color: colors.slate500 },
+  sectionNote: { fontSize: 11, color: colors.slate400, marginLeft: 4, marginTop: -4, marginBottom: 8 },
+  staffRow: { flexDirection: "row", alignItems: "center", gap: 10, paddingVertical: 10, borderTopWidth: 1, borderTopColor: colors.slate100 },
+  staffName: { fontSize: 14, fontWeight: "600", color: colors.slate900 },
+  staffSub: { fontSize: 12, color: colors.slate500, marginTop: 1 },
+  staffCost: { fontSize: 15, fontWeight: "800", color: colors.slate900 },
+  staffCostMuted: { fontSize: 15, fontWeight: "800", color: colors.slate400 },
+  rateRow: { flexDirection: "row", alignItems: "center", marginTop: 1 },
+  staffRate: { fontSize: 11, color: colors.slate400 },
   footnote: { fontSize: 11, color: colors.slate400, textAlign: "center", marginTop: 14 },
 });

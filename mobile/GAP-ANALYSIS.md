@@ -24,7 +24,7 @@ send-back)**. So the app is broad and usable but **not at full parity**.
 | Fleet | partial | assign equipment, equipment expenses/docs/usage (med ×4) |
 | Staff | partial | leave log, charge-out rate (med); invite/email (ext) |
 | Settings | partial | variation-types / cost-centre-template / account-code config (med/low) |
-| Reports | partial | ~~revenue-by-month, top customers, jobs-by-staff~~ (D48); staff cost/efficiency + equipment utilization tables still open |
+| Reports | partial | ~~revenue-by-month, top customers, jobs-by-staff~~ (D48), ~~staff cost/efficiency~~ (D51); only equipment utilization remains |
 | Jobs | partial | ~~reassign/reschedule~~ (D41), ~~status/priority edit~~ (D43), ~~**create job**~~ (D45); edit customer/site/title/type, price+approve variations still open |
 | Invoices | partial | ~~prefill-from-job + add unbilled variations~~ **DONE** (D44/Q15); Send/PDF/Xero (ext) |
 | Approvals | partial ✅ | ~~approve→auto-invoice, send-back~~ **DONE** (D40); Xero auto-push (ext) |
@@ -44,7 +44,7 @@ send-back)**. So the app is broad and usable but **not at full parity**.
 7. **Job equipment usage + PO/cost-centre editing** — log equipment usage on a job; create/edit POs + cost-centre stages; tag expenses to a stage.
 
 **P3 — admin depth & polish:**
-8. **Reports analytics tables** — ~~revenue-by-month, top customers, jobs-by-staff~~ **DONE (D48)** (dependency-free RN bars). Remaining: staff cost & efficiency (admin) + equipment cost & utilization (reuse the ported `computeLoadedCost`/`computeEquipmentCost` + payroll joins).
+8. **Reports analytics tables** — ~~revenue-by-month, top customers, jobs-by-staff~~ (D48), ~~staff cost & efficiency (admin)~~ **DONE (D51)**. Only **equipment cost & utilization** remains (reuse the ported `computeEquipmentCost` + equipment-usage joins).
 9. ~~**Customer-360 detail**~~ — **DONE (D47)**: related jobs/quotes/invoices + counts + total-invoiced/outstanding rollups. Remaining: active/inactive lifecycle, favourites, quick-create.
 10. **Fleet depth** — assign equipment, equipment expenses/documents/usage, equipment detail screen.
 11. **Staff depth** — leave log, charge-out rate override, loaded-rate summary.

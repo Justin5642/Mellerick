@@ -1,5 +1,6 @@
 import { supabase } from "../../supabase";
 import { topCustomersBySpend, revenueByMonth, jobsByStaff, type InvoiceRow, type JobStaffRow } from "../../reportsAnalytics";
+import { computeStaffEfficiency, type StaffEffProfile, type StaffEffRow, type StaffEffInput } from "../../staffEfficiency";
 
 export interface ReportSummary {
   revenuePaid: number;
@@ -55,6 +56,37 @@ function lastNMonthKeys(n: number): string[] {
     keys.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`);
   }
   return keys;
+}
+
+// Admin-only staff cost & efficiency over the last 12 months. Mirrors the web
+// Reports page. staff_cost_profiles / staff_leave are payroll-sensitive (RLS
+// admin-only) — the Reports screen only calls this for admins.
+export async function getStaffEfficiency(): Promise<StaffEffRow[]> {
+  const cutoff = new Date();
+  cutoff.setFullYear(cutoff.getFullYear() - 1);
+  const cutoffIso = cutoff.toISOString();
+  const cutoffDate = cutoffIso.slice(0, 10);
+
+  const [profilesRes, leaveRes, workRes, equipRes, nameRes] = await Promise.all([
+    supabase.from("staff_cost_profiles").select("*"),
+    supabase.from("staff_leave").select("staff_id, leave_type, hours, start_date").gte("start_date", cutoffDate),
+    supabase.from("time_entries").select("staff_id, hours").eq("entry_type", "work").gte("clock_in", cutoffIso).not("hours", "is", null),
+    supabase.from("equipment").select("*").eq("is_active", true),
+    supabase.from("profiles").select("id, full_name"),
+  ]);
+
+  type NameRow = { id: string; full_name: string };
+  const nameByStaff: Record<string, string> = {};
+  for (const p of (nameRes.data as unknown as NameRow[]) ?? []) nameByStaff[p.id] = p.full_name;
+
+  const input: StaffEffInput = {
+    profiles: (profilesRes.data as unknown as StaffEffProfile[]) ?? [],
+    workEntries: (workRes.data as unknown as { staff_id: string; hours: number | null }[]) ?? [],
+    leaveEntries: (leaveRes.data as unknown as { staff_id: string; leave_type: string; hours: number | null }[]) ?? [],
+    equipment: (equipRes.data as unknown as StaffEffInput["equipment"]) ?? [],
+    nameByStaff,
+  };
+  return computeStaffEfficiency(input);
 }
 
 export async function getReportAnalytics(): Promise<ReportAnalytics> {
