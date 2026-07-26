@@ -13,6 +13,7 @@ import { VoiceReportRepository } from "./repositories/voiceReport";
 import { FinanceRepository } from "./repositories/finance";
 import { CustomersRepository } from "./repositories/customers";
 import { InventoryRepository } from "./repositories/inventory";
+import { EquipmentRepository } from "./repositories/fleet";
 
 // The wired offline stack a screen consumes: repositories for writes, the sync
 // engine to drive them out, and the outbox for the pending/failed badge.
@@ -27,6 +28,7 @@ export interface DataLayer {
   finance: FinanceRepository;
   customers: CustomersRepository;
   inventory: InventoryRepository;
+  equipment: EquipmentRepository;
 }
 
 export interface DataLayerDeps {
@@ -54,5 +56,6 @@ export function createDataLayer(deps: DataLayerDeps): DataLayer {
   const finance = new FinanceRepository(outbox, ids);
   const customers = new CustomersRepository(outbox, ids);
   const inventory = new InventoryRepository(outbox, ids);
-  return { outbox, engine, timeEntries, photos, notes, signature, voiceReport, finance, customers, inventory };
+  const equipment = new EquipmentRepository(outbox, ids);
+  return { outbox, engine, timeEntries, photos, notes, signature, voiceReport, finance, customers, inventory, equipment };
 }
