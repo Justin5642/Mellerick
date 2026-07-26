@@ -24,6 +24,7 @@ interface Draft {
   leave_loading_rate: string;
   annual_fixed_oncosts: string;
   target_hours_per_week: string;
+  charge_out_rate: string;
 }
 
 function toDraft(s: StaffMember): Draft {
@@ -40,6 +41,7 @@ function toDraft(s: StaffMember): Draft {
     leave_loading_rate: String(c?.leave_loading_rate ?? 0),
     annual_fixed_oncosts: String(c?.annual_fixed_oncosts ?? 0),
     target_hours_per_week: String(c?.target_hours_per_week ?? 38),
+    charge_out_rate: c?.charge_out_rate != null ? String(c.charge_out_rate) : "",
   };
 }
 
@@ -70,6 +72,8 @@ export default function StaffScreen() {
           leave_loading_rate: num(draft.leave_loading_rate),
           annual_fixed_oncosts: num(draft.annual_fixed_oncosts),
           target_hours_per_week: num(draft.target_hours_per_week),
+          // Blank clears the override (null) so the default charge-out applies.
+          charge_out_rate: draft.charge_out_rate.trim() === "" ? null : parseFloat(draft.charge_out_rate),
         },
       });
       setDraft(null);
@@ -143,6 +147,7 @@ export default function StaffScreen() {
                 <View style={{ flex: 1 }}><Field label="Annual oncosts ($)" value={draft?.annual_fixed_oncosts ?? ""} onChange={set("annual_fixed_oncosts")} num /></View>
                 <View style={{ flex: 1 }}><Field label="Target hrs/wk" value={draft?.target_hours_per_week ?? ""} onChange={set("target_hours_per_week")} num /></View>
               </View>
+              <Field label="Charge-out rate ($/h, optional — blank = default)" value={draft?.charge_out_rate ?? ""} onChange={set("charge_out_rate")} num />
             </ScrollView>
             <View style={styles.actions}>
               <TouchableOpacity style={styles.cancel} onPress={() => setDraft(null)} disabled={saving}><Text style={styles.cancelText}>Cancel</Text></TouchableOpacity>

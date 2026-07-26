@@ -7,6 +7,7 @@ export interface CostProfile {
   leave_loading_rate: number;
   annual_fixed_oncosts: number;
   target_hours_per_week: number;
+  charge_out_rate: number | null; // per-employee billing rate override (0026)
 }
 export interface StaffMember {
   id: string;
@@ -21,7 +22,7 @@ export interface StaffMember {
 export async function listStaff(): Promise<StaffMember[]> {
   const { data } = await supabase
     .from("profiles")
-    .select("id, full_name, email, phone, role, is_active, staff_cost_profiles(hourly_rate, super_rate, workers_comp_rate, leave_loading_rate, annual_fixed_oncosts, target_hours_per_week)")
+    .select("id, full_name, email, phone, role, is_active, staff_cost_profiles(hourly_rate, super_rate, workers_comp_rate, leave_loading_rate, annual_fixed_oncosts, target_hours_per_week, charge_out_rate)")
     .order("full_name");
   return (data as unknown as StaffMember[]) ?? [];
 }
@@ -47,6 +48,7 @@ export async function saveStaff(input: {
       leave_loading_rate: input.cost.leave_loading_rate,
       annual_fixed_oncosts: input.cost.annual_fixed_oncosts,
       target_hours_per_week: input.cost.target_hours_per_week,
+      charge_out_rate: input.cost.charge_out_rate,
     },
     { onConflict: "staff_id" }
   );
