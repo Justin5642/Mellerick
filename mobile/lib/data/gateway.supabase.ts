@@ -9,9 +9,12 @@ import type { SideEffectKind } from "./outbox/types";
 // remain the authorization boundary (no second authz surface — the reason we
 // chose the outbox over PowerSync for this app).
 export const supabaseGateway: SupabaseGateway = {
-  async upsertRow(table, row) {
-    const { error } = await supabase.from(table).upsert(row, { onConflict: "id" });
-    if (error) throw new Error(`${table} upsert: ${error.message}`);
+  async insertRow(table, row) {
+    const { error } = await supabase.from(table).insert(row);
+    // 23505 = unique_violation. The row is already there from an earlier attempt
+    // whose response we never saw, so the create has effectively succeeded —
+    // report success WITHOUT overwriting whatever the row holds now.
+    if (error && error.code !== "23505") throw new Error(`${table} insert: ${error.message}`);
   },
   async updateRow(table, id, patch) {
     const { error } = await supabase.from(table).update(patch).eq("id", id);

@@ -10,7 +10,7 @@ function seqIds(): IdGen {
 }
 function makeGateway(): jest.Mocked<SupabaseGateway> {
   return {
-    upsertRow: jest.fn().mockResolvedValue(undefined),
+    insertRow: jest.fn().mockResolvedValue(undefined),
     updateRow: jest.fn().mockResolvedValue(undefined),
     deleteRow: jest.fn().mockResolvedValue(undefined),
     uploadObject: jest.fn().mockResolvedValue(undefined),
@@ -58,7 +58,7 @@ describe("createDataLayer (end-to-end offline → reconnect)", () => {
     await layer.timeEntries.clockIn({ jobId: "j1", staffId: "s1" });
     await layer.engine.flush(); // offline → no-op
 
-    expect(gw.upsertRow).not.toHaveBeenCalled();
+    expect(gw.insertRow).not.toHaveBeenCalled();
     // one write + one billing side-effect are queued and outstanding
     expect(await layer.outbox.pendingCount()).toBe(2);
   });
@@ -72,12 +72,12 @@ describe("createDataLayer (end-to-end offline → reconnect)", () => {
 
     const rowId = await layer.timeEntries.clockIn({ jobId: "j1", staffId: "s1" });
     await layer.engine.flush(); // still offline
-    expect(gw.upsertRow).not.toHaveBeenCalled();
+    expect(gw.insertRow).not.toHaveBeenCalled();
 
     net.reconnect(); // engine's onOnline fires a drain
     await flushMicrotasks();
 
-    expect(gw.upsertRow).toHaveBeenCalledWith("time_entries", expect.objectContaining({ id: rowId, job_id: "j1", staff_id: "s1" }));
+    expect(gw.insertRow).toHaveBeenCalledWith("time_entries", expect.objectContaining({ id: rowId, job_id: "j1", staff_id: "s1" }));
     expect(api.callSideEffect).toHaveBeenCalledWith("sync-billing", { entryId: rowId });
     expect(await layer.outbox.pendingCount()).toBe(0); // fully drained
   });
@@ -87,7 +87,7 @@ describe("createDataLayer (end-to-end offline → reconnect)", () => {
     const gw = makeGateway();
     const order: string[] = [];
     gw.uploadObject.mockImplementation(async () => void order.push("upload"));
-    gw.upsertRow.mockImplementation(async () => void order.push("insert"));
+    gw.insertRow.mockImplementation(async () => void order.push("insert"));
     gw.cleanupAttachment.mockImplementation(async () => void order.push("cleanup"));
     const layer = createDataLayer({ store: new InMemoryOutboxStore(), gateway: gw, api: makeApi(), connectivity: net.connectivity, ids: seqIds() });
     layer.engine.start();
@@ -101,7 +101,7 @@ describe("createDataLayer (end-to-end offline → reconnect)", () => {
 
     expect(order).toEqual(["upload", "insert", "cleanup"]); // strict ordering end-to-end
     expect(gw.uploadObject).toHaveBeenCalledWith("job-photos", storagePath, "file:///doc/outbox/x.jpg");
-    expect(gw.upsertRow).toHaveBeenCalledWith("job_photos", { id, storage_path: storagePath, job_id: "j1", uploaded_by: "u1", photo_type: "before" });
+    expect(gw.insertRow).toHaveBeenCalledWith("job_photos", { id, storage_path: storagePath, job_id: "j1", uploaded_by: "u1", photo_type: "before" });
     expect(await layer.outbox.pendingCount()).toBe(0);
   });
 
@@ -121,7 +121,7 @@ describe("createDataLayer (end-to-end offline → reconnect)", () => {
     const rowId = await layer.timeEntries.clockIn({ jobId: "j1", staffId: "s1" });
     await layer.timeEntries.clockOut({ entryId: rowId, clockInIso: "2026-07-27T00:00:00.000Z" });
 
-    gw.upsertRow.mockRejectedValueOnce(new Error("transient 500")); // insert fails first try
+    gw.insertRow.mockRejectedValueOnce(new Error("transient 500")); // insert fails first try
     net.reconnect();
     await flushMicrotasks();
     expect(gw.updateRow).not.toHaveBeenCalled(); // THE FIX: no 0-row clock-out on the missing row
@@ -130,7 +130,7 @@ describe("createDataLayer (end-to-end offline → reconnect)", () => {
     await layer.engine.flush();
     await flushMicrotasks();
 
-    expect(gw.upsertRow).toHaveBeenCalledWith("time_entries", expect.objectContaining({ id: rowId, job_id: "j1" }));
+    expect(gw.insertRow).toHaveBeenCalledWith("time_entries", expect.objectContaining({ id: rowId, job_id: "j1" }));
     expect(gw.updateRow).toHaveBeenCalledWith("time_entries", rowId, expect.objectContaining({ clock_out: expect.any(String) }));
     expect(await layer.outbox.pendingCount()).toBe(0); // fully drained, hours preserved
   });
@@ -143,7 +143,7 @@ describe("createDataLayer (end-to-end offline → reconnect)", () => {
     layer.engine.start();
 
     const rowId = await layer.timeEntries.clockIn({ jobId: "j1", staffId: "s1" });
-    gw.upsertRow.mockRejectedValueOnce(new Error("transient"));
+    gw.insertRow.mockRejectedValueOnce(new Error("transient"));
     net.reconnect();
     await flushMicrotasks();
     expect(await layer.outbox.pendingCount()).toBeGreaterThan(0); // failed once, still queued
@@ -152,9 +152,10 @@ describe("createDataLayer (end-to-end offline → reconnect)", () => {
     await layer.engine.flush();
     await flushMicrotasks();
 
-    // Every insert attempt targets the SAME client id → an idempotent upsert, so a
-    // retry can't create a duplicate row.
-    const inserts = gw.upsertRow.mock.calls.filter(([t]) => t === "time_entries");
+    // Every insert attempt targets the SAME client id, and the gateway treats a
+    // duplicate key as success, so a retry can't create a duplicate row — nor
+    // overwrite server-side edits made between the attempts (Q2).
+    const inserts = gw.insertRow.mock.calls.filter(([t]) => t === "time_entries");
     expect(inserts.length).toBeGreaterThanOrEqual(1);
     expect(inserts.every(([, row]) => (row as { id: string }).id === rowId)).toBe(true);
     expect(await layer.outbox.pendingCount()).toBe(0);
@@ -174,7 +175,7 @@ describe("createDataLayer (end-to-end offline → reconnect)", () => {
 
     // Upload failed → the metadata row must NOT be written (no orphan pointing at a
     // missing object), and the local file must NOT be cleaned up (kept for retry).
-    expect(gw.upsertRow).not.toHaveBeenCalled();
+    expect(gw.insertRow).not.toHaveBeenCalled();
     expect(gw.cleanupAttachment).not.toHaveBeenCalled();
 
     clock.advance(10_000);
@@ -182,7 +183,7 @@ describe("createDataLayer (end-to-end offline → reconnect)", () => {
     await flushMicrotasks();
 
     expect(gw.uploadObject).toHaveBeenCalledTimes(2); // failed, then succeeded
-    expect(gw.upsertRow).toHaveBeenCalledWith("job_photos", expect.objectContaining({ id }));
+    expect(gw.insertRow).toHaveBeenCalledWith("job_photos", expect.objectContaining({ id }));
     expect(gw.cleanupAttachment).toHaveBeenCalledTimes(1); // file dropped only after success
     expect(await layer.outbox.pendingCount()).toBe(0);
   });

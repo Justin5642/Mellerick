@@ -71,8 +71,10 @@ export class Processor {
         // written here (a server-side route writes it from the object later).
         break;
       case "insert":
-        // rowId is the client-generated PK → idempotent upsert on replay.
-        await this.gateway.upsertRow(op.table, { id: op.rowId, ...stripInternal(op.payload) });
+        // rowId is the client-generated PK, and insertRow treats a duplicate key
+        // as success — so a replay is "ensure this row exists", never an
+        // overwrite of edits the server has made since (Q2).
+        await this.gateway.insertRow(op.table, { id: op.rowId, ...stripInternal(op.payload) });
         break;
       case "update":
         await this.gateway.updateRow(op.table, op.rowId, stripInternal(op.payload));

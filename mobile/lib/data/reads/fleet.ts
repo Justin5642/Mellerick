@@ -1,4 +1,5 @@
 import { supabase } from "../../supabase";
+import { computeEquipmentCost } from "../../costing";
 
 export interface Equipment {
   id: string;
@@ -115,13 +116,12 @@ export async function getEquipmentDocumentSignedUrl(storagePath: string): Promis
   return data?.signedUrl ?? null;
 }
 
-// The web's equipment cost model: total annual cost / target hours + fuel/hr.
-// Depreciation = purchase_cost / estimated_life_years.
+// The web's equipment cost model. Delegates to lib/costing.ts (the verbatim,
+// TDD-locked port of the web's lib/equipment-cost.ts) instead of re-deriving the
+// arithmetic here. The two were algebraically equivalent, but keeping a second
+// copy of a MONEY formula is exactly how drift starts — one source of truth means
+// the Fleet list, the Fleet detail screen, job costing and the web can't diverge
+// (Q14).
 export function hourlyRate(e: Equipment): number {
-  // Match the web: with no target hours there's no meaningful per-hour rate — the
-  // whole expression is 0 (fuel is NOT added on top when hours is 0).
-  if (Number(e.target_hours_per_year) <= 0) return 0;
-  const depreciation = e.estimated_life_years > 0 ? Number(e.purchase_cost) / Number(e.estimated_life_years) : 0;
-  const annual = depreciation + Number(e.insurance_annual) + Number(e.maintenance_annual) + Number(e.registration_annual) + Number(e.other_annual_costs);
-  return annual / Number(e.target_hours_per_year) + Number(e.fuel_cost_per_hour);
+  return computeEquipmentCost(e).costPerHour;
 }

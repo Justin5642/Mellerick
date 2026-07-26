@@ -5,8 +5,14 @@
 import type { SideEffectKind } from "./outbox/types";
 
 export interface SupabaseGateway {
-  // Idempotent upsert keyed on the row's client-generated id.
-  upsertRow(table: string, row: Record<string, unknown>): Promise<void>;
+  // Idempotent CREATE keyed on the row's client-generated id: "ensure this row
+  // exists". A duplicate key on replay is SUCCESS, not an error — and crucially
+  // NOT an overwrite. It used to be an upsert (ON CONFLICT DO UPDATE), which
+  // meant a late-replaying insert would reset columns the server had since
+  // changed: e.g. a technician's queued job_variation insert landing after the
+  // office had priced it would revert `quantity` while leaving the office's
+  // `total_amount` — an inconsistent money row (Q2).
+  insertRow(table: string, row: Record<string, unknown>): Promise<void>;
   updateRow(table: string, id: string, patch: Record<string, unknown>): Promise<void>;
   // Deletes treat "not found" as success (idempotent).
   deleteRow(table: string, id: string): Promise<void>;
