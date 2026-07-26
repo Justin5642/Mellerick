@@ -7,12 +7,11 @@ import { supabase } from "../supabase";
 // never block sign-in or app use. See the PROPOSED device_tokens migration.
 export async function upsertDeviceToken(input: { token: string; platform: string; userId: string }): Promise<boolean> {
   try {
+    // updated_at is owned by the DB (default now() on insert + a BEFORE UPDATE
+    // trigger on conflict), not the device clock — see 0036_device_tokens.sql.
     const { error } = await supabase
       .from("device_tokens")
-      .upsert(
-        { token: input.token, user_id: input.userId, platform: input.platform, updated_at: new Date().toISOString() },
-        { onConflict: "token" }
-      );
+      .upsert({ token: input.token, user_id: input.userId, platform: input.platform }, { onConflict: "token" });
     return !error;
   } catch {
     return false;

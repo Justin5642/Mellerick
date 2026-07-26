@@ -13,6 +13,23 @@ create table if not exists device_tokens (
 
 create index if not exists device_tokens_user_id_idx on device_tokens(user_id);
 
+-- updated_at is server-owned: default now() covers inserts; this BEFORE UPDATE
+-- trigger covers the on-conflict re-register path, so the value never depends on
+-- the device clock (the client does not send updated_at).
+create or replace function device_tokens_set_updated_at()
+returns trigger as $$
+begin
+  new.updated_at = now();
+  return new;
+end;
+$$ language plpgsql;
+
+drop trigger if exists device_tokens_updated_at on device_tokens;
+create trigger device_tokens_updated_at
+  before update on device_tokens
+  for each row
+  execute procedure device_tokens_set_updated_at();
+
 alter table device_tokens enable row level security;
 
 -- A user may register / see / update / remove only their OWN device tokens.

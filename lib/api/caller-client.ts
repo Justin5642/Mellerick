@@ -32,5 +32,5 @@ export async function callerClient(request: NextRequest): Promise<SupabaseClient
     );
   }
 
-  return createCookieClient() as unknown as SupabaseClient;
+  return createCookieClient();
 }
