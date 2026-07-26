@@ -40,6 +40,10 @@ export interface WriteOperation {
   payload: Record<string, unknown>;
   /** Local file path for an attachment that must upload before this row inserts. */
   attachmentLocalPath?: string | null;
+  /** Payload field holding the Storage object key for the attachment (upload +
+   * delete-cleanup). Defaults to "storage_path" (photos); expenses set
+   * "receipt_storage_path" since that's their real column. */
+  attachmentPathField?: string;
   /** Another operation id this one must run after (e.g. metadata after upload). */
   dependsOn?: string | null;
   status: OpStatus;

@@ -15,7 +15,9 @@ export interface JobExpense {
   description: string | null;
   amount: number;
   gst_amount: number;
+  invoice_number: string | null;
   invoice_date: string | null;
+  receipt_storage_path: string | null;
 }
 export interface JobPOCostCentre {
   id: string;
@@ -41,7 +43,7 @@ export async function getJobBilling(jobId: string): Promise<JobBilling | null> {
   const [jobRes, itemsRes, expRes, poRes] = await Promise.all([
     supabase.from("jobs").select("job_number, title").eq("id", jobId).single(),
     supabase.from("job_items").select("id, name, description, quantity, unit_price, total").eq("job_id", jobId).order("created_at"),
-    supabase.from("job_expenses").select("id, supplier_name, category, description, amount, gst_amount, invoice_date").eq("job_id", jobId).order("created_at", { ascending: false }),
+    supabase.from("job_expenses").select("id, supplier_name, category, description, amount, gst_amount, invoice_number, invoice_date, receipt_storage_path").eq("job_id", jobId).order("created_at", { ascending: false }),
     supabase.from("purchase_orders").select("id, po_number, client_reference, total_value, po_cost_centers(id, name, allocated_amount)").eq("job_id", jobId),
   ]);
   const job = jobRes.data as { job_number: number | null; title: string } | null;
@@ -53,4 +55,11 @@ export async function getJobBilling(jobId: string): Promise<JobBilling | null> {
     expenses: (expRes.data as unknown as JobExpense[]) ?? [],
     purchaseOrders: (poRes.data as unknown as JobPO[]) ?? [],
   };
+}
+
+// Short-lived signed URL for a receipt object so the office user can view it.
+// Online-only (Storage has no offline story); returns null if unavailable.
+export async function getReceiptSignedUrl(storagePath: string): Promise<string | null> {
+  const { data } = await supabase.storage.from("job-documents").createSignedUrl(storagePath, 60);
+  return data?.signedUrl ?? null;
 }

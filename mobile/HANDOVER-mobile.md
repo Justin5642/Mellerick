@@ -28,7 +28,8 @@ field app + a full office/admin surface mirroring the web app.
   + accept/decline), Invoices (list/detail + Ready-to-Invoice queue + **create/edit
   builder**), Pricing (CRUD), Inventory (CRUD), Fleet/Equipment (CRUD, admin-only
   writes), Staff (admin), Reports (KPI first-pass), Settings (integration status).
-- **Job Billing** (office) — line items (add/remove) + expenses/POs (read) + totals.
+- **Job Billing** (office) — line items (add/remove) + **expense capture** (add/remove
+  with image-receipt upload + view) + POs (read) + totals.
 - **Read-repository layer** (`lib/data/reads/`) — every screen reads through it, so
   an offline cache / PowerSync drops in with no per-screen refactor.
 - **Money safety** — every dollar renders through role-gated `MoneyText`; financial
@@ -60,7 +61,7 @@ field app + a full office/admin surface mirroring the web app.
 ## Not yet built (in-repo follow-ups)
 - Offline **reads** cache / PowerSync connection · **push notifications** ·
   **background auto-clock** (needs the `development` EAS dev client) · **Reports**
-  Skia charts · expense-capture (receipt upload) + PO/cost-centre editing · office
+  Skia charts · PO/cost-centre editing + labour-cost/margin costing (Q18) · office
   Backflow list (Q12) · admin My-Jobs access (Q13) · MP1 dollar-leak RLS tightening.
 
 ## How to run / build

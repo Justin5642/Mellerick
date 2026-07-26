@@ -1,22 +1,50 @@
 import { useCallback, useEffect, useState } from "react";
-import { View, Text, ScrollView, StyleSheet, ActivityIndicator, TouchableOpacity, Modal, TextInput, Alert, RefreshControl } from "react-native";
+import { View, Text, ScrollView, StyleSheet, ActivityIndicator, TouchableOpacity, Modal, TextInput, Alert, RefreshControl, Linking } from "react-native";
 import { Stack, useLocalSearchParams } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
+import * as ImagePicker from "expo-image-picker";
 import { colors } from "../../../lib/theme";
 import { MoneyText } from "../../../design/components/MoneyText";
-import { getJobBilling, type JobBilling } from "../../../lib/data/reads/jobBilling";
+import { getJobBilling, getReceiptSignedUrl, type JobBilling, type JobExpense } from "../../../lib/data/reads/jobBilling";
 import { useJobBilling } from "../../../lib/data/hooks/useJobBilling";
+import { useAuth } from "../../../lib/auth-context";
+import type { ExpenseCategory } from "../../../lib/data/repositories/jobBilling";
 
 interface Draft { name: string; quantity: string; unit_price: string; description: string }
+interface ExpenseDraft {
+  supplier_name: string;
+  category: ExpenseCategory;
+  description: string;
+  invoice_number: string;
+  invoice_date: string; // YYYY-MM-DD (optional)
+  amount: string;
+  gst_amount: string;
+  receiptUri: string | null;
+}
+
+const EXPENSE_CATEGORIES: { value: ExpenseCategory; label: string }[] = [
+  { value: "materials", label: "Materials" },
+  { value: "subcontractor", label: "Subcontractor" },
+  { value: "equipment_hire", label: "Equipment Hire" },
+  { value: "other", label: "Other" },
+];
+const CATEGORY_LABELS: Record<string, string> = Object.fromEntries(EXPENSE_CATEGORIES.map((c) => [c.value, c.label]));
+
+const emptyExpense: ExpenseDraft = {
+  supplier_name: "", category: "materials", description: "", invoice_number: "", invoice_date: "", amount: "", gst_amount: "", receiptUri: null,
+};
 
 export default function JobBillingScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const billing = useJobBilling();
+  const { profile } = useAuth();
   const [data, setData] = useState<JobBilling | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [draft, setDraft] = useState<Draft | null>(null);
   const [saving, setSaving] = useState(false);
+  const [expense, setExpense] = useState<ExpenseDraft | null>(null);
+  const [savingExpense, setSavingExpense] = useState(false);
 
   const load = useCallback(async () => { setData(await getJobBilling(id)); setLoading(false); }, [id]);
   useEffect(() => { load(); }, [load]);
@@ -45,6 +73,56 @@ export default function JobBillingScreen() {
       { text: "Cancel", style: "cancel" },
       { text: "Remove", style: "destructive", onPress: async () => { await billing.removeLineItem(itemId); await load(); } },
     ]);
+  }
+
+  async function pickReceipt(fromCamera: boolean) {
+    const perm = fromCamera ? await ImagePicker.requestCameraPermissionsAsync() : await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!perm.granted) { Alert.alert("Permission needed", fromCamera ? "Camera access is required." : "Photo library access is required."); return; }
+    const result = fromCamera ? await ImagePicker.launchCameraAsync({ quality: 0.6 }) : await ImagePicker.launchImageLibraryAsync({ quality: 0.6 });
+    if (result.canceled || !result.assets?.length) return;
+    setExpense((d) => d && { ...d, receiptUri: result.assets[0].uri });
+  }
+
+  async function addExpense() {
+    if (!expense || savingExpense || !billing.ready) return;
+    const amount = parseFloat(expense.amount);
+    if (!expense.supplier_name.trim() || Number.isNaN(amount) || amount <= 0) { Alert.alert("Missing details", "Supplier and a valid amount are required."); return; }
+    if (!profile?.id) { Alert.alert("Not ready", "Your profile is still loading — please try again."); return; }
+    setSavingExpense(true);
+    try {
+      await billing.addExpense({
+        jobId: id,
+        enteredBy: profile.id,
+        supplierName: expense.supplier_name.trim(),
+        category: expense.category,
+        description: expense.description.trim() || null,
+        invoiceNumber: expense.invoice_number.trim() || null,
+        invoiceDate: expense.invoice_date.trim() || null,
+        amount,
+        gstAmount: parseFloat(expense.gst_amount) || 0,
+        receipt: expense.receiptUri ? { sourceUri: expense.receiptUri, ext: "jpg" } : null,
+      });
+      setExpense(null);
+      await load();
+    } catch (e) {
+      Alert.alert("Couldn't save expense", e instanceof Error ? e.message : "Please try again.");
+    } finally {
+      setSavingExpense(false);
+    }
+  }
+
+  function confirmRemoveExpense(e: JobExpense) {
+    Alert.alert("Remove expense", "This cannot be undone.", [
+      { text: "Cancel", style: "cancel" },
+      { text: "Remove", style: "destructive", onPress: async () => { await billing.removeExpense({ id: e.id, receiptStoragePath: e.receipt_storage_path }); await load(); } },
+    ]);
+  }
+
+  async function viewReceipt(e: JobExpense) {
+    if (!e.receipt_storage_path) return;
+    const url = await getReceiptSignedUrl(e.receipt_storage_path);
+    if (url) Linking.openURL(url);
+    else Alert.alert("Receipt unavailable", "The receipt can't be opened right now (it may still be uploading, or you're offline).");
   }
 
   if (loading) return <View style={styles.center}><Stack.Screen options={{ title: "Billing" }} /><ActivityIndicator size="large" color={colors.blue600} /></View>;
@@ -77,21 +155,37 @@ export default function JobBillingScreen() {
       </View>
       {data.lineItems.length > 0 && <Text style={styles.hint}>Long-press a line item to remove it.</Text>}
 
-      <Text style={styles.section}>Expenses</Text>
+      <View style={styles.sectionHead}>
+        <Text style={styles.section}>Expenses</Text>
+        <TouchableOpacity onPress={() => setExpense({ ...emptyExpense })} style={styles.addBtn}>
+          <Ionicons name="add" size={16} color={colors.blue600} /><Text style={styles.addText}>Add</Text>
+        </TouchableOpacity>
+      </View>
       <View style={styles.card}>
         {data.expenses.length === 0 ? <Text style={styles.empty}>No expenses.</Text> : data.expenses.map((e) => (
-          <View key={e.id} style={styles.lineRow}>
+          <TouchableOpacity key={e.id} style={styles.lineRow} onLongPress={() => confirmRemoveExpense(e)}>
             <View style={{ flex: 1 }}>
               <Text style={styles.lineName}>{e.supplier_name}</Text>
-              <Text style={styles.lineMeta}>{e.category.replace(/_/g, " ")}{e.description ? ` · ${e.description}` : ""}</Text>
+              <Text style={styles.lineMeta}>
+                {CATEGORY_LABELS[e.category] ?? e.category}
+                {e.invoice_number ? ` · Inv #${e.invoice_number}` : ""}
+                {e.description ? ` · ${e.description}` : ""}
+              </Text>
+              {e.receipt_storage_path && (
+                <TouchableOpacity onPress={() => viewReceipt(e)} style={styles.receiptLink} hitSlop={8}>
+                  <Ionicons name="document-attach-outline" size={13} color={colors.blue600} />
+                  <Text style={styles.receiptLinkText}>View receipt</Text>
+                </TouchableOpacity>
+              )}
             </View>
             <MoneyText amount={e.amount} style={styles.lineTotal} />
-          </View>
+          </TouchableOpacity>
         ))}
         {data.expenses.length > 0 && (
           <View style={styles.subtotalRow}><Text style={styles.subtotalLabel}>Expenses total</Text><MoneyText amount={expenseTotal} style={styles.subtotalValue} /></View>
         )}
       </View>
+      {data.expenses.length > 0 && <Text style={styles.hint}>Long-press an expense to remove it.</Text>}
 
       {data.purchaseOrders.length > 0 && (
         <>
@@ -113,8 +207,9 @@ export default function JobBillingScreen() {
         </>
       )}
 
-      <Text style={styles.footnote}>Expense capture (with receipts) and PO editing are managed on the web dashboard.</Text>
+      <Text style={styles.footnote}>PO editing and PDF receipts are managed on the web dashboard.</Text>
 
+      {/* Add line item */}
       <Modal visible={!!draft} transparent animationType="slide" onRequestClose={() => !saving && setDraft(null)}>
         <View style={styles.overlay}>
           <View style={styles.sheet}>
@@ -130,6 +225,58 @@ export default function JobBillingScreen() {
               <TouchableOpacity style={styles.saveBtn} onPress={addItem} disabled={saving}><Text style={styles.saveText}>{saving ? "…" : "Add"}</Text></TouchableOpacity>
             </View>
           </View>
+        </View>
+      </Modal>
+
+      {/* Add expense */}
+      <Modal visible={!!expense} transparent animationType="slide" onRequestClose={() => !savingExpense && setExpense(null)}>
+        <View style={styles.overlay}>
+          <ScrollView style={styles.sheetScroll} contentContainerStyle={styles.sheet} keyboardShouldPersistTaps="handled">
+            <Text style={styles.sheetTitle}>Add expense</Text>
+            <Field label="Supplier" value={expense?.supplier_name ?? ""} onChange={(v) => setExpense((d) => d && { ...d, supplier_name: v })} />
+
+            <Text style={styles.fieldLabel}>Category</Text>
+            <View style={styles.catRow}>
+              {EXPENSE_CATEGORIES.map((c) => (
+                <TouchableOpacity
+                  key={c.value}
+                  style={[styles.catChip, expense?.category === c.value && styles.catChipActive]}
+                  onPress={() => setExpense((d) => d && { ...d, category: c.value })}
+                >
+                  <Text style={[styles.catChipText, expense?.category === c.value && styles.catChipTextActive]}>{c.label}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+
+            <Field label="Description (optional)" value={expense?.description ?? ""} onChange={(v) => setExpense((d) => d && { ...d, description: v })} />
+            <View style={styles.twoCol}>
+              <View style={{ flex: 1 }}><Field label="Invoice # (optional)" value={expense?.invoice_number ?? ""} onChange={(v) => setExpense((d) => d && { ...d, invoice_number: v })} /></View>
+              <View style={{ flex: 1 }}><Field label="Invoice date (YYYY-MM-DD)" value={expense?.invoice_date ?? ""} onChange={(v) => setExpense((d) => d && { ...d, invoice_date: v })} /></View>
+            </View>
+            <View style={styles.twoCol}>
+              <View style={{ flex: 1 }}><Field label="Amount (ex GST)" value={expense?.amount ?? ""} onChange={(v) => setExpense((d) => d && { ...d, amount: v })} num /></View>
+              <View style={{ flex: 1 }}><Field label="GST" value={expense?.gst_amount ?? ""} onChange={(v) => setExpense((d) => d && { ...d, gst_amount: v })} num /></View>
+            </View>
+
+            <Text style={styles.fieldLabel}>Receipt (optional)</Text>
+            {expense?.receiptUri ? (
+              <View style={styles.receiptChosen}>
+                <Ionicons name="checkmark-circle" size={16} color={colors.green600} />
+                <Text style={styles.receiptChosenText}>Receipt attached</Text>
+                <TouchableOpacity onPress={() => setExpense((d) => d && { ...d, receiptUri: null })} hitSlop={8}><Text style={styles.receiptRemove}>Remove</Text></TouchableOpacity>
+              </View>
+            ) : (
+              <View style={styles.twoCol}>
+                <TouchableOpacity style={styles.receiptBtn} onPress={() => pickReceipt(true)}><Ionicons name="camera-outline" size={16} color={colors.blue600} /><Text style={styles.receiptBtnText}>Camera</Text></TouchableOpacity>
+                <TouchableOpacity style={styles.receiptBtn} onPress={() => pickReceipt(false)}><Ionicons name="image-outline" size={16} color={colors.blue600} /><Text style={styles.receiptBtnText}>Gallery</Text></TouchableOpacity>
+              </View>
+            )}
+
+            <View style={styles.actions}>
+              <TouchableOpacity style={styles.cancel} onPress={() => setExpense(null)} disabled={savingExpense}><Text style={styles.cancelText}>Cancel</Text></TouchableOpacity>
+              <TouchableOpacity style={styles.saveBtn} onPress={addExpense} disabled={savingExpense}><Text style={styles.saveText}>{savingExpense ? "…" : "Add"}</Text></TouchableOpacity>
+            </View>
+          </ScrollView>
         </View>
       </Modal>
     </ScrollView>
@@ -161,6 +308,8 @@ const styles = StyleSheet.create({
   lineMeta: { fontSize: 12, color: colors.slate500, marginTop: 1 },
   lineMetaMoney: { fontSize: 12, color: colors.slate500 },
   lineTotal: { fontSize: 14, fontWeight: "700", color: colors.slate900, width: 76, textAlign: "right" },
+  receiptLink: { flexDirection: "row", alignItems: "center", gap: 4, marginTop: 4 },
+  receiptLinkText: { fontSize: 12, color: colors.blue600, fontWeight: "600" },
   subtotalRow: { flexDirection: "row", justifyContent: "space-between", paddingTop: 8 },
   subtotalLabel: { fontSize: 13, fontWeight: "700", color: colors.slate700 },
   subtotalValue: { fontSize: 15, fontWeight: "800", color: colors.slate900 },
@@ -173,12 +322,23 @@ const styles = StyleSheet.create({
   ccAmount: { fontSize: 13, color: colors.slate700 },
   footnote: { fontSize: 11, color: colors.slate400, textAlign: "center", marginTop: 14 },
   overlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.4)", justifyContent: "flex-end" },
+  sheetScroll: { maxHeight: "88%", flexGrow: 0 },
   sheet: { backgroundColor: colors.card, borderTopLeftRadius: 16, borderTopRightRadius: 16, padding: 16, paddingBottom: 28 },
   sheetTitle: { fontSize: 16, fontWeight: "800", color: colors.slate900, marginBottom: 12 },
   field: { marginBottom: 12 },
   fieldLabel: { fontSize: 12, fontWeight: "700", color: colors.slate500, textTransform: "uppercase", marginBottom: 6 },
   input: { borderWidth: 1, borderColor: colors.border, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10, fontSize: 14, backgroundColor: colors.bg, color: colors.slate900 },
   twoCol: { flexDirection: "row", gap: 12 },
+  catRow: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: 12 },
+  catChip: { paddingHorizontal: 12, paddingVertical: 7, borderRadius: 999, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.bg },
+  catChipActive: { backgroundColor: colors.blue600, borderColor: colors.blue600 },
+  catChipText: { fontSize: 12, fontWeight: "600", color: colors.slate700 },
+  catChipTextActive: { color: "#fff" },
+  receiptBtn: { flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, paddingVertical: 12, borderRadius: 10, borderWidth: 1, borderColor: colors.blue100, backgroundColor: colors.blue100 },
+  receiptBtnText: { fontSize: 13, fontWeight: "600", color: colors.blue600 },
+  receiptChosen: { flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 12 },
+  receiptChosenText: { fontSize: 13, color: colors.slate700, fontWeight: "600", flex: 1 },
+  receiptRemove: { fontSize: 13, color: colors.red600, fontWeight: "600" },
   actions: { flexDirection: "row", gap: 10, marginTop: 8 },
   cancel: { flex: 1, paddingVertical: 12, borderRadius: 10, backgroundColor: colors.bg, alignItems: "center", borderWidth: 1, borderColor: colors.border },
   cancelText: { color: colors.slate700, fontWeight: "600", fontSize: 14 },

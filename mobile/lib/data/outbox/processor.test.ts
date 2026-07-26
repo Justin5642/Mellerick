@@ -67,6 +67,50 @@ describe("Processor", () => {
     expect(gw.upsertRow.mock.calls[0][1]).not.toHaveProperty("bucket");
   });
 
+  it("uploads a receipt attachment using a custom attachmentPathField and keeps that column on the row", async () => {
+    const store = new InMemoryOutboxStore();
+    const outbox = new Outbox(store, fixedClock());
+    await outbox.enqueue(
+      write("exp-1", {
+        aggregate: "job_expense",
+        table: "job_expenses",
+        attachmentLocalPath: "/tmp/r.jpg",
+        attachmentPathField: "receipt_storage_path",
+        payload: { bucket: "job-documents", receipt_storage_path: "j1/expense-exp-1.jpg", supplier_name: "Reece" },
+      })
+    );
+    const gw = makeGateway();
+    await new Processor(outbox, gw, makeApi(), online(true)).drain();
+    // uploads to the receipt_storage_path value (NOT storage_path, which is absent)
+    expect(gw.uploadObject).toHaveBeenCalledWith("job-documents", "j1/expense-exp-1.jpg", "/tmp/r.jpg");
+    // the real receipt_storage_path column survives; only bucket is stripped
+    expect(gw.upsertRow).toHaveBeenCalledWith("job_expenses", {
+      id: "exp-1",
+      receipt_storage_path: "j1/expense-exp-1.jpg",
+      supplier_name: "Reece",
+    });
+    expect(gw.upsertRow.mock.calls[0][1]).not.toHaveProperty("bucket");
+  });
+
+  it("removes the receipt object on an expense delete via the custom attachmentPathField", async () => {
+    const store = new InMemoryOutboxStore();
+    const outbox = new Outbox(store, fixedClock());
+    await outbox.enqueue(
+      write("del-e", {
+        aggregate: "job_expense",
+        table: "job_expenses",
+        op: "delete",
+        rowId: "exp-9",
+        attachmentPathField: "receipt_storage_path",
+        payload: { bucket: "job-documents", receipt_storage_path: "j1/expense-exp-9.jpg" },
+      })
+    );
+    const gw = makeGateway();
+    await new Processor(outbox, gw, makeApi(), online(true)).drain();
+    expect(gw.removeObject).toHaveBeenCalledWith("job-documents", "j1/expense-exp-9.jpg");
+    expect(gw.deleteRow).toHaveBeenCalledWith("job_expenses", "exp-9");
+  });
+
   it("removes the Storage object before the row on a photo delete, then cleans up nothing (no attachment)", async () => {
     const store = new InMemoryOutboxStore();
     const outbox = new Outbox(store, fixedClock());

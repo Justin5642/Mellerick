@@ -55,11 +55,14 @@ export class Processor {
   }
 
   private async dispatchWrite(op: WriteOperation): Promise<void> {
+    // The payload field holding the Storage object key (photos: storage_path;
+    // expenses: receipt_storage_path). Defaults preserve the photo behaviour.
+    const pathField = op.attachmentPathField ?? "storage_path";
     // Attachment first: upload the local file, then write the metadata row, so
     // the row only ever references an object that exists in Storage.
     if (op.attachmentLocalPath) {
       const bucket = (op.payload.bucket as string) ?? "job-photos";
-      const path = op.payload.storage_path as string;
+      const path = op.payload[pathField] as string;
       await this.gateway.uploadObject(bucket, path, op.attachmentLocalPath);
     }
     switch (op.op) {
@@ -75,11 +78,12 @@ export class Processor {
         await this.gateway.updateRow(op.table, op.rowId, stripInternal(op.payload));
         break;
       case "delete":
-        // Remove the associated Storage object first (photos carry storage_path),
-        // then the row — mirrors the web delete order; both are idempotent.
-        if (op.payload.storage_path) {
+        // Remove the associated Storage object first (photos carry storage_path,
+        // expenses carry receipt_storage_path), then the row — mirrors the web
+        // delete order; both are idempotent.
+        if (op.payload[pathField]) {
           const bucket = (op.payload.bucket as string) ?? "job-photos";
-          await this.gateway.removeObject(bucket, op.payload.storage_path as string);
+          await this.gateway.removeObject(bucket, op.payload[pathField] as string);
         }
         await this.gateway.deleteRow(op.table, op.rowId);
         break;
