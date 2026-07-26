@@ -24,7 +24,7 @@ in-repo is a short tail of **minor/complex depth** (below); the true blockers to
 | Customers | **full** ✅ | ~~Customer-360~~ (D47), ~~quick-create~~ (D60), ~~favourites~~ (D62); inactive lifecycle handled via deactivate |
 | Backflow | partial | ~~register-device offline~~ (D46); test-log offline needs the submit dedupe (Q3) — follow-up |
 | Quotes | partial | ~~convert-to-job~~ **DONE** (D50); Send/PDF (ext) |
-| Fleet | near-full | ~~assign~~ (D54), ~~detail + expenses~~ (D56), ~~usage log~~ (D61); documents (file upload) — follow-up |
+| Fleet | **full** ✅ | ~~assign~~ (D54), ~~detail + expenses~~ (D56), ~~usage log~~ (D61), ~~documents view/open~~ (D67); document *upload* stays a web action (matches job docs) |
 | Staff | near-full | ~~charge-out rate~~ (D53), ~~leave log~~ (D58); invite/resend/edit-email (ext) |
 | Settings | near-full | ~~variation-types~~ (D57), ~~cost-centre templates~~ (D59); Xero account codes + OAuth connect (web/ext) |
 | Reports | **full (analytics)** ✅ | all 5 tables done: revenue-by-month, top-customers, jobs-by-staff (D48), staff cost/efficiency (D51), equipment utilisation (D52) |
@@ -40,11 +40,12 @@ convert-to-job, Fleet (assign + detail + expenses), Staff (charge-out + leave),
 Settings (variation types + cost-centre templates), Pricing/Inventory parity, and
 backflow register-offline are all **DONE** (D40–D60). What's left:
 
-**Minor polish:** Jobs **customer/site reassignment** on an existing job (title/
-type/description editable D64, variations priced+approved D65; customer/site left
-to web — dependent-field cascade) · Fleet equipment **documents** (file upload) ·
-PO / cost-centre **editing** on the job billing screen (read + display done;
-still web-managed).
+**Minor polish (all deferred to web by design):** Jobs **customer/site
+reassignment** on an existing job (title/type/description editable D64, variations
+priced+approved D65; customer/site left to web — dependent-field cascade) ·
+document **upload** (job + equipment view/open done, D67; upload needs a native
+file/PDF picker — deferred to web) · PO / cost-centre **editing** on the job
+billing screen (read + display done; still web-managed).
 
 **Complex / has a caveat:**
 - **Backflow test-log offline** — the register-device write is now offline (D46),

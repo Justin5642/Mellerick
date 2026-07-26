@@ -6,7 +6,7 @@ import * as ImagePicker from "expo-image-picker";
 import { colors } from "../../lib/theme";
 import { MoneyText } from "../../design/components/MoneyText";
 import { computeEquipmentCost } from "../../lib/costing";
-import { getEquipment, listEquipmentExpenses, listEquipmentUsage, getEquipmentReceiptSignedUrl, type Equipment, type EquipmentExpense, type EquipmentUsage } from "../../lib/data/reads/fleet";
+import { getEquipment, listEquipmentExpenses, listEquipmentUsage, listEquipmentDocuments, getEquipmentReceiptSignedUrl, getEquipmentDocumentSignedUrl, type Equipment, type EquipmentExpense, type EquipmentUsage, type EquipmentDocument } from "../../lib/data/reads/fleet";
 import { useFleet } from "../../lib/data/hooks/useFleet";
 import { useAuth } from "../../lib/auth-context";
 import type { EquipmentExpenseCategory } from "../../lib/data/repositories/fleet";
@@ -32,6 +32,8 @@ export default function EquipmentDetailScreen() {
   const [equipment, setEquipment] = useState<Equipment | null>(null);
   const [expenses, setExpenses] = useState<EquipmentExpense[]>([]);
   const [usage, setUsage] = useState<EquipmentUsage[]>([]);
+  const [documents, setDocuments] = useState<EquipmentDocument[]>([]);
+  const [openingDocId, setOpeningDocId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [draft, setDraft] = useState<Draft | null>(null);
@@ -40,12 +42,21 @@ export default function EquipmentDetailScreen() {
   const [usageSaving, setUsageSaving] = useState(false);
 
   const load = useCallback(async () => {
-    const [e, ex, us] = await Promise.all([getEquipment(id), listEquipmentExpenses(id), listEquipmentUsage(id)]);
+    const [e, ex, us, docs] = await Promise.all([getEquipment(id), listEquipmentExpenses(id), listEquipmentUsage(id), listEquipmentDocuments(id)]);
     setEquipment(e);
     setExpenses(ex);
     setUsage(us);
+    setDocuments(docs);
     setLoading(false);
   }, [id]);
+
+  async function openDocument(doc: EquipmentDocument) {
+    setOpeningDocId(doc.id);
+    const url = await getEquipmentDocumentSignedUrl(doc.storage_path);
+    setOpeningDocId(null);
+    if (url) Linking.openURL(url);
+    else Alert.alert("Couldn't open document", "It may still be uploading, or you're offline.");
+  }
 
   async function addUsage() {
     if (!usageDraft || usageSaving || !fleet.ready) return;
@@ -215,6 +226,28 @@ export default function EquipmentDetailScreen() {
       </View>
       {usage.length > 0 && !usageDraft && <Text style={styles.hint}>Long-press a usage entry to remove it.</Text>}
 
+      <Text style={styles.section}>Documents</Text>
+      <View style={styles.card}>
+        {documents.length === 0 ? (
+          <Text style={styles.empty}>No documents. Registration, insurance &amp; compliance files are uploaded on the web.</Text>
+        ) : (
+          documents.map((doc) => (
+            <TouchableOpacity key={doc.id} style={styles.docRow} onPress={() => openDocument(doc)} disabled={openingDocId === doc.id}>
+              <View style={styles.docIcon}>
+                {openingDocId === doc.id ? <ActivityIndicator size="small" color={colors.blue600} /> : <Text style={styles.docIconText}>{extLabel(doc.file_name)}</Text>}
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.docName} numberOfLines={1}>{doc.file_name}</Text>
+                <Text style={styles.expMeta}>
+                  {[formatBytes(doc.file_size), doc.profiles?.full_name, new Date(doc.created_at).toLocaleDateString("en-AU")].filter(Boolean).join(" · ")}
+                </Text>
+              </View>
+              <Ionicons name="open-outline" size={18} color={colors.blue600} />
+            </TouchableOpacity>
+          ))
+        )}
+      </View>
+
       <Modal visible={!!draft} transparent animationType="slide" onRequestClose={() => !saving && setDraft(null)}>
         <View style={styles.overlay}>
           <ScrollView style={styles.sheetScroll} contentContainerStyle={styles.sheet} keyboardShouldPersistTaps="handled">
@@ -277,6 +310,16 @@ function CostRow({ label, amount }: { label: string; amount: number }) {
     </View>
   );
 }
+function formatBytes(bytes: number | null) {
+  if (!bytes) return "";
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+function extLabel(fileName: string) {
+  const ext = fileName.split(".").pop()?.toUpperCase() ?? "";
+  return ext.length <= 4 ? ext : "FILE";
+}
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.bg },
@@ -303,6 +346,10 @@ const styles = StyleSheet.create({
   expAmount: { fontSize: 14, fontWeight: "700", color: colors.slate900 },
   receiptLink: { flexDirection: "row", alignItems: "center", gap: 4, marginTop: 4 },
   receiptLinkText: { fontSize: 12, color: colors.blue600, fontWeight: "600" },
+  docRow: { flexDirection: "row", alignItems: "center", gap: 12, paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: colors.slate100 },
+  docIcon: { width: 36, height: 36, borderRadius: 8, backgroundColor: colors.blue100, alignItems: "center", justifyContent: "center" },
+  docIconText: { fontSize: 10, fontWeight: "700", color: colors.blue600 },
+  docName: { fontSize: 14, fontWeight: "600", color: colors.slate900 },
   hint: { fontSize: 11, color: colors.slate400, marginLeft: 4, marginTop: 6 },
   overlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.4)", justifyContent: "flex-end" },
   sheetScroll: { maxHeight: "88%", flexGrow: 0 },

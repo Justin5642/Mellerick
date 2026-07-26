@@ -79,6 +79,34 @@ export async function getEquipmentReceiptSignedUrl(storagePath: string): Promise
   return data?.signedUrl ?? null;
 }
 
+// Files attached to a piece of equipment — registration/insurance/compliance
+// certs, service invoices (migration 0023). Mobile is view/open-only, matching
+// the job-documents story (upload stays a web action); the private
+// equipment-documents bucket is opened via a short-lived signed URL.
+export interface EquipmentDocument {
+  id: string;
+  storage_path: string;
+  file_name: string;
+  file_size: number | null;
+  file_type: string | null;
+  created_at: string;
+  profiles: { full_name: string } | null;
+}
+
+export async function listEquipmentDocuments(equipmentId: string): Promise<EquipmentDocument[]> {
+  const { data } = await supabase
+    .from("equipment_documents")
+    .select("id, storage_path, file_name, file_size, file_type, created_at, profiles:uploaded_by(full_name)")
+    .eq("equipment_id", equipmentId)
+    .order("created_at", { ascending: false });
+  return (data as unknown as EquipmentDocument[]) ?? [];
+}
+
+export async function getEquipmentDocumentSignedUrl(storagePath: string): Promise<string | null> {
+  const { data } = await supabase.storage.from("equipment-documents").createSignedUrl(storagePath, 300);
+  return data?.signedUrl ?? null;
+}
+
 // The web's equipment cost model: total annual cost / target hours + fuel/hr.
 // Depreciation = purchase_cost / estimated_life_years.
 export function hourlyRate(e: Equipment): number {
