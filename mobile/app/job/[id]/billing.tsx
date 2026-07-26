@@ -5,13 +5,15 @@ import { Ionicons } from "@expo/vector-icons";
 import * as ImagePicker from "expo-image-picker";
 import { colors } from "../../../lib/theme";
 import { MoneyText } from "../../../design/components/MoneyText";
-import { getJobBilling, getReceiptSignedUrl, type JobBilling, type JobExpense } from "../../../lib/data/reads/jobBilling";
+import { getJobBilling, getJobEquipment, getReceiptSignedUrl, type JobBilling, type JobEquipment, type JobExpense } from "../../../lib/data/reads/jobBilling";
 import { useJobBilling } from "../../../lib/data/hooks/useJobBilling";
+import { useFleet } from "../../../lib/data/hooks/useFleet";
 import { useAuth } from "../../../lib/auth-context";
 import { useIsAdmin } from "../../../design/guards/useRole";
 import type { ExpenseCategory } from "../../../lib/data/repositories/jobBilling";
 
 interface Draft { name: string; quantity: string; unit_price: string; description: string }
+interface EquipDraft { equipmentId: string; usage_date: string; hours: string; notes: string }
 interface ExpenseDraft {
   supplier_name: string;
   category: ExpenseCategory;
@@ -38,23 +40,65 @@ const emptyExpense: ExpenseDraft = {
 export default function JobBillingScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const billing = useJobBilling();
+  const fleet = useFleet();
   const router = useRouter();
   const isAdmin = useIsAdmin();
   const { profile } = useAuth();
   const [data, setData] = useState<JobBilling | null>(null);
+  const [equipment, setEquipment] = useState<JobEquipment | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [draft, setDraft] = useState<Draft | null>(null);
   const [saving, setSaving] = useState(false);
   const [expense, setExpense] = useState<ExpenseDraft | null>(null);
   const [savingExpense, setSavingExpense] = useState(false);
+  const [equipDraft, setEquipDraft] = useState<EquipDraft | null>(null);
+  const [savingEquip, setSavingEquip] = useState(false);
 
-  const load = useCallback(async () => { setData(await getJobBilling(id)); setLoading(false); }, [id]);
+  const load = useCallback(async () => {
+    const [b, e] = await Promise.all([getJobBilling(id), getJobEquipment(id)]);
+    setData(b);
+    setEquipment(e);
+    setLoading(false);
+  }, [id]);
   useEffect(() => { load(); }, [load]);
   const onRefresh = useCallback(async () => { setRefreshing(true); await load(); setRefreshing(false); }, [load]);
 
   const lineTotal = data ? data.lineItems.reduce((s, i) => s + Number(i.total ?? 0), 0) : 0;
   const expenseTotal = data ? data.expenses.reduce((s, e) => s + Number(e.amount ?? 0), 0) : 0;
+  const equipHours = equipment ? equipment.usage.reduce((s, u) => s + Number(u.hours), 0) : 0;
+  const equipCost = equipment ? equipment.usage.reduce((s, u) => s + Number(u.hours) * Number(u.cost_per_hour), 0) : 0;
+
+  async function addEquipmentUsage() {
+    if (!equipDraft || savingEquip || !fleet.ready) return;
+    const hours = parseFloat(equipDraft.hours);
+    if (!equipDraft.equipmentId || Number.isNaN(hours) || hours <= 0) { Alert.alert("Missing details", "Choose equipment and enter hours greater than zero."); return; }
+    if (!profile?.id) { Alert.alert("Not ready", "Your profile is still loading — please try again."); return; }
+    setSavingEquip(true);
+    try {
+      await fleet.addEquipmentUsage({
+        equipmentId: equipDraft.equipmentId,
+        loggedBy: profile.id,
+        jobId: id,
+        usageDate: equipDraft.usage_date.trim() || null,
+        hours,
+        notes: equipDraft.notes.trim() || null,
+      });
+      setEquipDraft(null);
+      await load();
+    } catch (e) {
+      Alert.alert("Couldn't log usage", e instanceof Error ? e.message : "Please try again.");
+    } finally {
+      setSavingEquip(false);
+    }
+  }
+
+  function confirmRemoveEquipment(usageId: string) {
+    Alert.alert("Remove equipment usage", "This cannot be undone.", [
+      { text: "Cancel", style: "cancel" },
+      { text: "Remove", style: "destructive", onPress: async () => { await fleet.removeEquipmentUsage(usageId); await load(); } },
+    ]);
+  }
 
   async function addItem() {
     if (!draft || saving || !billing.ready) return;
@@ -198,6 +242,40 @@ export default function JobBillingScreen() {
       </View>
       {data.expenses.length > 0 && <Text style={styles.hint}>Long-press an expense to remove it.</Text>}
 
+      <View style={styles.sectionHead}>
+        <Text style={styles.section}>Equipment usage</Text>
+        <TouchableOpacity
+          onPress={() => setEquipDraft({ equipmentId: equipment?.options[0]?.id ?? "", usage_date: "", hours: "", notes: "" })}
+          style={styles.addBtn}
+        >
+          <Ionicons name="add" size={16} color={colors.blue600} /><Text style={styles.addText}>Add</Text>
+        </TouchableOpacity>
+      </View>
+      <View style={styles.card}>
+        {!equipment || equipment.usage.length === 0 ? (
+          <Text style={styles.empty}>No equipment logged.</Text>
+        ) : (
+          equipment.usage.map((u) => (
+            <TouchableOpacity key={u.id} style={styles.lineRow} onLongPress={() => confirmRemoveEquipment(u.id)}>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.lineName}>{u.equipment_name}</Text>
+                <Text style={styles.lineMeta}>
+                  {u.hours}h{u.usage_date ? ` · ${u.usage_date}` : ""}{u.notes ? ` · ${u.notes}` : ""}
+                </Text>
+              </View>
+              <MoneyText amount={u.hours * u.cost_per_hour} style={styles.lineTotal} />
+            </TouchableOpacity>
+          ))
+        )}
+        {equipment && equipment.usage.length > 0 && (
+          <View style={styles.subtotalRow}>
+            <Text style={styles.subtotalLabel}>{equipHours}h logged</Text>
+            <MoneyText amount={equipCost} style={styles.subtotalValue} />
+          </View>
+        )}
+      </View>
+      {equipment && equipment.usage.length > 0 && <Text style={styles.hint}>Long-press an entry to remove it.</Text>}
+
       {data.purchaseOrders.length > 0 && (
         <>
           <Text style={styles.section}>Purchase orders</Text>
@@ -286,6 +364,42 @@ export default function JobBillingScreen() {
             <View style={styles.actions}>
               <TouchableOpacity style={styles.cancel} onPress={() => setExpense(null)} disabled={savingExpense}><Text style={styles.cancelText}>Cancel</Text></TouchableOpacity>
               <TouchableOpacity style={styles.saveBtn} onPress={addExpense} disabled={savingExpense}><Text style={styles.saveText}>{savingExpense ? "…" : "Add"}</Text></TouchableOpacity>
+            </View>
+          </ScrollView>
+        </View>
+      </Modal>
+
+      {/* Log equipment usage */}
+      <Modal visible={!!equipDraft} transparent animationType="slide" onRequestClose={() => !savingEquip && setEquipDraft(null)}>
+        <View style={styles.overlay}>
+          <ScrollView style={styles.sheetScroll} contentContainerStyle={styles.sheet} keyboardShouldPersistTaps="handled">
+            <Text style={styles.sheetTitle}>Log equipment usage</Text>
+            {!equipment || equipment.options.length === 0 ? (
+              <Text style={styles.muted}>No active equipment set up yet — add vehicles/machinery under Fleet first.</Text>
+            ) : (
+              <>
+                <Text style={styles.fieldLabel}>Equipment</Text>
+                <View style={styles.catRow}>
+                  {equipment.options.map((eq) => (
+                    <TouchableOpacity
+                      key={eq.id}
+                      style={[styles.catChip, equipDraft?.equipmentId === eq.id && styles.catChipActive]}
+                      onPress={() => setEquipDraft((d) => d && { ...d, equipmentId: eq.id })}
+                    >
+                      <Text style={[styles.catChipText, equipDraft?.equipmentId === eq.id && styles.catChipTextActive]}>{eq.name}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+                <View style={styles.twoCol}>
+                  <View style={{ flex: 1 }}><Field label="Date (YYYY-MM-DD)" value={equipDraft?.usage_date ?? ""} onChange={(v) => setEquipDraft((d) => d && { ...d, usage_date: v })} /></View>
+                  <View style={{ flex: 1 }}><Field label="Hours" value={equipDraft?.hours ?? ""} onChange={(v) => setEquipDraft((d) => d && { ...d, hours: v })} num /></View>
+                </View>
+                <Field label="Notes (optional)" value={equipDraft?.notes ?? ""} onChange={(v) => setEquipDraft((d) => d && { ...d, notes: v })} />
+              </>
+            )}
+            <View style={styles.actions}>
+              <TouchableOpacity style={styles.cancel} onPress={() => setEquipDraft(null)} disabled={savingEquip}><Text style={styles.cancelText}>Cancel</Text></TouchableOpacity>
+              <TouchableOpacity style={styles.saveBtn} onPress={addEquipmentUsage} disabled={savingEquip || !equipment || equipment.options.length === 0}><Text style={styles.saveText}>{savingEquip ? "…" : "Add"}</Text></TouchableOpacity>
             </View>
           </ScrollView>
         </View>

@@ -28,7 +28,7 @@ in-repo is a short tail of **minor/complex depth** (below); the true blockers to
 | Staff | near-full | ~~charge-out rate~~ (D53), ~~leave log~~ (D58); invite/resend/edit-email (ext) |
 | Settings | near-full | ~~variation-types~~ (D57), ~~cost-centre templates~~ (D59); Xero account codes + OAuth connect (web/ext) |
 | Reports | **full (analytics)** ✅ | all 5 tables done: revenue-by-month, top-customers, jobs-by-staff (D48), staff cost/efficiency (D51), equipment utilisation (D52) |
-| Jobs | partial | ~~reassign/reschedule~~ (D41), ~~status/priority edit~~ (D43), ~~**create job**~~ (D45); edit customer/site/title/type, price+approve variations still open |
+| Jobs | near-full | ~~reassign/reschedule~~ (D41), ~~status/priority edit~~ (D43), ~~**create job**~~ (D45), ~~equipment-usage on billing~~ (D63); edit customer/site/title/type, price+approve variations still open |
 | Invoices | partial | ~~prefill-from-job + add unbilled variations~~ **DONE** (D44/Q15); Send/PDF/Xero (ext) |
 | Approvals | partial ✅ | ~~approve→auto-invoice, send-back~~ **DONE** (D40); Xero auto-push (ext) |
 | Schedule | partial ✅ | ~~assign/unassign, reschedule~~ **DONE** (D41); day/week grid deferred |
@@ -40,10 +40,9 @@ convert-to-job, Fleet (assign + detail + expenses), Staff (charge-out + leave),
 Settings (variation types + cost-centre templates), Pricing/Inventory parity, and
 backflow register-offline are all **DONE** (D40–D60). What's left:
 
-**Minor polish:** Customers favourites · Pricing category-taxonomy picker ·
-Jobs edit customer/site/title/type on an existing job · Fleet equipment
-**documents** + general (non-job) **usage log** · Job equipment-usage + PO /
-cost-centre editing on the job billing screen.
+**Minor polish:** Jobs edit customer/site/title/type on an existing job · Fleet
+equipment **documents** (file upload) · PO / cost-centre **editing** on the job
+billing screen (create/allocate — read + display already done; still web-managed).
 
 **Complex / has a caveat:**
 - **Backflow test-log offline** — the register-device write is now offline (D46),

@@ -40,7 +40,7 @@ export function useFleet() {
       [run]
     ),
     removeEquipmentExpense: useCallback((i: { id: string; receiptStoragePath?: string | null }) => run((r) => r.removeEquipmentExpense(i)), [run]),
-    addEquipmentUsage: useCallback((i: { equipmentId: string; loggedBy: string; usageDate?: string | null; hours: number; notes?: string | null }) => run((r) => r.addEquipmentUsage(i)), [run]),
+    addEquipmentUsage: useCallback((i: { equipmentId: string; loggedBy: string; usageDate?: string | null; hours: number; notes?: string | null; jobId?: string | null }) => run((r) => r.addEquipmentUsage(i)), [run]),
     removeEquipmentUsage: useCallback((id: string) => run((r) => r.removeEquipmentUsage(id)), [run]),
   };
 }

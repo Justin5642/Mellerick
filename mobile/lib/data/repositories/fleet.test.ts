@@ -115,6 +115,12 @@ describe("EquipmentRepository", () => {
     expect(b2.ops[0].payload).not.toHaveProperty("usage_date"); // DB default current_date
   });
 
+  it("addEquipmentUsage links usage to a job when jobId is supplied", async () => {
+    const { outbox, ops } = captureOutbox();
+    await new EquipmentRepository(outbox, seqIds(), fixedTime()).addEquipmentUsage({ equipmentId: "eq1", loggedBy: "u1", hours: 4, jobId: "job9" });
+    expect(ops[0].payload).toMatchObject({ equipment_id: "eq1", hours: 4, logged_by: "u1", job_id: "job9" });
+  });
+
   it("removeEquipmentUsage is a plain delete", async () => {
     const { outbox, ops } = captureOutbox();
     await new EquipmentRepository(outbox, seqIds(), fixedTime()).removeEquipmentUsage("u9");
