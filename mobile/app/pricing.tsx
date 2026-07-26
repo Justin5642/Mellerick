@@ -8,6 +8,8 @@ import { listPricing, listInactivePricing, type PricingItem } from "../lib/data/
 import { useFinance } from "../lib/data/hooks/useFinance";
 
 const PRICING_TYPES = ["flat_rate", "hourly", "material"] as const;
+// Fixed category taxonomy, matching the web pricing form.
+const PRICING_CATEGORIES = ["Labour", "Materials", "Call Out", "Inspection", "Drainage", "Hot Water", "Gas", "Backflow", "Stormwater", "Other"];
 
 function humanize(v: string): string {
   return v.replace(/_/g, " ");
@@ -207,7 +209,14 @@ export default function PricingScreen() {
             <Text style={styles.sheetTitle}>{draft?.id ? "Edit item" : "New pricing item"}</Text>
             <ScrollView keyboardShouldPersistTaps="handled">
               <Field label="Name" value={draft?.name ?? ""} onChange={(v) => setDraft((d) => d && { ...d, name: v })} />
-              <Field label="Category" value={draft?.category ?? ""} onChange={(v) => setDraft((d) => d && { ...d, category: v })} />
+              <Text style={styles.fieldLabel}>Category</Text>
+              <View style={styles.catWrap}>
+                {(draft && !PRICING_CATEGORIES.includes(draft.category) && draft.category ? [draft.category, ...PRICING_CATEGORIES] : PRICING_CATEGORIES).map((c) => (
+                  <TouchableOpacity key={c} style={[styles.catChip, draft?.category === c && styles.catChipActive]} onPress={() => setDraft((d) => d && { ...d, category: c })}>
+                    <Text style={[styles.catChipText, draft?.category === c && styles.catChipTextActive]}>{c}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
               <Text style={styles.fieldLabel}>Type</Text>
               <View style={styles.segment}>
                 {PRICING_TYPES.map((t) => (
@@ -277,6 +286,11 @@ const styles = StyleSheet.create({
   fieldLabel: { fontSize: 12, fontWeight: "700", color: colors.slate500, textTransform: "uppercase", marginBottom: 6 },
   input: { borderWidth: 1, borderColor: colors.border, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10, fontSize: 14, backgroundColor: colors.bg, color: colors.slate900 },
   segment: { flexDirection: "row", gap: 8, marginBottom: 12 },
+  catWrap: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: 12 },
+  catChip: { paddingHorizontal: 12, paddingVertical: 7, borderRadius: 999, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.bg },
+  catChipActive: { backgroundColor: colors.blue600, borderColor: colors.blue600 },
+  catChipText: { fontSize: 12, fontWeight: "600", color: colors.slate700 },
+  catChipTextActive: { color: "#fff" },
   segItem: { flex: 1, paddingVertical: 10, borderRadius: 8, borderWidth: 1, borderColor: colors.border, alignItems: "center", backgroundColor: colors.bg },
   segItemActive: { backgroundColor: colors.blue600, borderColor: colors.blue600 },
   segText: { fontSize: 12, fontWeight: "600", color: colors.slate700, textTransform: "capitalize" },

@@ -18,7 +18,7 @@ in-repo is a short tail of **minor/complex depth** (below); the true blockers to
 | Area | Mobile status | Biggest remaining gap(s) |
 |---|---|---|
 | Dashboard | **full-parity** | — (one cosmetic empty-state link) |
-| Pricing | partial | ~~reactivate deactivated items~~ **DONE** (D49); category-taxonomy picker — minor |
+| Pricing | **full** ✅ | ~~reactivate~~ (D49), ~~category-taxonomy picker~~ done |
 | Inventory | **near-full** | ~~low-stock surfacing~~ (D49), ~~margin display~~ done |
 | My Jobs | partial | tech: change status/notes + submit variation offline (med) |
 | Customers | near-full | ~~Customer-360~~ (D47), ~~quick-create~~ (D60); favourites, inactive lifecycle — minor |
