@@ -4,6 +4,17 @@
     "appVersionSource": "remote"
   },
   "build": {
+    "development": {
+      "developmentClient": true,
+      "distribution": "internal",
+      "channel": "development",
+      "ios": {
+        "simulator": false
+      },
+      "android": {
+        "buildType": "apk"
+      }
+    },
     "preview": {
       "distribution": "internal",
       "channel": "preview",
@@ -14,6 +25,19 @@
     "production": {
       "autoIncrement": true,
       "channel": "production"
+    }
+  },
+  "submit": {
+    "production": {
+      "ios": {
+        "appleId": "APPLE_ID_EMAIL_HERE",
+        "ascAppId": "APP_STORE_CONNECT_APP_ID_HERE",
+        "appleTeamId": "APPLE_TEAM_ID_HERE"
+      },
+      "android": {
+        "serviceAccountKeyPath": "./play-service-account.json",
+        "track": "internal"
+      }
     }
   }
 }
