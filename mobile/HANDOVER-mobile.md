@@ -57,10 +57,15 @@ field app + a full office/admin surface mirroring the web app.
 - `app/` — expo-router routes; `app/_layout.tsx` composes the role-aware shell.
 
 ## Gates before ship (NOT closable in-repo — need you / the backend / hardware)
-1. **Backend Bearer refactor (Jason)** — invoice/quote **Send-email / PDF / Xero
-   push** web routes are cookie-only and reject a mobile Bearer token. Until they
-   use `getCallerId(request)` (guards.ts already supports Bearer), those actions are
-   unavailable on mobile. *The app is not fully shippable without this.*
+1. **Backend Bearer refactor (Jason) — DRAFTED + tested (D72), awaiting review/deploy.**
+   Invoice/quote **Send-email / PDF** routes were cookie-only and rejected a mobile
+   Bearer token. Now refactored to `requireOfficeOrAdmin(request)` + a new
+   `lib/api/caller-client.ts` (`callerClient(request)`) so RLS-scoped DB access works
+   for both a mobile Bearer token and a web cookie — the web path is byte-for-byte
+   unchanged (the change only *adds* the mobile path). 12 web unit tests, web `tsc`
+   clean. **Jason to review + merge + deploy** (untestable end-to-end here); then the
+   mobile Send/PDF buttons are a fast follow, and the same pattern applies to the
+   **Xero push** routes (which additionally need the Xero OAuth connection).
 2. **On-device QA** — first real interactive test is on hardware; a full human QA
    pass (navigation, forms, layout, touch targets, dark mode) is required.
 3. **Cross-system e2e** — create on mobile → verify on web/DB (and Maestro/Detox

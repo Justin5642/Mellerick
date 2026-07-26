@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server";
+import { requireOfficeOrAdmin } from "@/lib/api/guards";
+import { callerClient } from "@/lib/api/caller-client";
 import { renderDocumentPdf } from "@/lib/pdf/render";
 import { businessInfo } from "@/lib/business-info";
 import { getResend, getFromAddress } from "@/lib/resend";
@@ -10,10 +11,13 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   try {
     const { id } = await params;
     const body = await request.json().catch(() => ({}));
-    const supabase = await createClient();
 
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+    // Sending an invoice is office/admin-only. Authorize the caller (Bearer token
+    // from mobile OR web session cookie), then use a caller-scoped client so the
+    // RLS-protected reads/writes below work for both surfaces.
+    const guard = await requireOfficeOrAdmin(request);
+    if (!guard.ok) return guard.response;
+    const supabase = await callerClient(request);
 
     const { data: invoice } = await supabase
       .from("invoices")
