@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { View, Text, ScrollView, StyleSheet, ActivityIndicator, TouchableOpacity, Modal, TextInput, Alert, RefreshControl, Linking } from "react-native";
-import { Stack, useLocalSearchParams } from "expo-router";
+import { Stack, useLocalSearchParams, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import * as ImagePicker from "expo-image-picker";
 import { colors } from "../../../lib/theme";
@@ -8,6 +8,7 @@ import { MoneyText } from "../../../design/components/MoneyText";
 import { getJobBilling, getReceiptSignedUrl, type JobBilling, type JobExpense } from "../../../lib/data/reads/jobBilling";
 import { useJobBilling } from "../../../lib/data/hooks/useJobBilling";
 import { useAuth } from "../../../lib/auth-context";
+import { useIsAdmin } from "../../../design/guards/useRole";
 import type { ExpenseCategory } from "../../../lib/data/repositories/jobBilling";
 
 interface Draft { name: string; quantity: string; unit_price: string; description: string }
@@ -37,6 +38,8 @@ const emptyExpense: ExpenseDraft = {
 export default function JobBillingScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const billing = useJobBilling();
+  const router = useRouter();
+  const isAdmin = useIsAdmin();
   const { profile } = useAuth();
   const [data, setData] = useState<JobBilling | null>(null);
   const [loading, setLoading] = useState(true);
@@ -131,6 +134,14 @@ export default function JobBillingScreen() {
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.blue600} />}>
       <Stack.Screen options={{ title: data.jobNumber ? `#${data.jobNumber} Billing` : "Billing" }} />
+
+      {isAdmin && (
+        <TouchableOpacity style={styles.costingBtn} onPress={() => router.push(`/job/${id}/costing`)} accessibilityLabel="Job costing and margin">
+          <Ionicons name="stats-chart-outline" size={16} color={colors.blue600} />
+          <Text style={styles.costingBtnText}>Job costing &amp; margin</Text>
+          <Ionicons name="chevron-forward" size={16} color={colors.blue600} />
+        </TouchableOpacity>
+      )}
 
       <View style={styles.sectionHead}>
         <Text style={styles.section}>Line items</Text>
@@ -301,6 +312,8 @@ const styles = StyleSheet.create({
   sectionHead: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginTop: 8 },
   addBtn: { flexDirection: "row", alignItems: "center", gap: 4 },
   addText: { fontSize: 13, color: colors.blue600, fontWeight: "600" },
+  costingBtn: { flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: colors.blue100, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, marginTop: 10 },
+  costingBtnText: { flex: 1, fontSize: 14, fontWeight: "700", color: colors.blue600 },
   card: { backgroundColor: colors.card, borderWidth: 1, borderColor: colors.border, borderRadius: 12, padding: 12, gap: 2 },
   empty: { fontSize: 13, color: colors.slate400, paddingVertical: 8, textAlign: "center" },
   lineRow: { flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: colors.slate100 },

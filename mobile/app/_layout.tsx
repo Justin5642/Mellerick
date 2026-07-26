@@ -102,6 +102,7 @@ function RootNavigation() {
       <Stack.Protected guard={!!session && isAdmin}>
         <Stack.Screen name="staff" options={{ headerShown: true }} />
         <Stack.Screen name="settings" options={{ headerShown: true }} />
+        <Stack.Screen name="job/[id]/costing" options={{ headerShown: true }} />
       </Stack.Protected>
 
       {/* Shared across roles (reached from tech tabs and office Jobs/Dashboard). */}
