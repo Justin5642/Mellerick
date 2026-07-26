@@ -260,7 +260,7 @@ export default function JobBillingScreen() {
               <View style={{ flex: 1 }}>
                 <Text style={styles.lineName}>{u.equipment_name}</Text>
                 <Text style={styles.lineMeta}>
-                  {u.hours}h{u.usage_date ? ` · ${u.usage_date}` : ""}{u.notes ? ` · ${u.notes}` : ""}
+                  {u.hours.toFixed(1)}h{u.usage_date ? ` · ${u.usage_date}` : ""}{u.notes ? ` · ${u.notes}` : ""}
                 </Text>
               </View>
               <MoneyText amount={u.hours * u.cost_per_hour} style={styles.lineTotal} />
@@ -269,7 +269,7 @@ export default function JobBillingScreen() {
         )}
         {equipment && equipment.usage.length > 0 && (
           <View style={styles.subtotalRow}>
-            <Text style={styles.subtotalLabel}>{equipHours}h logged</Text>
+            <Text style={styles.subtotalLabel}>{equipHours.toFixed(1)}h logged</Text>
             <MoneyText amount={equipCost} style={styles.subtotalValue} />
           </View>
         )}

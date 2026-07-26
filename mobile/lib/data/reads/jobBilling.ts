@@ -93,14 +93,23 @@ export async function getJobEquipment(jobId: string): Promise<JobEquipment> {
   const [usageRes, optRes] = await Promise.all([
     supabase
       .from("equipment_usage_log")
-      .select(`id, equipment_id, usage_date, hours, notes, equipment:equipment_id(name, category, ${EQUIP_COST_COLS})`)
+      .select("id, equipment_id, usage_date, hours, notes, equipment:equipment_id(name, category)")
       .eq("job_id", jobId)
       .order("usage_date", { ascending: false })
       .order("created_at", { ascending: false }),
     supabase.from("equipment").select(`id, name, category, ${EQUIP_COST_COLS}`).eq("is_active", true).order("category").order("name"),
   ]);
 
-  type UsageRow = { id: string; equipment_id: string; usage_date: string; hours: number; notes: string | null; equipment: ({ name: string; category: string } & EquipmentCostInputs) | null };
+  // Price each usage row from the ACTIVE equipment map — exactly the web (its
+  // equipmentById is built from the active-only options), so usage on a since-
+  // deactivated item costs $0 and matches both the web and the mobile Costing
+  // screen (jobCosting.ts also filters is_active). The name is still shown from
+  // the join (better than the web's "Unknown equipment"; a name is not money).
+  type OptRow = { id: string; name: string; category: string } & EquipmentCostInputs;
+  const optionRows = (optRes.data as unknown as OptRow[]) ?? [];
+  const costById = new Map(optionRows.map((e) => [e.id, computeEquipmentCost(e).costPerHour]));
+
+  type UsageRow = { id: string; equipment_id: string; usage_date: string; hours: number; notes: string | null; equipment: { name: string; category: string } | null };
   const usage: JobEquipmentUsage[] = ((usageRes.data as unknown as UsageRow[]) ?? []).map((r) => ({
     id: r.id,
     equipment_id: r.equipment_id,
@@ -109,15 +118,14 @@ export async function getJobEquipment(jobId: string): Promise<JobEquipment> {
     usage_date: r.usage_date,
     hours: Number(r.hours),
     notes: r.notes,
-    cost_per_hour: r.equipment ? computeEquipmentCost(r.equipment).costPerHour : 0,
+    cost_per_hour: costById.get(r.equipment_id) ?? 0,
   }));
 
-  type OptRow = { id: string; name: string; category: string } & EquipmentCostInputs;
-  const options: JobEquipmentOption[] = ((optRes.data as unknown as OptRow[]) ?? []).map((e) => ({
+  const options: JobEquipmentOption[] = optionRows.map((e) => ({
     id: e.id,
     name: e.name,
     category: e.category,
-    cost_per_hour: computeEquipmentCost(e).costPerHour,
+    cost_per_hour: costById.get(e.id) ?? 0,
   }));
 
   return { usage, options };
