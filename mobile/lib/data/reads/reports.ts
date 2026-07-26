@@ -1,6 +1,7 @@
 import { supabase } from "../../supabase";
 import { topCustomersBySpend, revenueByMonth, jobsByStaff, type InvoiceRow, type JobStaffRow } from "../../reportsAnalytics";
 import { computeStaffEfficiency, type StaffEffProfile, type StaffEffRow, type StaffEffInput } from "../../staffEfficiency";
+import { computeEquipmentUtilization, type EquipUtilRow, type EquipUtilInput } from "../../equipmentUtilization";
 
 export interface ReportSummary {
   revenuePaid: number;
@@ -87,6 +88,24 @@ export async function getStaffEfficiency(): Promise<StaffEffRow[]> {
     nameByStaff,
   };
   return computeStaffEfficiency(input);
+}
+
+// Equipment cost & utilisation over the last 12 months (office/admin — not
+// payroll-sensitive). Mirrors the web Reports page.
+export async function getEquipmentUtilization(): Promise<EquipUtilRow[]> {
+  const cutoff = new Date();
+  cutoff.setFullYear(cutoff.getFullYear() - 1);
+  const cutoffDate = cutoff.toISOString().slice(0, 10);
+
+  const [equipRes, usageRes] = await Promise.all([
+    supabase.from("equipment").select("*").eq("is_active", true),
+    supabase.from("equipment_usage_log").select("equipment_id, hours, usage_date").gte("usage_date", cutoffDate),
+  ]);
+  const input: EquipUtilInput = {
+    equipment: (equipRes.data as unknown as EquipUtilInput["equipment"]) ?? [],
+    usage: (usageRes.data as unknown as { equipment_id: string; hours: number | null }[]) ?? [],
+  };
+  return computeEquipmentUtilization(input);
 }
 
 export async function getReportAnalytics(): Promise<ReportAnalytics> {

@@ -4,8 +4,9 @@ import { Stack } from "expo-router";
 import { colors, statusColors } from "../lib/theme";
 import { MoneyText } from "../design/components/MoneyText";
 import { StatCard } from "../design/components/StatCard";
-import { getReportSummary, getReportAnalytics, getStaffEfficiency, type ReportSummary, type ReportAnalytics } from "../lib/data/reads/reports";
+import { getReportSummary, getReportAnalytics, getStaffEfficiency, getEquipmentUtilization, type ReportSummary, type ReportAnalytics } from "../lib/data/reads/reports";
 import { type StaffEffRow } from "../lib/staffEfficiency";
+import { type EquipUtilRow } from "../lib/equipmentUtilization";
 import { useIsAdmin } from "../design/guards/useRole";
 
 function humanize(v: string): string {
@@ -20,12 +21,14 @@ export default function ReportsScreen() {
   const [summary, setSummary] = useState<ReportSummary | null>(null);
   const [analytics, setAnalytics] = useState<ReportAnalytics | null>(null);
   const [staffEff, setStaffEff] = useState<StaffEffRow[] | null>(null);
+  const [equipUtil, setEquipUtil] = useState<EquipUtilRow[] | null>(null);
   const [refreshing, setRefreshing] = useState(false);
 
   const load = useCallback(async () => {
-    const [s, a] = await Promise.all([getReportSummary(), getReportAnalytics()]);
+    const [s, a, eq] = await Promise.all([getReportSummary(), getReportAnalytics(), getEquipmentUtilization()]);
     setSummary(s);
     setAnalytics(a);
+    setEquipUtil(eq);
     if (isAdmin) setStaffEff(await getStaffEfficiency());
   }, [isAdmin]);
   useEffect(() => { load(); }, [load]);
@@ -157,7 +160,39 @@ export default function ReportsScreen() {
             </>
           )}
 
-          <Text style={styles.footnote}>Equipment cost/utilization is on the web dashboard.</Text>
+          {equipUtil && equipUtil.length > 0 && (
+            <>
+              <Text style={styles.section}>Equipment cost &amp; utilisation</Text>
+              <Text style={styles.sectionNote}>Last 12 months · true cost = fixed annual cost ÷ hours used + fuel</Text>
+              <View style={styles.card}>
+                {equipUtil.map((e) => (
+                  <View key={e.name} style={styles.staffRow}>
+                    <View style={{ flex: 1, minWidth: 0 }}>
+                      <Text style={styles.staffName} numberOfLines={1}>{e.name}</Text>
+                      <Text style={styles.staffSub}>
+                        {e.hoursUsed.toFixed(0)}h used
+                        {e.utilizationPct != null ? ` · ${Math.round(e.utilizationPct)}% util` : ""}
+                      </Text>
+                    </View>
+                    <View style={{ alignItems: "flex-end" }}>
+                      {e.trueCostPerHourUsed != null ? (
+                        <MoneyText amount={e.trueCostPerHourUsed} style={styles.staffCost} />
+                      ) : (
+                        <Text style={styles.staffCostMuted}>—</Text>
+                      )}
+                      <View style={styles.rateRow}>
+                        <Text style={styles.staffRate}>budget </Text>
+                        <MoneyText amount={e.budgetedCostPerHour} style={styles.staffRate} />
+                        <Text style={styles.staffRate}>/h</Text>
+                      </View>
+                    </View>
+                  </View>
+                ))}
+              </View>
+            </>
+          )}
+
+          <Text style={styles.footnote}>Pull to refresh. All figures update live from the database.</Text>
         </>
       )}
     </ScrollView>
