@@ -47,6 +47,12 @@ describe("JobsRepository.updateFields", () => {
     expect(writes(ops)[0].payload).toEqual({ job_type: "maintenance" });
   });
 
+  it("updates the title alone without touching other columns", async () => {
+    const { outbox, ops } = captureOutbox();
+    await makeRepo(outbox).updateFields("j1", { title: "Renamed job" });
+    expect(writes(ops)[0].payload).toEqual({ title: "Renamed job" });
+  });
+
   it("is a no-op when no fields are provided (no empty update enqueued)", async () => {
     const { outbox, ops } = captureOutbox();
     await makeRepo(outbox).updateFields("j1", {});

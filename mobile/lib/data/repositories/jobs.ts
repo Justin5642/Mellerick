@@ -6,6 +6,7 @@ import { systemTime, type TimeSource } from "../time";
 export interface JobFieldsInput {
   status?: string;
   priority?: string;
+  title?: string;
   jobType?: string;
   description?: string | null;
   notes?: string | null;
@@ -151,6 +152,7 @@ export class JobsRepository {
     const payload: Record<string, unknown> = {};
     if (fields.status !== undefined) payload.status = fields.status;
     if (fields.priority !== undefined) payload.priority = fields.priority;
+    if (fields.title !== undefined) payload.title = fields.title;
     if (fields.jobType !== undefined) payload.job_type = fields.jobType;
     if (fields.description !== undefined) payload.description = fields.description;
     if (fields.notes !== undefined) payload.notes = fields.notes;
