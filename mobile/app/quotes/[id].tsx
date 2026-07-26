@@ -9,6 +9,7 @@ import { StatusPill } from "../../design/components/StatusPill";
 import { getQuote, type QuoteDetail } from "../../lib/data/reads/finance";
 import { useFinance } from "../../lib/data/hooks/useFinance";
 import { useJobEdit } from "../../lib/data/hooks/useJobEdit";
+import { useWriteOutcome } from "../../lib/data/hooks/useWriteOutcome";
 import { useAuth } from "../../lib/auth-context";
 
 function fmtDate(iso: string | null): string {
@@ -20,6 +21,7 @@ export default function QuoteDetailScreen() {
   const router = useRouter();
   const finance = useFinance();
   const jobEdit = useJobEdit();
+  const writeOutcome = useWriteOutcome();
   const { profile } = useAuth();
   const [quote, setQuote] = useState<QuoteDetail | null>(null);
   const [loading, setLoading] = useState(true);
@@ -58,14 +60,19 @@ export default function QuoteDetailScreen() {
         items: quote.quote_items.map((i) => ({ name: i.name, description: i.description ?? null, quantity: Number(i.quantity), unitPrice: Number(i.unit_price) })),
       });
       setQuote((q) => (q ? { ...q, job_id: newJobId } : q)); // optimistic
-      if (synced) router.push(`/job/${newJobId}`);
-      else Alert.alert("Saved offline", "The job is queued and will sync when you're back online.");
+      if (!synced) {
+        Alert.alert("Saved offline", "The job is queued and will sync when you're back online.");
+      } else if ((await writeOutcome(newJobId)) === "failed") {
+        Alert.alert("Couldn't create the job", "The server rejected it — it's queued and will retry. Check the sync status for details.");
+      } else {
+        router.push(`/job/${newJobId}`);
+      }
     } catch (e) {
       Alert.alert("Couldn't convert", e instanceof Error ? e.message : "Please try again.");
     } finally {
       setUpdating(false);
     }
-  }, [quote, updating, jobEdit, profile, router]);
+  }, [quote, updating, jobEdit, profile, router, writeOutcome]);
 
   useEffect(() => {
     load();

@@ -7,6 +7,7 @@ import { MoneyText } from "../design/components/MoneyText";
 import { listInventory, type InventoryItem } from "../lib/data/reads/inventory";
 import { lowStockItems } from "../lib/inventoryStock";
 import { useInventory } from "../lib/data/hooks/useInventory";
+import { useWriteOutcome } from "../lib/data/hooks/useWriteOutcome";
 
 interface Draft {
   id: string | null;
@@ -40,6 +41,7 @@ function toDraft(it: InventoryItem | null): Draft {
 
 export default function InventoryScreen() {
   const inv = useInventory();
+  const writeOutcome = useWriteOutcome();
   const [items, setItems] = useState<InventoryItem[]>([]);
   const [refreshing, setRefreshing] = useState(false);
   const [draft, setDraft] = useState<Draft | null>(null);
@@ -91,7 +93,14 @@ export default function InventoryScreen() {
       };
       setItems((prev) => (editingId ? prev.map((it) => (it.id === editingId ? optimistic : it)) : [...prev, optimistic]));
       setDraft(null);
-      if (synced) await load();
+      if (synced) {
+        await load();
+        if ((await writeOutcome(rowId)) === "failed") {
+          Alert.alert("Couldn't save the item", "The server rejected the change — it's queued and will retry. Check the sync status for details.");
+        }
+      }
+    } catch (e) {
+      Alert.alert("Couldn't save the item", e instanceof Error ? e.message : "Please try again.");
     } finally {
       setSaving(false);
     }

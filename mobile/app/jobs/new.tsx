@@ -5,6 +5,7 @@ import DateTimePicker, { type DateTimePickerEvent } from "@react-native-communit
 import { Ionicons } from "@expo/vector-icons";
 import { colors } from "../../lib/theme";
 import { useJobEdit } from "../../lib/data/hooks/useJobEdit";
+import { useWriteOutcome } from "../../lib/data/hooks/useWriteOutcome";
 import { CustomerPicker } from "../../components/finance/customer-picker";
 import { getCustomer, type Site } from "../../lib/data/reads/customers";
 import { listAssignableStaff, type AssignableStaff } from "../../lib/data/reads/schedule";
@@ -17,6 +18,7 @@ export default function NewJobScreen() {
   const router = useRouter();
   const { customerId } = useLocalSearchParams<{ customerId?: string }>();
   const { createJob, ready } = useJobEdit();
+  const writeOutcome = useWriteOutcome();
   const [title, setTitle] = useState("");
   const [customer, setCustomer] = useState<CustomerListRow | null>(null);
   const [pickCustomer, setPickCustomer] = useState(false);
@@ -88,11 +90,16 @@ export default function NewJobScreen() {
         scheduledStartIso,
         description: description.trim() || null,
       });
-      if (synced) {
-        router.replace(`/job/${id}`);
-      } else {
+      if (!synced) {
         Alert.alert("Saved offline", "The new job is queued and will sync when you're back online.");
         router.back();
+      } else if ((await writeOutcome(id)) === "failed") {
+        // Online but the server rejected the insert — don't navigate to a job
+        // detail that would 404; it's queued and will retry.
+        Alert.alert("Couldn't create the job", "The server rejected it — it's queued and will retry. Check the sync status for details.");
+        router.back();
+      } else {
+        router.replace(`/job/${id}`);
       }
     } catch (e) {
       Alert.alert("Couldn't create job", e instanceof Error ? e.message : "Please try again.");

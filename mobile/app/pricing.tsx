@@ -6,6 +6,7 @@ import { colors } from "../lib/theme";
 import { MoneyText } from "../design/components/MoneyText";
 import { listPricing, listInactivePricing, type PricingItem } from "../lib/data/reads/finance";
 import { useFinance } from "../lib/data/hooks/useFinance";
+import { useWriteOutcome } from "../lib/data/hooks/useWriteOutcome";
 
 const PRICING_TYPES = ["flat_rate", "hourly", "material"] as const;
 // Fixed category taxonomy, matching the web pricing form.
@@ -39,6 +40,7 @@ function toDraft(item: PricingItem | null): Draft {
 
 export default function PricingScreen() {
   const finance = useFinance();
+  const writeOutcome = useWriteOutcome();
   const [items, setItems] = useState<PricingItem[]>([]);
   const [refreshing, setRefreshing] = useState(false);
   const [draft, setDraft] = useState<Draft | null>(null);
@@ -105,7 +107,14 @@ export default function PricingScreen() {
       };
       setItems((prev) => (editingId ? prev.map((it) => (it.id === editingId ? optimistic : it)) : [...prev, optimistic]));
       setDraft(null);
-      if (synced) await load();
+      if (synced) {
+        await load();
+        if ((await writeOutcome(rowId)) === "failed") {
+          Alert.alert("Couldn't save the item", "The server rejected the change — it's queued and will retry. Check the sync status for details.");
+        }
+      }
+    } catch (e) {
+      Alert.alert("Couldn't save the item", e instanceof Error ? e.message : "Please try again.");
     } finally {
       setSaving(false);
     }

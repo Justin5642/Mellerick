@@ -5,6 +5,7 @@ import DateTimePicker, { type DateTimePickerEvent } from "@react-native-communit
 import { Ionicons } from "@expo/vector-icons";
 import { colors } from "../../lib/theme";
 import { useFinance } from "../../lib/data/hooks/useFinance";
+import { useWriteOutcome } from "../../lib/data/hooks/useWriteOutcome";
 import { CustomerPicker } from "../../components/finance/customer-picker";
 import { localDateKey } from "../../lib/date";
 import { LineItemsEditor, newItem, type EditableItem } from "../../components/finance/line-items-editor";
@@ -18,6 +19,7 @@ interface UnbilledVariation { id: string; name: string; description: string; uni
 export default function NewInvoiceScreen() {
   const router = useRouter();
   const finance = useFinance();
+  const writeOutcome = useWriteOutcome();
   const { jobId, customerId } = useLocalSearchParams<{ jobId?: string; customerId?: string }>();
   const [customer, setCustomer] = useState<CustomerListRow | null>(null);
   const [pickCustomer, setPickCustomer] = useState(false);
@@ -98,11 +100,16 @@ export default function NewInvoiceScreen() {
         items: lineItems,
         reconcile: jobId ? { markVariationIds } : null,
       });
-      if (synced) {
-        router.replace(`/invoices/${result}`);
-      } else {
+      if (!synced) {
         Alert.alert("Saved offline", "The draft invoice is queued and will sync when you're back online.");
         router.back();
+      } else if ((await writeOutcome(result)) === "failed") {
+        // Online but the server rejected the write — don't navigate to a detail
+        // for an invoice that never persisted; it's queued and will retry.
+        Alert.alert("Couldn't save the invoice", "The server rejected it — it's queued and will retry. Check the sync status for details.");
+        router.back();
+      } else {
+        router.replace(`/invoices/${result}`);
       }
     } catch (e) {
       Alert.alert("Couldn't create invoice", e instanceof Error ? e.message : "Please try again.");

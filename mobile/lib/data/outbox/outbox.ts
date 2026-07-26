@@ -133,6 +133,22 @@ export class Outbox {
     );
   }
 
+  // The sync outcome for a specific row's write ops, so a screen can tell whether
+  // a mutation was actually ACCEPTED by the server (not merely that we were
+  // online). "failed" if any of the row's writes has failed/dead (the drain tried
+  // and the server rejected it, or it's backing off) — the screen must not treat
+  // it as persisted (e.g. don't navigate to its detail); "pending" if any is
+  // still queued/inflight (offline, or a dependency not yet done); "settled" when
+  // every write for the row is done (or there are none). "failed" wins over
+  // "pending" so a partially-failed compound write is surfaced, not hidden.
+  async writeStatus(rowId: string): Promise<"settled" | "pending" | "failed"> {
+    const all = await this.store.all();
+    const ops = all.filter((o): o is WriteOperation => o.kind === "write" && o.rowId === rowId);
+    if (ops.some((o) => o.status === "failed" || o.status === "dead")) return "failed";
+    if (ops.some((o) => o.status === "pending" || o.status === "inflight")) return "pending";
+    return "settled";
+  }
+
   // The oldest pending op that is ready to run: its backoff has elapsed and its
   // dependency (if any) has completed. Returns undefined if nothing is ready.
   async nextReady(): Promise<Operation | undefined> {

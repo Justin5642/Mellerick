@@ -263,6 +263,33 @@ describe("Outbox — offline delete/insert ordering + recovery", () => {
     expect(ids.has("R2")).toBe(true);
     expect(ids.has("R1")).toBe(false); // done → not pending
   });
+
+  it("writeStatus reports a row's sync outcome (settled / pending / failed)", async () => {
+    const store = new InMemoryOutboxStore();
+    const box = new Outbox(store, mockClock());
+    // Unknown row → settled (nothing outstanding to worry about).
+    expect(await box.writeStatus("R0")).toBe("settled");
+    // Queued, not yet run → pending.
+    await box.enqueue(write("op1", { rowId: "R1" }));
+    expect(await box.writeStatus("R1")).toBe("pending");
+    // Completed → settled.
+    await box.markDone("op1");
+    expect(await box.writeStatus("R1")).toBe("settled");
+    // A failed op for the row → failed (drain tried and the server rejected it).
+    await box.enqueue(write("op2", { rowId: "R2" }));
+    await box.markFailed((await store.all()).find((o) => o.id === "op2")!, "rejected");
+    expect(await box.writeStatus("R2")).toBe("failed");
+  });
+
+  it("writeStatus prefers 'failed' over 'pending' when a row has both", async () => {
+    const store = new InMemoryOutboxStore();
+    const box = new Outbox(store, mockClock());
+    await box.enqueue(write("ins", { rowId: "R", op: "insert", createdAt: 1 }));
+    await box.enqueue(write("upd", { rowId: "R", op: "update", createdAt: 2 }));
+    await box.markFailed((await store.all()).find((o) => o.id === "ins")!, "rejected");
+    // insert failed, update still pending → the row's outcome is 'failed'.
+    expect(await box.writeStatus("R")).toBe("failed");
+  });
 });
 
 describe("backoffMs", () => {
