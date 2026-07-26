@@ -75,16 +75,22 @@ field app + a full office/admin surface mirroring the web app.
    accounts as part of on-device QA (`maestro test .maestro`). Cross-check
    create-on-mobile → verify-on-web/DB manually alongside.
 4. **Store accounts** — Apple Developer + Google Play Console (fill the placeholders
-   in `eas.json` `submit.production`).
+   in `eas.json` `submit.production`); listing copy + privacy manifest are done
+   (`store/`, D74) — only accounts, screenshots, and your legal details remain.
 5. **PowerSync DB password** — for true offline *reads* (writes are already durable).
-6. **Push credentials (APNs/FCM)** — for notifications (not yet built).
+6. **Push credentials (APNs/FCM)** — the **client is built + tested** (D75,
+   `lib/push/`); to actually deliver a push, add the APNs/FCM credentials via EAS,
+   apply the drafted `supabase/migrations/0036_device_tokens.sql`, and add a backend
+   sender (job-assigned → Expo Push API). The app degrades gracefully until then.
 7. **Atomic invoice/quote RPC (Jason)** — hardens the outbox+draft mitigation (D30).
 
 ## Not yet built — and why (nothing here is a plain in-repo feature gap)
 - **Offline reads cache / PowerSync connection** — writes are already durable; true
   offline *reads* need the PowerSync Cloud instance + DB password (MP3 blocker).
-- **Push notifications** + **background auto-clock** — need Expo push credentials +
-  the `development` EAS dev client (MP9, hardware/accounts).
+- **Push notifications** — the **client registration is built + tested** (D75); the
+  remaining pieces (APNs/FCM credentials, apply `0036_device_tokens.sql`, backend
+  sender) need accounts/backend. **Background auto-clock** still needs the
+  `development` EAS dev client (MP9, hardware).
 - **Backflow test-log offline (Q3)** — the water-authority submit must be
   dedupe-guarded server-side before the test-submit can be safely replayed; left
   online-direct. The one open in-repo item, blocked on a flagged decision.

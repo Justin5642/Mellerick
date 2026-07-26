@@ -4,6 +4,7 @@ import { Stack, useRouter, useSegments } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import { ActivityIndicator, View, StyleSheet, Platform, StatusBar as RNStatusBar } from "react-native";
 import { AuthProvider, useAuth } from "../lib/auth-context";
+import { usePushRegistration } from "../lib/push/usePushRegistration";
 import { LocationTrackingProvider } from "../lib/location-tracking";
 import { DataProvider } from "../lib/data/DataProvider";
 import { SyncStatusPill } from "../design/components/SyncStatusPill";
@@ -25,6 +26,9 @@ function SyncStatusOverlay() {
 
 function RootNavigation() {
   const { session, profile, loading, signOut } = useAuth();
+  // Register for push once signed in (best-effort; no-op without a device /
+  // permission / credentials / the device_tokens table — never blocks the UI).
+  usePushRegistration();
   const role = profile?.role;
   const isTech = role === "technician";
   const isOffice = role === "office" || role === "admin";
