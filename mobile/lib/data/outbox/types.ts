@@ -15,7 +15,9 @@ export type Aggregate =
   | "quote"
   | "pricing_item"
   | "customer"
-  | "site";
+  | "site"
+  | "inventory"
+  | "equipment";
 
 // "upload" uploads the attachment to Storage and writes NO metadata row — used
 // when a server-side route (not the client) later writes the row from the object
