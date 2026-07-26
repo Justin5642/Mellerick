@@ -14,6 +14,7 @@ interface Item {
 
 const OPERATIONS: Item[] = [
   { label: "Customers", icon: "people-outline", href: "/customers" },
+  { label: "Backflow", icon: "water-outline", href: "/backflow/list" },
   { label: "Inventory", icon: "cube-outline", href: "/inventory" },
   { label: "Fleet & Equipment", icon: "car-outline", href: "/fleet" },
 ];

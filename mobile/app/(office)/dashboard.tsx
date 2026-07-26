@@ -116,7 +116,7 @@ export default function DashboardScreen() {
           <StatCard title="Total Jobs" value={counts.total} icon="checkmark-circle" iconColor="#22c55e" onPress={() => router.push("/jobs")} />
           <StatCard title="Customers" value={counts.customers} icon="people" iconColor="#8b5cf6" onPress={() => router.push("/customers")} />
           <StatCard title="Overdue Invoices" value={counts.overdue} icon="alert-circle" iconColor="#ef4444" onPress={() => router.push("/invoices")} />
-          <StatCard title="Backflow Due" value={counts.backflowDue} icon="water" iconColor="#0891b2" />
+          <StatCard title="Backflow Due" value={counts.backflowDue} icon="water" iconColor="#0891b2" onPress={() => router.push("/backflow/list")} />
         </View>
 
         <Section title="Today's Jobs" action="View schedule" onAction={() => router.push("/schedule")}>

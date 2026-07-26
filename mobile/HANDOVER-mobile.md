@@ -61,8 +61,8 @@ field app + a full office/admin surface mirroring the web app.
 ## Not yet built (in-repo follow-ups)
 - Offline **reads** cache / PowerSync connection · **push notifications** ·
   **background auto-clock** (needs the `development` EAS dev client) · **Reports**
-  Skia charts · PO/cost-centre editing + labour-cost/margin costing (Q18) · office
-  Backflow list (Q12) · admin My-Jobs access (Q13) · MP1 dollar-leak RLS tightening.
+  Skia charts · PO/cost-centre editing + labour-cost/margin costing (Q18) ·
+  admin My-Jobs access (Q13) · MP1 dollar-leak RLS tightening.
 
 ## How to run / build
 ```bash
