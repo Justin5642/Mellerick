@@ -29,6 +29,7 @@ export function useFleet() {
     createEquipment: useCallback((i: EquipmentInput) => run((r) => r.createEquipment(i)), [run]),
     updateEquipment: useCallback((id: string, i: EquipmentInput) => run((r) => r.updateEquipment(id, i)), [run]),
     deactivateEquipment: useCallback((id: string) => run((r) => r.deactivateEquipment(id)), [run]),
+    reactivateEquipment: useCallback((id: string) => run((r) => r.reactivateEquipment(id)), [run]),
     assignEquipment: useCallback((id: string, assignedTo: string | null) => run((r) => r.assignEquipment(id, assignedTo)), [run]),
     addEquipmentExpense: useCallback(
       async (a: AddEquipmentExpenseArgs) => {

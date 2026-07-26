@@ -73,8 +73,10 @@ export interface CustomerOverview {
 // area is not reachable by technicians.
 export async function getCustomerOverview(customerId: string): Promise<CustomerOverview> {
   const [jobsRes, quotesRes, invoicesRes] = await Promise.all([
-    supabase.from("jobs").select("id, job_number, title, status").eq("customer_id", customerId).order("created_at", { ascending: false }).limit(20),
-    supabase.from("quotes").select("id, title, status, total").eq("customer_id", customerId).order("created_at", { ascending: false }).limit(20),
+    // No limit — the section counts must match the web's true totals; the screen
+    // itself slices to the first few for display.
+    supabase.from("jobs").select("id, job_number, title, status").eq("customer_id", customerId).order("created_at", { ascending: false }),
+    supabase.from("quotes").select("id, title, status, total").eq("customer_id", customerId).order("created_at", { ascending: false }),
     supabase.from("invoices").select("id, title, status, total").eq("customer_id", customerId).order("created_at", { ascending: false }),
   ]);
   const invoices = (invoicesRes.data as unknown as CustomerInvoice[]) ?? [];

@@ -7,9 +7,11 @@ import { computeEquipmentUtilization, type EquipUtilRow, type EquipUtilInput } f
 export interface ReportSummary {
   revenuePaid: number;
   outstanding: number;
+  totalOverdue: number;
   quotesAccepted: number;
   quotesDeclined: number;
   quotesTotal: number;
+  acceptedValue: number;
   jobsByStatus: { status: string; count: number }[];
   activeJobs: number;
 }
@@ -25,22 +27,27 @@ export async function getReportSummary(): Promise<ReportSummary> {
   );
   const [paidRes, outstandingRes, quotesRes, ...jobCounts] = await Promise.all([
     supabase.from("invoices").select("total").eq("status", "paid"),
-    supabase.from("invoices").select("total").in("status", ["sent", "overdue"]),
-    supabase.from("quotes").select("status"),
+    supabase.from("invoices").select("total, status").in("status", ["sent", "overdue"]),
+    supabase.from("quotes").select("status, total"),
     ...jobCountQueries,
   ]);
 
   const sum = (rows: { total: number | null }[] | null) => (rows ?? []).reduce((s, r) => s + Number(r.total ?? 0), 0);
-  const quotes = (quotesRes.data as { status: string }[] | null) ?? [];
+  const outstandingRows = (outstandingRes.data as { total: number | null; status: string }[] | null) ?? [];
+  const quotes = (quotesRes.data as { status: string; total: number | null }[] | null) ?? [];
   const jobsByStatus = JOB_STATUSES.map((status, i) => ({ status, count: jobCounts[i].count ?? 0 }));
   const activeJobs = jobsByStatus.filter((j) => ["pending", "scheduled", "in_progress"].includes(j.status)).reduce((s, j) => s + j.count, 0);
 
   return {
     revenuePaid: sum(paidRes.data as { total: number | null }[] | null),
-    outstanding: sum(outstandingRes.data as { total: number | null }[] | null),
+    outstanding: sum(outstandingRows),
+    // Overdue subset only — matches the web reports headline (Σ overdue invoices).
+    totalOverdue: sum(outstandingRows.filter((r) => r.status === "overdue")),
     quotesAccepted: quotes.filter((q) => q.status === "accepted").length,
     quotesDeclined: quotes.filter((q) => q.status === "declined").length,
     quotesTotal: quotes.length,
+    // Σ accepted-quote totals — matches the web reports headline.
+    acceptedValue: sum(quotes.filter((q) => q.status === "accepted")),
     jobsByStatus,
     activeJobs,
   };

@@ -4,7 +4,7 @@ import { Stack, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { colors } from "../lib/theme";
 import { MoneyText } from "../design/components/MoneyText";
-import { listEquipment, hourlyRate, type Equipment } from "../lib/data/reads/fleet";
+import { listEquipment, listInactiveEquipment, hourlyRate, type Equipment } from "../lib/data/reads/fleet";
 import { listAssignableStaff, type AssignableStaff } from "../lib/data/reads/schedule";
 import { useFleet } from "../lib/data/hooks/useFleet";
 import { useIsAdmin } from "../design/guards/useRole";
@@ -55,9 +55,32 @@ export default function FleetScreen() {
   const [saving, setSaving] = useState(false);
   const [assignFor, setAssignFor] = useState<Equipment | null>(null);
   const [staff, setStaff] = useState<AssignableStaff[]>([]);
+  const [showInactive, setShowInactive] = useState(false);
+  const [inactive, setInactive] = useState<Equipment[]>([]);
 
   const load = useCallback(async () => setItems(await listEquipment()), []);
+  const loadInactive = useCallback(async () => setInactive(await listInactiveEquipment()), []);
   useEffect(() => { load(); }, [load]);
+
+  async function toggleInactive() {
+    const next = !showInactive;
+    setShowInactive(next);
+    if (next) await loadInactive();
+  }
+
+  async function reactivate(item: Equipment) {
+    if (saving || !fleet.ready) return;
+    setSaving(true);
+    try {
+      await fleet.reactivateEquipment(item.id);
+      setInactive((prev) => prev.filter((it) => it.id !== item.id));
+      await load();
+    } catch (e) {
+      Alert.alert("Couldn't reactivate", e instanceof Error ? e.message : "Please try again.");
+    } finally {
+      setSaving(false);
+    }
+  }
 
   function openAssign(item: Equipment) {
     if (staff.length === 0) listAssignableStaff().then(setStaff).catch(() => {});
@@ -140,6 +163,7 @@ export default function FleetScreen() {
       setItems((prev) => prev.filter((it) => it.id !== id));
       setDraft(null);
       if (synced) await load();
+      if (showInactive) await loadInactive();
     } finally {
       setSaving(false);
     }
@@ -177,6 +201,32 @@ export default function FleetScreen() {
             </TouchableOpacity>
           </TouchableOpacity>
         )}
+        ListFooterComponent={
+          isAdmin ? (
+            <View style={styles.footer}>
+              <TouchableOpacity style={styles.inactiveToggle} onPress={toggleInactive}>
+                <Ionicons name={showInactive ? "chevron-down" : "chevron-forward"} size={16} color={colors.slate500} />
+                <Text style={styles.inactiveToggleText}>Inactive equipment</Text>
+              </TouchableOpacity>
+              {showInactive &&
+                (inactive.length === 0 ? (
+                  <Text style={styles.inactiveEmpty}>No inactive equipment.</Text>
+                ) : (
+                  inactive.map((item) => (
+                    <View key={item.id} style={styles.inactiveRow}>
+                      <View style={styles.body}>
+                        <Text style={styles.inactiveName} numberOfLines={1}>{item.name}</Text>
+                        <Text style={styles.meta} numberOfLines={1}>{item.registration || item.category}</Text>
+                      </View>
+                      <TouchableOpacity style={styles.reactivateBtn} onPress={() => reactivate(item)} disabled={saving}>
+                        <Text style={styles.reactivateText}>Reactivate</Text>
+                      </TouchableOpacity>
+                    </View>
+                  ))
+                ))}
+            </View>
+          ) : null
+        }
       />
 
       <Modal visible={!!draft} transparent animationType="slide" onRequestClose={() => !saving && setDraft(null)}>
@@ -268,6 +318,14 @@ const styles = StyleSheet.create({
   rate: { fontSize: 14, fontWeight: "700", color: colors.slate900 },
   rateUnit: { fontSize: 11, color: colors.slate400 },
   empty: { textAlign: "center", color: colors.slate400, marginTop: 40, fontSize: 13 },
+  footer: { marginTop: 20, paddingHorizontal: 16, paddingBottom: 24 },
+  inactiveToggle: { flexDirection: "row", alignItems: "center", gap: 6, paddingVertical: 10 },
+  inactiveToggleText: { fontSize: 13, fontWeight: "600", color: colors.slate500 },
+  inactiveRow: { flexDirection: "row", alignItems: "center", gap: 12, paddingVertical: 10, borderTopWidth: 1, borderTopColor: colors.border },
+  inactiveName: { fontSize: 14, fontWeight: "600", color: colors.slate500 },
+  inactiveEmpty: { fontSize: 12, color: colors.slate400, paddingVertical: 8 },
+  reactivateBtn: { paddingHorizontal: 12, paddingVertical: 7, borderRadius: 8, borderWidth: 1, borderColor: colors.blue600, backgroundColor: colors.blue100 },
+  reactivateText: { fontSize: 12, fontWeight: "700", color: colors.blue600 },
   overlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.4)", justifyContent: "flex-end" },
   sheet: { backgroundColor: colors.card, borderTopLeftRadius: 16, borderTopRightRadius: 16, padding: 16, paddingBottom: 28, maxHeight: "90%" },
   assignRow: { flexDirection: "row", alignItems: "center", gap: 12, paddingVertical: 12, borderTopWidth: 1, borderTopColor: colors.slate100 },

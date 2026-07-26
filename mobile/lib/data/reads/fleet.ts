@@ -27,6 +27,14 @@ export async function listEquipment(): Promise<Equipment[]> {
   return (data as unknown as Equipment[]) ?? [];
 }
 
+// Deactivated fleet items — surfaced behind a "show inactive" toggle so they can
+// be reactivated (mirrors the Pricing inactive flow; the web fleet list shows
+// active + inactive together).
+export async function listInactiveEquipment(): Promise<Equipment[]> {
+  const { data } = await supabase.from("equipment").select(SELECT).eq("is_active", false).order("category").order("name");
+  return (data as unknown as Equipment[]) ?? [];
+}
+
 export async function getEquipment(id: string): Promise<Equipment | null> {
   const { data } = await supabase.from("equipment").select(SELECT).eq("id", id).single();
   return (data as unknown as Equipment) ?? null;

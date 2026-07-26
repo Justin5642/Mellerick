@@ -53,6 +53,10 @@ export default function ReportsScreen() {
             <MoneyCard title="Paid" amount={summary.revenuePaid} color="#22c55e" />
             <MoneyCard title="Outstanding" amount={summary.outstanding} color="#f59e0b" />
           </View>
+          <View style={styles.row}>
+            <MoneyCard title="Overdue" amount={summary.totalOverdue} color="#ef4444" />
+            <MoneyCard title="Accepted quotes" amount={summary.acceptedValue} color="#3b82f6" />
+          </View>
 
           <Text style={styles.section}>Pipeline</Text>
           <View style={styles.row}>

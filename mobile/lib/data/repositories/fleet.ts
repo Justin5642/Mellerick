@@ -65,6 +65,10 @@ export class EquipmentRepository {
     await this.write("update", id, { is_active: false });
   }
 
+  async reactivateEquipment(id: string): Promise<void> {
+    await this.write("update", id, { is_active: true });
+  }
+
   /** Assign (or unassign, with null) equipment to a staff member. A vehicle
    * assigned to someone folds its $/hour into that person's loaded cost rate
    * (see costing/staff-efficiency). Preserve-on-update: only assigned_to. */
