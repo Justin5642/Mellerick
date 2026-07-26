@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { getGoogleCalendarClient } from "@/lib/google";
 import { requireUser } from "@/lib/api/guards";
+import { canManageJobBilling } from "@/lib/api/job-authz";
 
 export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   // Any authenticated staff member can trigger a calendar sync for a job they
@@ -10,10 +11,22 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   if (!guard.ok) return guard.response;
 
   const { id } = await params;
-  const supabase = await createClient();
+
+  // Q1: this used the COOKIE-scoped client, so a mobile Bearer caller (which
+  // sends no cookies) executed every query as `anon`. google_tokens is
+  // office/admin-only since migration 0027, so the token read returned nothing
+  // and the route answered HTTP 200 {skipped:true} — which the mobile outbox
+  // treats as success, silently marking the op done and NEVER syncing the
+  // calendar. A web technician hit the same dead end. Use the service-role
+  // client (same pattern as the other Bearer-replayed side-effect routes) and
+  // authorize the record explicitly, since service-role bypasses RLS.
+  const supabase = createAdminClient();
+  if (!(await canManageJobBilling(supabase, guard.userId, id))) {
+    return NextResponse.json({ error: "Insufficient permissions" }, { status: 403 });
+  }
 
   try {
-    const calendar = await getGoogleCalendarClient();
+    const calendar = await getGoogleCalendarClient(supabase);
     if (!calendar) {
       return NextResponse.json({ skipped: true, reason: "Google Calendar not connected" });
     }

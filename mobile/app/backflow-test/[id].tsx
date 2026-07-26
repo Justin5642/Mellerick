@@ -17,12 +17,10 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import DateTimePicker, { DateTimePickerEvent } from "@react-native-community/datetimepicker";
 import Signature, { SignatureViewRef } from "react-native-signature-canvas";
-import { decode } from "base64-arraybuffer";
 import { supabase } from "../../lib/supabase";
 import { colors } from "../../lib/theme";
 import { TEST_TYPES, FAILURE_REASONS } from "../../lib/backflow";
-
-const API_BASE_URL = process.env.EXPO_PUBLIC_API_BASE_URL;
+import { useBackflow } from "../../lib/data/hooks/useBackflow";
 
 interface DeviceGroup {
   group_label: string;
@@ -177,6 +175,7 @@ function DateField({ label, value, onChange }: { label: string; value: Date; onC
 export default function NewBackflowTestScreen() {
   const { id: deviceId } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
+  const backflow = useBackflow();
   const signatureRef = useRef<SignatureViewRef>(null);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -251,18 +250,12 @@ export default function NewBackflowTestScreen() {
   }
 
   async function submitTest(signatureBase64: string | null) {
+    if (!backflow.ready) {
+      Alert.alert("Not ready", "Please try again in a moment.");
+      return;
+    }
     setSaving(true);
     try {
-      let signatureStoragePath: string | null = null;
-      if (signatureBase64) {
-        const base64 = signatureBase64.replace(/^data:image\/png;base64,/, "");
-        const path = `${deviceId}/signatures/${Date.now()}.png`;
-        const { error: uploadError } = await supabase.storage.from("backflow-certificates").upload(path, decode(base64), {
-          contentType: "image/png",
-        });
-        if (!uploadError) signatureStoragePath = path;
-      }
-
       const testResults = groups.map((g) => ({
         group_label: g.group_label,
         make: g.make || null,
@@ -278,61 +271,43 @@ export default function NewBackflowTestScreen() {
         relief_valve_opened: g.relief_valve_opened,
       }));
 
-      const { data: test, error } = await supabase
-        .from("backflow_tests")
-        .insert({
-          device_id: deviceId,
-          test_type: testType,
-          test_date: toIsoDate(testDate),
-          result,
-          mains_pressure_kpa: mainsPressureKpa ? Number(mainsPressureKpa) : null,
-          permission_to_turn_off_water: permissionToTurnOffWater,
-          strainer_installed: strainerInstalled,
-          strainer_cleaned: strainerCleaned,
-          isolating_valves_padlocked: isolatingValvesPadlocked,
-          complies_with_as_nzs_3500_1: compliesWithAsNzs,
-          reason_for_failure: result === "fail" ? reasonForFailure : null,
-          repair_scheduled_date: result === "fail" && repairScheduledDate ? toIsoDate(repairScheduledDate) : null,
-          test_kit_serial_number: testKitSerialNumber || null,
-          test_kit_calibration_date: testKitCalibrationDate ? toIsoDate(testKitCalibrationDate) : null,
-          tester_name: testerName,
-          tester_licence_number: testerLicenceNumber || null,
-          tester_phone: testerPhone || null,
-          remarks: remarks || null,
-          test_results: testResults,
-          signature_storage_path: signatureStoragePath,
-          tested_by: currentUserId,
-        })
-        .select("id")
-        .single();
+      // Offline-durable: the row + its signature + the water-authority submission
+      // all go through the outbox. The submit is gated on the row landing and the
+      // endpoint is idempotent (Q3), so a replay can never double-email the
+      // authority — which is what makes logging a test safe with no signal.
+      const { synced } = await backflow.logTest({
+        deviceId,
+        testedBy: currentUserId,
+        testType,
+        testDate: toIsoDate(testDate),
+        result,
+        mainsPressureKpa: mainsPressureKpa ? Number(mainsPressureKpa) : null,
+        permissionToTurnOffWater,
+        strainerInstalled,
+        strainerCleaned,
+        isolatingValvesPadlocked,
+        compliesWithAsNzs,
+        reasonForFailure: reasonForFailure || null,
+        repairScheduledDate: repairScheduledDate ? toIsoDate(repairScheduledDate) : null,
+        testKitSerialNumber: testKitSerialNumber || null,
+        testKitCalibrationDate: testKitCalibrationDate ? toIsoDate(testKitCalibrationDate) : null,
+        testerName,
+        testerLicenceNumber: testerLicenceNumber || null,
+        testerPhone: testerPhone || null,
+        remarks: remarks || null,
+        testResults,
+        signatureBase64: signatureBase64,
+      });
 
-      if (error || !test) {
-        Alert.alert("Error", error?.message ?? "Failed to save test");
-        setSaving(false);
-        return;
-      }
-
-      if (!API_BASE_URL) {
-        Alert.alert("Test logged", "Test saved, but the app isn't configured to reach the office server to submit it. Submit from the office dashboard.");
-        router.replace(`/backflow/${deviceId}`);
-        return;
-      }
-
-      try {
-        const { data: sessionData } = await supabase.auth.getSession();
-        const accessToken = sessionData.session?.access_token;
-        const res = await fetch(`${API_BASE_URL}/api/backflow/tests/${test.id}/submit`, {
-          method: "POST",
-          headers: { Authorization: `Bearer ${accessToken}` },
-        });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data?.error ?? "Submission failed");
-        Alert.alert("Test submitted", `Report emailed to ${data.sentTo}`);
-      } catch (err: any) {
-        Alert.alert("Test saved", `Test saved, but submission failed: ${err?.message ?? "unknown error"} — retry from the device page.`);
-      }
-
+      Alert.alert(
+        synced ? "Test submitted" : "Saved offline",
+        synced
+          ? "The test was logged and the report sent to the water authority."
+          : "The test is saved on this device and will be submitted to the water authority automatically when you're back online."
+      );
       router.replace(`/backflow/${deviceId}`);
+    } catch (e) {
+      Alert.alert("Couldn't save the test", e instanceof Error ? e.message : "Please try again.");
     } finally {
       setSaving(false);
     }

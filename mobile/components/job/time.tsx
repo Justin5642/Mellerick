@@ -438,7 +438,8 @@ export function JobTimeTab({ jobId, currentUserId }: { jobId: string; currentUse
     if (!editing?.entryId || saving || !timeClock.ready) return;
     setSaving(true);
     const entryId = editing.entryId;
-    await timeClock.remove(entryId);
+    // Pass the job so the billing reconcile can run after the row is gone (Q6).
+    await timeClock.remove(entryId, jobId);
     setEntries((prev) => prev.filter((e) => e.id !== entryId));
     setSaving(false);
     setEditing(null);

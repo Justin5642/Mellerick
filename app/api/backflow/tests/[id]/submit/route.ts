@@ -19,6 +19,10 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   const guard = await requireUser(request);
   if (!guard.ok) return guard.response;
 
+  // Deliberate re-send of a corrected test (office/admin only) — see the dedupe
+  // guard below. Absent/false, the call is idempotent.
+  const { force } = ((await request.json().catch(() => ({}))) ?? {}) as { force?: boolean };
+
   const supabase = createAdminClient();
 
   try {
@@ -35,8 +39,34 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     // Authorize per-record before submitting to a water authority: office/admin
     // may submit any test; a technician may submit only one they performed
     // (backflow_tests.tested_by). Prevents acting on another record by id.
-    if (!(test.tested_by === guard.userId || (await isOfficeOrAdmin(supabase, guard.userId)))) {
+    const officeOrAdmin = await isOfficeOrAdmin(supabase, guard.userId);
+    if (!(test.tested_by === guard.userId || officeOrAdmin)) {
       return NextResponse.json({ error: "Insufficient permissions" }, { status: 403 });
+    }
+
+    // ---- Water-authority submission dedupe (Q3) -----------------------------
+    // Emailing a compliance report to the water authority is an EXTERNAL, not-
+    // undoable side effect, so this endpoint must be idempotent: a retry (an
+    // offline replay, a double-tap, a flaky network) must never send it twice.
+    // Once submitted_to_water_authority_at is set we short-circuit and report
+    // SUCCESS, so a queued offline op completes cleanly rather than retrying
+    // forever. A genuinely corrected test can still be re-sent deliberately with
+    // { force: true } — restricted to office/admin, never a technician.
+    if (test.submitted_to_water_authority_at) {
+      if (!force) {
+        return NextResponse.json({
+          success: true,
+          alreadySubmitted: true,
+          sentTo: test.submitted_to_email,
+          submittedAt: test.submitted_to_water_authority_at,
+        });
+      }
+      if (!officeOrAdmin) {
+        return NextResponse.json(
+          { error: "This test has already been submitted. Only office or admin staff can re-send it." },
+          { status: 403 }
+        );
+      }
     }
 
     const device = test.backflow_devices;

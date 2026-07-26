@@ -102,6 +102,9 @@ function RootNavigation() {
         <Stack.Screen name="reports" options={{ headerShown: true }} />
         <Stack.Screen name="jobs/new" options={{ headerShown: true }} />
         <Stack.Screen name="backflow/list" options={{ headerShown: true }} />
+        {/* Q13: an admin who also does field work reaches their assigned jobs
+            here (linked from the More hub); renders the shared My Jobs list. */}
+        <Stack.Screen name="my-jobs" options={{ headerShown: true, title: "My Jobs" }} />
         <Stack.Screen name="job/[id]/billing" options={{ headerShown: true }} />
       </Stack.Protected>
 

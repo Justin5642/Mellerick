@@ -25,6 +25,9 @@ const FINANCIAL: Item[] = [
   { label: "Reports", icon: "bar-chart-outline", href: "/reports" },
 ];
 const ADMIN: Item[] = [
+  // Q13: an admin who also works in the field gets their own assigned-jobs list
+  // (the web exposes My Jobs to admins too). Same shared list as the tech tab.
+  { label: "My Jobs", icon: "hammer-outline", href: "/my-jobs" },
   { label: "Staff", icon: "id-card-outline", href: "/staff" },
   { label: "Settings", icon: "settings-outline", href: "/settings" },
 ];

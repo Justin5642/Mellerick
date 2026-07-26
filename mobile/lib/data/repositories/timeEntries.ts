@@ -100,15 +100,27 @@ export class TimeEntriesRepository {
     await this.enqueueBillingSync(input.entryId, opId);
   }
 
-  /** Assign an entry to a PO cost-center stage. No billing resync (hours are
-   * unchanged) — matches the web app's assignCostCenter. */
+  /** Assign an entry to a PO cost-center stage. Deliberately NO billing resync:
+   * the generated Labour/Call-Out items are derived from hours only (see
+   * lib/labour-billing-sync.ts — it never reads cost_center_id), so reassigning
+   * a stage cannot change what's billed. Verified for Q6. */
   async assignCostCenter(entryId: string, costCenterId: string | null): Promise<void> {
     await this.enqueueWrite(entryId, "update", { cost_center_id: costCenterId });
   }
 
-  /** Delete an entry. No billing resync — matches the web app's deleteEditing. */
-  async remove(entryId: string): Promise<void> {
-    await this.enqueueWrite(entryId, "delete", {});
+  /**
+   * Delete an entry, then reconcile the job's billing (Q6).
+   *
+   * Deleting a billed entry used to leave its auto-generated "Labour" line item
+   * behind — the job stayed billed for hours that no longer exist. We therefore
+   * resync, but keyed on the JOB, not the entry: the entry-keyed endpoint
+   * resolves the job FROM the entry, so once the row is gone it would 404. The
+   * job-level route recomputes every remaining entry, so the stale line clears.
+   * `jobId` is optional only for backwards compatibility; always pass it.
+   */
+  async remove(entryId: string, jobId?: string): Promise<void> {
+    const opId = await this.enqueueWrite(entryId, "delete", {});
+    if (jobId) await this.enqueueJobBillingSync(jobId, opId);
   }
 
   private async enqueueWrite(
@@ -132,6 +144,24 @@ export class TimeEntriesRepository {
     };
     await this.outbox.enqueue(write);
     return id;
+  }
+
+  // Job-level reconcile, gated on the write that triggered it. Coalesced per job
+  // so several deletes in one offline session collapse to a single resync.
+  private async enqueueJobBillingSync(jobId: string, dependsOn: string): Promise<void> {
+    const op: SideEffectOperation = {
+      kind: "side_effect",
+      id: this.ids.newId(),
+      effect: "sync-job-billing",
+      coalesceKey: `sync-job-billing:${jobId}`,
+      payload: { jobId },
+      dependsOn,
+      status: "pending",
+      attempts: 0,
+      nextAttemptAt: 0,
+      createdAt: this.time.nowMs(),
+    };
+    await this.outbox.enqueue(op);
   }
 
   private async enqueueBillingSync(entryId: string, dependsOn: string): Promise<void> {

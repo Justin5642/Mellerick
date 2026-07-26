@@ -63,6 +63,10 @@ export interface WriteOperation {
 // to one, and only the latest matters (e.g. re-syncing a job's billing).
 export type SideEffectKind =
   | "sync-billing"
+  // Job-level billing reconcile. Needed when the entry-keyed sync can't be used
+  // because the entry no longer exists (a DELETE) — the endpoint resolves the job
+  // from the entry, so a post-delete entry-keyed call would 404 (Q6).
+  | "sync-job-billing"
   | "sync-calendar"
   | "transcribe-voice-report"
   | "backflow-submit";

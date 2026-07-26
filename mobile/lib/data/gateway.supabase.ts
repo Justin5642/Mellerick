@@ -67,6 +67,7 @@ const API_BASE_URL = process.env.EXPO_PUBLIC_API_BASE_URL;
 
 const sideEffectPath: Record<SideEffectKind, (p: Record<string, unknown>) => string> = {
   "sync-billing": (p) => `/api/time-entries/${p.entryId}/sync-billing`,
+  "sync-job-billing": (p) => `/api/jobs/${p.jobId}/sync-billing`,
   "sync-calendar": (p) => `/api/jobs/${p.jobId}/sync-calendar`,
   "transcribe-voice-report": (p) => `/api/jobs/${p.jobId}/transcribe-voice-report`,
   "backflow-submit": (p) => `/api/backflow/tests/${p.testId}/submit`,

@@ -158,11 +158,29 @@ describe("TimeEntriesRepository", () => {
     expect(sides(ops)).toHaveLength(0); // parity with web: no billing resync
   });
 
-  it("remove enqueues a delete and does NOT resync billing", async () => {
+  // Q6 (Avi's call: treat the stale labour line as a defect). Deleting a billed
+  // entry must reconcile the job's billing, keyed on the JOB — the entry-keyed
+  // endpoint resolves the job from the entry, so post-delete it would 404.
+  it("remove enqueues a delete AND a job-keyed billing resync gated on it (Q6)", async () => {
+    const { outbox, ops } = captureOutbox();
+    const repo = new TimeEntriesRepository(outbox, seqIds(), fixedTime());
+    await repo.remove("te-7", "job-1");
+
+    const del = writes(ops)[0];
+    expect(del).toMatchObject({ op: "delete", rowId: "te-7", table: "time_entries" });
+    expect(sides(ops)[0]).toMatchObject({
+      effect: "sync-job-billing", // NOT the entry-keyed one — the row is gone
+      coalesceKey: "sync-job-billing:job-1",
+      payload: { jobId: "job-1" },
+      dependsOn: del.id, // only after the delete actually lands
+    });
+  });
+
+  it("remove without a jobId still deletes and queues no resync (back-compat)", async () => {
     const { outbox, ops } = captureOutbox();
     const repo = new TimeEntriesRepository(outbox, seqIds(), fixedTime());
     await repo.remove("te-7");
-    expect(writes(ops)[0]).toMatchObject({ op: "delete", rowId: "te-7", table: "time_entries" });
+    expect(writes(ops)[0]).toMatchObject({ op: "delete", rowId: "te-7" });
     expect(sides(ops)).toHaveLength(0);
   });
 });

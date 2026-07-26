@@ -15,7 +15,7 @@ export interface TimeClock {
   addManual(input: ManualEntryInput): Promise<{ id: string; synced: boolean }>;
   editEntry(input: EditEntryInput): Promise<{ synced: boolean }>;
   assignCostCenter(entryId: string, costCenterId: string | null): Promise<{ synced: boolean }>;
-  remove(entryId: string): Promise<{ synced: boolean }>;
+  remove(entryId: string, jobId?: string): Promise<{ synced: boolean }>;
 }
 
 export function useTimeClock(): TimeClock {
@@ -52,9 +52,9 @@ export function useTimeClock(): TimeClock {
     return { synced: await flush() };
   }, [layer, flush]);
 
-  const remove = useCallback<TimeClock["remove"]>(async (entryId) => {
+  const remove = useCallback<TimeClock["remove"]>(async (entryId, jobId) => {
     if (!layer) throw new Error("Data layer not ready");
-    await layer.timeEntries.remove(entryId);
+    await layer.timeEntries.remove(entryId, jobId);
     return { synced: await flush() };
   }, [layer, flush]);
 
