@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
-import { View, Text, FlatList, StyleSheet, RefreshControl, ActivityIndicator } from "react-native";
+import { View, Text, FlatList, StyleSheet, RefreshControl, ActivityIndicator, TouchableOpacity } from "react-native";
 import { Stack, useRouter } from "expo-router";
+import { Ionicons } from "@expo/vector-icons";
 import { colors } from "../lib/theme";
 import { formatQuoteNumber } from "../lib/finance";
 import { FinanceListRow } from "../design/components/FinanceListRow";
@@ -48,7 +49,16 @@ export default function QuotesScreen() {
 
   return (
     <View style={styles.container}>
-      <Stack.Screen options={{ title: "Quotes" }} />
+      <Stack.Screen
+        options={{
+          title: "Quotes",
+          headerRight: () => (
+            <TouchableOpacity onPress={() => router.push("/quotes/new")} accessibilityLabel="New quote">
+              <Ionicons name="add" size={26} color={colors.blue600} />
+            </TouchableOpacity>
+          ),
+        }}
+      />
       <FlatList
         data={quotes}
         keyExtractor={(q) => q.id}

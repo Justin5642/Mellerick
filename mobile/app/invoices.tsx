@@ -81,7 +81,16 @@ export default function InvoicesScreen() {
 
   return (
     <View style={styles.container}>
-      <Stack.Screen options={{ title: "Invoices" }} />
+      <Stack.Screen
+        options={{
+          title: "Invoices",
+          headerRight: () => (
+            <TouchableOpacity onPress={() => router.push("/invoices/new")} accessibilityLabel="New invoice">
+              <Ionicons name="add" size={26} color={colors.blue600} />
+            </TouchableOpacity>
+          ),
+        }}
+      />
       <FlatList
         data={invoices}
         keyExtractor={(i) => i.id}

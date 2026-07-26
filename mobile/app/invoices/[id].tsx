@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
-import { View, Text, ScrollView, StyleSheet, ActivityIndicator } from "react-native";
-import { Stack, useLocalSearchParams } from "expo-router";
+import { View, Text, ScrollView, StyleSheet, ActivityIndicator, TouchableOpacity } from "react-native";
+import { Stack, useLocalSearchParams, useRouter } from "expo-router";
+import { Ionicons } from "@expo/vector-icons";
 import { colors } from "../../lib/theme";
 import { formatInvoiceNumber } from "../../lib/finance";
 import { MoneyText } from "../../design/components/MoneyText";
@@ -13,6 +14,7 @@ function fmtDate(iso: string | null): string {
 
 export default function InvoiceDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
+  const router = useRouter();
   const [invoice, setInvoice] = useState<InvoiceDetail | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -45,7 +47,16 @@ export default function InvoiceDetailScreen() {
   const c = invoice.customers;
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
-      <Stack.Screen options={{ title: formatInvoiceNumber(invoice.invoice_number) }} />
+      <Stack.Screen
+        options={{
+          title: formatInvoiceNumber(invoice.invoice_number),
+          headerRight: () => (
+            <TouchableOpacity onPress={() => router.push(`/invoices/${id}/edit`)} accessibilityLabel="Edit invoice">
+              <Ionicons name="create-outline" size={22} color={colors.blue600} />
+            </TouchableOpacity>
+          ),
+        }}
+      />
 
       <View style={styles.headerRow}>
         <View style={{ flex: 1 }}>

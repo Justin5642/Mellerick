@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useState } from "react";
-import { View, Text, ScrollView, StyleSheet, ActivityIndicator } from "react-native";
-import { Stack, useLocalSearchParams } from "expo-router";
+import { View, Text, ScrollView, StyleSheet, ActivityIndicator, TouchableOpacity } from "react-native";
+import { Stack, useLocalSearchParams, useRouter } from "expo-router";
+import { Ionicons } from "@expo/vector-icons";
 import { colors } from "../../lib/theme";
 import { formatQuoteNumber } from "../../lib/finance";
 import { MoneyText } from "../../design/components/MoneyText";
 import { StatusPill } from "../../design/components/StatusPill";
 import { getQuote, type QuoteDetail } from "../../lib/data/reads/finance";
+import { useFinance } from "../../lib/data/hooks/useFinance";
 
 function fmtDate(iso: string | null): string {
   return iso ? new Date(iso).toLocaleDateString("en-AU", { day: "numeric", month: "short", year: "numeric" }) : "—";
@@ -13,13 +15,27 @@ function fmtDate(iso: string | null): string {
 
 export default function QuoteDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
+  const router = useRouter();
+  const finance = useFinance();
   const [quote, setQuote] = useState<QuoteDetail | null>(null);
   const [loading, setLoading] = useState(true);
+  const [updating, setUpdating] = useState(false);
 
   const load = useCallback(async () => {
     setQuote(await getQuote(id));
     setLoading(false);
   }, [id]);
+
+  const setStatus = useCallback(async (status: "accepted" | "declined") => {
+    if (updating || !finance.ready) return;
+    setUpdating(true);
+    try {
+      await finance.setQuoteStatus(id, status);
+      setQuote((q) => (q ? { ...q, status } : q)); // optimistic
+    } finally {
+      setUpdating(false);
+    }
+  }, [id, finance, updating]);
 
   useEffect(() => {
     load();
@@ -45,7 +61,16 @@ export default function QuoteDetailScreen() {
   const c = quote.customers;
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
-      <Stack.Screen options={{ title: formatQuoteNumber(quote.quote_number) }} />
+      <Stack.Screen
+        options={{
+          title: formatQuoteNumber(quote.quote_number),
+          headerRight: () => (
+            <TouchableOpacity onPress={() => router.push(`/quotes/${id}/edit`)} accessibilityLabel="Edit quote">
+              <Ionicons name="create-outline" size={22} color={colors.blue600} />
+            </TouchableOpacity>
+          ),
+        }}
+      />
 
       <View style={styles.headerRow}>
         <View style={{ flex: 1 }}>
@@ -54,6 +79,19 @@ export default function QuoteDetailScreen() {
         </View>
         <StatusPill domain="quoteStatus" value={quote.status} />
       </View>
+
+      {quote.status === "sent" && (
+        <View style={styles.decision}>
+          <TouchableOpacity style={[styles.decisionBtn, styles.decline]} onPress={() => setStatus("declined")} disabled={updating}>
+            <Ionicons name="close" size={16} color={colors.red600} />
+            <Text style={styles.declineText}>Decline</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={[styles.decisionBtn, styles.accept]} onPress={() => setStatus("accepted")} disabled={updating}>
+            <Ionicons name="checkmark" size={16} color="#fff" />
+            <Text style={styles.acceptText}>Accept</Text>
+          </TouchableOpacity>
+        </View>
+      )}
 
       {c && (
         <Card title="Customer">
@@ -99,7 +137,7 @@ export default function QuoteDetailScreen() {
         </Card>
       )}
 
-      <Text style={styles.footnote}>Sending, PDF and accept/decline are managed on the web dashboard.</Text>
+      <Text style={styles.footnote}>Sending and PDF are managed on the web dashboard.</Text>
     </ScrollView>
   );
 }
@@ -134,6 +172,12 @@ const styles = StyleSheet.create({
   content: { padding: 16, gap: 14, paddingBottom: 40 },
   center: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: colors.bg },
   headerRow: { flexDirection: "row", alignItems: "flex-start", gap: 12 },
+  decision: { flexDirection: "row", gap: 10 },
+  decisionBtn: { flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, paddingVertical: 12, borderRadius: 10 },
+  decline: { backgroundColor: colors.red100, borderWidth: 1, borderColor: colors.red600 },
+  declineText: { color: colors.red600, fontWeight: "700", fontSize: 14 },
+  accept: { backgroundColor: colors.green600 },
+  acceptText: { color: "#fff", fontWeight: "700", fontSize: 14 },
   number: { fontSize: 13, fontWeight: "700", color: colors.blue600 },
   title: { fontSize: 18, fontWeight: "800", color: colors.slate900, marginTop: 2 },
   card: { backgroundColor: colors.card, borderWidth: 1, borderColor: colors.border, borderRadius: 12, padding: 14, gap: 6 },
