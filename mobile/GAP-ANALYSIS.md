@@ -25,7 +25,7 @@ send-back)**. So the app is broad and usable but **not at full parity**.
 | Staff | partial | leave log, charge-out rate (med); invite/email (ext) |
 | Settings | partial | variation-types / cost-centre-template / account-code config (med/low) |
 | Reports | partial | staff cost & efficiency table (**high**) + 4 analytics tables (med) |
-| Jobs | partial | **create job**, edit/reassign/reschedule, price+approve variations (**high ×3**) |
+| Jobs | partial | ~~reassign/reschedule~~ (D41), ~~status/priority edit~~ (D43); **create job**, edit customer/site/title/type, price+approve variations still open |
 | Invoices | partial | prefill-from-job + add unbilled variations (**high ×2**); Send/PDF/Xero (ext) |
 | Approvals | partial ✅ | ~~approve→auto-invoice, send-back~~ **DONE** (D40); Xero auto-push (ext) |
 | Schedule | partial ✅ | ~~assign/unassign, reschedule~~ **DONE** (D41); day/week grid deferred |
