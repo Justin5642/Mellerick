@@ -12,7 +12,7 @@ const compat = new FlatCompat({ baseDirectory: __dirname });
 // Expo app is a separate project with its own toolchain — it is not linted by
 // this web config (it gets expo-doctor + tsc instead).
 const eslintConfig = [
-  { ignores: [".next/**", "out/**", "build/**", "next-env.d.ts", "mobile/**", "coverage/**"] },
+  { ignores: [".next/**", "out/**", "build/**", "next-env.d.ts", "mobile/**", "coverage/**", "supabase/functions/**"] },
   ...compat.extends("next/core-web-vitals", "next/typescript"),
   {
     rules: {
