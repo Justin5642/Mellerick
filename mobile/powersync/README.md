@@ -114,6 +114,17 @@ backstop). **Payroll** tables (`staff_cost_profiles`, `billing_rate_config`) are
 `role = 'admin'` when implementing, rather than including them in the office set.
 
 ## Role-impersonation test (the parity check — MP3 DoD)
+
+> ✅ **VERIFIED AGAINST THE LIVE SERVICE — 2026-07-27**, via the dashboard's
+> Sync Diagnostics Client with real identities (dev tokens; read-only):
+> **technician** `1720afed-…` → 6 money-free tables only (customers 138,
+> sites 519, profiles 6, variation_types 2 **without the `rate` column**,
+> backflow 1+1); office buckets synced ZERO rows and no money table exists
+> client-side; `tech_jobs` correctly parameterized on their UUID.
+> **admin** `3d9d69ad-…` → the full 18-table business set (jobs 825,
+> job_photos 9,714, invoices/items/expenses/POs/cost-centres present),
+> 11,257 rows / 30 buckets. Development tokens were enabled on the instance
+> for this check (Client Auth toggle) — disable there if unwanted.
 Mirror the RLS role-impersonation test (`supabase/tests/0035_…`). Against a
 PowerSync test instance, for a **technician** token assert:
 1. Every table in the "NEVER sync" list yields **zero rows** in the device DB.
