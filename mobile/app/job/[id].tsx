@@ -1,9 +1,12 @@
 import { useCallback, useState } from "react";
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator } from "react-native";
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, Modal, Alert, TextInput } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { useFocusEffect, useLocalSearchParams } from "expo-router";
+import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
+import { Ionicons } from "@expo/vector-icons";
 import { supabase } from "../../lib/supabase";
 import { colors, statusColors } from "../../lib/theme";
+import { useIsOfficeOrAdmin } from "../../design/guards/useRole";
+import { useJobEdit } from "../../lib/data/hooks/useJobEdit";
 import { JobOverviewTab } from "../../components/job/overview";
 import { JobNotesTab } from "../../components/job/notes";
 import { JobPhotosTab } from "../../components/job/photos";
@@ -24,12 +27,22 @@ const TABS = [
 
 type TabKey = (typeof TABS)[number]["key"];
 
+const JOB_STATUSES = ["pending", "scheduled", "in_progress", "on_hold", "completed", "cancelled"] as const;
+const JOB_PRIORITIES = ["low", "normal", "high", "urgent"] as const;
+const JOB_TYPES = ["service", "installation", "maintenance", "emergency", "quote", "project"] as const;
+
 export default function JobDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
+  const router = useRouter();
+  const isOfficeOrAdmin = useIsOfficeOrAdmin();
+  const jobEdit = useJobEdit();
   const [job, setJob] = useState<any>(null);
   const [userId, setUserId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState<TabKey>("overview");
+  const [editing, setEditing] = useState(false);
+  const [savingEdit, setSavingEdit] = useState(false);
+  const [details, setDetails] = useState<{ title: string; description: string } | null>(null);
 
   const loadJob = useCallback(async () => {
     const {
@@ -54,10 +67,72 @@ export default function JobDetailScreen() {
     }, [loadJob])
   );
 
-  if (loading || !job) {
+  // Office/admin quick-edit of a job's own fields (offline-durable, preserve-on-
+  // update). Applies the change optimistically; completion is still owned by the
+  // sign-off flow — this is for dispatch/triage edits, not customer/site
+  // reassignment (a heavier flow still done on the web).
+  const applyEdit = useCallback(
+    async (fields: { status?: string; priority?: string; jobType?: string }, close = true) => {
+      if (savingEdit || !jobEdit.ready) return;
+      setSavingEdit(true);
+      try {
+        await jobEdit.updateFields(id, fields);
+        // Map camelCase inputs back onto the job row's snake_case columns.
+        setJob((j: any) => ({ ...j, ...(fields.status !== undefined && { status: fields.status }), ...(fields.priority !== undefined && { priority: fields.priority }), ...(fields.jobType !== undefined && { job_type: fields.jobType }) }));
+        if (close) setEditing(false);
+      } catch (e) {
+        Alert.alert("Couldn't update", e instanceof Error ? e.message : "Please try again.");
+      } finally {
+        setSavingEdit(false);
+      }
+    },
+    [id, jobEdit, savingEdit]
+  );
+
+  const openEdit = useCallback(() => {
+    setDetails({ title: job?.title ?? "", description: job?.description ?? "" });
+    setEditing(true);
+  }, [job]);
+
+  // Save the free-text title/description together (only the changed fields go to
+  // the outbox). Title is required; a blank title is rejected.
+  const saveDetails = useCallback(async () => {
+    if (!details || savingEdit || !jobEdit.ready || !job) return;
+    const title = details.title.trim();
+    if (!title) { Alert.alert("Title required", "A job title can't be empty."); return; }
+    const description = details.description.trim();
+    const fields: { title?: string; description?: string | null } = {};
+    if (title !== job.title) fields.title = title;
+    if (description !== (job.description ?? "")) fields.description = description || null;
+    if (Object.keys(fields).length === 0) return;
+    setSavingEdit(true);
+    try {
+      await jobEdit.updateFields(id, fields);
+      setJob((j: any) => ({ ...j, ...fields }));
+    } catch (e) {
+      Alert.alert("Couldn't update", e instanceof Error ? e.message : "Please try again.");
+    } finally {
+      setSavingEdit(false);
+    }
+  }, [details, id, job, jobEdit, savingEdit]);
+
+  if (loading) {
     return (
       <SafeAreaView style={styles.center} edges={["bottom", "left", "right"]}>
         <ActivityIndicator size="large" color={colors.blue600} />
+      </SafeAreaView>
+    );
+  }
+  // Loaded but no job → not found / no access / offline (the row read failed).
+  // Show a clear message like every sibling detail screen, not an endless spinner.
+  if (!job) {
+    return (
+      <SafeAreaView style={styles.center} edges={["bottom", "left", "right"]}>
+        <Text style={styles.notFound}>Job not found.</Text>
+        <Text style={styles.notFoundHint}>It may have been removed, you may not have access, or you&apos;re offline.</Text>
+        <TouchableOpacity style={styles.notFoundBtn} onPress={() => router.back()}>
+          <Text style={styles.notFoundBtnText}>Go back</Text>
+        </TouchableOpacity>
       </SafeAreaView>
     );
   }
@@ -70,9 +145,22 @@ export default function JobDetailScreen() {
         <Text style={styles.title} numberOfLines={1}>
           #{job.job_number} — {job.title}
         </Text>
-        <View style={[styles.badge, { backgroundColor: sc.bg }]}>
-          <Text style={[styles.badgeText, { color: sc.text }]}>{job.status.replace("_", " ")}</Text>
-        </View>
+        {isOfficeOrAdmin && (
+          <TouchableOpacity style={styles.billingBtn} onPress={() => router.push(`/job/${id}/billing`)} accessibilityLabel="Job billing">
+            <Ionicons name="cash-outline" size={14} color={colors.blue600} />
+            <Text style={styles.billingText}>Billing</Text>
+          </TouchableOpacity>
+        )}
+        {isOfficeOrAdmin ? (
+          <TouchableOpacity style={[styles.badge, styles.badgeEditable, { backgroundColor: sc.bg }]} onPress={openEdit} accessibilityLabel="Edit job">
+            <Text style={[styles.badgeText, { color: sc.text }]}>{job.status.replace("_", " ")}</Text>
+            <Ionicons name="chevron-down" size={11} color={sc.text} />
+          </TouchableOpacity>
+        ) : (
+          <View style={[styles.badge, { backgroundColor: sc.bg }]}>
+            <Text style={[styles.badgeText, { color: sc.text }]}>{job.status.replace("_", " ")}</Text>
+          </View>
+        )}
       </View>
       <Text style={styles.subtitle}>
         {job.customers?.name}
@@ -113,13 +201,92 @@ export default function JobDetailScreen() {
           />
         )}
       </ScrollView>
+
+      <Modal visible={editing} transparent animationType="slide" onRequestClose={() => !savingEdit && setEditing(false)}>
+        <View style={styles.overlay}>
+          <ScrollView style={styles.sheetScroll} contentContainerStyle={styles.sheet} keyboardShouldPersistTaps="handled">
+            <Text style={styles.sheetTitle}>Update job</Text>
+
+            <Text style={styles.sheetLabel}>Title</Text>
+            <TextInput
+              style={styles.input}
+              value={details?.title ?? ""}
+              onChangeText={(v) => setDetails((d) => d && { ...d, title: v })}
+              placeholder="Job title"
+              placeholderTextColor={colors.slate400}
+            />
+
+            <Text style={styles.sheetLabel}>Status</Text>
+            <View style={styles.chipWrap}>
+              {JOB_STATUSES.map((s) => {
+                const c = statusColors[s] ?? statusColors.pending;
+                const active = job.status === s;
+                return (
+                  <TouchableOpacity key={s} style={[styles.chip, active && { backgroundColor: c.bg, borderColor: c.text }]} onPress={() => applyEdit({ status: s }, false)} disabled={savingEdit}>
+                    <Text style={[styles.chipText, active && { color: c.text }]}>{s.replace("_", " ")}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+
+            <Text style={styles.sheetLabel}>Priority</Text>
+            <View style={styles.chipWrap}>
+              {JOB_PRIORITIES.map((p) => {
+                const active = job.priority === p;
+                return (
+                  <TouchableOpacity key={p} style={[styles.chip, active && styles.chipActive]} onPress={() => applyEdit({ priority: p }, false)} disabled={savingEdit}>
+                    <Text style={[styles.chipText, active && styles.chipTextActive]}>{p}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+
+            <Text style={styles.sheetLabel}>Type</Text>
+            <View style={styles.chipWrap}>
+              {JOB_TYPES.map((t) => {
+                const active = job.job_type === t;
+                return (
+                  <TouchableOpacity key={t} style={[styles.chip, active && styles.chipActive]} onPress={() => applyEdit({ jobType: t }, false)} disabled={savingEdit}>
+                    <Text style={[styles.chipText, active && styles.chipTextActive]}>{t}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+
+            <Text style={styles.sheetLabel}>Description</Text>
+            <TextInput
+              style={[styles.input, styles.inputMultiline]}
+              value={details?.description ?? ""}
+              onChangeText={(v) => setDetails((d) => d && { ...d, description: v })}
+              placeholder="Job description"
+              placeholderTextColor={colors.slate400}
+              multiline
+            />
+
+            <Text style={styles.editHint}>Status, priority and type save instantly. Customer, site and schedule are edited on the web.</Text>
+
+            <View style={styles.editActions}>
+              <TouchableOpacity style={styles.cancelBtn} onPress={() => setEditing(false)} disabled={savingEdit}>
+                <Text style={styles.cancelText}>Close</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.doneBtn} onPress={saveDetails} disabled={savingEdit}>
+                <Text style={styles.doneText}>{savingEdit ? "…" : "Save details"}</Text>
+              </TouchableOpacity>
+            </View>
+          </ScrollView>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.bg },
-  center: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: colors.bg },
+  center: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: colors.bg, padding: 24 },
+  notFound: { fontSize: 16, fontWeight: "700", color: colors.slate900 },
+  notFoundHint: { fontSize: 13, color: colors.slate500, textAlign: "center", marginTop: 6 },
+  notFoundBtn: { marginTop: 16, paddingHorizontal: 20, paddingVertical: 10, borderRadius: 10, backgroundColor: colors.blue600 },
+  notFoundBtnText: { color: "#fff", fontWeight: "700", fontSize: 14 },
   header: {
     flexDirection: "row",
     justifyContent: "space-between",
@@ -129,8 +296,29 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   title: { fontSize: 17, fontWeight: "700", color: colors.slate900, flex: 1 },
+  billingBtn: { flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 999, borderWidth: 1, borderColor: colors.blue100, backgroundColor: colors.blue100 },
+  billingText: { fontSize: 12, fontWeight: "700", color: colors.blue600 },
   badge: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 999 },
+  badgeEditable: { flexDirection: "row", alignItems: "center", gap: 3 },
   badgeText: { fontSize: 11, fontWeight: "600", textTransform: "capitalize" },
+  overlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.4)", justifyContent: "flex-end" },
+  sheetScroll: { maxHeight: "88%", flexGrow: 0 },
+  sheet: { backgroundColor: colors.card, borderTopLeftRadius: 16, borderTopRightRadius: 16, padding: 16, paddingBottom: 28 },
+  sheetTitle: { fontSize: 16, fontWeight: "800", color: colors.slate900, marginBottom: 8 },
+  sheetLabel: { fontSize: 12, fontWeight: "700", color: colors.slate500, textTransform: "uppercase", marginTop: 12, marginBottom: 8 },
+  input: { borderWidth: 1, borderColor: colors.border, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10, fontSize: 14, backgroundColor: colors.bg, color: colors.slate900 },
+  inputMultiline: { minHeight: 72, textAlignVertical: "top" },
+  chipWrap: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
+  chip: { paddingHorizontal: 12, paddingVertical: 8, borderRadius: 999, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.bg },
+  chipActive: { backgroundColor: colors.blue600, borderColor: colors.blue600 },
+  chipText: { fontSize: 13, fontWeight: "600", color: colors.slate700, textTransform: "capitalize" },
+  chipTextActive: { color: "#fff" },
+  editHint: { fontSize: 11, color: colors.slate400, marginTop: 14 },
+  editActions: { flexDirection: "row", gap: 10, marginTop: 14 },
+  cancelBtn: { flex: 1, paddingVertical: 12, borderRadius: 10, backgroundColor: colors.bg, alignItems: "center", borderWidth: 1, borderColor: colors.border },
+  cancelText: { color: colors.slate700, fontWeight: "600", fontSize: 14 },
+  doneBtn: { flex: 1, paddingVertical: 12, borderRadius: 10, backgroundColor: colors.blue600, alignItems: "center" },
+  doneText: { color: "#fff", fontWeight: "700", fontSize: 14 },
   subtitle: { fontSize: 13, color: colors.slate500, paddingHorizontal: 16, marginTop: 2 },
   tabBarWrap: { borderBottomWidth: 1, borderBottomColor: colors.border, marginTop: 12 },
   tabBar: { paddingHorizontal: 12, gap: 4 },

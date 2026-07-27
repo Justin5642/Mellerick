@@ -1,17 +1,16 @@
-import { NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server";
+import { NextRequest, NextResponse } from "next/server";
+import { requireOfficeOrAdmin } from "@/lib/api/guards";
+import { callerClient } from "@/lib/api/caller-client";
 import { pollXeroInvoicePayments } from "@/lib/xero";
 
-// Manual trigger for the Settings page's "Sync now" button — same logic as
-// the cron poll route, but authenticated by the user's normal logged-in
-// session instead of CRON_SECRET, since only signed-in app users can reach it.
-export async function POST() {
-  const supabase = await createClient();
-
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+// Manual trigger for the Settings page's "Sync now" button — same logic as the
+// cron poll route. Previously auth'd by getUser() ONLY (any signed-in user,
+// including a technician, could trigger a Xero payments sync); now office/admin
+// -only via the shared guard, and Bearer-aware (mobile) via callerClient.
+export async function POST(request: NextRequest) {
+  const guard = await requireOfficeOrAdmin(request);
+  if (!guard.ok) return guard.response;
+  const supabase = await callerClient(request);
 
   try {
     const result = await pollXeroInvoicePayments(supabase);

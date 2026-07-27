@@ -1,0 +1,31 @@
+# Critical path — office/admin: login → Approvals → approve a completed job.
+# Mirrors the plan's DoD flow "dashboard→approvals→approve". Requires the seeded
+# account to be ADMIN (approve is admin-gated) and at least one job awaiting
+# approval in the queue.
+appId: au.com.mellerick.field
+env:
+  EMAIL: ${ADMIN_EMAIL}
+  PASSWORD: ${ADMIN_PASSWORD}
+---
+- runFlow:
+    file: ../subflows/login.yaml
+    env:
+      EMAIL: ${ADMIN_EMAIL}
+      PASSWORD: ${ADMIN_PASSWORD}
+# Office/admin land on the Dashboard; the tab bar exposes Approvals.
+- assertVisible: "Approvals"
+- tapOn: "Approvals"
+# Expand the first pending approval card, then approve it.
+- assertVisible:
+    id: "job-list-row"
+- tapOn:
+    id: "job-list-row"
+    index: 0
+- assertVisible:
+    id: "approve-job"
+- tapOn:
+    id: "approve-job"
+# A draft invoice is created + the job leaves the pending queue. Confirm the
+# approve control for that card is gone (either the card collapsed or refreshed).
+- assertNotVisible:
+    id: "approve-job"

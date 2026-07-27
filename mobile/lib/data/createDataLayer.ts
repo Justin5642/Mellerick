@@ -1,0 +1,84 @@
+import { Outbox, systemClock, type Clock } from "./outbox/outbox";
+import { Processor } from "./outbox/processor";
+import type { OutboxStore } from "./outbox/store";
+import type { SupabaseGateway, ApiBridge } from "./gateway";
+import type { Connectivity } from "./net/connectivity";
+import { SyncEngine } from "./syncEngine";
+import { cryptoIdGen, type IdGen } from "./ids";
+import { TimeEntriesRepository } from "./repositories/timeEntries";
+import { JobPhotosRepository } from "./repositories/jobPhotos";
+import { JobNotesRepository } from "./repositories/jobNotes";
+import { SignatureRepository } from "./repositories/signature";
+import { VoiceReportRepository } from "./repositories/voiceReport";
+import { FinanceRepository } from "./repositories/finance";
+import { CustomersRepository } from "./repositories/customers";
+import { InventoryRepository } from "./repositories/inventory";
+import { EquipmentRepository } from "./repositories/fleet";
+import { JobBillingRepository } from "./repositories/jobBilling";
+import { ApprovalsRepository } from "./repositories/approvals";
+import { ScheduleRepository } from "./repositories/schedule";
+import { JobsRepository } from "./repositories/jobs";
+import { BackflowRepository } from "./repositories/backflow";
+import { SettingsRepository } from "./repositories/settings";
+import { VariationsRepository } from "./repositories/variations";
+
+// The wired offline stack a screen consumes: repositories for writes, the sync
+// engine to drive them out, and the outbox for the pending/failed badge.
+export interface DataLayer {
+  outbox: Outbox;
+  engine: SyncEngine;
+  timeEntries: TimeEntriesRepository;
+  photos: JobPhotosRepository;
+  notes: JobNotesRepository;
+  signature: SignatureRepository;
+  voiceReport: VoiceReportRepository;
+  finance: FinanceRepository;
+  customers: CustomersRepository;
+  inventory: InventoryRepository;
+  equipment: EquipmentRepository;
+  jobBilling: JobBillingRepository;
+  approvals: ApprovalsRepository;
+  schedule: ScheduleRepository;
+  jobs: JobsRepository;
+  backflow: BackflowRepository;
+  settings: SettingsRepository;
+  variations: VariationsRepository;
+}
+
+export interface DataLayerDeps {
+  store: OutboxStore;
+  gateway: SupabaseGateway;
+  api: ApiBridge;
+  connectivity: Connectivity;
+  ids?: IdGen;
+  clock?: Clock;
+  /** Refresh the auth session before a drain (Q4) — see SyncEngine. */
+  ensureSession?: () => Promise<unknown>;
+}
+
+// Composition root, injectable end-to-end so the whole stack can be integration-
+// tested with fakes (no native SQLite/netinfo). DataProvider calls this with the
+// real adapters.
+export function createDataLayer(deps: DataLayerDeps): DataLayer {
+  const outbox = new Outbox(deps.store, deps.clock ?? systemClock);
+  const processor = new Processor(outbox, deps.gateway, deps.api, deps.connectivity);
+  const engine = new SyncEngine(processor, deps.connectivity, deps.ensureSession);
+  const ids = deps.ids ?? cryptoIdGen;
+  const timeEntries = new TimeEntriesRepository(outbox, ids);
+  const photos = new JobPhotosRepository(outbox, ids);
+  const notes = new JobNotesRepository(outbox, ids);
+  const signature = new SignatureRepository(outbox, ids);
+  const voiceReport = new VoiceReportRepository(outbox, ids);
+  const finance = new FinanceRepository(outbox, ids);
+  const customers = new CustomersRepository(outbox, ids);
+  const inventory = new InventoryRepository(outbox, ids);
+  const equipment = new EquipmentRepository(outbox, ids);
+  const jobBilling = new JobBillingRepository(outbox, ids);
+  const approvals = new ApprovalsRepository(outbox, ids, finance);
+  const schedule = new ScheduleRepository(outbox, ids);
+  const jobs = new JobsRepository(outbox, ids);
+  const backflow = new BackflowRepository(outbox, ids);
+  const settings = new SettingsRepository(outbox, ids);
+  const variations = new VariationsRepository(outbox, ids);
+  return { outbox, engine, timeEntries, photos, notes, signature, voiceReport, finance, customers, inventory, equipment, jobBilling, approvals, schedule, jobs, backflow, settings, variations };
+}

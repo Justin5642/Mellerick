@@ -1,0 +1,33 @@
+# Offline durability — clock in while offline, then reconnect and confirm the
+# entry survived (the durable outbox replays it). setAirplaneMode is Android-only
+# in Maestro, so this flow runs on Android; the iOS equivalent is a manual QA step
+# (toggle Airplane Mode in Control Center).
+appId: au.com.mellerick.field
+env:
+  EMAIL: ${TECH_EMAIL}
+  PASSWORD: ${TECH_PASSWORD}
+---
+- runFlow:
+    file: ../subflows/login.yaml
+    env:
+      EMAIL: ${TECH_EMAIL}
+      PASSWORD: ${TECH_PASSWORD}
+- assertVisible: "My Jobs"
+- tapOn:
+    id: "job-list-row"
+    index: 0
+- tapOn: "Time"
+# Go offline, then clock in — the write is enqueued in the durable outbox and the
+# UI updates optimistically (clock-out affordance appears with no network).
+- setAirplaneMode: enabled
+- tapOn:
+    id: "clock-in"
+- assertVisible:
+    id: "clock-out"
+# Reconnect; the outbox drains and the entry is now on the server. The open entry
+# must still be present (no duplicate, no loss) after a reload.
+- setAirplaneMode: disabled
+- waitForAnimationToEnd:
+    timeout: 8000
+- assertVisible:
+    id: "clock-out"

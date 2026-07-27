@@ -17,10 +17,13 @@ import * as ImagePicker from "expo-image-picker";
 import * as Location from "expo-location";
 import { Ionicons } from "@expo/vector-icons";
 import ViewShot from "react-native-view-shot";
-import * as FileSystem from "expo-file-system/legacy";
-import { decode } from "base64-arraybuffer";
 import { supabase } from "../../lib/supabase";
 import { colors, photoTagColors } from "../../lib/theme";
+import { usePhotoLibrary } from "../../lib/data/hooks/usePhotoLibrary";
+import { netInfoConnectivity } from "../../lib/data/net/connectivity";
+import { useDataLayer } from "../../lib/data/DataProvider";
+import { useSyncSettled } from "../../lib/data/hooks/useSyncSettled";
+import { reconcileRows } from "../../lib/data/reconcile";
 
 interface Photo {
   id: string;
@@ -74,15 +77,24 @@ export function JobPhotosTab({
   const [saving, setSaving] = useState(false);
   const [viewingPhoto, setViewingPhoto] = useState<Photo | null>(null);
   const shotRef = useRef<ViewShot>(null);
+  const photoLibrary = usePhotoLibrary();
+  const layer = useDataLayer();
 
+  // Reads refresh from the server only when online; offline, local state (incl.
+  // optimistic photos shown from their local file) is authoritative. Even online
+  // we MERGE, so a queued photo still uploading isn't wiped by a racing reload
+  // (which would also blank its cell once the local file is cleaned up).
   const loadPhotos = useCallback(async () => {
+    if (!(await netInfoConnectivity.isOnline())) return;
     const { data } = await supabase
       .from("job_photos")
       .select("*")
       .eq("job_id", jobId)
       .order("created_at", { ascending: false });
-    setPhotos((data as any) ?? []);
-    for (const p of (data as any) ?? []) {
+    const rows = (data as unknown as Photo[]) ?? [];
+    const pendingIds = layer ? await layer.outbox.pendingRowIds() : new Set<string>();
+    setPhotos((prev) => reconcileRows(prev, rows, pendingIds));
+    for (const p of rows) {
       supabase.storage
         .from("job-photos")
         .createSignedUrl(p.storage_path, 3600)
@@ -90,11 +102,32 @@ export function JobPhotosTab({
           if (signed?.signedUrl) setUrls((prev) => ({ ...prev, [p.storage_path]: signed.signedUrl }));
         });
     }
-  }, [jobId]);
+  }, [jobId, layer]);
+
+  // Queue a photo through the offline outbox and show it immediately: the local
+  // file renders under its Storage key until the real signed URL replaces it on
+  // reconcile (same client id => no duplicate).
+  const addPhotoFromUri = useCallback(
+    async (uri: string, type: (typeof PHOTO_TYPES)[number]): Promise<void> => {
+      const { id, storagePath, localUri } = await photoLibrary.addPhoto({
+        jobId,
+        uploadedBy: currentUserId,
+        photoType: type,
+        sourceUri: uri,
+      });
+      setPhotos((prev) => [{ id, storage_path: storagePath, photo_type: type, created_at: new Date().toISOString() }, ...prev]);
+      setUrls((prev) => ({ ...prev, [storagePath]: localUri }));
+    },
+    [jobId, currentUserId, photoLibrary]
+  );
 
   useEffect(() => {
     loadPhotos();
   }, [loadPhotos]);
+
+  // Reconcile after each sync drain: offline photos get their real signed URL
+  // (and the row is confirmed) right when the queued upload lands.
+  useSyncSettled(loadPhotos);
 
   function chooseType() {
     return new Promise<(typeof PHOTO_TYPES)[number] | null>((resolve) => {
@@ -109,23 +142,6 @@ export function JobPhotosTab({
       } else {
         resolve(photoType);
       }
-    });
-  }
-
-  async function uploadAsset(base64: string, type: string) {
-    const path = `${jobId}/${Date.now()}_${Math.round(Math.random() * 1e6)}.jpg`;
-    const { error: uploadError } = await supabase.storage.from("job-photos").upload(path, decode(base64), {
-      contentType: "image/jpeg",
-    });
-    if (uploadError) {
-      Alert.alert("Upload failed", uploadError.message);
-      return;
-    }
-    await supabase.from("job_photos").insert({
-      job_id: jobId,
-      uploaded_by: currentUserId,
-      storage_path: path,
-      photo_type: type,
     });
   }
 
@@ -158,17 +174,19 @@ export function JobPhotosTab({
       Alert.alert("Permission needed", "Photo library access is required");
       return;
     }
-    const result = await ImagePicker.launchImageLibraryAsync({ quality: 0.6, base64: true, allowsMultipleSelection: true });
+    const result = await ImagePicker.launchImageLibraryAsync({ quality: 0.6, allowsMultipleSelection: true });
     if (result.canceled || !result.assets?.length) return;
 
     setUploading(true);
-    for (const asset of result.assets) {
-      if (asset.base64) {
-        await uploadAsset(asset.base64, type);
+    try {
+      for (const asset of result.assets) {
+        await addPhotoFromUri(asset.uri, type);
       }
+    } catch (e) {
+      Alert.alert("Couldn't add photo", e instanceof Error ? e.message : "Please try again.");
+    } finally {
+      setUploading(false); // always clears, even if staging/queueing throws
     }
-    await loadPhotos();
-    setUploading(false);
   }
 
   async function confirmPending() {
@@ -177,20 +195,18 @@ export function JobPhotosTab({
     try {
       const capturedUri = await shotRef.current?.capture?.();
       if (!capturedUri) throw new Error("Could not stamp photo");
-      const base64 = await FileSystem.readAsStringAsync(capturedUri, { encoding: FileSystem.EncodingType.Base64 });
-      await uploadAsset(base64, pendingType);
+      await addPhotoFromUri(capturedUri, pendingType);
       setPending(null);
-      await loadPhotos();
-    } catch (e: any) {
-      Alert.alert("Upload failed", e?.message ?? "Please try again.");
+    } catch (e) {
+      Alert.alert("Upload failed", e instanceof Error ? e.message : "Please try again.");
     } finally {
       setSaving(false);
     }
   }
 
   async function handleDelete(photo: Photo) {
-    await supabase.storage.from("job-photos").remove([photo.storage_path]);
-    await supabase.from("job_photos").delete().eq("id", photo.id);
+    // Queue the delete (row now; Storage object best-effort — see the outbox).
+    await photoLibrary.deletePhoto({ id: photo.id, storagePath: photo.storage_path });
     setPhotos((prev) => prev.filter((p) => p.id !== photo.id));
     setViewingPhoto((v) => (v?.id === photo.id ? null : v));
   }

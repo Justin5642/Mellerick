@@ -45,6 +45,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   async function loadProfile(userId: string) {
+    // Raise loading for the whole fetch so the root layout shows the splash — not
+    // the fail-closed "no role" screen — during the post-login profile round-trip
+    // (onAuthStateChange(SIGNED_IN) doesn't otherwise re-enter the loading state).
+    setLoading(true);
     const { data } = await supabase.from("profiles").select("*").eq("id", userId).single();
     setProfile(data);
     setLoading(false);

@@ -119,8 +119,17 @@ export function JobOverviewTab({ job, currentUserId }: { job: Job; currentUserId
       Alert.alert("Error", error.message);
       return;
     }
+    // Best-effort calendar resync. MUST carry the Bearer token — React Native has
+    // no cookie jar, so an unauthenticated POST just 401s silently (Q1).
     if (API_BASE_URL) {
-      fetch(`${API_BASE_URL}/api/jobs/${job.id}/sync-calendar`, { method: "POST" }).catch(() => {});
+      supabase.auth.getSession().then(({ data }) => {
+        const token = data.session?.access_token;
+        if (!token) return;
+        fetch(`${API_BASE_URL}/api/jobs/${job.id}/sync-calendar`, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${token}` },
+        }).catch(() => {});
+      });
     }
     Alert.alert("Saved", "Job updated");
   }

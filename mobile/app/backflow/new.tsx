@@ -18,6 +18,7 @@ import * as ImagePicker from "expo-image-picker";
 import { supabase } from "../../lib/supabase";
 import { colors } from "../../lib/theme";
 import { WATER_AUTHORITIES, DEVICE_TYPES, PROTECTION_TYPES } from "../../lib/backflow";
+import { useBackflow } from "../../lib/data/hooks/useBackflow";
 
 const API_BASE_URL = process.env.EXPO_PUBLIC_API_BASE_URL;
 const NO_SITE_VALUE = "__no_site__";
@@ -84,6 +85,7 @@ function ModalPicker({
 
 export default function NewBackflowDeviceScreen() {
   const router = useRouter();
+  const backflow = useBackflow();
   const [saving, setSaving] = useState(false);
   const [scanning, setScanning] = useState(false);
   const [customers, setCustomers] = useState<{ id: string; name: string }[]>([]);
@@ -206,30 +208,34 @@ export default function NewBackflowDeviceScreen() {
     setSaving(true);
     try {
       const { data: userData } = await supabase.auth.getUser();
-      const payload = {
-        customer_id: customerId,
-        site_id: siteId || null,
-        water_authority: waterAuthority,
-        device_type: deviceType,
-        protection_type: protectionType || null,
+      // Offline-durable: routes through the outbox so a device registered in
+      // the field with no signal is queued and replays idempotently.
+      const { id, synced } = await backflow.registerDevice({
+        customerId,
+        siteId: siteId || null,
+        waterAuthority,
+        deviceType,
+        protectionType: protectionType || null,
         make: make || null,
         model: model || null,
-        serial_number: serialNumber || null,
-        size_mm: sizeMm ? Number(sizeMm) : null,
-        location_description: locationDescription || null,
-        water_authority_property_number: waterAuthorityPropertyNumber || null,
-        water_meter_number: waterMeterNumber || null,
-        fire_service_meter_number: fireServiceMeterNumber || null,
-        test_frequency_months: Number(testFrequencyMonths) || 12,
+        serialNumber: serialNumber || null,
+        sizeMm: sizeMm ? Number(sizeMm) : null,
+        locationDescription: locationDescription || null,
+        waterAuthorityPropertyNumber: waterAuthorityPropertyNumber || null,
+        waterMeterNumber: waterMeterNumber || null,
+        fireServiceMeterNumber: fireServiceMeterNumber || null,
+        testFrequencyMonths: Number(testFrequencyMonths) || 12,
         notes: notes || null,
-        created_by: userData.user?.id ?? null,
-      };
-      const { data, error } = await supabase.from("backflow_devices").insert(payload).select("id").single();
-      if (error || !data) {
-        Alert.alert("Error", error?.message ?? "Failed to register device");
-        return;
+        createdBy: userData.user?.id ?? null,
+      });
+      if (synced) {
+        router.replace(`/backflow/${id}`);
+      } else {
+        Alert.alert("Saved offline", "The device is queued and will sync when you're back online.");
+        router.back();
       }
-      router.replace(`/backflow/${data.id}`);
+    } catch (e) {
+      Alert.alert("Error", e instanceof Error ? e.message : "Failed to register device");
     } finally {
       setSaving(false);
     }

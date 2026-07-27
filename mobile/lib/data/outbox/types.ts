@@ -1,0 +1,95 @@
+// The durable write-outbox model. Every mutation the app makes while it may be
+// offline becomes an Operation persisted to SQLite and replayed (idempotently)
+// by the processor when connectivity returns. This is the offline backbone of
+// the `supabase-outbox` DataSource; a future PowerSync DataSource would replace
+// it behind the same repository interfaces.
+
+export type Aggregate =
+  | "time_entry"
+  | "job_photo"
+  | "job"
+  | "job_note"
+  | "job_variation"
+  | "backflow_device"
+  | "backflow_test"
+  | "invoice"
+  | "quote"
+  | "pricing_item"
+  | "customer"
+  | "site"
+  | "inventory"
+  | "equipment"
+  | "equipment_expense"
+  | "equipment_usage"
+  | "variation_type"
+  | "cost_center_template"
+  | "job_item"
+  | "job_expense";
+
+// "upload" uploads the attachment to Storage and writes NO metadata row — used
+// when a server-side route (not the client) later writes the row from the object
+// (e.g. voice-report transcription).
+export type WriteOp = "insert" | "update" | "delete" | "upload";
+
+// "dead" is terminal — a write that failed too many times to keep retrying.
+export type OpStatus = "pending" | "inflight" | "done" | "failed" | "dead";
+
+// A data mutation against a Supabase table.
+export interface WriteOperation {
+  kind: "write";
+  id: string; // unique operation id (outbox PK) — distinct from the target row
+  rowId: string; // the target row's PK: client-generated UUID for inserts (=> idempotent replay), existing id for update/delete
+  aggregate: Aggregate;
+  op: WriteOp;
+  table: string;
+  payload: Record<string, unknown>;
+  /** Local file path for an attachment that must upload before this row inserts. */
+  attachmentLocalPath?: string | null;
+  /** Payload field holding the Storage object key for the attachment (upload +
+   * delete-cleanup). Defaults to "storage_path" (photos); expenses set
+   * "receipt_storage_path" since that's their real column. */
+  attachmentPathField?: string;
+  /** Another operation id this one must run after (e.g. metadata after upload). */
+  dependsOn?: string | null;
+  status: OpStatus;
+  attempts: number;
+  nextAttemptAt: number; // epoch ms
+  createdAt: number;
+  error?: string | null;
+}
+
+// A deferred server-side side-effect (a Bearer web-API call). These are
+// coalesced by `coalesceKey` so repeated triggers for the same entity collapse
+// to one, and only the latest matters (e.g. re-syncing a job's billing).
+export type SideEffectKind =
+  | "sync-billing"
+  // Job-level billing reconcile. Needed when the entry-keyed sync can't be used
+  // because the entry no longer exists (a DELETE) — the endpoint resolves the job
+  // from the entry, so a post-delete entry-keyed call would 404 (Q6).
+  | "sync-job-billing"
+  | "sync-calendar"
+  | "transcribe-voice-report"
+  | "backflow-submit";
+
+export interface SideEffectOperation {
+  kind: "side_effect";
+  id: string;
+  effect: SideEffectKind;
+  coalesceKey: string; // e.g. `sync-billing:${entryId}` — dedupes queued duplicates
+  payload: Record<string, unknown>;
+  dependsOn?: string | null;
+  status: OpStatus;
+  attempts: number;
+  nextAttemptAt: number;
+  createdAt: number;
+  error?: string | null;
+}
+
+export type Operation = WriteOperation | SideEffectOperation;
+
+export function isWrite(op: Operation): op is WriteOperation {
+  return op.kind === "write";
+}
+export function isSideEffect(op: Operation): op is SideEffectOperation {
+  return op.kind === "side_effect";
+}

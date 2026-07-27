@@ -3,6 +3,11 @@ import { View, Text, StyleSheet, TextInput, TouchableOpacity, FlatList, Activity
 import { Ionicons } from "@expo/vector-icons";
 import { supabase } from "../../lib/supabase";
 import { colors } from "../../lib/theme";
+import { useJobNotes } from "../../lib/data/hooks/useJobNotes";
+import { netInfoConnectivity } from "../../lib/data/net/connectivity";
+import { useDataLayer } from "../../lib/data/DataProvider";
+import { useSyncSettled } from "../../lib/data/hooks/useSyncSettled";
+import { reconcileRows } from "../../lib/data/reconcile";
 
 // Same "office server" the voice report recorder calls
 // (see components/job/voice-report.tsx) — /api/ai/polish-note on the web
@@ -17,38 +22,56 @@ interface Note {
   profiles: { full_name: string } | null;
 }
 
+// A provisional note shown the instant it's queued (also the offline path). It
+// carries the same client id as the queued write, so the real row replaces it
+// on the next online reload with no duplicate.
+function optimisticNote(id: string, content: string): Note {
+  return { id, content, created_at: new Date().toISOString(), profiles: { full_name: "You" } };
+}
+
 export function JobNotesTab({ jobId, currentUserId }: { jobId: string; currentUserId: string }) {
   const [notes, setNotes] = useState<Note[]>([]);
   const [content, setContent] = useState("");
   const [saving, setSaving] = useState(false);
   const [polishing, setPolishing] = useState(false);
+  const notesComposer = useJobNotes();
+  const layer = useDataLayer();
 
+  // Reads refresh from the server only when online; offline, local state (incl.
+  // the optimistic note just queued) is authoritative. Even online we MERGE, so
+  // an optimistic note whose write is still pending survives a racing reload.
   const loadNotes = useCallback(async () => {
+    if (!(await netInfoConnectivity.isOnline())) return;
     const { data } = await supabase
       .from("job_notes")
       .select("*, profiles(full_name)")
       .eq("job_id", jobId)
       .order("created_at", { ascending: false });
-    setNotes((data as any) ?? []);
-  }, [jobId]);
+    const rows = (data as unknown as Note[]) ?? [];
+    const pending = layer ? await layer.outbox.pendingRowIds() : new Set<string>();
+    setNotes((prev) => reconcileRows(prev, rows, pending));
+  }, [jobId, layer]);
 
   useEffect(() => {
     loadNotes();
   }, [loadNotes]);
 
+  // Reconcile after each sync drain completes (the note has actually landed).
+  useSyncSettled(loadNotes);
+
   async function handleAdd() {
-    if (!content.trim()) return;
+    if (!content.trim() || saving || !notesComposer.ready) return;
     setSaving(true);
-    const { error } = await supabase.from("job_notes").insert({
-      job_id: jobId,
-      author_id: currentUserId,
-      content: content.trim(),
-    });
-    if (!error) {
+    try {
+      const text = content.trim();
+      const { id } = await notesComposer.addNote({ jobId, authorId: currentUserId, content: text });
+      // Optimistic: show immediately (also the offline path). The server row
+      // reconciles in via useSyncSettled once the write lands.
+      setNotes((prev) => [optimisticNote(id, text), ...prev]);
       setContent("");
-      await loadNotes();
+    } finally {
+      setSaving(false);
     }
-    setSaving(false);
   }
 
   // Sends the current draft (typically dictated via the phone's own

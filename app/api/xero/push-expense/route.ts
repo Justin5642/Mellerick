@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getRefreshedXero, describeXeroError } from "@/lib/xero";
-import { createClient } from "@/lib/supabase/server";
+import { requireOfficeOrAdmin } from "@/lib/api/guards";
+import { callerClient } from "@/lib/api/caller-client";
 import { Invoice, LineItem, Contact, LineAmountTypes } from "xero-node";
 
 // Manual, per-expense "push to Xero" action — same pattern/UX as the
@@ -12,10 +13,14 @@ import { Invoice, LineItem, Contact, LineAmountTypes } from "xero-node";
 export async function POST(request: NextRequest) {
   try {
     const { expenseId } = await request.json();
-    const supabase = await createClient();
 
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+    // Was auth'd only by getUser() (any logged-in user) — a technician holding a
+    // session could push a supplier expense to Xero. Now office/admin-only (Bearer
+    // or cookie), consistent with the rest of the money surface. Whether it should
+    // be admin-only like push-invoice is a business call — see Q21.
+    const guard = await requireOfficeOrAdmin(request);
+    if (!guard.ok) return guard.response;
+    const supabase = await callerClient(request);
 
     const { data: expense } = await supabase
       .from("job_expenses")

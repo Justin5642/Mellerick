@@ -1,14 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server";
+import { requireOfficeOrAdmin } from "@/lib/api/guards";
+import { callerClient } from "@/lib/api/caller-client";
 import { renderDocumentPdf } from "@/lib/pdf/render";
 import { businessInfo } from "@/lib/business-info";
 
 export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const supabase = await createClient();
 
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+  // Office/admin-only; Bearer (mobile) or cookie (web) via a caller-scoped client.
+  const guard = await requireOfficeOrAdmin(request);
+  if (!guard.ok) return guard.response;
+  const supabase = await callerClient(request);
 
   const { data: quote } = await supabase
     .from("quotes")
