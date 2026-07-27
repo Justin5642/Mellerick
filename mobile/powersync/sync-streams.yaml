@@ -1,0 +1,162 @@
+# PowerSync SYNC STREAMS (edition 3) — Mellerick Field
+# =============================================================================
+# The live instance runs Sync Streams edition 3, NOT legacy Sync Rules — so this
+# replaces sync-rules.yaml (kept for reference) in the new dialect:
+#   • auth.user_id()            instead of request.user_id()
+#   • streams:                  instead of bucket_definitions:
+#   • subqueries ARE supported  (IN (SELECT …)) — the per-job child scoping is
+#     expressed directly instead of via bucket parameters
+#   • auto_subscribe: true      = every client subscribes; per-user filtering
+#     happens in the query, and a non-matching user gets ZERO rows (fail-closed)
+#
+# MONEY CONTRACT (authoritative — same boundary as RLS 0027/0035/0038):
+#   technicians must never receive a money column. Office/admin streams are
+#   role-gated on profiles.role; technician streams are scoped to their jobs and
+#   rate-stripped. RLS remains the authority underneath.
+#
+# MAINTENANCE HAZARD: every table here must ALSO be in the scoped `powersync`
+# publication (migration 0039). Add a table to a stream without
+# `alter publication powersync add table <t>` and it silently never syncs.
+# =============================================================================
+
+config:
+  edition: 3
+
+streams:
+  # ---- Reference data, all roles (no money columns) --------------------------
+  profiles:
+    auto_subscribe: true
+    query: SELECT id, full_name, role FROM profiles
+
+  customers:
+    auto_subscribe: true
+    query: SELECT id, name, company, phone, email, mobile, abn, is_active, is_favorite FROM customers
+
+  sites:
+    auto_subscribe: true
+    query: SELECT id, customer_id, name, address_line1, address_line2, suburb, state, postcode, site_lat, site_lng FROM sites
+
+  # RATE-STRIPPED: the base table's preset `rate` must never reach a device.
+  variation_types:
+    auto_subscribe: true
+    query: SELECT id, name, unit, auto_approve, is_active FROM variation_types
+
+  # Backflow compliance data (no money; matches the authenticated RLS posture —
+  # technicians register devices and log tests in the field).
+  backflow_devices:
+    auto_subscribe: true
+    query: SELECT * FROM backflow_devices
+
+  backflow_tests:
+    auto_subscribe: true
+    query: SELECT * FROM backflow_tests
+
+  # ---- Technician: their assigned jobs + children, MONEY-STRIPPED ------------
+  tech_jobs:
+    auto_subscribe: true
+    query: |
+      SELECT id, job_number, title, description, notes, status, priority, job_type,
+             customer_id, site_id, assigned_to, scheduled_start, scheduled_end,
+             actual_start, actual_end, completion_notes, voice_report_transcript, created_at
+      FROM jobs WHERE assigned_to = auth.user_id()
+
+  tech_job_photos:
+    auto_subscribe: true
+    query: |
+      SELECT id, job_id, storage_path, photo_type, uploaded_by, created_at
+      FROM job_photos
+      WHERE job_id IN (SELECT id FROM jobs WHERE assigned_to = auth.user_id())
+
+  tech_job_notes:
+    auto_subscribe: true
+    query: |
+      SELECT id, job_id, note, created_by, created_at
+      FROM job_notes
+      WHERE job_id IN (SELECT id FROM jobs WHERE assigned_to = auth.user_id())
+
+  tech_time_entries:
+    auto_subscribe: true
+    query: |
+      SELECT id, job_id, staff_id, clock_in, clock_out, hours, entry_type, cost_center_id, notes, created_at
+      FROM time_entries
+      WHERE job_id IN (SELECT id FROM jobs WHERE assigned_to = auth.user_id())
+
+  # RATE-STRIPPED: omits rate, total_amount, admin_notes.
+  tech_job_variations:
+    auto_subscribe: true
+    query: |
+      SELECT id, job_id, variation_type_id, custom_name, description, quantity, unit,
+             status, photo_storage_path, logged_by, logged_at
+      FROM job_variations
+      WHERE job_id IN (SELECT id FROM jobs WHERE assigned_to = auth.user_id())
+
+  # ---- Office/admin: full business set (money allowed), ROLE-GATED -----------
+  # Gate: the stream only yields rows when the caller's profiles.role is office/
+  # admin. A technician (or missing profile) matches nothing — fail-closed.
+  office_jobs:
+    auto_subscribe: true
+    query: SELECT * FROM jobs WHERE auth.user_id() IN (SELECT id FROM profiles WHERE role IN ('office', 'admin'))
+
+  office_job_items:
+    auto_subscribe: true
+    query: SELECT * FROM job_items WHERE auth.user_id() IN (SELECT id FROM profiles WHERE role IN ('office', 'admin'))
+
+  office_job_variations:
+    auto_subscribe: true
+    query: SELECT * FROM job_variations WHERE auth.user_id() IN (SELECT id FROM profiles WHERE role IN ('office', 'admin'))
+
+  office_job_expenses:
+    auto_subscribe: true
+    query: SELECT * FROM job_expenses WHERE auth.user_id() IN (SELECT id FROM profiles WHERE role IN ('office', 'admin'))
+
+  office_invoices:
+    auto_subscribe: true
+    query: SELECT * FROM invoices WHERE auth.user_id() IN (SELECT id FROM profiles WHERE role IN ('office', 'admin'))
+
+  office_invoice_items:
+    auto_subscribe: true
+    query: SELECT * FROM invoice_items WHERE auth.user_id() IN (SELECT id FROM profiles WHERE role IN ('office', 'admin'))
+
+  office_quotes:
+    auto_subscribe: true
+    query: SELECT * FROM quotes WHERE auth.user_id() IN (SELECT id FROM profiles WHERE role IN ('office', 'admin'))
+
+  office_quote_items:
+    auto_subscribe: true
+    query: SELECT * FROM quote_items WHERE auth.user_id() IN (SELECT id FROM profiles WHERE role IN ('office', 'admin'))
+
+  office_pricing_items:
+    auto_subscribe: true
+    query: SELECT * FROM pricing_items WHERE auth.user_id() IN (SELECT id FROM profiles WHERE role IN ('office', 'admin'))
+
+  office_inventory:
+    auto_subscribe: true
+    query: SELECT * FROM inventory WHERE auth.user_id() IN (SELECT id FROM profiles WHERE role IN ('office', 'admin'))
+
+  office_equipment:
+    auto_subscribe: true
+    query: SELECT * FROM equipment WHERE auth.user_id() IN (SELECT id FROM profiles WHERE role IN ('office', 'admin'))
+
+  office_equipment_expenses:
+    auto_subscribe: true
+    query: SELECT * FROM equipment_expenses WHERE auth.user_id() IN (SELECT id FROM profiles WHERE role IN ('office', 'admin'))
+
+  office_equipment_usage_log:
+    auto_subscribe: true
+    query: SELECT * FROM equipment_usage_log WHERE auth.user_id() IN (SELECT id FROM profiles WHERE role IN ('office', 'admin'))
+
+  office_purchase_orders:
+    auto_subscribe: true
+    query: SELECT * FROM purchase_orders WHERE auth.user_id() IN (SELECT id FROM profiles WHERE role IN ('office', 'admin'))
+
+  office_po_cost_centers:
+    auto_subscribe: true
+    query: SELECT * FROM po_cost_centers WHERE auth.user_id() IN (SELECT id FROM profiles WHERE role IN ('office', 'admin'))
+
+  office_time_entries:
+    auto_subscribe: true
+    query: SELECT * FROM time_entries WHERE auth.user_id() IN (SELECT id FROM profiles WHERE role IN ('office', 'admin'))
+
+  office_job_photos:
+    auto_subscribe: true
+    query: SELECT * FROM job_photos WHERE auth.user_id() IN (SELECT id FROM profiles WHERE role IN ('office', 'admin'))

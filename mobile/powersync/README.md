@@ -1,11 +1,18 @@
-# PowerSync sync rules — design + security contract (MP3, PROPOSED)
+# PowerSync sync rules — design + security contract (MP3)
 
-`sync-rules.yaml` is a **starter** for the PowerSync integration (MP3), which is
-blocked on a PowerSync Cloud instance + the Supabase replication password. It is
-**not wired into the app** — the app today uses online reads + the durable
-offline-write outbox; PowerSync would add true offline *reads*. A documented
-fallback (persisted read-cache over the same read-repository layer) exists if
-PowerSync's cost/fit doesn't work out.
+**The deployable artifact is `sync-streams.yaml`** — the live PowerSync Cloud
+instance (project mellerick / Development) runs **Sync Streams edition 3**, not
+legacy Sync Rules. `sync-rules.yaml` is the legacy-dialect version, kept for
+reference; both encode the same money contract below.
+
+The client is **not wired into the app yet** — the app today uses online reads +
+the durable offline-write outbox; PowerSync adds true offline *reads*. A
+documented fallback (persisted read-cache over the same read-repository layer)
+exists if PowerSync's cost/fit doesn't work out.
+
+Password rotation for `powersync_role`: `pwsh -File scripts\set-powersync-password.ps1`
+(add `-Show` when the dashboard is open on a different computer — see the script
+header). Never commit or display the password; rotate on any suspected exposure.
 
 ## Syntax validation — done, and the first draft was WRONG
 
