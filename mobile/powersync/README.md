@@ -27,22 +27,41 @@ row ids (one bucket per assigned job) and every data query filters on
 queries that read a table (`SELECT id as job_id FROM jobs WHERE assigned_to =
 request.user_id()`), and `bucket.<param>` references in data queries.
 
-### ⚠️ One open question — the office/admin role gate
+### Role gate — RESOLVED (table-backed, not a JWT claim)
 
-A **global** bucket takes no parameters, so it can't be role-filtered; a
-**parameterised** bucket requires every data query to use that parameter, which a
-whole-table sync can't do. Pick one before deploying that bucket:
+Gated with PowerSync's documented **"No Output Columns"** parameter query — a
+parameter query selecting nothing, whose only job is deciding whether the bucket
+syncs to this user. Zero output columns means zero bucket parameters, so the
+"every data query must use every bucket parameter" rule is vacuous and whole-table
+`SELECT *` queries are legal. PowerSync ships this exact shape as its
+`global_admins` reference example.
 
-1. **JWT custom claim** (preferred) — put the app role in the token via a
-   Supabase Auth Hook, gate with `request.jwt() ->> 'app_role'`. No extra query.
-2. **Sync Streams** — PowerSync's newer mode, which *does* support subqueries,
-   JOINs and CTEs. Would also let the technician bucket be expressed directly.
-3. **RLS only** for that bucket — accepting the sync rules stop being
-   defence-in-depth for office data.
+```yaml
+office_admin_business:
+  parameters: |
+      SELECT FROM profiles WHERE
+         profiles.id = request.user_id() AND
+         profiles.role IN ('office', 'admin')
+  data:
+    - SELECT * FROM invoices
+    # …
+```
 
-Until one is chosen the `office_admin_business` bucket has **no role gate** and
-would replicate money to every authenticated device, technicians included. It is
-commented as the most dangerous line in the file.
+**Why the table and not a JWT custom claim** (the option originally chosen, then
+reversed on evidence): PowerSync's docs note that gating on a source-database row
+means *"access can instantly be revoked"*. A claim cannot be re-read from an
+already-issued token, so with `jwt_expiry = 3600` a demoted technician would keep
+syncing financial data to their device for up to **an hour**. The table gate also
+avoids a custom access token hook entirely — a malformed hook runs on every token
+issuance and can block all logins.
+
+**Fail-closed:** no profiles row, or a NULL/`technician` role → the WHERE matches
+nothing → the bucket is never created → nothing syncs. There is no path where a
+missing or unknown role leaks money.
+
+**RLS remains the authority.** This is defence-in-depth; migrations 0027 / 0035 /
+0038 are what actually enforce the boundary — and they are now **APPLIED in
+production**.
 
 > The money-column contract below is **authoritative** and must not be weakened —
 > it is the same boundary as the RLS migrations (0027 + proposed 0035 / 0038).
