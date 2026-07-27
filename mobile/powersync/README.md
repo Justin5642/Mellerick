@@ -7,19 +7,45 @@ offline-write outbox; PowerSync would add true offline *reads*. A documented
 fallback (persisted read-cache over the same read-repository layer) exists if
 PowerSync's cost/fit doesn't work out.
 
-> **Two things need validation before deploy** (do not deploy unreviewed):
-> 1. The PowerSync **YAML syntax** — the parameter-query form and whether
->    `WHERE … IN (SELECT …)` subqueries are supported in data queries on the
->    target PowerSync version. Read the versioned PowerSync sync-rules docs and
->    test against the instance; the bucket **shapes** may need to be expressed as
->    parameter lists instead of inline subqueries.
-> 2. The **role parameter query** — this assumes PowerSync can run a parameter
->    query that reads `profiles.role` for `request.user_id()`. Confirm that, or
->    move the app role into a JWT custom claim (Supabase Auth hook) and read it
->    via `request.jwt()`.
->
-> What is **authoritative** and must NOT be weakened is the money-column contract
-> below — it is the same boundary as the RLS migrations (0027 + proposed 0035).
+## Syntax validation — done, and the first draft was WRONG
+
+Checked against the official docs (`docs.powersync.com/usage/sync-rules`,
+`.../data-queries`, `.../operators-and-functions`). The original draft of
+`sync-rules.yaml` **would have been rejected**. Legacy Sync Rules support none of:
+
+> "Subqueries, JOINs, CTEs, aggregation, sorting, or set operations" — and no
+> scalar subqueries.
+
+The first draft used all of: `WHERE job_id IN (SELECT id FROM jobs WHERE …)` for
+child tables, and a scalar subquery (`WHERE (SELECT role FROM profiles …) =
+'technician'`) for the role gate. It also broke the hard rule that **every data
+query must use every bucket parameter**.
+
+**Rewritten to the documented pattern:** the *parameter* query returns the parent
+row ids (one bucket per assigned job) and every data query filters on
+`bucket.job_id`. Confirmed supported: `bucket_definitions` root, parameter
+queries that read a table (`SELECT id as job_id FROM jobs WHERE assigned_to =
+request.user_id()`), and `bucket.<param>` references in data queries.
+
+### ⚠️ One open question — the office/admin role gate
+
+A **global** bucket takes no parameters, so it can't be role-filtered; a
+**parameterised** bucket requires every data query to use that parameter, which a
+whole-table sync can't do. Pick one before deploying that bucket:
+
+1. **JWT custom claim** (preferred) — put the app role in the token via a
+   Supabase Auth Hook, gate with `request.jwt() ->> 'app_role'`. No extra query.
+2. **Sync Streams** — PowerSync's newer mode, which *does* support subqueries,
+   JOINs and CTEs. Would also let the technician bucket be expressed directly.
+3. **RLS only** for that bucket — accepting the sync rules stop being
+   defence-in-depth for office data.
+
+Until one is chosen the `office_admin_business` bucket has **no role gate** and
+would replicate money to every authenticated device, technicians included. It is
+commented as the most dangerous line in the file.
+
+> The money-column contract below is **authoritative** and must not be weakened —
+> it is the same boundary as the RLS migrations (0027 + proposed 0035 / 0038).
 
 ## Why the sync path is a second authorization surface
 PowerSync replicates Postgres rows into **plaintext SQLite on the device**,

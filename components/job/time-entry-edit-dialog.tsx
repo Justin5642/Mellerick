@@ -192,6 +192,13 @@ export function TimeEntryEditDialog({ open, onOpenChange, mode, jobId, currentUs
     toast.success("Entry deleted");
     onDeleted(entry.id);
     onOpenChange(false);
+    // Reconcile the job's billing so the deleted entry's auto-generated "Labour"
+    // line goes away — otherwise the job stays billed for hours that no longer
+    // exist. Keyed on the JOB, not the entry: /api/time-entries/[id]/sync-billing
+    // resolves the job FROM the entry, so once the row is deleted it 404s. The
+    // job-level route recomputes every remaining entry. (Q6 — matches the mobile
+    // fix in mobile/lib/data/repositories/timeEntries.ts.)
+    fetch(`/api/jobs/${jobId}/sync-billing`, { method: "POST" }).catch(() => {});
   }
 
   return (

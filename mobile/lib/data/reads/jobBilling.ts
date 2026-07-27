@@ -34,10 +34,13 @@ export interface JobCostCentre {
 // by the Time tab (allocating a time entry) and the Billing tab (allocating an
 // expense) so the two can't drift.
 export async function getJobCostCentres(jobId: string): Promise<JobCostCentre[]> {
-  type PoRow = { po_number: string; po_cost_centers: { id: string; name: string; code: string | null }[] | null };
-  const { data } = await supabase.from("purchase_orders").select("po_number, po_cost_centers(id, name, code)").eq("job_id", jobId);
+  type PoRow = { po_number: string; po_cost_centers_public: { id: string; name: string; code: string | null }[] | null };
+  const { data } = await supabase
+    .from("purchase_orders_public")
+    .select("po_number, po_cost_centers_public(id, name, code)")
+    .eq("job_id", jobId);
   return ((data as unknown as PoRow[]) ?? []).flatMap((po) =>
-    (po.po_cost_centers ?? []).map((cc) => ({ id: cc.id, name: cc.name, code: cc.code, po_number: po.po_number }))
+    (po.po_cost_centers_public ?? []).map((cc) => ({ id: cc.id, name: cc.name, code: cc.code, po_number: po.po_number }))
   );
 }
 export interface JobPOCostCentre {
