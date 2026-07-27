@@ -13,18 +13,33 @@
 # the password off this terminal and type it into the other PC's Password field.
 # Only run -Show in a terminal an agent is not reading.
 #
-# Alphanumeric only (32 chars, ~190 bits): deliberately no special characters so
-# it can never be mangled by URI encoding, shell quoting, or bracket confusion.
+# Format: pronounceable lowercase passphrase (three 3-syllable words + 2 digits,
+# e.g. kelupora-mitavesu-ranofi-42). Easy to read off one screen and type on
+# another; ~66 bits, which is ample against an online-only attack surface, and
+# nothing in it needs URI encoding, shell quoting, or Shift.
 
 param([switch]$Show)
 
 $ErrorActionPreference = "Stop"
 
-# 1. Generate: 32 chars from [A-Za-z0-9] using a cryptographic RNG.
-$chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
-$bytes = New-Object byte[] 32
-[System.Security.Cryptography.RandomNumberGenerator]::Fill($bytes)
-$pw = -join ($bytes | ForEach-Object { $chars[$_ % $chars.Length] })
+# The Supabase CLI link lives in the repo (supabase/.temp), so run from there
+# regardless of where the user invoked this script.
+Set-Location (Join-Path $PSScriptRoot "..")
+
+# 1. Generate: 9 consonant-vowel syllables (20x5 = 100 options each, ~6.6 bits)
+# in 3 hyphenated words, plus a 2-digit suffix: ~66 bits total, all typeable.
+function Get-Rand([int]$max) {
+    # Uniform crypto-random int in [0, $max)
+    [System.Security.Cryptography.RandomNumberGenerator]::GetInt32($max)
+}
+$consonants = "bcdfghjklmnprstvwxyz"
+$vowels = "aeiou"
+$words = 1..3 | ForEach-Object {
+    -join (1..3 | ForEach-Object {
+        "$($consonants[(Get-Rand 20)])$($vowels[(Get-Rand 5)])"
+    })
+}
+$pw = ($words -join "-") + "-" + ((Get-Rand 90) + 10)
 
 # 2. Apply to the database via the already-linked Supabase CLI.
 Write-Host "Setting password on powersync_role (production)..." -ForegroundColor Cyan
