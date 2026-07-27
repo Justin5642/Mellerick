@@ -45,7 +45,8 @@ export type ReadOriginReason =
   | "not-synced"
   | "write-echo"
   | "role"
-  | "local-threw";
+  | "local-threw"
+  | "stale-db";
 
 type OriginListener = (origin: ReadOrigin, reason?: ReadOriginReason) => void;
 const originListeners = new Set<OriginListener>();
@@ -97,6 +98,13 @@ export async function fromLocalOr<T>(
   }
   try {
     const result = await local(db);
+    // Teardown race: if sign-out/role-change cleared the mirror while this
+    // query was in flight, its rows came from an emptied database — discard
+    // them and answer from the network instead of flashing an empty screen.
+    if (getLocalReads() !== db) {
+      emit("remote", "stale-db");
+      return remote();
+    }
     emit("local");
     return result;
   } catch (e) {

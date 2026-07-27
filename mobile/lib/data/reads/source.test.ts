@@ -96,6 +96,18 @@ describe("fromLocalOr", () => {
     ]);
   });
 
+  it("discards a local result when the mirror was torn down mid-query", async () => {
+    const db = fakeReads();
+    setLocalReads(db);
+    const remote = jest.fn().mockResolvedValue(REMOTE);
+    const local = jest.fn().mockImplementation(async () => {
+      setLocalReads(null); // sign-out lands while the query is in flight
+      return LOCAL; // rows from an emptied database
+    });
+    await expect(fromLocalOr(local, remote)).resolves.toBe(REMOTE);
+    expect(remote).toHaveBeenCalled();
+  });
+
   it("re-evaluates on every call: deregistering flips the next read to remote", async () => {
     setLocalReads(fakeReads());
     const remote = jest.fn().mockResolvedValue(REMOTE);
