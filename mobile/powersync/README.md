@@ -115,10 +115,26 @@ PowerSync test instance, for a **technician** token assert:
 
 For **office/admin**, assert the broader set is present and correctly scoped.
 
-## Setup checklist (when the account exists)
-1. PowerSync Cloud instance (AU region) + a Supabase `powersync` publication +
-   replication role + "Use Supabase Auth". Needs `SUPABASE_DB_URL`.
-2. Apply RLS 0035 first (the row-level pre-req).
+## Setup status
+
+**Supabase side — DONE and verified in production (2026-07-27):**
+- `wal_level = logical` ✅
+- `powersync` publication ✅ — **scoped to the 24 tables the sync rules reference**
+  (migration `0039`). It was `FOR ALL TABLES` (68), which would have streamed
+  `xero_tokens` / `google_tokens` (live OAuth tokens), `staff_cost_profiles`,
+  `billing_rate_config`, `staff_leave` and `device_tokens` into PowerSync's cloud
+  service. Sync rules gate *devices*; the publication gates *the service*. Now
+  excluded — verified `secrets_still_published = NONE`.
+- `powersync_role` ✅ — has REPLICATION, USAGE on `public`, and SELECT on all 24.
+- RLS pre-req ✅ — `0035` / `0038` applied AND role-impersonation verified
+  (technician denied on every money table; money-free views still readable).
+
+⚠️ **Keep the publication in sync with `sync-rules.yaml`.** Add a table to a rule
+and you must `alter publication powersync add table <t>;` or it silently never syncs.
+
+**Still required (needs your account):**
+1. A PowerSync Cloud instance (AU region) pointed at this database, using
+   `powersync_role` + its password, with "Use Supabase Auth" enabled.
 3. Load `sync-rules.yaml`, run the role-impersonation test above, iterate until a
    technician token receives zero money columns.
 4. Wire the client (`@powersync/react-native`) behind the existing
