@@ -1,3 +1,9 @@
+// DELIBERATELY SUPABASE-ONLY — no fromLocalOr / LocalReads path in this module.
+// listVariationTypes needs `rate`, but the variation_types stream is
+// rate-stripped for EVERY role (sync-streams.yaml) — locally `rate` is NULL
+// even for an admin. cost_center_templates is not in the PowerSync publication
+// at all. Pinned by supabaseOnly.test.ts.
+
 import { supabase } from "../../supabase";
 
 export interface VariationType {
