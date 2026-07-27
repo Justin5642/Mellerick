@@ -13,6 +13,7 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useFocusEffect, useRouter } from "expo-router";
 import { supabase } from "../../lib/supabase";
+import { listMyJobs } from "../../lib/data/reads/jobs";
 import { useAuth } from "../../lib/auth-context";
 import { colors, statusColors } from "../../lib/theme";
 
@@ -40,14 +41,9 @@ export function MyJobsScreen() {
     } = await supabase.auth.getUser();
     if (!user) return;
 
-    const { data } = await supabase
-      .from("jobs")
-      .select("id, job_number, title, status, scheduled_start, scheduled_end, customers(name), sites(name, address_line1, suburb, site_lat, site_lng)")
-      .eq("assigned_to", user.id)
-      .not("status", "in", '("completed","cancelled")')
-      .order("scheduled_start", { ascending: true, nullsFirst: false });
+    const data = await listMyJobs(user.id);
 
-    setJobs((data as any) ?? []);
+    setJobs(data);
     setLoading(false);
     setRefreshing(false);
   }, []);

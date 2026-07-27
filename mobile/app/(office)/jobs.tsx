@@ -3,7 +3,7 @@ import { View, Text, FlatList, StyleSheet, RefreshControl, TextInput, ActivityIn
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
-import { supabase } from "../../lib/supabase";
+import { listOfficeJobs, searchOfficeJobs } from "../../lib/data/reads/jobs";
 import { colors } from "../../lib/theme";
 import { JobListRow } from "../../design/components/JobListRow";
 
@@ -18,7 +18,6 @@ interface OfficeJob {
 }
 
 const PAGE = 50;
-const SELECT = "id, job_number, title, status, priority, customers(name), assigned_profile:profiles!jobs_assigned_to_fkey(full_name)";
 
 export default function OfficeJobsScreen() {
   const router = useRouter();
@@ -34,17 +33,12 @@ export default function OfficeJobsScreen() {
   // first page are still found — not a client-side filter over a capped list.
   const runSearch = useCallback(async (q: string) => {
     const id = ++reqId.current;
+    // Same strip the module applies internally — kept here only to decide hasMore.
     const safe = q.replace(/[,()%]/g, " ").trim();
-    let builder = supabase.from("jobs").select(SELECT).order("created_at", { ascending: false })
-      .order("id", { ascending: false }).limit(PAGE);
-    if (safe) {
-      const numeric = /^\d+$/.test(safe);
-      builder = builder.or(`title.ilike.%${safe}%${numeric ? `,job_number.eq.${safe}` : ""}`);
-    }
-    const { data } = await builder;
+    const data = await searchOfficeJobs(q, PAGE);
     if (id !== reqId.current) return; // a newer query superseded this one
-    setJobs((data as unknown as OfficeJob[]) ?? []);
-    setHasMore(!safe && (data?.length ?? 0) === PAGE);
+    setJobs(data);
+    setHasMore(!safe && data.length === PAGE);
   }, []);
 
   // Debounce the search box.
@@ -63,13 +57,7 @@ export default function OfficeJobsScreen() {
   const loadMore = useCallback(async () => {
     if (loadingMore || !hasMore || query.trim()) return;
     setLoadingMore(true);
-    const { data } = await supabase
-      .from("jobs")
-      .select(SELECT)
-      .order("created_at", { ascending: false })
-      .order("id", { ascending: false })
-      .range(jobs.length, jobs.length + PAGE - 1);
-    const next = (data as unknown as OfficeJob[]) ?? [];
+    const next = await listOfficeJobs(jobs.length, PAGE);
     setJobs((prev) => [...prev, ...next]);
     setHasMore(next.length === PAGE);
     setLoadingMore(false);
