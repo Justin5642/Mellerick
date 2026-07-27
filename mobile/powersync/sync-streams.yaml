@@ -34,15 +34,15 @@ streams:
   # ---- Reference data, all roles (no money columns) --------------------------
   profiles:
     auto_subscribe: true
-    query: SELECT id, full_name, role FROM profiles
+    query: SELECT id, full_name, role, is_active FROM profiles
 
   customers:
     auto_subscribe: true
-    query: SELECT id, name, company, phone, email, mobile, abn, is_active, is_favorite FROM customers
+    query: SELECT id, name, company, phone, email, mobile, abn, notes, is_active, is_favorite FROM customers
 
   sites:
     auto_subscribe: true
-    query: SELECT id, customer_id, name, address_line1, address_line2, suburb, state, postcode, site_lat, site_lng FROM sites
+    query: SELECT id, customer_id, name, address_line1, address_line2, suburb, state, postcode, site_lat, site_lng, notes FROM sites
 
   # RATE-STRIPPED: the base table's preset `rate` must never reach a device.
   variation_types:
