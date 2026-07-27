@@ -5,7 +5,7 @@ import { Ionicons } from "@expo/vector-icons";
 import * as ImagePicker from "expo-image-picker";
 import { colors } from "../../../lib/theme";
 import { MoneyText } from "../../../design/components/MoneyText";
-import { getJobBilling, getJobEquipment, getReceiptSignedUrl, type JobBilling, type JobEquipment, type JobExpense } from "../../../lib/data/reads/jobBilling";
+import { getJobBilling, getJobEquipment, getJobCostCentres, getReceiptSignedUrl, type JobBilling, type JobEquipment, type JobExpense, type JobCostCentre } from "../../../lib/data/reads/jobBilling";
 import { useJobBilling } from "../../../lib/data/hooks/useJobBilling";
 import { useFleet } from "../../../lib/data/hooks/useFleet";
 import { useAuth } from "../../../lib/auth-context";
@@ -22,6 +22,7 @@ interface ExpenseDraft {
   invoice_date: string; // YYYY-MM-DD (optional)
   amount: string;
   gst_amount: string;
+  costCenterId: string | null;
   receiptUri: string | null;
 }
 
@@ -34,7 +35,7 @@ const EXPENSE_CATEGORIES: { value: ExpenseCategory; label: string }[] = [
 const CATEGORY_LABELS: Record<string, string> = Object.fromEntries(EXPENSE_CATEGORIES.map((c) => [c.value, c.label]));
 
 const emptyExpense: ExpenseDraft = {
-  supplier_name: "", category: "materials", description: "", invoice_number: "", invoice_date: "", amount: "", gst_amount: "", receiptUri: null,
+  supplier_name: "", category: "materials", description: "", invoice_number: "", invoice_date: "", amount: "", gst_amount: "", costCenterId: null, receiptUri: null,
 };
 
 export default function JobBillingScreen() {
@@ -46,6 +47,7 @@ export default function JobBillingScreen() {
   const { profile } = useAuth();
   const [data, setData] = useState<JobBilling | null>(null);
   const [equipment, setEquipment] = useState<JobEquipment | null>(null);
+  const [costCentres, setCostCentres] = useState<JobCostCentre[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [draft, setDraft] = useState<Draft | null>(null);
@@ -56,7 +58,8 @@ export default function JobBillingScreen() {
   const [savingEquip, setSavingEquip] = useState(false);
 
   const load = useCallback(async () => {
-    const [b, e] = await Promise.all([getJobBilling(id), getJobEquipment(id)]);
+    const [b, e, cc] = await Promise.all([getJobBilling(id), getJobEquipment(id), getJobCostCentres(id)]);
+    setCostCentres(cc);
     setData(b);
     setEquipment(e);
     setLoading(false);
@@ -149,6 +152,7 @@ export default function JobBillingScreen() {
         invoiceDate: expense.invoice_date.trim() || null,
         amount,
         gstAmount: parseFloat(expense.gst_amount) || 0,
+        costCenterId: expense.costCenterId,
         receipt: expense.receiptUri ? { sourceUri: expense.receiptUri, ext: "jpg" } : null,
       });
       setExpense(null);
@@ -227,6 +231,7 @@ export default function JobBillingScreen() {
                 {CATEGORY_LABELS[e.category] ?? e.category}
                 {e.invoice_number ? ` · Inv #${e.invoice_number}` : ""}
                 {e.description ? ` · ${e.description}` : ""}
+                {e.cost_center_id ? ` · ${costCentres.find((c) => c.id === e.cost_center_id)?.name ?? "Stage"}` : ""}
               </Text>
               {e.receipt_storage_path && (
                 <TouchableOpacity onPress={() => viewReceipt(e)} style={styles.receiptLink} hitSlop={8}>
@@ -348,6 +353,33 @@ export default function JobBillingScreen() {
               <View style={{ flex: 1 }}><Field label="Amount (ex GST)" value={expense?.amount ?? ""} onChange={(v) => setExpense((d) => d && { ...d, amount: v })} num /></View>
               <View style={{ flex: 1 }}><Field label="GST" value={expense?.gst_amount ?? ""} onChange={(v) => setExpense((d) => d && { ...d, gst_amount: v })} num /></View>
             </View>
+
+            {/* Allocate the spend to a PO cost-centre stage, the same stages the
+                Time tab allocates hours to. Only shown when the job has POs. */}
+            {costCentres.length > 0 && (
+              <>
+                <Text style={styles.fieldLabel}>Cost centre</Text>
+                <View style={styles.catRow}>
+                  <TouchableOpacity
+                    style={[styles.catChip, !expense?.costCenterId && styles.catChipActive]}
+                    onPress={() => setExpense((d) => d && { ...d, costCenterId: null })}
+                  >
+                    <Text style={[styles.catChipText, !expense?.costCenterId && styles.catChipTextActive]}>Unassigned</Text>
+                  </TouchableOpacity>
+                  {costCentres.map((cc) => (
+                    <TouchableOpacity
+                      key={cc.id}
+                      style={[styles.catChip, expense?.costCenterId === cc.id && styles.catChipActive]}
+                      onPress={() => setExpense((d) => d && { ...d, costCenterId: cc.id })}
+                    >
+                      <Text style={[styles.catChipText, expense?.costCenterId === cc.id && styles.catChipTextActive]} numberOfLines={1}>
+                        {cc.name}{cc.po_number ? ` · PO #${cc.po_number}` : ""}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </>
+            )}
 
             <Text style={styles.fieldLabel}>Receipt (optional)</Text>
             {expense?.receiptUri ? (

@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useEffect, useState } from "react";
 import { SqliteOutboxStore } from "./outbox/sqliteStore";
 import { supabaseGateway, apiBridge } from "./gateway.supabase";
+import { supabase } from "../supabase";
 import { netInfoConnectivity } from "./net/connectivity";
 import { createDataLayer, type DataLayer } from "./createDataLayer";
 
@@ -26,6 +27,11 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
         gateway: supabaseGateway,
         api: apiBridge,
         connectivity: netInfoConnectivity,
+        // Q4: after a long offline workday the access token has expired. Refresh
+        // it BEFORE replaying queued writes, so the reconnect drain doesn't race
+        // the background refresh and 401 every op. getSession() is a no-op read
+        // when the token is still valid, and refreshes it when it isn't.
+        ensureSession: () => supabase.auth.getSession(),
       });
       built.engine.start();
       setLayer(built);

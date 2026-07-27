@@ -19,6 +19,26 @@ export interface JobExpense {
   invoice_number: string | null;
   invoice_date: string | null;
   receipt_storage_path: string | null;
+  cost_center_id: string | null;
+}
+
+/** A PO cost-centre stage on this job, for allocating time + expenses. */
+export interface JobCostCentre {
+  id: string;
+  name: string;
+  code: string | null;
+  po_number: string;
+}
+
+// The job's PO cost-centre stages, flattened across its purchase orders. Shared
+// by the Time tab (allocating a time entry) and the Billing tab (allocating an
+// expense) so the two can't drift.
+export async function getJobCostCentres(jobId: string): Promise<JobCostCentre[]> {
+  type PoRow = { po_number: string; po_cost_centers: { id: string; name: string; code: string | null }[] | null };
+  const { data } = await supabase.from("purchase_orders").select("po_number, po_cost_centers(id, name, code)").eq("job_id", jobId);
+  return ((data as unknown as PoRow[]) ?? []).flatMap((po) =>
+    (po.po_cost_centers ?? []).map((cc) => ({ id: cc.id, name: cc.name, code: cc.code, po_number: po.po_number }))
+  );
 }
 export interface JobPOCostCentre {
   id: string;
@@ -44,7 +64,7 @@ export async function getJobBilling(jobId: string): Promise<JobBilling | null> {
   const [jobRes, itemsRes, expRes, poRes] = await Promise.all([
     supabase.from("jobs").select("job_number, title").eq("id", jobId).single(),
     supabase.from("job_items").select("id, name, description, quantity, unit_price, total").eq("job_id", jobId).order("created_at"),
-    supabase.from("job_expenses").select("id, supplier_name, category, description, amount, gst_amount, invoice_number, invoice_date, receipt_storage_path").eq("job_id", jobId).order("created_at", { ascending: false }),
+    supabase.from("job_expenses").select("id, supplier_name, category, description, amount, gst_amount, invoice_number, invoice_date, receipt_storage_path, cost_center_id").eq("job_id", jobId).order("created_at", { ascending: false }),
     supabase.from("purchase_orders").select("id, po_number, client_reference, total_value, po_cost_centers(id, name, allocated_amount)").eq("job_id", jobId).order("created_at"),
   ]);
   const job = jobRes.data as { job_number: number | null; title: string } | null;

@@ -81,6 +81,25 @@ export default function ReportsScreen() {
             })}
           </View>
 
+          {/* Quote pipeline by status — the web reports dashboard's quote
+              breakdown (draft/sent/accepted/declined/expired). */}
+          <Text style={styles.section}>Quotes by status</Text>
+          <View style={styles.card}>
+            {summary.quotesByStatus.map((q) => {
+              const pct = summary.quotesTotal > 0 ? (q.count / summary.quotesTotal) * 100 : 0;
+              const sc = statusColors[q.status] ?? { bg: colors.slate100, text: colors.slate500 };
+              return (
+                <View key={q.status} style={styles.barRow}>
+                  <Text style={styles.barLabel}>{humanize(q.status)}</Text>
+                  <View style={styles.barTrack}>
+                    <View style={[styles.barFill, { width: `${Math.max(pct, 2)}%`, backgroundColor: sc.text }]} />
+                  </View>
+                  <Text style={styles.barCount}>{q.count}</Text>
+                </View>
+              );
+            })}
+          </View>
+
           {analytics && (
             <>
               <Text style={styles.section}>Revenue by month</Text>

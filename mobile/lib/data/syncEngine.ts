@@ -14,7 +14,18 @@ export class SyncEngine {
 
   constructor(
     private processor: Processor,
-    private connectivity: Connectivity
+    private connectivity: Connectivity,
+    /**
+     * Optional: make sure the auth session is fresh before replaying writes (Q4).
+     * After a long offline stretch the access token has expired, and the drain
+     * triggered by reconnection can otherwise race the background refresh —
+     * every queued write 401s, burning its retry budget (~8.5 min of backoff)
+     * and dead-lettering work that was perfectly good. Refreshing first removes
+     * the race. Injected so the engine keeps no direct auth dependency; failures
+     * are swallowed (offline refresh legitimately fails and the drain then
+     * no-ops on the connectivity check).
+     */
+    private ensureSession?: () => Promise<unknown>
   ) {}
 
   start(): void {
@@ -49,6 +60,15 @@ export class SyncEngine {
   }
 
   private async drainAndNotify(): Promise<void> {
+    if (this.ensureSession) {
+      // Never let a refresh failure block the drain — the processor's own
+      // connectivity check handles the genuinely-offline case.
+      try {
+        await this.ensureSession();
+      } catch {
+        /* keep going; a stale token just means the writes retry */
+      }
+    }
     await this.processor.drain();
     for (const cb of [...this.settledListeners]) cb();
   }

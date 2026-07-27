@@ -55,11 +55,26 @@ describe("JobBillingRepository", () => {
       invoice_date: null,
       amount: 120.5,
       gst_amount: 12.05,
+      cost_center_id: null,
       entered_by: "u1",
     });
     // no receipt columns, no transport bucket, no generated created_at
     expect(w.payload).not.toHaveProperty("receipt_storage_path");
     expect(w.payload).not.toHaveProperty("bucket");
+  });
+
+  it("addExpense allocates to a PO cost-centre stage when one is chosen (Q18)", async () => {
+    const { outbox, ops } = captureOutbox();
+    await new JobBillingRepository(outbox, seqIds(), fixedTime()).addExpense({
+      jobId: "j1",
+      enteredBy: "u1",
+      supplierName: "Reece Plumbing",
+      category: "materials",
+      amount: 100,
+      gstAmount: 10,
+      costCenterId: "cc-3",
+    });
+    expect(ops[0].payload).toMatchObject({ cost_center_id: "cc-3" });
   });
 
   it("addExpense (with receipt) uploads before the row: derives an idempotent receipt key from rowId, bucket transport-only", async () => {

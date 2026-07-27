@@ -5,6 +5,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { supabase } from "../../lib/supabase";
 import { colors } from "../../lib/theme";
 import { useTimeClock } from "../../lib/data/hooks/useTimeClock";
+import { getJobCostCentres, type JobCostCentre } from "../../lib/data/reads/jobBilling";
 import { hoursBetween } from "../../lib/data/repositories/timeEntries";
 import { netInfoConnectivity } from "../../lib/data/net/connectivity";
 import { useDataLayer } from "../../lib/data/DataProvider";
@@ -33,12 +34,9 @@ interface EditingEntry {
   costCenterId: string | null;
 }
 
-interface CostCenterOption {
-  id: string;
-  name: string;
-  code: string | null;
-  po_number?: string;
-}
+// The shared shape from the read layer — the Billing tab allocates expenses to
+// the same stages, so both screens use one definition and one query.
+type CostCenterOption = JobCostCentre;
 
 function formatTime(iso: string) {
   return new Date(iso).toLocaleTimeString("en-AU", { hour: "2-digit", minute: "2-digit" });
@@ -311,14 +309,7 @@ export function JobTimeTab({ jobId, currentUserId }: { jobId: string; currentUse
   useSyncSettled(loadEntries);
 
   const loadCostCenters = useCallback(async () => {
-    const { data } = await supabase
-      .from("purchase_orders")
-      .select("po_number, po_cost_centers(id, name, code)")
-      .eq("job_id", jobId);
-    const flat: CostCenterOption[] = (data ?? []).flatMap((po: any) =>
-      (po.po_cost_centers ?? []).map((cc: any) => ({ id: cc.id, name: cc.name, code: cc.code, po_number: po.po_number }))
-    );
-    setCostCenters(flat);
+    setCostCenters(await getJobCostCentres(jobId));
   }, [jobId]);
 
   useEffect(() => {

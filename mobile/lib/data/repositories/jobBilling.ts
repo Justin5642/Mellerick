@@ -25,6 +25,8 @@ export interface JobExpenseInput {
   invoiceDate?: string | null; // YYYY-MM-DD (local); DB column is `date`
   amount: number; // ex-GST, to match the invoice_items convention
   gstAmount: number;
+  /** Optional PO cost-centre stage to allocate this spend to (null = Unassigned). */
+  costCenterId?: string | null;
   /** Optional receipt/invoice file to attach (uploads before the row). */
   receipt?: { localUri: string; ext?: string } | null;
 }
@@ -76,6 +78,7 @@ export class JobBillingRepository {
       invoice_date: input.invoiceDate ?? null,
       amount: input.amount,
       gst_amount: input.gstAmount,
+      cost_center_id: input.costCenterId ?? null,
       entered_by: input.enteredBy,
       // total/created_at are DB-owned; never sent.
     };

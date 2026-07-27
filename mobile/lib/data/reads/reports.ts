@@ -12,6 +12,7 @@ export interface ReportSummary {
   quotesDeclined: number;
   quotesTotal: number;
   acceptedValue: number;
+  quotesByStatus: { status: string; count: number }[];
   jobsByStatus: { status: string; count: number }[];
   activeJobs: number;
 }
@@ -20,6 +21,8 @@ export interface ReportSummary {
 // omitting it would drop that whole bucket and the per-status counts wouldn't
 // sum to the job total.
 const JOB_STATUSES = ["pending", "scheduled", "in_progress", "on_hold", "completed", "cancelled"] as const;
+// The five quote statuses the web reports dashboard buckets by.
+const QUOTE_STATUSES = ["draft", "sent", "accepted", "declined", "expired"] as const;
 
 export async function getReportSummary(): Promise<ReportSummary> {
   const jobCountQueries = JOB_STATUSES.map((s) =>
@@ -48,6 +51,7 @@ export async function getReportSummary(): Promise<ReportSummary> {
     quotesTotal: quotes.length,
     // Σ accepted-quote totals — matches the web reports headline.
     acceptedValue: sum(quotes.filter((q) => q.status === "accepted")),
+    quotesByStatus: QUOTE_STATUSES.map((status) => ({ status, count: quotes.filter((q) => q.status === status).length })),
     jobsByStatus,
     activeJobs,
   };

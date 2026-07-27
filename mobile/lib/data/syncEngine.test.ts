@@ -85,3 +85,46 @@ describe("SyncEngine", () => {
     expect(proc.drain).toHaveBeenCalledTimes(1);
   });
 });
+
+// Q4: after a long offline workday the access token has expired. The drain that
+// fires on reconnection must not race the background token refresh — otherwise
+// every queued write 401s and burns its retry budget until it dead-letters.
+describe("SyncEngine — session freshness before replay (Q4)", () => {
+  it("refreshes the session BEFORE draining, on both start and reconnect", async () => {
+    const order: string[] = [];
+    const processor = { drain: jest.fn(async () => void order.push("drain")) };
+    const net = fakeConnectivity();
+    const ensureSession = jest.fn(async () => void order.push("session"));
+
+    const engine = new SyncEngine(processor as unknown as Processor, net.connectivity, ensureSession);
+    engine.start();
+    await flushMicrotasks();
+    net.goOnline();
+    await flushMicrotasks();
+
+    // Every drain is preceded by a refresh — never the other way round.
+    expect(order).toEqual(["session", "drain", "session", "drain"]);
+  });
+
+  it("still drains when the refresh fails (offline refresh must not block replay)", async () => {
+    const processor = fakeProcessor();
+    const net = fakeConnectivity();
+    const ensureSession = jest.fn().mockRejectedValue(new Error("offline"));
+
+    const engine = new SyncEngine(processor as unknown as Processor, net.connectivity, ensureSession);
+    engine.start();
+    await flushMicrotasks();
+
+    expect(ensureSession).toHaveBeenCalled();
+    expect(processor.drain).toHaveBeenCalled(); // not blocked by the failure
+  });
+
+  it("works without the hook (optional dependency)", async () => {
+    const processor = fakeProcessor();
+    const net = fakeConnectivity();
+    const engine = new SyncEngine(processor as unknown as Processor, net.connectivity);
+    engine.start();
+    await flushMicrotasks();
+    expect(processor.drain).toHaveBeenCalled();
+  });
+});
