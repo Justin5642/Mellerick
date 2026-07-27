@@ -5,10 +5,15 @@ instance (project mellerick / Development) runs **Sync Streams edition 3**, not
 legacy Sync Rules. `sync-rules.yaml` is the legacy-dialect version, kept for
 reference; both encode the same money contract below.
 
-The client is **not wired into the app yet** — the app today uses online reads +
-the durable offline-write outbox; PowerSync adds true offline *reads*. A
-documented fallback (persisted read-cache over the same read-repository layer)
-exists if PowerSync's cost/fit doesn't work out.
+**The client IS wired (2026-07-27) and the instance is LIVE** — streams v2
+deployed, replication slot active. Reads serve from the device mirror through
+`lib/data/reads/source.ts` (`fromLocalOr`: per-call fallback to byte-identical
+Supabase bodies); PowerSync is **read-only** on the device (`uploadData` is a
+tripwire — every write stays on the outbox). The device schema is **generated**:
+`node mobile/scripts/generate-powersync-schema.mjs` (from the deployed streams ×
+the live database); `lib/powersync/schema.test.ts` enforces the money contract
+in CI. See DECISIONS-FOR-AVI.md D89–D92 for the dialect rules the live
+validator actually enforces (no literal IN-lists; JOIN-on-auth.user_id() gate).
 
 Password rotation for `powersync_role`: `pwsh -File scripts\set-powersync-password.ps1`
 (add `-Show` when the dashboard is open on a different computer — see the script
@@ -136,14 +141,19 @@ For **office/admin**, assert the broader set is present and correctly scoped.
 - RLS pre-req ✅ — `0035` / `0038` applied AND role-impersonation verified
   (technician denied on every money table; money-free views still readable).
 
-⚠️ **Keep the publication in sync with `sync-rules.yaml`.** Add a table to a rule
-and you must `alter publication powersync add table <t>;` or it silently never syncs.
+⚠️ **Keep the publication in sync with `sync-streams.yaml`.** Add a table to a
+stream and you must `alter publication powersync add table <t>;` or it silently
+never syncs — then regenerate the schema
+(`node mobile/scripts/generate-powersync-schema.mjs`).
 
-**Still required (needs your account):**
-1. A PowerSync Cloud instance (AU region) pointed at this database, using
-   `powersync_role` + its password, with "Use Supabase Auth" enabled.
-3. Load `sync-rules.yaml`, run the role-impersonation test above, iterate until a
-   technician token receives zero money columns.
-4. Wire the client (`@powersync/react-native`) behind the existing
-   `lib/data/reads/` layer so screens don't change; add `@powersync/attachments`
-   for photos/audio.
+**PowerSync side — DONE (2026-07-27):** Cloud instance live ("Use Supabase Auth"
+enabled), streams v2 deployed and dashboard-validated, replication slot active,
+client wired: connector + serialized provider + `fromLocalOr` seam; 13 read
+modules converted or documented Supabase-only; jobs extracted from screens.
+`@powersync/attachments` deliberately dropped (D90 — reads-only architecture;
+photos stay on the outbox → Storage).
+
+**Still required (needs hardware):** the on-device role-impersonation pass above
+via a custom dev client (`npx expo run:android` — Expo Go cannot load
+op-sqlite), plus the serialization/ordering spot-checks listed in D89–D92's
+design notes.
