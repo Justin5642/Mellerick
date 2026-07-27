@@ -1,73 +1,92 @@
-# PowerSync sync rules — Mellerick Field  (PROPOSED / MP3, needs validation)
+# PowerSync sync rules — Mellerick Field  (PROPOSED / MP3)
 # =============================================================================
-# STATUS: starter definition for the (blocked) PowerSync integration. The
-# money-column ALLOW/DENY lists below are AUTHORITATIVE — they are derived from
-# the RLS hardening (migrations 0027 + proposed 0035) and are the security
-# contract this file must enforce. The PowerSync YAML *syntax* (parameter-query
-# form, subquery support) MUST be validated against the target PowerSync version
-# and instance before use — see README.md. Do NOT deploy unreviewed.
+# Rewritten against the official PowerSync docs (docs.powersync.com/usage/
+# sync-rules + .../data-queries + .../operators-and-functions). The FIRST draft
+# of this file was materially wrong and would have been rejected — it used
+# subqueries (`WHERE job_id IN (SELECT ...)`) and a scalar subquery for the role
+# check, and legacy Sync Rules support NONE of:
+#     "Subqueries, JOINs, CTEs, aggregation, sorting, or set operations"
+# It also broke the hard constraint that **every data query must use every
+# bucket parameter**.
 #
-# WHY THIS FILE IS SECURITY-CRITICAL: PowerSync replicates rows from Postgres to
-# plaintext SQLite ON THE DEVICE, bypassing the app's UI money-gating (MoneyText)
-# and the read-repository layer. So the ONLY thing keeping dollar figures off a
-# technician's phone on the sync path is (a) the row-level RLS (0035) AND (b) the
-# per-column SELECTs here that omit rate/price/cost/total columns. Both must hold.
+# The documented pattern instead makes the PARAMETER query return the parent
+# row ids — one bucket per job — and every data query then filters on
+# `bucket.job_id`. That is what this file now does.
 #
-# HARD RULE: a technician bucket must contain ZERO money columns. The office/admin
-# bucket may contain the full set (they are authorised to see money). Role is read
-# from profiles via a parameter query keyed on the authenticated user id.
+# STILL UNVERIFIED (needs a real instance — see README "Open question"):
+#   * the office/admin bucket's role gate (marked below)
+# Nothing here has been run against a PowerSync instance yet.
+#
+# WHY THIS FILE IS SECURITY-CRITICAL: PowerSync replicates rows into plaintext
+# SQLite ON THE DEVICE, bypassing the app's UI money-gating (MoneyText) and the
+# read-repository layer. The per-column selects below are therefore a SECOND
+# authorization surface alongside RLS (0027 / 0035 / 0038). A technician bucket
+# must contain ZERO money columns.
 # =============================================================================
 
 bucket_definitions:
-  # ---- Global reference every authenticated employee needs (no money) --------
+  # ---------------------------------------------------------------------------
+  # GLOBAL: reference data every authenticated employee needs. No parameters, so
+  # no per-row scoping — only put NON-money, non-sensitive columns here.
+  # ---------------------------------------------------------------------------
   global_reference:
     data:
       - SELECT id, full_name, role FROM profiles
-      # Customers/sites carry NO money columns — safe for all roles (techs need
-      # the customer name + site address for their assigned jobs).
+      # Customers/sites carry no money columns (techs need the customer name and
+      # the site address for their jobs).
       - SELECT id, name, company, phone, email, mobile, abn, is_active, is_favorite FROM customers
       - SELECT id, customer_id, name, address_line1, address_line2, suburb, state, postcode, site_lat, site_lng FROM sites
-      # variation_types RATE-STRIPPED (the base table has a preset `rate`; techs
-      # must never receive it — mirrors the variation_types_public view).
+      # RATE-STRIPPED: variation_types.rate must never reach a device.
       - SELECT id, name, unit, auto_approve, is_active FROM variation_types
 
-  # ---- TECHNICIAN: only their assigned jobs + children, MONEY STRIPPED -------
-  # This bucket instantiates ONLY for users whose profiles.role = 'technician'.
-  technician_jobs:
-    parameters: |
-      SELECT request.user_id() AS user_id
-      WHERE (SELECT role FROM profiles WHERE id = request.user_id()) = 'technician'
+  # ---------------------------------------------------------------------------
+  # TECHNICIAN: one bucket PER JOB assigned to the caller. This is the documented
+  # "grouping by parameter query values" pattern — the parameter query yields the
+  # job ids, and every data query below filters on `bucket.job_id`, satisfying
+  # the "each data query must use every bucket parameter" rule.
+  #
+  # No role gate is needed here: the bucket only instantiates for jobs where
+  # `assigned_to` is the caller, so a non-technician simply gets no buckets.
+  # ---------------------------------------------------------------------------
+  assigned_job:
+    parameters: SELECT id as job_id FROM jobs WHERE assigned_to = request.user_id()
     data:
-      # jobs has no money columns of its own — full row is safe.
       - SELECT id, job_number, title, description, notes, status, priority, job_type,
                customer_id, site_id, assigned_to, scheduled_start, scheduled_end,
                actual_start, actual_end, completion_notes, voice_report_transcript, created_at
-          FROM jobs
-         WHERE assigned_to = bucket.user_id
-      # job_photos / time entries / backflow for those jobs (no money columns).
+          FROM jobs WHERE id = bucket.job_id
       - SELECT id, job_id, storage_path, photo_type, uploaded_by, created_at
-          FROM job_photos WHERE job_id IN (SELECT id FROM jobs WHERE assigned_to = bucket.user_id)
+          FROM job_photos WHERE job_id = bucket.job_id
       - SELECT id, job_id, staff_id, clock_in, clock_out, hours, entry_type, cost_center_id, notes, created_at
-          FROM time_entries WHERE staff_id = bucket.user_id
-      # job_variations RATE-STRIPPED: OMIT rate, total_amount, admin_notes.
+          FROM time_entries WHERE job_id = bucket.job_id
+      - SELECT id, job_id, note, created_by, created_at
+          FROM job_notes WHERE job_id = bucket.job_id
+      # RATE-STRIPPED: omits rate, total_amount and admin_notes.
       - SELECT id, job_id, variation_type_id, custom_name, description, quantity, unit,
                status, photo_storage_path, logged_by, logged_at
-          FROM job_variations WHERE job_id IN (SELECT id FROM jobs WHERE assigned_to = bucket.user_id)
-      # Backflow devices + tests (compliance data, no money).
-      - SELECT id, customer_id, site_id, location_description, make, model, serial_number,
-               size, hazard_level, is_active, created_at
-          FROM backflow_devices
-      - SELECT id, device_id, tested_by, test_date, result, storage_path, created_at
-          FROM backflow_tests WHERE tested_by = bucket.user_id
+          FROM job_variations WHERE job_id = bucket.job_id
 
-  # ---- OFFICE / ADMIN: the broader authorised set (money allowed) ------------
-  # Instantiates for office + admin. These users are authorised to see money, so
-  # the full rows sync (RLS is the backstop). Payroll-only tables
-  # (staff_cost_profiles, billing_rate_config) are ADMIN-only — see README.
+  # ---------------------------------------------------------------------------
+  # OFFICE / ADMIN: the broader business set, money included (they are authorised
+  # to see it; RLS remains the backstop).
+  #
+  # ⚠️ OPEN QUESTION — the role gate. A global bucket has no parameters, so it
+  # cannot be filtered by role; but a parameterised bucket requires EVERY data
+  # query to use that parameter, which a whole-table sync cannot do. Legacy sync
+  # rules also can't do the scalar subquery the first draft used. Resolve ONE of:
+  #   (a) put the app role in a JWT custom claim via a Supabase Auth Hook and
+  #       gate with `request.jwt() ->> 'app_role'`  ← preferred, no extra query;
+  #   (b) use PowerSync "Sync Streams" (the newer mode) instead of legacy Sync
+  #       Rules — it DOES support subqueries, JOINs and CTEs, which would also
+  #       let the technician bucket be expressed more directly; or
+  #   (c) rely on RLS alone for this bucket, accepting that the sync rules stop
+  #       being a defence-in-depth layer for office data.
+  # DO NOT deploy this bucket until one of those is chosen — as written it has no
+  # role gate, so it would replicate money to EVERY authenticated device,
+  # including technicians'. This is the single most dangerous line in the file.
+  # ---------------------------------------------------------------------------
   office_admin_business:
-    parameters: |
-      SELECT request.user_id() AS user_id
-      WHERE (SELECT role FROM profiles WHERE id = request.user_id()) IN ('office', 'admin')
+    # parameters: <role gate — see the open question above>
     data:
       - SELECT * FROM jobs
       - SELECT * FROM job_items
