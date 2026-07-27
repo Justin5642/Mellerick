@@ -4,10 +4,18 @@
 # replaces sync-rules.yaml (kept for reference) in the new dialect:
 #   • auth.user_id()            instead of request.user_id()
 #   • streams:                  instead of bucket_definitions:
-#   • subqueries ARE supported  (IN (SELECT …)) — the per-job child scoping is
-#     expressed directly instead of via bucket parameters
+#   • IN (subquery) is supported ONLY with a column of the streamed table on the
+#     left; IN with a LITERAL LIST (role IN ('office','admin')) is NOT supported
+#     at all — use OR-equalities instead
+#   • JOIN profiles ON profiles.id = auth.user_id() IS legal — the office/admin
+#     role gate below uses exactly that shape
 #   • auto_subscribe: true      = every client subscribes; per-user filtering
 #     happens in the query, and a non-matching user gets ZERO rows (fail-closed)
+#
+# VALIDATED against the live instance (dashboard Validate, 2026-07-27) after
+# three fixes: job_notes columns are (content, author_id) not (note,
+# created_by); the gate `auth.user_id() IN (SELECT …)` and every literal
+# `IN ('office','admin')` were rejected — final form is the JOIN + OR gate.
 #
 # MONEY CONTRACT (authoritative — same boundary as RLS 0027/0035/0038):
 #   technicians must never receive a money column. Office/admin streams are
@@ -70,7 +78,7 @@ streams:
   tech_job_notes:
     auto_subscribe: true
     query: |
-      SELECT id, job_id, note, created_by, created_at
+      SELECT id, job_id, content, author_id, created_at
       FROM job_notes
       WHERE job_id IN (SELECT id FROM jobs WHERE assigned_to = auth.user_id())
 
@@ -91,72 +99,77 @@ streams:
       WHERE job_id IN (SELECT id FROM jobs WHERE assigned_to = auth.user_id())
 
   # ---- Office/admin: full business set (money allowed), ROLE-GATED -----------
-  # Gate: the stream only yields rows when the caller's profiles.role is office/
-  # admin. A technician (or missing profile) matches nothing — fail-closed.
+  # Gate: JOIN the requesting user's profiles row; the stream only yields rows
+  # when that row exists AND its role is office/admin. A technician (or missing
+  # profile) joins to nothing — fail-closed.
   office_jobs:
     auto_subscribe: true
-    query: SELECT * FROM jobs WHERE auth.user_id() IN (SELECT id FROM profiles WHERE role IN ('office', 'admin'))
+    query: SELECT jobs.* FROM jobs JOIN profiles ON profiles.id = auth.user_id() WHERE profiles.role = 'office' OR profiles.role = 'admin'
 
   office_job_items:
     auto_subscribe: true
-    query: SELECT * FROM job_items WHERE auth.user_id() IN (SELECT id FROM profiles WHERE role IN ('office', 'admin'))
+    query: SELECT job_items.* FROM job_items JOIN profiles ON profiles.id = auth.user_id() WHERE profiles.role = 'office' OR profiles.role = 'admin'
 
   office_job_variations:
     auto_subscribe: true
-    query: SELECT * FROM job_variations WHERE auth.user_id() IN (SELECT id FROM profiles WHERE role IN ('office', 'admin'))
+    query: SELECT job_variations.* FROM job_variations JOIN profiles ON profiles.id = auth.user_id() WHERE profiles.role = 'office' OR profiles.role = 'admin'
 
   office_job_expenses:
     auto_subscribe: true
-    query: SELECT * FROM job_expenses WHERE auth.user_id() IN (SELECT id FROM profiles WHERE role IN ('office', 'admin'))
+    query: SELECT job_expenses.* FROM job_expenses JOIN profiles ON profiles.id = auth.user_id() WHERE profiles.role = 'office' OR profiles.role = 'admin'
+
+  office_job_notes:
+    auto_subscribe: true
+    query: SELECT job_notes.* FROM job_notes JOIN profiles ON profiles.id = auth.user_id() WHERE profiles.role = 'office' OR profiles.role = 'admin'
 
   office_invoices:
     auto_subscribe: true
-    query: SELECT * FROM invoices WHERE auth.user_id() IN (SELECT id FROM profiles WHERE role IN ('office', 'admin'))
+    query: SELECT invoices.* FROM invoices JOIN profiles ON profiles.id = auth.user_id() WHERE profiles.role = 'office' OR profiles.role = 'admin'
 
   office_invoice_items:
     auto_subscribe: true
-    query: SELECT * FROM invoice_items WHERE auth.user_id() IN (SELECT id FROM profiles WHERE role IN ('office', 'admin'))
+    query: SELECT invoice_items.* FROM invoice_items JOIN profiles ON profiles.id = auth.user_id() WHERE profiles.role = 'office' OR profiles.role = 'admin'
 
   office_quotes:
     auto_subscribe: true
-    query: SELECT * FROM quotes WHERE auth.user_id() IN (SELECT id FROM profiles WHERE role IN ('office', 'admin'))
+    query: SELECT quotes.* FROM quotes JOIN profiles ON profiles.id = auth.user_id() WHERE profiles.role = 'office' OR profiles.role = 'admin'
 
   office_quote_items:
     auto_subscribe: true
-    query: SELECT * FROM quote_items WHERE auth.user_id() IN (SELECT id FROM profiles WHERE role IN ('office', 'admin'))
+    query: SELECT quote_items.* FROM quote_items JOIN profiles ON profiles.id = auth.user_id() WHERE profiles.role = 'office' OR profiles.role = 'admin'
 
   office_pricing_items:
     auto_subscribe: true
-    query: SELECT * FROM pricing_items WHERE auth.user_id() IN (SELECT id FROM profiles WHERE role IN ('office', 'admin'))
+    query: SELECT pricing_items.* FROM pricing_items JOIN profiles ON profiles.id = auth.user_id() WHERE profiles.role = 'office' OR profiles.role = 'admin'
 
   office_inventory:
     auto_subscribe: true
-    query: SELECT * FROM inventory WHERE auth.user_id() IN (SELECT id FROM profiles WHERE role IN ('office', 'admin'))
+    query: SELECT inventory.* FROM inventory JOIN profiles ON profiles.id = auth.user_id() WHERE profiles.role = 'office' OR profiles.role = 'admin'
 
   office_equipment:
     auto_subscribe: true
-    query: SELECT * FROM equipment WHERE auth.user_id() IN (SELECT id FROM profiles WHERE role IN ('office', 'admin'))
+    query: SELECT equipment.* FROM equipment JOIN profiles ON profiles.id = auth.user_id() WHERE profiles.role = 'office' OR profiles.role = 'admin'
 
   office_equipment_expenses:
     auto_subscribe: true
-    query: SELECT * FROM equipment_expenses WHERE auth.user_id() IN (SELECT id FROM profiles WHERE role IN ('office', 'admin'))
+    query: SELECT equipment_expenses.* FROM equipment_expenses JOIN profiles ON profiles.id = auth.user_id() WHERE profiles.role = 'office' OR profiles.role = 'admin'
 
   office_equipment_usage_log:
     auto_subscribe: true
-    query: SELECT * FROM equipment_usage_log WHERE auth.user_id() IN (SELECT id FROM profiles WHERE role IN ('office', 'admin'))
+    query: SELECT equipment_usage_log.* FROM equipment_usage_log JOIN profiles ON profiles.id = auth.user_id() WHERE profiles.role = 'office' OR profiles.role = 'admin'
 
   office_purchase_orders:
     auto_subscribe: true
-    query: SELECT * FROM purchase_orders WHERE auth.user_id() IN (SELECT id FROM profiles WHERE role IN ('office', 'admin'))
+    query: SELECT purchase_orders.* FROM purchase_orders JOIN profiles ON profiles.id = auth.user_id() WHERE profiles.role = 'office' OR profiles.role = 'admin'
 
   office_po_cost_centers:
     auto_subscribe: true
-    query: SELECT * FROM po_cost_centers WHERE auth.user_id() IN (SELECT id FROM profiles WHERE role IN ('office', 'admin'))
+    query: SELECT po_cost_centers.* FROM po_cost_centers JOIN profiles ON profiles.id = auth.user_id() WHERE profiles.role = 'office' OR profiles.role = 'admin'
 
   office_time_entries:
     auto_subscribe: true
-    query: SELECT * FROM time_entries WHERE auth.user_id() IN (SELECT id FROM profiles WHERE role IN ('office', 'admin'))
+    query: SELECT time_entries.* FROM time_entries JOIN profiles ON profiles.id = auth.user_id() WHERE profiles.role = 'office' OR profiles.role = 'admin'
 
   office_job_photos:
     auto_subscribe: true
-    query: SELECT * FROM job_photos WHERE auth.user_id() IN (SELECT id FROM profiles WHERE role IN ('office', 'admin'))
+    query: SELECT job_photos.* FROM job_photos JOIN profiles ON profiles.id = auth.user_id() WHERE profiles.role = 'office' OR profiles.role = 'admin'
