@@ -46,7 +46,7 @@ export function JobHoursScoreboard({ job, currentUserId }: { job: JobLite; curre
 
   async function load() {
     const [{ data: pos }, { data: entries }] = await Promise.all([
-      supabase.from("purchase_orders").select("total_hours").eq("job_id", jobId),
+      supabase.from("purchase_orders_public").select("total_hours").eq("job_id", jobId),
       // Only "work" entries count against the allocated-hours budget — travel
       // time between jobs is tracked separately and shouldn't eat into it.
       supabase.from("time_entries").select("hours, clock_in, clock_out").eq("job_id", jobId).eq("entry_type", "work"),
