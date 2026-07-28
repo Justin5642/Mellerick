@@ -54,6 +54,8 @@ export interface DataLayerDeps {
   clock?: Clock;
   /** Refresh the auth session before a drain (Q4) — see SyncEngine. */
   ensureSession?: () => Promise<unknown>;
+  /** Where a background drain's failure goes instead of an unhandled rejection. */
+  onSyncError?: (error: unknown) => void;
 }
 
 // Composition root, injectable end-to-end so the whole stack can be integration-
@@ -62,7 +64,7 @@ export interface DataLayerDeps {
 export function createDataLayer(deps: DataLayerDeps): DataLayer {
   const outbox = new Outbox(deps.store, deps.clock ?? systemClock);
   const processor = new Processor(outbox, deps.gateway, deps.api, deps.connectivity);
-  const engine = new SyncEngine(processor, deps.connectivity, deps.ensureSession);
+  const engine = new SyncEngine(processor, deps.connectivity, deps.ensureSession, deps.onSyncError);
   const ids = deps.ids ?? cryptoIdGen;
   const timeEntries = new TimeEntriesRepository(outbox, ids);
   const photos = new JobPhotosRepository(outbox, ids);

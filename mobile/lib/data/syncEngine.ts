@@ -11,6 +11,18 @@ export class SyncEngine {
   private unsubscribe?: () => void;
   private started = false;
   private settledListeners = new Set<() => void>();
+  /**
+   * Bumped by stop(). A drain captures the generation it began in and abandons
+   * itself at every await boundary once that generation is stale.
+   *
+   * A drain awaits the NETWORK (the session refresh) before it touches SQLite,
+   * so there is a window of hundreds of milliseconds in which the engine can be
+   * torn down — a sign-out, or a dev reload, which destroys the JS context and
+   * every native object with it. Resuming into that dead context and reaching
+   * for a SQLite handle throws "Cannot use shared object that was already
+   * released". Unsubscribing alone never stopped the work already in the air.
+   */
+  private generation = 0;
 
   constructor(
     private processor: Processor,
@@ -25,28 +37,46 @@ export class SyncEngine {
      * are swallowed (offline refresh legitimately fails and the drain then
      * no-ops on the connectivity check).
      */
-    private ensureSession?: () => Promise<unknown>
+    private ensureSession?: () => Promise<unknown>,
+    /**
+     * Where a background drain's failure goes. Drains started by start() and by
+     * the reconnect handler are fire-and-forget, so anything they throw would
+     * otherwise become an UNHANDLED rejection — which React Native puts on the
+     * screen as a full-page red error box. A drain failing is ordinary (offline,
+     * an expired token, a handle torn down by a reload) and the processor's own
+     * retry is what recovers the work, so it must never take over the screen.
+     */
+    private onError?: (error: unknown) => void
   ) {}
 
   start(): void {
     if (this.started) return;
     this.started = true;
+    const generation = this.generation;
     this.unsubscribe = this.connectivity.onOnline(() => {
-      void this.drainAndNotify();
+      this.drainInBackground(generation);
     });
-    void this.drainAndNotify(); // catch up on anything queued offline
+    this.drainInBackground(generation); // catch up on anything queued offline
   }
 
   stop(): void {
     this.unsubscribe?.();
     this.unsubscribe = undefined;
     this.started = false;
+    this.generation += 1; // abandons any drain still in flight
+  }
+
+  private drainInBackground(generation: number): void {
+    void this.drainAndNotify(generation).catch((e) => {
+      if (this.onError) this.onError(e);
+      else if (__DEV__) console.warn("[sync] background drain failed:", e);
+    });
   }
 
   // Kick a drain after enqueuing a mutation so a queued write goes out
   // immediately when online (and is a harmless no-op when offline).
   async flush(): Promise<void> {
-    await this.drainAndNotify();
+    await this.drainAndNotify(this.generation);
   }
 
   // Subscribe to "a drain pass just completed", so a screen can reconcile its
@@ -59,7 +89,7 @@ export class SyncEngine {
     };
   }
 
-  private async drainAndNotify(): Promise<void> {
+  private async drainAndNotify(generation: number): Promise<void> {
     if (this.ensureSession) {
       // Never let a refresh failure block the drain — the processor's own
       // connectivity check handles the genuinely-offline case.
@@ -69,7 +99,12 @@ export class SyncEngine {
         /* keep going; a stale token just means the writes retry */
       }
     }
+    // Torn down while we were on the network: the SQLite handles this drain
+    // would use may no longer exist. Queued work is durable on disk and the
+    // next start() picks it up, so abandoning here loses nothing.
+    if (generation !== this.generation) return;
     await this.processor.drain();
+    if (generation !== this.generation) return;
     for (const cb of [...this.settledListeners]) cb();
   }
 }

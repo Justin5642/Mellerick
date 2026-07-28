@@ -1,6 +1,13 @@
 "use client";
 
-export const dynamic = "force-dynamic";
+// NOTE: a route-segment `export const dynamic = "force-dynamic"` used to sit
+// here. Next ignores route-segment config exported from a "use client" module,
+// so it never had any effect — this page is still prerendered at build time
+// (confirmed in the build output, which lists it as Static). It has been removed
+// rather than made to work: because createClient() runs during that prerender,
+// the build fails loudly when NEXT_PUBLIC_SUPABASE_* is missing, and that is
+// worth keeping. Those values are inlined into the client bundle at build time,
+// so a build that succeeded without them would ship a broken sign-in page.
 
 import { useState, useEffect } from "react";
 import { createClient } from "@/lib/supabase/client";

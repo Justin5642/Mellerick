@@ -86,6 +86,115 @@ describe("SyncEngine", () => {
   });
 });
 
+// A drain is fire-and-forget and it touches native SQLite AFTER awaiting the
+// network. If the engine is torn down during that await — sign-out, or a dev
+// reload, which destroys the JS context while the native objects go with it —
+// the resumed drain would reach for SQLite handles that no longer exist and die
+// with "Cannot use shared object that was already released". stop() must
+// therefore abort work already in flight, not merely unsubscribe.
+describe("SyncEngine — teardown must abort in-flight work", () => {
+  it("does NOT reach the processor when stopped while the session refresh is still pending", async () => {
+    const proc = fakeProcessor();
+    const net = fakeConnectivity();
+    let releaseSession!: () => void;
+    const ensureSession = jest.fn(() => new Promise<void>((res) => (releaseSession = res)));
+
+    const engine = new SyncEngine(proc as unknown as Processor, net.connectivity, ensureSession);
+    engine.start();
+    await flushMicrotasks();
+    expect(ensureSession).toHaveBeenCalled();
+    expect(proc.drain).not.toHaveBeenCalled(); // still awaiting the refresh
+
+    engine.stop(); // teardown lands mid-flight
+    releaseSession();
+    await flushMicrotasks();
+
+    expect(proc.drain).not.toHaveBeenCalled(); // the zombie drain was abandoned
+  });
+
+  it("does not notify onSettled subscribers for a drain that was aborted by stop()", async () => {
+    const proc = fakeProcessor();
+    const net = fakeConnectivity();
+    let releaseSession!: () => void;
+    const ensureSession = jest.fn(() => new Promise<void>((res) => (releaseSession = res)));
+
+    const engine = new SyncEngine(proc as unknown as Processor, net.connectivity, ensureSession);
+    const settled = jest.fn();
+    engine.onSettled(settled);
+    engine.start();
+    await flushMicrotasks();
+
+    engine.stop();
+    releaseSession();
+    await flushMicrotasks();
+
+    expect(settled).not.toHaveBeenCalled();
+  });
+
+  it("drains normally again after a stop/start cycle", async () => {
+    const proc = fakeProcessor();
+    const net = fakeConnectivity();
+    const engine = new SyncEngine(proc as unknown as Processor, net.connectivity);
+
+    engine.start();
+    await flushMicrotasks();
+    engine.stop();
+    engine.start();
+    await flushMicrotasks();
+
+    expect(proc.drain).toHaveBeenCalledTimes(2); // stop() must not wedge the engine
+  });
+});
+
+// start() and the reconnect handler launch drains with `void`, so anything the
+// drain throws becomes an UNHANDLED promise rejection — which React Native
+// surfaces as a full-screen red error box to the user. A failed drain is normal
+// (offline, expired token, a torn-down SQLite handle); it must never take the
+// screen over. The processor's own retry logic is what recovers the work.
+describe("SyncEngine — a failing drain must not surface as an unhandled rejection", () => {
+  it("swallows and reports a drain failure on start instead of rejecting", async () => {
+    const boom = new Error("Cannot use shared object that was already released");
+    const proc = { drain: jest.fn().mockRejectedValue(boom) };
+    const net = fakeConnectivity();
+    const onError = jest.fn();
+
+    const engine = new SyncEngine(proc as unknown as Processor, net.connectivity, undefined, onError);
+    expect(() => engine.start()).not.toThrow();
+    await flushMicrotasks();
+
+    expect(proc.drain).toHaveBeenCalled();
+    expect(onError).toHaveBeenCalledWith(boom);
+  });
+
+  it("swallows a drain failure on reconnection too", async () => {
+    const proc = { drain: jest.fn().mockRejectedValue(new Error("offline")) };
+    const net = fakeConnectivity();
+    const onError = jest.fn();
+
+    const engine = new SyncEngine(proc as unknown as Processor, net.connectivity, undefined, onError);
+    engine.start();
+    await flushMicrotasks();
+    onError.mockClear();
+
+    net.goOnline();
+    await flushMicrotasks();
+
+    expect(onError).toHaveBeenCalled();
+  });
+
+  it("still REJECTS from flush(), whose caller can handle it", async () => {
+    // flush() is awaited by callers (the retry button), so it must keep
+    // propagating — only the fire-and-forget paths swallow.
+    const proc = { drain: jest.fn().mockRejectedValue(new Error("nope")) };
+    const net = fakeConnectivity();
+    const engine = new SyncEngine(proc as unknown as Processor, net.connectivity);
+    engine.start();
+    await flushMicrotasks();
+
+    await expect(engine.flush()).rejects.toThrow(/nope/);
+  });
+});
+
 // Q4: after a long offline workday the access token has expired. The drain that
 // fires on reconnection must not race the background token refresh — otherwise
 // every queued write 401s and burns its retry budget until it dead-letters.

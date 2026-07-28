@@ -23,8 +23,19 @@ export function useSyncStatus(pollMs = 3000): SyncStatus {
     if (!layer) return;
     let active = true;
     const tick = async () => {
-      const [pending, dead] = await Promise.all([layer.outbox.pendingCount(), layer.outbox.deadCount()]);
-      if (active) setCounts({ pending, failed: dead });
+      // Re-check after every await: a tick that began before teardown must not
+      // keep querying SQLite afterwards. On a dev reload the native handles are
+      // gone with the JS context, and touching one throws "Cannot use shared
+      // object that was already released" — as an UNHANDLED rejection out of an
+      // interval, which React Native puts on screen as a red error box.
+      if (!active) return;
+      try {
+        const [pending, dead] = await Promise.all([layer.outbox.pendingCount(), layer.outbox.deadCount()]);
+        if (active) setCounts({ pending, failed: dead });
+      } catch (e) {
+        // A status badge is not worth an error screen; the next tick recovers.
+        if (__DEV__) console.warn("[sync] status poll failed:", e);
+      }
     };
     void tick();
     const iv = setInterval(tick, pollMs);
@@ -37,8 +48,12 @@ export function useSyncStatus(pollMs = 3000): SyncStatus {
   const retry = useCallback(() => {
     if (!layer) return;
     void (async () => {
-      await layer.outbox.retryDead();
-      await layer.engine.flush();
+      try {
+        await layer.outbox.retryDead();
+        await layer.engine.flush();
+      } catch (e) {
+        if (__DEV__) console.warn("[sync] retry failed:", e);
+      }
     })();
   }, [layer]);
 
