@@ -19,8 +19,9 @@ export interface SupabaseGateway {
   // Upload a local file to Supabase Storage; returns the storage path.
   uploadObject(bucket: string, path: string, localUri: string): Promise<void>;
   // Remove a Storage object. Best-effort: never throws (mirrors the web app's
-  // unchecked storage.remove; the job-photos bucket has no DELETE policy yet, so
-  // this is RLS-denied today — throwing would wedge every photo delete).
+  // unchecked storage.remove). Migration 0037 gives the job buckets a DELETE
+  // policy, so this genuinely removes the object; it stays best-effort because a
+  // storage failure must never wedge the row delete queued behind it.
   removeObject(bucket: string, path: string): Promise<void>;
   // Best-effort delete of a queued local attachment after it has synced, so the
   // outbox attachment directory doesn't grow without bound. Never throws.

@@ -1,9 +1,10 @@
 -- =============================================
 -- STORAGE DELETE POLICIES FOR job-photos AND job-audio
 --
--- STATUS: PROPOSED (mobile/full-parity branch). NOT applied. The shared
--- `supabase/` schema and the live database are Jason's — he reviews and applies.
--- Do NOT auto-apply. See mobile/DECISIONS-FOR-AVI.md D12 / Q8.
+-- STATUS: ✅ APPLIED AND VERIFIED IN PRODUCTION (2026-07-28). Confirmed by
+-- querying pg_policies directly — DELETE policies exist on storage.objects for
+-- job photos, job audio AND equipment documents. The previous "PROPOSED / NOT
+-- applied" header was stale and had misled three code comments (see below).
 --
 -- THE LEAK: 0000_baseline.sql:327-333 created the private `job-photos` bucket
 -- with only INSERT and SELECT policies on storage.objects, and
