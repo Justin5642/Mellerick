@@ -1,23 +1,51 @@
 # Reusable login subflow. Callers pass EMAIL / PASSWORD via `env:` so the same
 # flow logs in as a technician, office, or admin account depending on the caller.
 # No credentials are committed — they come from the environment at run time.
+#
+# Two properties that matter in practice:
+#
+#  • Login is CONDITIONAL on the sign-in screen being present, so a flow can run
+#    against a device where a human already signed in by hand — the usual case
+#    when the password must not pass through a script at all. State is not
+#    cleared for the same reason; set CLEAR_STATE=true for an isolated run that
+#    deliberately starts signed out (that run does need EMAIL/PASSWORD).
+#
+#  • The caller passes LANDING — a label that only exists once the app has
+#    painted and routed for that role (e.g. "Approvals" for office/admin,
+#    "My Jobs" for a technician). A dev build streams its bundle from Metro and
+#    shows a blank screen for many seconds; asserting during that window answers
+#    vacuously (every "is X visible" is false, every "not visible" is true). The
+#    long wait below is what makes these flows trustworthy rather than flaky.
 appId: au.com.mellerick.field
+env:
+  LANDING: "Dashboard"
 ---
+- runFlow:
+    when:
+      true: ${CLEAR_STATE == 'true'}
+    commands:
+      - clearState
 - launchApp:
-    clearState: true
     permissions:
       camera: allow
       photos: allow
       location: allow
-- assertVisible: "Sign In"
-- tapOn:
-    id: "login-email"
-- inputText: ${EMAIL}
-- tapOn:
-    id: "login-password"
-- inputText: ${PASSWORD}
-- tapOn:
-    id: "login-submit"
-# Login succeeded once we leave the auth screen (role-specific landing is
-# asserted by the calling flow: technicians → My Jobs, office/admin → Dashboard).
-- assertNotVisible: "Sign In"
+- runFlow:
+    when:
+      visible:
+        id: "login-email"
+    commands:
+      - tapOn:
+          id: "login-email"
+      - inputText: ${EMAIL}
+      - tapOn:
+          id: "login-password"
+      - inputText: ${PASSWORD}
+      - tapOn:
+          id: "login-submit"
+# Signed in AND painted AND routed for this role. If this times out on a
+# signed-out device, the conditional login above raced the bundle load — rerun
+# once the app is warm, or use CLEAR_STATE=true with credentials.
+- extendedWaitUntil:
+    visible: ${LANDING}
+    timeout: 120000

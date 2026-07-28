@@ -1,31 +1,47 @@
-# Critical path — office/admin: login → Approvals → approve a completed job.
-# Mirrors the plan's DoD flow "dashboard→approvals→approve". Requires the seeded
-# account to be ADMIN (approve is admin-gated) and at least one job awaiting
-# approval in the queue.
+# Critical path — office/admin: login → Approvals → open a pending job → the
+# admin-gated approve control is present. Mirrors the plan's DoD flow
+# "dashboard→approvals→approve".
+#
+# TARGETING NOTE (learned the hard way on this build): React Native flattens
+# view hierarchies, so a `testID` on a TouchableOpacity wrapper never reaches the
+# native tree and Maestro cannot see it. Text and TextInputs DO surface. These
+# flows therefore target visible text — which is also what a user actually sees.
+#
+# ⚠ APPROVING IS A REAL WRITE: it drafts an invoice and clears the job from the
+# queue. Against a production database that is not a test artifact, so the tap is
+# OPT-IN. By default this flow verifies everything up to the approve control and
+# stops. Run with APPROVE_FOR_REAL=true (against staging, or a job you are
+# content to invoice) to exercise the tap itself.
 appId: au.com.mellerick.field
 env:
   EMAIL: ${ADMIN_EMAIL}
   PASSWORD: ${ADMIN_PASSWORD}
+  APPROVE_FOR_REAL: "false"
 ---
 - runFlow:
     file: ../subflows/login.yaml
     env:
       EMAIL: ${ADMIN_EMAIL}
       PASSWORD: ${ADMIN_PASSWORD}
-# Office/admin land on the Dashboard; the tab bar exposes Approvals.
-- assertVisible: "Approvals"
+      LANDING: "Approvals"
+# login.yaml has already waited for the office/admin tab bar to paint.
 - tapOn: "Approvals"
-# Expand the first pending approval card, then approve it.
-- assertVisible:
-    id: "job-list-row"
-- tapOn:
-    id: "job-list-row"
-    index: 0
-- assertVisible:
-    id: "approve-job"
-- tapOn:
-    id: "approve-job"
-# A draft invoice is created + the job leaves the pending queue. Confirm the
-# approve control for that card is gone (either the card collapsed or refreshed).
-- assertNotVisible:
-    id: "approve-job"
+- extendedWaitUntil:
+    visible: "JOBS AWAITING APPROVAL.*"
+    timeout: 30000
+# Expand the first pending card (matched by its "#<number> — <title>" heading).
+- tapOn: "#.* — .*"
+# The admin-gated approve control must appear — this assertion proves the whole
+# path: role gate, queue read, card expansion, action rendering.
+- extendedWaitUntil:
+    visible: "Approve & Queue Invoice"
+    timeout: 15000
+# Destructive step — only when explicitly opted in.
+- runFlow:
+    when:
+      true: ${APPROVE_FOR_REAL == 'true'}
+    commands:
+      - tapOn: "Approve & Queue Invoice"
+      - extendedWaitUntil:
+          notVisible: "Approve & Queue Invoice"
+          timeout: 30000
