@@ -158,7 +158,10 @@ export const SQL_GET_QUOTE_ITEMS = `
          ROUND(quantity * unit_price, 2) AS total
   FROM quote_items WHERE quote_id = ? ORDER BY created_at, id`;
 
-// jobs.ready_to_invoice is prod drift (no migration) — confirmed boolean in prod.
+// jobs.ready_to_invoice is created by migration 0040. It was previously believed
+// to be "prod drift, confirmed boolean in prod" — that comment was wrong: the
+// column did not exist at all, so every read and write naming it failed. Verified
+// against the live database 2026-07-28 (ERROR 42703) and fixed by 0040.
 export const SQL_READY_JOBS = `
   SELECT j.id, j.job_number, j.title, c.name AS customer_name
   FROM jobs j LEFT JOIN customers c ON c.id = j.customer_id
