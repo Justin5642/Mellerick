@@ -27,6 +27,13 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
         gateway: supabaseGateway,
         api: apiBridge,
         connectivity: netInfoConnectivity,
+        // A background drain failing is ordinary — offline, an expired token, or
+        // a handle torn down by a dev reload. Without a sink it would surface as
+        // an unhandled rejection, i.e. a full-screen red box over a working app.
+        // The queue is durable, so the next drain picks the work back up.
+        onSyncError: (e) => {
+          if (__DEV__) console.warn("[sync] drain failed:", e);
+        },
         // Q4: after a long offline workday the access token has expired. Refresh
         // it BEFORE replaying queued writes, so the reconnect drain doesn't race
         // the background refresh and 401 every op. getSession() is a no-op read
@@ -35,7 +42,12 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
       });
       built.engine.start();
       setLayer(built);
-    })();
+    })().catch((e) => {
+      // Opening the durable outbox failed. Leaving this uncaught would put a red
+      // box over the whole app; instead the layer stays null, which every write
+      // hook already treats as "not ready".
+      if (__DEV__) console.warn("[data] outbox unavailable, offline writes disabled:", e);
+    });
     return () => {
       cancelled = true;
       built?.engine.stop();
