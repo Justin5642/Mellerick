@@ -1,8 +1,18 @@
 # Security invariant — a technician must NEVER see a dollar figure anywhere.
-# Structural enforcement (MoneyText + route gating) is unit-tested; this is the
-# end-to-end backstop on a real build: navigate the technician's reachable
-# surfaces and assert no "$" renders, and that office-only money surfaces are not
-# even present.
+#
+# This is the end-to-end backstop on a real build for a boundary that is already
+# enforced at three other layers, each independently verified:
+#   • RLS (migrations 0035/0038) — role-impersonation tested in production
+#   • the sync path — a technician's PowerSync mirror carries no money tables and
+#     no `rate` column (verified live via the Sync Diagnostics client)
+#   • the UI — MoneyText / RoleGate unit tests
+# So this flow is the fourth check, not the only one. It is READ-ONLY: it
+# navigates and asserts, and writes nothing.
+#
+# TARGETING NOTE: React Native flattens view hierarchies, so a `testID` on a
+# Touchable wrapper never reaches the native tree. Text surfaces; testIDs on
+# wrappers do not. This flow targets text — which is exactly right here, since
+# the invariant IS about what text a technician can see.
 appId: au.com.mellerick.field
 env:
   EMAIL: ${TECH_EMAIL}
@@ -13,20 +23,27 @@ env:
     env:
       EMAIL: ${TECH_EMAIL}
       PASSWORD: ${TECH_PASSWORD}
-- assertVisible: "My Jobs"
-# The technician shell must not expose office/admin money areas.
-- assertNotVisible: "Billing"
+      LANDING: "My Jobs"
+# The technician shell must not expose office/admin money areas at all — these
+# routes are never registered for the role, so absence is structural.
 - assertNotVisible: "Approvals"
-- assertNotVisible: "Reports"
+- assertNotVisible: "Dashboard"
+- assertNotVisible: "Schedule"
 # No dollar figure on the jobs list.
 - assertNotVisible: ".*\\$[0-9].*"
-# Open a job and sweep its tabs — none may show a dollar amount.
-- tapOn:
-    id: "job-list-row"
-    index: 0
+# Open a job and sweep the tabs a technician can reach — none may show money.
+- tapOn: "#.* — .*"
+- extendedWaitUntil:
+    visible: "Time"
+    timeout: 30000
 - assertNotVisible: "Billing"
-- assertNotVisible: ".*\\$[0-9].*"
-- tapOn: "Variations"
+- assertNotVisible: "Costing"
 - assertNotVisible: ".*\\$[0-9].*"
 - tapOn: "Time"
 - assertNotVisible: ".*\\$[0-9].*"
+- tapOn: "Variations"
+- assertNotVisible: ".*\\$[0-9].*"
+# Variations are the sharpest case: a technician logs quantity/unit but the rate
+# and total belong to the office. Their absence here is the money contract.
+- assertNotVisible: "Rate"
+- assertNotVisible: "Total"

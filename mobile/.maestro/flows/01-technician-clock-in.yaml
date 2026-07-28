@@ -1,30 +1,49 @@
 # Critical path — technician: login → My Jobs → open a job → clock in → clock out.
 # Mirrors the plan's DoD flow "login→my-jobs→clock-in→complete".
+#
+# TARGETING NOTE: React Native flattens view hierarchies, so a `testID` on a
+# Touchable wrapper never reaches the native tree and Maestro cannot see it. Only
+# text and TextInputs surface. These flows target visible text.
+#
+# ⚠ CLOCKING IN IS A REAL WRITE — it creates a `time_entries` row (and the
+# geofence/billing side-effects that follow). Against production that is payroll
+# data, not a test artifact. The clock pair is therefore OPT-IN: by default this
+# flow proves the technician path renders and the Clock In control is reachable,
+# then stops. Run with CLOCK_FOR_REAL=true against staging, or a job whose time
+# log you are content to edit afterwards.
 appId: au.com.mellerick.field
 env:
   EMAIL: ${TECH_EMAIL}
   PASSWORD: ${TECH_PASSWORD}
+  CLOCK_FOR_REAL: "false"
 ---
 - runFlow:
     file: ../subflows/login.yaml
     env:
       EMAIL: ${TECH_EMAIL}
       PASSWORD: ${TECH_PASSWORD}
-- assertVisible: "My Jobs"
-# Open the first job in the list (rows carry testID="job-list-row").
-- tapOn:
-    id: "job-list-row"
-    index: 0
-# The role-aware job detail defaults to the Overview tab; switch to Time.
-- assertVisible: "Time"
+      LANDING: "My Jobs"
+# Open the first assigned job — rows render as "#<number> — <title>".
+- tapOn: "#.* — .*"
+# The role-aware job detail defaults to Overview; switch to the Time tab.
+- extendedWaitUntil:
+    visible: "Time"
+    timeout: 30000
 - tapOn: "Time"
-# Clock in, then confirm the clock-out affordance appears (we are on the clock).
-- tapOn:
-    id: "clock-in"
-- assertVisible:
-    id: "clock-out"
-# Clock out, then confirm we are back to the clock-in state.
-- tapOn:
-    id: "clock-out"
-- assertVisible:
-    id: "clock-in"
+# The clock control must be reachable for a technician on their own job.
+- extendedWaitUntil:
+    visible: "Clock In"
+    timeout: 20000
+# Destructive pair — only when explicitly opted in.
+- runFlow:
+    when:
+      true: ${CLOCK_FOR_REAL == 'true'}
+    commands:
+      - tapOn: "Clock In"
+      - extendedWaitUntil:
+          visible: "Clock Out"
+          timeout: 30000
+      - tapOn: "Clock Out"
+      - extendedWaitUntil:
+          visible: "Clock In"
+          timeout: 30000
