@@ -14,6 +14,20 @@ param([string]$Only)
 $ErrorActionPreference = "Stop"
 Set-Location (Join-Path $PSScriptRoot "..")
 
+# Maestro finds devices through adb, so the SDK must be on PATH for THIS process
+# — never assume the parent shell has it (a terminal opened before the SDK was
+# installed will report "0 devices connected" while the emulator runs happily).
+if (-not $env:ANDROID_HOME) { $env:ANDROID_HOME = "$env:LOCALAPPDATA\Android\Sdk" }
+$env:PATH = "$env:ANDROID_HOME\platform-tools;$env:ANDROID_HOME\emulator;$env:PATH"
+
+$devices = & "$env:ANDROID_HOME\platform-tools\adb.exe" devices | Select-String "\tdevice$"
+if (-not $devices) {
+  Write-Host "No device visible to adb. Start one with:" -ForegroundColor Red
+  Write-Host "  & `"$env:ANDROID_HOME\emulator\emulator.exe`" -avd mellerick" -ForegroundColor Yellow
+  exit 1
+}
+Write-Host "Device(s): $($devices -join ', ')" -ForegroundColor DarkGray
+
 $maestro = if ($env:MAESTRO_HOME) { Join-Path $env:MAESTRO_HOME "bin\maestro.bat" }
            else { Get-ChildItem "$env:LOCALAPPDATA\Temp\claude" -Recurse -Filter maestro.bat -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty FullName }
 if (-not $maestro -or -not (Test-Path $maestro)) { Write-Host "maestro.bat not found - set MAESTRO_HOME" -ForegroundColor Red; exit 1 }
