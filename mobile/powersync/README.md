@@ -1,11 +1,23 @@
-# PowerSync sync rules — design + security contract (MP3, PROPOSED)
+# PowerSync sync rules — design + security contract (MP3)
 
-`sync-rules.yaml` is a **starter** for the PowerSync integration (MP3), which is
-blocked on a PowerSync Cloud instance + the Supabase replication password. It is
-**not wired into the app** — the app today uses online reads + the durable
-offline-write outbox; PowerSync would add true offline *reads*. A documented
-fallback (persisted read-cache over the same read-repository layer) exists if
-PowerSync's cost/fit doesn't work out.
+**The deployable artifact is `sync-streams.yaml`** — the live PowerSync Cloud
+instance (project mellerick / Development) runs **Sync Streams edition 3**, not
+legacy Sync Rules. `sync-rules.yaml` is the legacy-dialect version, kept for
+reference; both encode the same money contract below.
+
+**The client IS wired (2026-07-27) and the instance is LIVE** — streams v2
+deployed, replication slot active. Reads serve from the device mirror through
+`lib/data/reads/source.ts` (`fromLocalOr`: per-call fallback to byte-identical
+Supabase bodies); PowerSync is **read-only** on the device (`uploadData` is a
+tripwire — every write stays on the outbox). The device schema is **generated**:
+`node mobile/scripts/generate-powersync-schema.mjs` (from the deployed streams ×
+the live database); `lib/powersync/schema.test.ts` enforces the money contract
+in CI. See DECISIONS-FOR-AVI.md D89–D92 for the dialect rules the live
+validator actually enforces (no literal IN-lists; JOIN-on-auth.user_id() gate).
+
+Password rotation for `powersync_role`: `pwsh -File scripts\set-powersync-password.ps1`
+(add `-Show` when the dashboard is open on a different computer — see the script
+header). Never commit or display the password; rotate on any suspected exposure.
 
 ## Syntax validation — done, and the first draft was WRONG
 
@@ -27,22 +39,41 @@ row ids (one bucket per assigned job) and every data query filters on
 queries that read a table (`SELECT id as job_id FROM jobs WHERE assigned_to =
 request.user_id()`), and `bucket.<param>` references in data queries.
 
-### ⚠️ One open question — the office/admin role gate
+### Role gate — RESOLVED (table-backed, not a JWT claim)
 
-A **global** bucket takes no parameters, so it can't be role-filtered; a
-**parameterised** bucket requires every data query to use that parameter, which a
-whole-table sync can't do. Pick one before deploying that bucket:
+Gated with PowerSync's documented **"No Output Columns"** parameter query — a
+parameter query selecting nothing, whose only job is deciding whether the bucket
+syncs to this user. Zero output columns means zero bucket parameters, so the
+"every data query must use every bucket parameter" rule is vacuous and whole-table
+`SELECT *` queries are legal. PowerSync ships this exact shape as its
+`global_admins` reference example.
 
-1. **JWT custom claim** (preferred) — put the app role in the token via a
-   Supabase Auth Hook, gate with `request.jwt() ->> 'app_role'`. No extra query.
-2. **Sync Streams** — PowerSync's newer mode, which *does* support subqueries,
-   JOINs and CTEs. Would also let the technician bucket be expressed directly.
-3. **RLS only** for that bucket — accepting the sync rules stop being
-   defence-in-depth for office data.
+```yaml
+office_admin_business:
+  parameters: |
+      SELECT FROM profiles WHERE
+         profiles.id = request.user_id() AND
+         profiles.role IN ('office', 'admin')
+  data:
+    - SELECT * FROM invoices
+    # …
+```
 
-Until one is chosen the `office_admin_business` bucket has **no role gate** and
-would replicate money to every authenticated device, technicians included. It is
-commented as the most dangerous line in the file.
+**Why the table and not a JWT custom claim** (the option originally chosen, then
+reversed on evidence): PowerSync's docs note that gating on a source-database row
+means *"access can instantly be revoked"*. A claim cannot be re-read from an
+already-issued token, so with `jwt_expiry = 3600` a demoted technician would keep
+syncing financial data to their device for up to **an hour**. The table gate also
+avoids a custom access token hook entirely — a malformed hook runs on every token
+issuance and can block all logins.
+
+**Fail-closed:** no profiles row, or a NULL/`technician` role → the WHERE matches
+nothing → the bucket is never created → nothing syncs. There is no path where a
+missing or unknown role leaks money.
+
+**RLS remains the authority.** This is defence-in-depth; migrations 0027 / 0035 /
+0038 are what actually enforce the boundary — and they are now **APPLIED in
+production**.
 
 > The money-column contract below is **authoritative** and must not be weakened —
 > it is the same boundary as the RLS migrations (0027 + proposed 0035 / 0038).
@@ -83,6 +114,17 @@ backstop). **Payroll** tables (`staff_cost_profiles`, `billing_rate_config`) are
 `role = 'admin'` when implementing, rather than including them in the office set.
 
 ## Role-impersonation test (the parity check — MP3 DoD)
+
+> ✅ **VERIFIED AGAINST THE LIVE SERVICE — 2026-07-27**, via the dashboard's
+> Sync Diagnostics Client with real identities (dev tokens; read-only):
+> **technician** `1720afed-…` → 6 money-free tables only (customers 138,
+> sites 519, profiles 6, variation_types 2 **without the `rate` column**,
+> backflow 1+1); office buckets synced ZERO rows and no money table exists
+> client-side; `tech_jobs` correctly parameterized on their UUID.
+> **admin** `3d9d69ad-…` → the full 18-table business set (jobs 825,
+> job_photos 9,714, invoices/items/expenses/POs/cost-centres present),
+> 11,257 rows / 30 buckets. Development tokens were enabled on the instance
+> for this check (Client Auth toggle) — disable there if unwanted.
 Mirror the RLS role-impersonation test (`supabase/tests/0035_…`). Against a
 PowerSync test instance, for a **technician** token assert:
 1. Every table in the "NEVER sync" list yields **zero rows** in the device DB.
@@ -96,12 +138,33 @@ PowerSync test instance, for a **technician** token assert:
 
 For **office/admin**, assert the broader set is present and correctly scoped.
 
-## Setup checklist (when the account exists)
-1. PowerSync Cloud instance (AU region) + a Supabase `powersync` publication +
-   replication role + "Use Supabase Auth". Needs `SUPABASE_DB_URL`.
-2. Apply RLS 0035 first (the row-level pre-req).
-3. Load `sync-rules.yaml`, run the role-impersonation test above, iterate until a
-   technician token receives zero money columns.
-4. Wire the client (`@powersync/react-native`) behind the existing
-   `lib/data/reads/` layer so screens don't change; add `@powersync/attachments`
-   for photos/audio.
+## Setup status
+
+**Supabase side — DONE and verified in production (2026-07-27):**
+- `wal_level = logical` ✅
+- `powersync` publication ✅ — **scoped to the 24 tables the sync rules reference**
+  (migration `0039`). It was `FOR ALL TABLES` (68), which would have streamed
+  `xero_tokens` / `google_tokens` (live OAuth tokens), `staff_cost_profiles`,
+  `billing_rate_config`, `staff_leave` and `device_tokens` into PowerSync's cloud
+  service. Sync rules gate *devices*; the publication gates *the service*. Now
+  excluded — verified `secrets_still_published = NONE`.
+- `powersync_role` ✅ — has REPLICATION, USAGE on `public`, and SELECT on all 24.
+- RLS pre-req ✅ — `0035` / `0038` applied AND role-impersonation verified
+  (technician denied on every money table; money-free views still readable).
+
+⚠️ **Keep the publication in sync with `sync-streams.yaml`.** Add a table to a
+stream and you must `alter publication powersync add table <t>;` or it silently
+never syncs — then regenerate the schema
+(`node mobile/scripts/generate-powersync-schema.mjs`).
+
+**PowerSync side — DONE (2026-07-27):** Cloud instance live ("Use Supabase Auth"
+enabled), streams v2 deployed and dashboard-validated, replication slot active,
+client wired: connector + serialized provider + `fromLocalOr` seam; 13 read
+modules converted or documented Supabase-only; jobs extracted from screens.
+`@powersync/attachments` deliberately dropped (D90 — reads-only architecture;
+photos stay on the outbox → Storage).
+
+**Still required (needs hardware):** the on-device role-impersonation pass above
+via a custom dev client (`npx expo run:android` — Expo Go cannot load
+op-sqlite), plus the serialization/ordering spot-checks listed in D89–D92's
+design notes.

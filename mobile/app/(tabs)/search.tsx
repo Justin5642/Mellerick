@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   View,
   Text,
@@ -13,7 +13,7 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect, useRouter } from "expo-router";
-import { supabase } from "../../lib/supabase";
+import { searchJobs } from "../../lib/data/reads/jobs";
 import { colors, statusColors } from "../../lib/theme";
 
 interface Job {
@@ -32,29 +32,37 @@ export default function SearchJobsScreen() {
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState("");
 
-  const loadJobs = useCallback(async () => {
-    // No assigned_to / status filter — techs need to find ANY job in the
-    // system (completed or not, theirs or not) to reference photos/plans.
-    // NOTE: capped at 10,000 rather than left unbounded purely as a sanity
-    // ceiling — as of writing the whole system has ~500 jobs total, so this
-    // comfortably covers every job with a lot of headroom for growth. If
-    // this business ever gets into the tens of thousands of jobs, swap this
-    // for server-side filtering (Postgres ilike query per keystroke) instead
-    // of pulling the full table client-side.
-    const { data } = await supabase
-      .from("jobs")
-      .select("id, job_number, title, status, scheduled_start, customers(name), sites(name, address_line1, suburb, site_lat, site_lng)")
-      .order("created_at", { ascending: false })
-      .limit(10000);
-    setAllJobs((data as any) ?? []);
+  // Guards against out-of-order responses when the query changes mid-flight.
+  const reqId = useRef(0);
+
+  // searchJobs owns what used to be this screen's inline pull + filter: the
+  // matching jobs (any job in the system — completed or not, theirs or not),
+  // newest first, capped at 50; an empty query returns [] with no fetch.
+  const loadJobs = useCallback(async (q: string) => {
+    const id = ++reqId.current;
+    const data = await searchJobs(q);
+    if (id !== reqId.current) return; // a newer query superseded this one
+    setAllJobs(data);
     setLoading(false);
   }, []);
 
+  // Re-run the current search when the tab regains focus (jobs may have
+  // changed while a pushed screen was open) — the same refresh-on-focus the
+  // old upfront pull had. Read via a ref so refocus sees the latest query
+  // without this effect re-firing per keystroke (the debounce below owns those).
+  const queryRef = useRef(query);
+  queryRef.current = query;
   useFocusEffect(
     useCallback(() => {
-      loadJobs();
+      loadJobs(queryRef.current);
     }, [loadJobs])
   );
+
+  // Debounce the search box.
+  useEffect(() => {
+    const t = setTimeout(() => loadJobs(query), 250);
+    return () => clearTimeout(t);
+  }, [query, loadJobs]);
 
   const results = useMemo(() => {
     const q = query.trim().toLowerCase();

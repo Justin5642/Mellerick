@@ -6,9 +6,13 @@ module.exports = {
   preset: "jest-expo",
   setupFilesAfterEnv: ["<rootDir>/test/setup.ts"],
   transformIgnorePatterns: [
-    "node_modules/(?!((jest-)?react-native|@react-native(-community)?|expo(nent)?|@expo(nent)?/.*|@expo-google-fonts/.*|react-navigation|@react-navigation/.*|@unimodules/.*|unimodules|sentry-expo|native-base|react-native-svg|nativewind|react-native-css-interop|lucide-react-native|react-native-reanimated|@gorhom/.*|moti|@shopify/flash-list))",
+    "node_modules/(?!((jest-)?react-native|@react-native(-community)?|expo(nent)?|@expo(nent)?/.*|@expo-google-fonts/.*|react-navigation|@react-navigation/.*|@unimodules/.*|unimodules|sentry-expo|native-base|react-native-svg|nativewind|react-native-css-interop|lucide-react-native|react-native-reanimated|@gorhom/.*|moti|@shopify/flash-list|@powersync/common))",
   ],
   moduleNameMapper: {
     "\\.(css)$": "<rootDir>/test/styleMock.js",
+    // No unit test may load native PowerSync/op-sqlite code — reads are tested
+    // through the LocalReads seam. The guard throws on import, loudly.
+    "^@powersync/react-native$": "<rootDir>/test/powersyncNativeGuard.js",
+    "^@op-engineering/op-sqlite$": "<rootDir>/test/powersyncNativeGuard.js",
   },
 };

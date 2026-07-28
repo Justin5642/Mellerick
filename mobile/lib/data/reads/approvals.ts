@@ -1,3 +1,10 @@
+// DELIBERATELY SUPABASE-ONLY — no fromLocalOr / LocalReads path in this module.
+// All three tables read here ARE office-synced, but getApprovalPlan is a
+// pre-write consistency read: existingInvoiceId is the duplicate-invoice guard.
+// A stale local DB returning null would create a second invoice. Reading this
+// locally trades a correctness invariant for an offline convenience on a flow
+// that already requires the network. Pinned by supabaseOnly.test.ts.
+
 import { supabase } from "../../supabase";
 import type { LineItemInput } from "../repositories/finance";
 

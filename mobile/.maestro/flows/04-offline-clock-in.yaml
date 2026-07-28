@@ -2,32 +2,54 @@
 # entry survived (the durable outbox replays it). setAirplaneMode is Android-only
 # in Maestro, so this flow runs on Android; the iOS equivalent is a manual QA step
 # (toggle Airplane Mode in Control Center).
+#
+# TARGETING NOTE: React Native flattens view hierarchies, so a `testID` on a
+# Touchable wrapper never reaches the native tree. This flow targets text.
+#
+# ⚠ THIS FLOW WRITES BY DESIGN — proving the offline write survives IS the test,
+# so there is no assert-only mode. It creates a `time_entries` row and then
+# leaves it open (clocked in). Run it against staging, or clock out and tidy the
+# entry afterwards. It is gated behind CLOCK_FOR_REAL for the same reason as
+# flow 01 so a full-suite run cannot write to production by accident.
+#
+# ⚠ DEV-BUILD CAVEAT: airplane mode also cuts the emulator's link to Metro, so a
+# dev client cannot fetch its bundle while offline. Run this against a RELEASE
+# build (bundle embedded) — otherwise the app reloads into a red screen rather
+# than testing anything.
 appId: au.com.mellerick.field
 env:
   EMAIL: ${TECH_EMAIL}
   PASSWORD: ${TECH_PASSWORD}
+  CLOCK_FOR_REAL: "false"
 ---
 - runFlow:
-    file: ../subflows/login.yaml
-    env:
-      EMAIL: ${TECH_EMAIL}
-      PASSWORD: ${TECH_PASSWORD}
-- assertVisible: "My Jobs"
-- tapOn:
-    id: "job-list-row"
-    index: 0
-- tapOn: "Time"
-# Go offline, then clock in — the write is enqueued in the durable outbox and the
-# UI updates optimistically (clock-out affordance appears with no network).
-- setAirplaneMode: enabled
-- tapOn:
-    id: "clock-in"
-- assertVisible:
-    id: "clock-out"
-# Reconnect; the outbox drains and the entry is now on the server. The open entry
-# must still be present (no duplicate, no loss) after a reload.
-- setAirplaneMode: disabled
-- waitForAnimationToEnd:
-    timeout: 8000
-- assertVisible:
-    id: "clock-out"
+    when:
+      true: ${CLOCK_FOR_REAL == 'true'}
+    commands:
+      - runFlow:
+          file: ../subflows/login.yaml
+          env:
+            EMAIL: ${TECH_EMAIL}
+            PASSWORD: ${TECH_PASSWORD}
+            LANDING: "My Jobs"
+      - tapOn: "#.* — .*"
+      - extendedWaitUntil:
+          visible: "Time"
+          timeout: 30000
+      - tapOn: "Time"
+      - extendedWaitUntil:
+          visible: "Clock In"
+          timeout: 20000
+      # Go offline, then clock in — the write is enqueued in the durable outbox
+      # and the UI updates optimistically (Clock Out appears with no network).
+      - setAirplaneMode: enabled
+      - tapOn: "Clock In"
+      - extendedWaitUntil:
+          visible: "Clock Out"
+          timeout: 30000
+      # Reconnect; the outbox drains and the entry lands on the server. The open
+      # entry must still be present (no duplicate, no loss).
+      - setAirplaneMode: disabled
+      - waitForAnimationToEnd:
+          timeout: 10000
+      - assertVisible: "Clock Out"

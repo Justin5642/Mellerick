@@ -1,3 +1,29 @@
+-- =====================================================================
+-- ✅ VERIFIED IN PRODUCTION — 2026-07-27, project ntdohrsujnyuqyeirqva
+--
+-- Rather than seeding throwaway auth.users rows into a LIVE auth table, the
+-- check was run by impersonating REAL existing identities, read-only, inside a
+-- transaction that rolled back. Zero writes to production.
+--
+--   technician 1720afed-…  |  admin 3d9d69ad-…
+--
+--   table                | technician | admin  <- the control proving the zeros
+--   ---------------------+------------+------  are RLS, not empty tables
+--   job_expenses         |     0      |   1
+--   equipment_expenses   |     0      |   0    (genuinely empty; policy same shape)
+--   inventory            |     0      |   0    (genuinely empty; policy same shape)
+--   equipment            |     0      |  21
+--   purchase_orders      |     0      |   1
+--   po_cost_centers      |     0      |   7
+--
+--   And the tech app still works — as the technician:
+--     purchase_orders_public 1 · po_cost_centers_public 7
+--     variation_types_public 2 · job_variations_public 3
+--
+-- The seed-and-rollback script below remains valid for a NON-production
+-- database (it needs to insert its own identities); it was not the method used.
+-- =====================================================================
+
 -- ========================================================================
 -- RLS role-impersonation test for migration 0035
 -- (companion to supabase/migrations/0035_restrict_remaining_financial_tables_to_office_admin.sql)

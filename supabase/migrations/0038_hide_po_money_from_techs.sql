@@ -37,12 +37,16 @@
 
 -- 1. Money-free projections for the technician app -----------------------------
 
+-- NOTE: `id` and the FK column `po_id` MUST be selected. PostgREST resolves
+-- embedded reads between two views by tracing their columns back to the base
+-- tables' foreign key — drop the FK column and
+-- `purchase_orders_public?select=po_cost_centers_public(...)` stops resolving.
 create or replace view purchase_orders_public as
   select id, job_id, po_number, client_reference, total_hours, created_at
   from purchase_orders;
 
 create or replace view po_cost_centers_public as
-  select id, purchase_order_id, name, code, created_at
+  select id, po_id, name, code, allocated_hours, sort_order, created_at
   from po_cost_centers;
 
 grant select on purchase_orders_public to authenticated;

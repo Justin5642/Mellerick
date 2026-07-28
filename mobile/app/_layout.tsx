@@ -7,6 +7,7 @@ import { AuthProvider, useAuth } from "../lib/auth-context";
 import { usePushRegistration } from "../lib/push/usePushRegistration";
 import { LocationTrackingProvider } from "../lib/location-tracking";
 import { DataProvider } from "../lib/data/DataProvider";
+import { PowerSyncProvider } from "../lib/data/PowerSyncProvider";
 import { SyncStatusPill } from "../design/components/SyncStatusPill";
 import { TouchableOpacity, Text } from "react-native";
 import { colors } from "../lib/theme";
@@ -124,11 +125,13 @@ export default function RootLayout() {
   return (
     <AuthProvider>
       <DataProvider>
-        <LocationTrackingProvider>
-          <StatusBar style="dark" />
-          <RootNavigation />
-          <SyncStatusOverlay />
-        </LocationTrackingProvider>
+        <PowerSyncProvider>
+          <LocationTrackingProvider>
+            <StatusBar style="dark" />
+            <RootNavigation />
+            <SyncStatusOverlay />
+          </LocationTrackingProvider>
+        </PowerSyncProvider>
       </DataProvider>
     </AuthProvider>
   );

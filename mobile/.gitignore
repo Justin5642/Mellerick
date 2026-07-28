@@ -39,3 +39,11 @@ yarn-error.*
 # generated native folders
 /ios
 /android
+
+# release credentials — committing any of these hands over the ability to
+# publish or impersonate this app. SHIPPING.md tells you to create the Play
+# service-account key at this path, so it must be ignored BEFORE it exists.
+play-service-account.json
+*.keystore
+google-services.json
+GoogleService-Info.plist

@@ -4,6 +4,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { supabase } from "../../lib/supabase";
+import { getJob } from "../../lib/data/reads/jobs";
 import { colors, statusColors } from "../../lib/theme";
 import { useIsOfficeOrAdmin } from "../../design/guards/useRole";
 import { useJobEdit } from "../../lib/data/hooks/useJobEdit";
@@ -50,14 +51,7 @@ export default function JobDetailScreen() {
     } = await supabase.auth.getUser();
     setUserId(user?.id ?? null);
 
-    const { data } = await supabase
-      .from("jobs")
-      .select(
-        "id, job_number, title, status, priority, description, notes, job_type, created_at, scheduled_start, scheduled_end, actual_start, actual_end, completion_notes, overtime_reason, overtime_category, voice_report_transcript, customers(name, phone, mobile, email), sites(name, address_line1, suburb, state, postcode, site_lat, site_lng)"
-      )
-      .eq("id", id)
-      .single();
-    setJob(data);
+    setJob(await getJob(id));
     setLoading(false);
   }, [id]);
 

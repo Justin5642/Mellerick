@@ -70,23 +70,35 @@ bucket_definitions:
   # OFFICE / ADMIN: the broader business set, money included (they are authorised
   # to see it; RLS remains the backstop).
   #
-  # ⚠️ OPEN QUESTION — the role gate. A global bucket has no parameters, so it
-  # cannot be filtered by role; but a parameterised bucket requires EVERY data
-  # query to use that parameter, which a whole-table sync cannot do. Legacy sync
-  # rules also can't do the scalar subquery the first draft used. Resolve ONE of:
-  #   (a) put the app role in a JWT custom claim via a Supabase Auth Hook and
-  #       gate with `request.jwt() ->> 'app_role'`  ← preferred, no extra query;
-  #   (b) use PowerSync "Sync Streams" (the newer mode) instead of legacy Sync
-  #       Rules — it DOES support subqueries, JOINs and CTEs, which would also
-  #       let the technician bucket be expressed more directly; or
-  #   (c) rely on RLS alone for this bucket, accepting that the sync rules stop
-  #       being a defence-in-depth layer for office data.
-  # DO NOT deploy this bucket until one of those is chosen — as written it has no
-  # role gate, so it would replicate money to EVERY authenticated device,
-  # including technicians'. This is the single most dangerous line in the file.
+  # ROLE GATE — RESOLVED (Avi chose the table-backed gate over a JWT claim).
+  #
+  # This uses PowerSync's documented "No Output Columns" parameter query: a
+  # parameter query that selects NOTHING exists purely to decide whether the
+  # bucket is synced to this user at all. Because it yields zero columns there
+  # are zero bucket parameters, so the "every data query must use every bucket
+  # parameter" rule is vacuously satisfied and whole-table `SELECT *` queries
+  # are legal. PowerSync ships this exact combination as its `global_admins`
+  # reference example.
+  #
+  # WHY THE TABLE AND NOT A JWT CLAIM: PowerSync's own docs note that gating on
+  # a source-database row means "access can instantly be revoked". A JWT claim
+  # cannot be re-read from an already-issued token, so with jwt_expiry = 3600 a
+  # demoted technician would keep syncing financial data to their device for up
+  # to an HOUR. It also avoids a custom access token hook entirely — a malformed
+  # one runs on every token issuance and can block all logins.
+  #
+  # FAIL-CLOSED: if the caller has no profiles row, or role is NULL/'technician',
+  # the WHERE matches nothing → the bucket is never created → zero rows sync.
+  # There is no path where a missing/unknown role syncs money.
+  #
+  # RLS IS STILL THE AUTHORITY. This is defence-in-depth, not the control:
+  # migrations 0027 / 0035 / 0038 are what actually enforce the boundary.
   # ---------------------------------------------------------------------------
   office_admin_business:
-    # parameters: <role gate — see the open question above>
+    parameters: |
+        SELECT FROM profiles WHERE
+           profiles.id = request.user_id() AND
+           profiles.role IN ('office', 'admin')
     data:
       - SELECT * FROM jobs
       - SELECT * FROM job_items

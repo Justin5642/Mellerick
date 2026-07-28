@@ -1,3 +1,10 @@
+// DELIBERATELY SUPABASE-ONLY — no fromLocalOr / LocalReads path in this module.
+// staff_cost_profiles and staff_leave are payroll tables, excluded from the
+// PowerSync publication by design (migration 0039) — they never exist
+// on-device, so a local read would return empty rows instead of an RLS denial.
+// The writes here are already direct/online per DECISIONS D33 and are
+// untouched. Pinned by supabaseOnly.test.ts.
+
 import { supabase } from "../../supabase";
 
 export interface CostProfile {

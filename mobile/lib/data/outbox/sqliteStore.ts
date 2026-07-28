@@ -59,13 +59,44 @@ function rowToOp(r: Row): Operation {
   } as Operation;
 }
 
+// One store per process, keyed by filename.
+//
+// expo-sqlite hands back a SHARED native object per database file: opening the
+// same file twice yields two JS handles onto ONE native object, not two
+// connections. When either handle is released — a Fast Refresh, a provider
+// remount, React's dev double-mount — the others point at freed memory and the
+// next query dies with "Cannot use shared object that was already released"
+// (expo.modules.sqlite.NativeStatement). DataProvider opens the store inside a
+// useEffect, so any remount used to trigger exactly that.
+//
+// Caching the PROMISE (not the resolved store) also collapses a race where two
+// callers open concurrently. A rejected attempt is evicted so a transient
+// failure cannot leave the outbox permanently unusable.
+const openStores = new Map<string, Promise<SqliteOutboxStore>>();
+
+/** Test seam: drop cached handles so each test opens fresh. */
+export function __resetOutboxStoreForTests(): void {
+  openStores.clear();
+}
+
 export class SqliteOutboxStore implements OutboxStore {
   private constructor(private db: SQLite.SQLiteDatabase) {}
 
-  static async open(name = "mellerick-outbox.db"): Promise<SqliteOutboxStore> {
-    const db = await SQLite.openDatabaseAsync(name);
-    await db.execAsync(CREATE);
-    return new SqliteOutboxStore(db);
+  static open(name = "mellerick-outbox.db"): Promise<SqliteOutboxStore> {
+    const existing = openStores.get(name);
+    if (existing) return existing;
+
+    const opening = (async () => {
+      const db = await SQLite.openDatabaseAsync(name);
+      await db.execAsync(CREATE);
+      return new SqliteOutboxStore(db);
+    })().catch((e) => {
+      openStores.delete(name); // never cache a failure
+      throw e;
+    });
+
+    openStores.set(name, opening);
+    return opening;
   }
 
   async insert(op: Operation): Promise<void> {

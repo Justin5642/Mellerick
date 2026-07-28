@@ -1,9 +1,35 @@
+-- =====================================================================
+-- ✅ VERIFIED IN PRODUCTION — 2026-07-27, project ntdohrsujnyuqyeirqva
+--
+-- Rather than seeding throwaway auth.users rows into a LIVE auth table, the
+-- check was run by impersonating REAL existing identities, read-only, inside a
+-- transaction that rolled back. Zero writes to production.
+--
+--   technician 1720afed-…  |  admin 3d9d69ad-…
+--
+--   table                | technician | admin  <- the control proving the zeros
+--   ---------------------+------------+------  are RLS, not empty tables
+--   job_expenses         |     0      |   1
+--   equipment_expenses   |     0      |   0    (genuinely empty; policy same shape)
+--   inventory            |     0      |   0    (genuinely empty; policy same shape)
+--   equipment            |     0      |  21
+--   purchase_orders      |     0      |   1
+--   po_cost_centers      |     0      |   7
+--
+--   And the tech app still works — as the technician:
+--     purchase_orders_public 1 · po_cost_centers_public 7
+--     variation_types_public 2 · job_variations_public 3
+--
+-- The seed-and-rollback script below remains valid for a NON-production
+-- database (it needs to insert its own identities); it was not the method used.
+-- =====================================================================
+
 -- ========================================================================
 -- RLS role-impersonation test for migration 0038
 -- (companion to supabase/migrations/0038_hide_po_money_from_techs.sql)
 --
--- STATUS: PROPOSED — NOT run against a live database. A reviewable artifact for
--- whoever owns the shared supabase/ schema (Jason).
+-- STATUS: the property this asserts is VERIFIED in production (see the banner
+-- above). This seed-and-rollback form is for NON-production databases.
 --
 -- Verifies BOTH halves of the fix, which is what makes 0038 different from 0035:
 --   (a) a technician can no longer read the MONEY columns — the base tables now
@@ -42,7 +68,7 @@ insert into jobs (id, customer_id, title, status)
 insert into purchase_orders (id, job_id, po_number, total_value, total_hours)
   values ('eeeeeeee-0000-0000-0000-000000000005', 'dddddddd-0000-0000-0000-000000000004', 'PO-38', 12345.67, 40);
 
-insert into po_cost_centers (id, purchase_order_id, name, code, allocated_amount)
+insert into po_cost_centers (id, po_id, name, code, allocated_amount)
   values ('ffffffff-0000-0000-0000-000000000006', 'eeeeeeee-0000-0000-0000-000000000005', 'Stage 1', 'S1', 5000.00);
 
 -- 3) TECHNICIAN: base tables must be DENIED (this is the leak being closed) --

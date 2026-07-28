@@ -11,10 +11,20 @@ import type { SideEffectKind } from "./outbox/types";
 export const supabaseGateway: SupabaseGateway = {
   async insertRow(table, row) {
     const { error } = await supabase.from(table).insert(row);
-    // 23505 = unique_violation. The row is already there from an earlier attempt
-    // whose response we never saw, so the create has effectively succeeded —
-    // report success WITHOUT overwriting whatever the row holds now.
-    if (error && error.code !== "23505") throw new Error(`${table} insert: ${error.message}`);
+    if (!error) return;
+    // 23505 = unique_violation, and it means two very different things here.
+    //
+    // PRIMARY KEY violated → this is the outbox replaying a write that already
+    // landed (we never saw the first response). Report success WITHOUT
+    // overwriting whatever the row holds now — that is the idempotency the
+    // durable outbox depends on.
+    //
+    // SECONDARY unique constraint violated (inventory.sku, variation_types.name)
+    // → a genuinely NEW row collided with a DIFFERENT existing one. Nothing was
+    // written. Swallowing it would mark the operation done and lose the record
+    // silently, with the user believing they had saved it. Surface it.
+    if (error.code === "23505" && isReplayOfSameRow(table, error.message)) return;
+    throw new Error(`${table} insert: ${error.message}`);
   },
   async updateRow(table, id, patch) {
     const { error } = await supabase.from(table).update(patch).eq("id", id);
@@ -35,11 +45,11 @@ export const supabaseGateway: SupabaseGateway = {
   },
   async removeObject(bucket, path) {
     // Best-effort, never throws — mirrors the web app's unchecked
-    // storage.remove(). The job-photos bucket has no Storage DELETE policy yet
-    // (see DECISIONS D12), so this is RLS-denied today and objects orphan; if we
-    // threw, every offline photo delete would fail forever and never delete the
-    // row. When a DELETE policy lands this starts actually removing objects with
-    // no code change. "Not found" is likewise success (idempotent replay).
+    // storage.remove(). Migration 0037 IS applied (verified against pg_policies
+    // 2026-07-28), so job-photos/job-audio deletes now genuinely remove the
+    // object rather than being RLS-denied. Staying best-effort regardless: a
+    // storage hiccup must never dead-letter the row delete behind it, and
+    // "not found" is success on an idempotent replay.
     try {
       await supabase.storage.from(bucket).remove([path]);
     } catch {
@@ -55,6 +65,28 @@ export const supabaseGateway: SupabaseGateway = {
     }
   },
 };
+
+/**
+ * True when a unique_violation names a PRIMARY KEY constraint — i.e. the same
+ * row is being inserted twice, which is exactly what an outbox replay looks
+ * like. Postgres reports these as `<table>_pkey`.
+ *
+ * When the constraint cannot be identified we treat it as a replay: the cost is
+ * at worst one lost row in an ambiguous case, whereas throwing would dead-letter
+ * a legitimately-replayed write forever and block the whole queue behind it.
+ *
+ * That ambiguous branch is the only path on which a write disappears without
+ * surfacing an error, so it warns unconditionally — a report of a missing row is
+ * otherwise impossible to attribute after the fact.
+ */
+function isReplayOfSameRow(table: string, message: string): boolean {
+  const named = message.match(/constraint "([^"]+)"/);
+  if (!named) {
+    console.warn(`[outbox] ${table}: unique violation with no constraint name — assuming replay, row dropped:`, message);
+    return true;
+  }
+  return named[1].endsWith("_pkey");
+}
 
 function guessContentType(path: string): string {
   if (/\.png$/i.test(path)) return "image/png";

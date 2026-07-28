@@ -1,3 +1,10 @@
+// DELIBERATELY SUPABASE-ONLY — no fromLocalOr / LocalReads path in this module.
+// staff_cost_profiles and billing_rate_config are excluded from the PowerSync
+// publication (migration 0039), so they never exist on-device. 8 of the 10
+// queries below could be served locally, but minMarginPct (billing_rate_config)
+// drives the belowMinMargin verdict — defaulting it offline would silently
+// change a money verdict. Pinned by supabaseOnly.test.ts.
+
 import { supabase } from "../../supabase";
 import { computeJobProfitability, type JobProfitabilityResult, type StaffCostProfile, type EquipmentOption } from "../../costing";
 
