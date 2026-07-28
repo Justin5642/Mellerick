@@ -5,7 +5,7 @@
 -- STATUS: PROPOSED (mobile/full-parity branch). Authored + cross-checked by an
 -- automated policy-name/tech-access audit, but NOT yet applied or RLS-tested
 -- against a live database (RLS can't be exercised from the mobile repo). The
--- shared `supabase/` schema is owned by Jason -- he should review this, run the
+-- shared `supabase/` schema is owned by Justin -- he should review this, run the
 -- companion role-impersonation test in ../tests/0035_rls_role_impersonation_test.sql
 -- against a real DB, and apply it. Do NOT auto-apply unreviewed. See
 -- mobile/DECISIONS-FOR-AVI.md Q19/D39.

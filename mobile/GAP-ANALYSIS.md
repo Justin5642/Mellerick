@@ -7,7 +7,7 @@ Companion to `HANDOVER-mobile.md` and `DECISIONS-FOR-AVI.md`.
 **Headline (updated after the D40–D68 run):** the in-repo feature work is now
 **complete** — every one of the 15 areas is either at **full parity** or has only
 work that is genuinely **out of repo scope**: an external backend gate (Send-email
-/ PDF / Xero via the cookie-only routes → Jason's Bearer refactor; Staff invite via
+/ PDF / Xero via the cookie-only routes → Justin's Bearer refactor; Staff invite via
 auth-admin; integration OAuth), a native-module deferral (document *upload* needs a
 file/PDF picker that can't be device-QA'd here), or the one **flagged crucial
 decision** (Q3 — backflow test-submit dedupe, so the compliance email can't
@@ -54,7 +54,7 @@ out of in-repo scope:
   but logging a *test* carries a certificate upload AND a water-authority **submit**
   that must be **dedupe-guarded server-side** before it can be safely replayed;
   left direct-write (online) so a retry can't double-email the authority. Needs
-  Avi/Jason to confirm the dedupe contract — the one genuinely-open in-repo item.
+  Avi/Justin to confirm the dedupe contract — the one genuinely-open in-repo item.
 
 **Deferred to web by design (native-module / dependent-field cascade):**
 - Document **upload** (job + equipment *view/open* done, D67) — needs a native
@@ -71,7 +71,7 @@ out of in-repo scope:
 
 ## External gates (NOT closable in-repo)
 
-- **Invoice/Quote Send-email, PDF view/download, Xero push** — the web API routes are cookie-only and reject a mobile Bearer token → **backend refactor (Jason)**.
+- **Invoice/Quote Send-email, PDF view/download, Xero push** — the web API routes are cookie-only and reject a mobile Bearer token → **backend refactor (Justin)**.
 - **Staff invite / resend / edit-login-email** — Supabase auth-admin onboarding.
 - **Integration OAuth connect/reconnect** (Xero, Google) — browser redirect flow.
 - **On-device QA, store accounts, push credentials, PowerSync password** — hardware/accounts.

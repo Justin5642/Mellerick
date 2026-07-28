@@ -2,7 +2,7 @@
 -- CLOSE THE LAST DOLLAR LEAK: purchase_orders + po_cost_centers
 --
 -- STATUS: PROPOSED (not applied). The shared `supabase/` schema and the live
--- database are Jason's — he reviews, tests and applies. Do NOT auto-apply.
+-- database are Justin's — he reviews, tests and applies. Do NOT auto-apply.
 -- See mobile/DECISIONS-FOR-AVI.md Q19 (the deferred half of migration 0035).
 --
 -- WHY THIS WAS DEFERRED FROM 0035: every other money-bearing table could simply

@@ -29,7 +29,7 @@
 -- (companion to supabase/migrations/0035_restrict_remaining_financial_tables_to_office_admin.sql)
 --
 -- STATUS: PROPOSED — this has NOT been run against a live database. It is a
--- reviewable artifact for whoever owns the shared supabase/ schema (Jason).
+-- reviewable artifact for whoever owns the shared supabase/ schema (Justin).
 --
 -- Verifies: a technician is DENIED on every locked table, while an office user
 -- is still ALLOWED. Run migration 0035 FIRST, then run this whole script in the

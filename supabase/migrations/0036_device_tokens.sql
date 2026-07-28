@@ -1,4 +1,4 @@
--- PROPOSED (not applied) — flagged for Jason's review, like 0035.
+-- PROPOSED (not applied) — flagged for Justin's review, like 0035.
 -- Backs the mobile push-notification registration (MP9): each device stores its
 -- Expo push token so the backend can target it. The mobile client upserts here
 -- after sign-in (see mobile/lib/push/*); the app degrades gracefully if this
