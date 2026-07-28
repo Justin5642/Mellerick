@@ -23,7 +23,7 @@ export const supabaseGateway: SupabaseGateway = {
     // → a genuinely NEW row collided with a DIFFERENT existing one. Nothing was
     // written. Swallowing it would mark the operation done and lose the record
     // silently, with the user believing they had saved it. Surface it.
-    if (error.code === "23505" && isReplayOfSameRow(error.message)) return;
+    if (error.code === "23505" && isReplayOfSameRow(table, error.message)) return;
     throw new Error(`${table} insert: ${error.message}`);
   },
   async updateRow(table, id, patch) {
@@ -74,10 +74,17 @@ export const supabaseGateway: SupabaseGateway = {
  * When the constraint cannot be identified we treat it as a replay: the cost is
  * at worst one lost row in an ambiguous case, whereas throwing would dead-letter
  * a legitimately-replayed write forever and block the whole queue behind it.
+ *
+ * That ambiguous branch is the only path on which a write disappears without
+ * surfacing an error, so it warns unconditionally — a report of a missing row is
+ * otherwise impossible to attribute after the fact.
  */
-function isReplayOfSameRow(message: string): boolean {
+function isReplayOfSameRow(table: string, message: string): boolean {
   const named = message.match(/constraint "([^"]+)"/);
-  if (!named) return true; // unattributable — favour the idempotent path
+  if (!named) {
+    console.warn(`[outbox] ${table}: unique violation with no constraint name — assuming replay, row dropped:`, message);
+    return true;
+  }
   return named[1].endsWith("_pkey");
 }
 

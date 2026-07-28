@@ -65,6 +65,31 @@ describe("insertRow — 23505 handling", () => {
     await expect(supabaseGateway.insertRow("jobs", { id: "abc" })).resolves.toBeUndefined();
   });
 
+  it("warns when it takes the unattributable path, so a silently-dropped row is traceable", async () => {
+    // The ambiguous branch is the only place a write can vanish without an error.
+    // It must leave a trace: a support call about a missing row is unanswerable
+    // otherwise.
+    const warn = jest.spyOn(console, "warn").mockImplementation(() => {});
+    insert.mockResolvedValue({ error: { code: "23505", message: "duplicate key value" } });
+
+    await supabaseGateway.insertRow("jobs", { id: "abc" });
+
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("jobs"), "duplicate key value");
+    warn.mockRestore();
+  });
+
+  it("does NOT warn on an attributable replay — that path is expected and benign", async () => {
+    const warn = jest.spyOn(console, "warn").mockImplementation(() => {});
+    insert.mockResolvedValue({
+      error: { code: "23505", message: 'duplicate key value violates unique constraint "jobs_pkey"' },
+    });
+
+    await supabaseGateway.insertRow("jobs", { id: "abc" });
+
+    expect(warn).not.toHaveBeenCalled();
+    warn.mockRestore();
+  });
+
   it("still throws on non-unique-violation errors", async () => {
     insert.mockResolvedValue({ error: { code: "42703", message: 'column "nope" does not exist' } });
     await expect(supabaseGateway.insertRow("jobs", { id: "abc" })).rejects.toThrow(/jobs insert/);
