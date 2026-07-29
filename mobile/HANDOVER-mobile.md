@@ -57,13 +57,13 @@ field app + a full office/admin surface mirroring the web app.
 - `app/` — expo-router routes; `app/_layout.tsx` composes the role-aware shell.
 
 ## Gates before ship (NOT closable in-repo — need you / the backend / hardware)
-1. **Backend Bearer refactor (Jason) — DRAFTED + tested (D72), awaiting review/deploy.**
+1. **Backend Bearer refactor (Justin) — DRAFTED + tested (D72), awaiting review/deploy.**
    Invoice/quote **Send-email / PDF** routes were cookie-only and rejected a mobile
    Bearer token. Now refactored to `requireOfficeOrAdmin(request)` + a new
    `lib/api/caller-client.ts` (`callerClient(request)`) so RLS-scoped DB access works
    for both a mobile Bearer token and a web cookie — the web path is byte-for-byte
    unchanged (the change only *adds* the mobile path). 12 web unit tests, web `tsc`
-   clean. **Jason to review + merge + deploy** (untestable end-to-end here); then the
+   clean. **Justin to review + merge + deploy** (untestable end-to-end here); then the
    mobile Send/PDF buttons are a fast follow, and the same pattern applies to the
    **Xero push** routes (which additionally need the Xero OAuth connection).
 2. **On-device QA** — first real interactive test is on hardware; a full human QA
@@ -82,7 +82,7 @@ field app + a full office/admin surface mirroring the web app.
    `lib/push/`); to actually deliver a push, add the APNs/FCM credentials via EAS,
    apply the drafted `supabase/migrations/0036_device_tokens.sql`, and add a backend
    sender (job-assigned → Expo Push API). The app degrades gracefully until then.
-7. **Atomic invoice/quote RPC (Jason)** — hardens the outbox+draft mitigation (D30).
+7. **Atomic invoice/quote RPC (Justin)** — hardens the outbox+draft mitigation (D30).
 
 ## Not yet built — and why (nothing here is a plain in-repo feature gap)
 - **Offline reads cache / PowerSync connection** — writes are already durable; true
@@ -99,7 +99,7 @@ field app + a full office/admin surface mirroring the web app.
 - **PO / cost-centre editing** + **customer/site reassignment on a job** — display/
   read done; the write cascade stays a web action.
 - **MP1 dollar-leak RLS tightening** — migration `0035` + role-impersonation test are
-  drafted (D39) but **must be applied + tested by Jason on the live DB** (untestable
+  drafted (D39) but **must be applied + tested by Justin on the live DB** (untestable
   from this repo). This is the real security boundary behind the `MoneyText` UI gate.
 
 ## How to run / build

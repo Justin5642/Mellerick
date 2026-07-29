@@ -2,7 +2,7 @@
 
 Completes the push loop: the mobile client registers a token (`mobile/lib/push/`,
 D75) into `device_tokens` (migration `0036`, PROPOSED); this function dispatches a
-push to a user's devices via the Expo Push API. **PROPOSED for Jason** — it deploys
+push to a user's devices via the Expo Push API. **PROPOSED for Justin** — it deploys
 to the Supabase project and needs push credentials; not deployed here.
 
 - `pushSender.ts` — pure dispatch logic (batching ≤100, ok/error/DeviceNotRegistered
@@ -12,7 +12,7 @@ to the Supabase project and needs push credentials; not deployed here.
   or an office/admin Bearer JWT), read the target user's `device_tokens` with the
   service-role key, send, and prune `DeviceNotRegistered` tokens.
 
-## To enable (Jason + accounts)
+## To enable (Justin + accounts)
 1. Configure Expo push credentials for the EAS project (APNs key / FCM) — see
    `expo credentials` / EAS docs. Expo delivers via its push service using the
    ExponentPushToken the client already registers.

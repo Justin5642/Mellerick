@@ -76,7 +76,7 @@ export interface PricingItemInput {
 // in "draft" and its line items depend on the parent row, so a partial failure
 // leaves a safe draft rather than a live document with missing items — the
 // mitigation Avi chose over the web's non-transactional client-side
-// delete-reinsert. FLAGGED (Jason): an atomic Postgres RPC is the true fix.
+// delete-reinsert. FLAGGED (Justin): an atomic Postgres RPC is the true fix.
 export class FinanceRepository {
   constructor(
     private outbox: Outbox,

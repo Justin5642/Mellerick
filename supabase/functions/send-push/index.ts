@@ -1,5 +1,5 @@
 // Supabase Edge Function (Deno) — send a push to a user's devices. PROPOSED for
-// Jason's review/deploy (like the RLS drafts): it deploys to the Supabase project
+// Justin's review/deploy (like the RLS drafts): it deploys to the Supabase project
 // and needs the Expo push credentials configured. Thin wrapper around the
 // unit-tested pushSender.ts.
 //
