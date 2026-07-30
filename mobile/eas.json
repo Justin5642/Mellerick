@@ -35,7 +35,7 @@
       "ios": {
         "appleId": "APPLE_ID_EMAIL_HERE",
         "ascAppId": "APP_STORE_CONNECT_APP_ID_HERE",
-        "appleTeamId": "APPLE_TEAM_ID_HERE"
+        "appleTeamId": "864FRPRM47"
       },
       "android": {
         "serviceAccountKeyPath": "./play-service-account.json",
