@@ -143,6 +143,10 @@ export class SqliteOutboxStore implements OutboxStore {
     return row ? rowToOp(row) : undefined;
   }
 
+  async remove(id: string): Promise<void> {
+    await this.db.runAsync("DELETE FROM outbox WHERE id = ?", id);
+  }
+
   async countByStatus(status: OpStatus): Promise<number> {
     const row = await this.db.getFirstAsync<{ n: number }>(
       "SELECT COUNT(*) as n FROM outbox WHERE status = ?",

@@ -16,6 +16,11 @@ export function backoffMs(attempts: number): number {
 // retrying forever. ~8 attempts spans ~10 min of backoff before giving up.
 export const MAX_ATTEMPTS = 8;
 
+// How long a completed operation is kept before pruning. Long enough that
+// support can still see what a device sent for a recent job, short enough that
+// the queue stays small. See Outbox.pruneCompleted.
+export const DEFAULT_PRUNE_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
+
 // The largest wait backoffMs can ever schedule.
 const MAX_BACKOFF_MS = backoffMs(Number.MAX_SAFE_INTEGER);
 
@@ -207,6 +212,53 @@ export class Outbox {
       nextAttemptAt: this.clock.now() + backoffMs(attempts),
       error,
     });
+  }
+
+  /**
+   * Delete completed operations that nothing still needs, and report how many
+   * went.
+   *
+   * Nothing previously removed them, so the queue grew for the life of the
+   * install. That is not just untidy: `nextReady()` calls `store.all()`, which
+   * SELECTs the whole table and JSON.parses every row, and it runs in a loop
+   * inside `drain()`. Unbounded, a technician's phone does work quadratic in the
+   * number of operations it has EVER performed, and holds all of them in memory.
+   * A device doing ~50 writes a day passes 18,000 rows inside a year.
+   *
+   * Two rules make this safe:
+   *
+   *  - Only `done` operations are eligible. `pending`, `failed` and `inflight`
+   *    are live work; `dead` is retained deliberately so `retryDead()` can still
+   *    revive it and so the failure stays visible.
+   *  - A `done` operation is kept while any non-terminal operation still names it
+   *    in `dependsOn`. `nextReady()` unblocks a dependent by finding its
+   *    dependency among the done ids, so pruning one early would strand that
+   *    dependent as permanently un-runnable — the single way this could lose a
+   *    technician's work.
+   *
+   * The retention window keeps recent history so support can see what a device
+   * actually sent. It is measured on the device clock, which can move backwards
+   * (see `isDue`) — here that is harmless, since the only effect is pruning later
+   * than intended.
+   */
+  async pruneCompleted(retainMs: number = DEFAULT_PRUNE_RETENTION_MS): Promise<number> {
+    const all = await this.store.all();
+    const stillNeeded = new Set(
+      all
+        .filter((o) => o.status !== "done" && o.status !== "dead")
+        .map((o) => o.dependsOn)
+        .filter((id): id is string => Boolean(id))
+    );
+    const cutoff = this.clock.now() - retainMs;
+    let removed = 0;
+    for (const o of all) {
+      if (o.status !== "done") continue;
+      if (stillNeeded.has(o.id)) continue;
+      if (o.createdAt > cutoff) continue;
+      await this.store.remove(o.id);
+      removed++;
+    }
+    return removed;
   }
 
   async pendingCount(): Promise<number> {
