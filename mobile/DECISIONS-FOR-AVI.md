@@ -172,6 +172,29 @@ are flagged to Avi in real time per the plan's crucial-flag protocol.
   protection and no staging environment. Recommended: protect `main` and promote
   to production deliberately. Owner action, unchanged from the July handover.
 
+- **Q27 (blocks the Maestro e2e suite):** the Maestro CLI is **not installed** on
+  this machine — only its data directory survives from the 28 July runs. Its
+  official installer is a piped remote shell script
+  (`curl -Ls https://get.maestro.mobile.dev | bash`), which Claude will not
+  execute, so the four `.maestro/flows/` cannot be run here. They ran and passed
+  on 28 July, and are unchanged since.
+
+  **What was done instead, 2026-08-02:** full on-device verification against
+  production data with all seven of this session's fixes live — emulator booted,
+  debug build installed, Metro serving current source, 2,030-module bundle,
+  dashboard rendering 825 jobs / 153 active / 138 customers, and **zero** crash
+  signatures in logcat (`already released`, `NativeStatement`,
+  `FATAL EXCEPTION`, `Unhandled promise`).
+
+  Plus the in-process end-to-end suite (`createDataLayer.test.ts`), which drives
+  the whole vertical — repository → outbox → processor → gateway — including the
+  offline clock-in/clock-out regression, idempotent retry, and attachment-failure
+  safety.
+
+  **Decision needed:** install Maestro (someone runs the installer manually) so
+  the device-level flows are part of the release gate again, or accept the
+  in-process e2e plus manual device smoke as sufficient for v1.0.
+
 
 - **Q21 (RESOLVED, Avi 2026-07-27)**: pushing a supplier **expense** to Xero is **office + admin** (as applied in D79); pushing a customer **invoice** stays **admin-only**. Office staff handle supplier bills day-to-day. No further change needed.
 
