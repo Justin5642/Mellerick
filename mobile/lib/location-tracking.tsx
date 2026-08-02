@@ -2,16 +2,16 @@ import { createContext, useContext, useEffect, useRef, type ReactNode } from "re
 import * as Location from "expo-location";
 import { supabase } from "./supabase";
 import { useAuth } from "./auth-context";
+import { plausibleAutoClockHours, MAX_PLAUSIBLE_TRAVEL_HOURS, MAX_PLAUSIBLE_WORK_HOURS } from "./autoClockHours";
 
 // Mirrors the constant used on the web side (components/job/job-time.tsx)
 // so a tech is treated as "on site" consistently across platforms.
 const GEOFENCE_RADIUS_METERS = 150;
 
-// If the gap between leaving one job's fence and arriving at another's is
-// longer than this, we don't log it as travel — most likely the app was
-// backgrounded/killed for a while (lunch break, end of day, etc.) rather
-// than genuine drive time between two jobs.
-const MAX_PLAUSIBLE_TRAVEL_HOURS = 3;
+// Plausibility ceilings for both auto-clocked durations live in
+// ./autoClockHours, together with the reasoning: a gap longer than the travel
+// ceiling is a backgrounded app rather than drive time, and a work stint longer
+// than its ceiling is a departure event that never fired.
 
 const API_BASE_URL = process.env.EXPO_PUBLIC_API_BASE_URL;
 
@@ -182,8 +182,8 @@ export function LocationTrackingProvider({ children }: { children: ReactNode }) 
     const departure = departureRef.current;
     departureRef.current = null;
     if (departure) {
-      const hours = Math.round(((new Date(arrivalTime).getTime() - new Date(departure.time).getTime()) / 3600000) * 100) / 100;
-      if (hours > 0 && hours <= MAX_PLAUSIBLE_TRAVEL_HOURS) {
+      const hours = plausibleAutoClockHours(departure.time, arrivalTime, MAX_PLAUSIBLE_TRAVEL_HOURS);
+      if (hours !== null) {
         await supabase.from("time_entries").insert({
           job_id: jobId,
           staff_id: staffId,
@@ -211,7 +211,13 @@ export function LocationTrackingProvider({ children }: { children: ReactNode }) 
       .maybeSingle();
 
     if (openEntry) {
-      const hours = Math.round(((new Date(departTime).getTime() - new Date(openEntry.clock_in).getTime()) / 3600000) * 100) / 100;
+      // Null when the duration cannot be believed — a backward clock correction
+      // (which would otherwise write NEGATIVE hours and subtract from the
+      // technician's pay) or a departure event that never fired, leaving the
+      // entry open for days. The entry still CLOSES either way; leaving it open
+      // is its own problem. The office then sees a gap to correct rather than a
+      // number that quietly reconciles wrong.
+      const hours = plausibleAutoClockHours(openEntry.clock_in, departTime, MAX_PLAUSIBLE_WORK_HOURS);
       await supabase.from("time_entries").update({ clock_out: departTime, hours }).eq("id", openEntry.id);
       syncBilling(openEntry.id);
     }
