@@ -135,7 +135,30 @@ are flagged to Avi in real time per the plan's crucial-flag protocol.
 
 ### Raised 2026-07-30 (security/hardening session) — for Avi + Justin
 
-- **Q22 (CRUCIAL, flagged live — ACTION REQUIRED, not a decision):** migration
+- **Q22 — RESOLVED 2026-08-03. The leak is closed.** `supabase migration list
+  --linked` reports `0042` as applied on the remote. That is meaningful here in a
+  way it was not for `0034`: the CLI applies each migration in a transaction, so a
+  raised exception aborts it and it is never recorded — and `0042` ends with
+  assertion blocks that raise unless `xero_tokens` has RLS on, exactly one
+  permissive policy and zero restrictive, with `USING` **and** `WITH CHECK` both
+  exactly `is_office_or_admin(auth.uid())`. Recorded-as-applied therefore proves
+  every assertion passed. The `google_tokens` detector in the same migration did
+  not fire, so **Q23 is closed too** — that table was already correctly gated.
+
+  Also done 2026-08-03: the `powersync_role` password was rotated via
+  `scripts/set-powersync-password.ps1` after a plaintext value was exposed in a
+  chat paste. **Still open:** whether to rotate the Xero OAuth tokens themselves
+  on the assumption they were readable while the policy was permissive. That
+  breaks the accounting integration until someone re-authorises it, so it stays a
+  business call.
+
+  Near-miss worth recording: the same paste contained the pre-`0039` setup
+  snippet, including `CREATE PUBLICATION powersync FOR ALL TABLES`. It was run in
+  the SQL editor and failed with `42710 publication already exists` — which is the
+  only reason the publication is still scoped to 24 tables rather than being
+  reopened to all 68, token tables included. Do not re-run that snippet.
+
+- **Q22-original (superseded by the entry above):** migration
   **0042 must be applied to production**. Until it runs, `xero_tokens` carries a
   permissive policy and **any authenticated user, technicians included, can read
   the org's Xero OAuth access + refresh tokens**. The corrected 0034 cannot do
