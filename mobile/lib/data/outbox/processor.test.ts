@@ -17,6 +17,7 @@ function makeGateway(): jest.Mocked<SupabaseGateway> {
     uploadObject: jest.fn().mockResolvedValue(undefined),
     removeObject: jest.fn().mockResolvedValue(undefined),
     cleanupAttachment: jest.fn().mockResolvedValue(undefined),
+    listStagedAttachments: jest.fn().mockResolvedValue([]),
   };
 }
 const makeApi = (): jest.Mocked<ApiBridge> => ({ callSideEffect: jest.fn().mockResolvedValue(undefined) });
@@ -275,5 +276,35 @@ describe("Processor — prunes completed work after a drain", () => {
 
     const ids = (await store.all()).map((o) => o.id).sort();
     expect(ids).toEqual(["insert-op", "update-op"]);
+  });
+});
+
+describe("Processor — reclaims orphaned attachment files", () => {
+  const OLD = Date.now() - 2 * 60 * 60 * 1000; // beyond the grace period
+
+  it("deletes a staged file no operation references", async () => {
+    const store = new InMemoryOutboxStore();
+    const box = new Outbox(store, fixedClock(0));
+    const gateway = makeGateway();
+    gateway.listStagedAttachments.mockResolvedValue([{ uri: "orphan.jpg", modifiedAt: OLD }]);
+    const proc = new Processor(box, gateway, makeApi(), online(true));
+
+    await proc.drain();
+
+    expect(gateway.cleanupAttachment).toHaveBeenCalledWith("orphan.jpg");
+  });
+
+  it("keeps the file of a dead operation, which retryDead still needs", async () => {
+    const store = new InMemoryOutboxStore();
+    const box = new Outbox(store, fixedClock(0));
+    const gateway = makeGateway();
+    gateway.listStagedAttachments.mockResolvedValue([{ uri: "dead-photo.jpg", modifiedAt: OLD }]);
+    const proc = new Processor(box, gateway, makeApi(), online(true));
+
+    await box.enqueue(write("d", { attachmentLocalPath: "dead-photo.jpg" }));
+    await store.update("d", { status: "dead" });
+    await proc.drain();
+
+    expect(gateway.cleanupAttachment).not.toHaveBeenCalledWith("dead-photo.jpg");
   });
 });

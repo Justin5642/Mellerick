@@ -529,3 +529,5 @@
 2026-08-02T13:08:02.225Z | Edit | C:\Dev\Mellerick\mobile\powersync\sync-streams.yaml
 2026-08-02T13:19:59.575Z | Edit | C:\Dev\Mellerick\mobile\DECISIONS-FOR-AVI.md
 2026-08-02T13:20:14.129Z | Edit | C:\Dev\Mellerick\HANDOVER.md
+2026-08-02T13:27:28.163Z | Write | C:\Dev\Mellerick\mobile\lib\data\outbox\orphanAttachments.test.ts
+2026-08-02T13:27:43.253Z | Write | C:\Dev\Mellerick\mobile\lib\data\outbox\orphanAttachments.ts

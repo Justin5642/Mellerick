@@ -261,6 +261,23 @@ export class Outbox {
     return removed;
   }
 
+  /**
+   * Local attachment paths that some operation still expects to upload.
+   *
+   * Anything staged on disk and absent from this set is unreachable — nothing
+   * will ever read it. Includes 'dead' operations, whose files must survive so
+   * retryDead() can still upload them.
+   */
+  async referencedAttachmentUris(): Promise<Set<string>> {
+    const all = await this.store.all();
+    return new Set(
+      all
+        .filter((o) => o.kind === "write" && o.status !== "done")
+        .map((o) => (o as WriteOperation).attachmentLocalPath)
+        .filter((p): p is string => Boolean(p))
+    );
+  }
+
   async pendingCount(): Promise<number> {
     const [pending, failed, inflight] = await Promise.all([
       this.store.countByStatus("pending"),

@@ -26,6 +26,11 @@ export interface SupabaseGateway {
   // Best-effort delete of a queued local attachment after it has synced, so the
   // outbox attachment directory doesn't grow without bound. Never throws.
   cleanupAttachment(localUri: string): Promise<void>;
+  // Every file currently in the attachment staging directory, with its mtime.
+  // Used to reclaim files no operation will ever upload — see
+  // orphanAttachments.ts for the two ways they leak. Never throws; an empty
+  // list simply means nothing is reclaimed this pass.
+  listStagedAttachments(): Promise<{ uri: string; modifiedAt: number }[]>;
 }
 
 export interface ApiBridge {

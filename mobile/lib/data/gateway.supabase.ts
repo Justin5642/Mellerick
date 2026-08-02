@@ -3,6 +3,7 @@ import { decode } from "base64-arraybuffer";
 import { supabase } from "../supabase";
 import type { SupabaseGateway, ApiBridge } from "./gateway";
 import type { SideEffectKind } from "./outbox/types";
+import { OUTBOX_ATTACHMENT_DIR } from "./attachments";
 
 // Real gateway: the processor's writes hit Supabase through here. All reads
 // still go through supabase-js elsewhere, so RLS + the rate-stripped views
@@ -62,6 +63,34 @@ export const supabaseGateway: SupabaseGateway = {
       await FileSystem.deleteAsync(localUri, { idempotent: true });
     } catch {
       // ignore — orphaned temp file at worst
+    }
+  },
+  async listStagedAttachments() {
+    // Best-effort inventory of the staging directory. Housekeeping only, so any
+    // failure — directory absent on a fresh install, permissions, a file that
+    // vanished between the listing and the stat — degrades to "reclaim nothing
+    // this pass" rather than disturbing the drain.
+    try {
+      const names = await FileSystem.readDirectoryAsync(OUTBOX_ATTACHMENT_DIR);
+      const files = await Promise.all(
+        names.map(async (name) => {
+          const uri = `${OUTBOX_ATTACHMENT_DIR}${name}`;
+          try {
+            const info = await FileSystem.getInfoAsync(uri);
+            if (!info.exists || info.isDirectory) return null;
+            // modificationTime is SECONDS in expo-file-system; the selector works
+            // in ms. A missing value becomes "now", which keeps the file — the
+            // safe direction.
+            const modifiedAt = info.modificationTime ? info.modificationTime * 1000 : Date.now();
+            return { uri, modifiedAt };
+          } catch {
+            return null;
+          }
+        })
+      );
+      return files.filter((f): f is { uri: string; modifiedAt: number } => f !== null);
+    } catch {
+      return [];
     }
   },
 };
