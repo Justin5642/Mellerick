@@ -1,9 +1,16 @@
 # PowerSync sync rules — design + security contract (MP3)
 
-**The deployable artifact is `sync-streams.yaml`** — the live PowerSync Cloud
-instance (project mellerick / Development) runs **Sync Streams edition 3**, not
-legacy Sync Rules. `sync-rules.yaml` is the legacy-dialect version, kept for
-reference; both encode the same money contract below.
+**The deployable artifact is `sync-streams.yaml`, and it is the only one** — the
+live PowerSync Cloud instance (project mellerick / Development) runs **Sync
+Streams edition 3**, not legacy Sync Rules.
+
+A second file, `sync-rules.yaml`, previously sat here as a legacy-dialect
+version "kept for reference". It was **deleted on 2026-07-30**. Two
+security-critical YAML files side by side, written in different dialects, with
+nothing in the filenames saying which is authoritative, is a standing hazard: it
+puts deploying the wrong one a single mistake away. Git history has it if the
+legacy dialect is ever needed again. `tests/unit/sync-streams-contract.test.ts`
+now fails if a second sync YAML reappears in this directory.
 
 **The client IS wired (2026-07-27) and the instance is LIVE** — streams v2
 deployed, replication slot active. Reads serve from the device mirror through
@@ -22,8 +29,7 @@ header). Never commit or display the password; rotate on any suspected exposure.
 ## Syntax validation — done, and the first draft was WRONG
 
 Checked against the official docs (`docs.powersync.com/usage/sync-rules`,
-`.../data-queries`, `.../operators-and-functions`). The original draft of
-`sync-rules.yaml` **would have been rejected**. Legacy Sync Rules support none of:
+`.../data-queries`, `.../operators-and-functions`). The original legacy-dialect draft **would have been rejected**. Legacy Sync Rules support none of:
 
 > "Subqueries, JOINs, CTEs, aggregation, sorting, or set operations" — and no
 > scalar subqueries.

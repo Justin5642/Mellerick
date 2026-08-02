@@ -71,7 +71,8 @@ streams:
     query: |
       SELECT id, device_id, job_id, test_type, test_date, result, mains_pressure_kpa,
              permission_to_turn_off_water, strainer_installed, strainer_cleaned,
-             isolating_valves_padlocked, reason_for_failure, repair_scheduled_date,
+             isolating_valves_padlocked, complies_with_as_nzs_3500_1,
+             reason_for_failure, repair_scheduled_date,
              test_kit_serial_number, test_kit_calibration_date, tester_name,
              tester_licence_number, tester_phone, remarks, test_results,
              signature_storage_path, certificate_storage_path,

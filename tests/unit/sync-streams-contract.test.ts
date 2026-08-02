@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { parse } from "yaml";
 
@@ -37,6 +37,18 @@ function isTechnicianVisible(query: string): boolean {
 }
 
 const MONEY_COLUMN = /\b(rate|total_amount|unit_cost|unit_sell|amount|price|cost|subtotal|admin_notes)\b/i;
+
+// There must be exactly ONE deployable sync config. A second, superseded YAML
+// sitting beside the live one is a standing hazard: both are security-critical,
+// they are written in different PowerSync dialects, and nothing in the filenames
+// says which is authoritative. Deploying the wrong one is a single mistake away.
+describe("PowerSync config — exactly one deployable artifact", () => {
+  it("has no sync YAML beside sync-streams.yaml", () => {
+    const dir = join(process.cwd(), "mobile", "powersync");
+    const yamls = readdirSync(dir).filter((f) => f.endsWith(".yaml") || f.endsWith(".yml"));
+    expect(yamls).toEqual(["sync-streams.yaml"]);
+  });
+});
 
 describe("PowerSync sync rules — technician streams", () => {
   const streams = loadStreams();
