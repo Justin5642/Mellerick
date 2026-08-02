@@ -154,6 +154,30 @@ is durable on disk, so abandoning loses nothing.
 
 > **If you add async work that touches SQLite, add the same liveness check.**
 
+### The device clock lies — never compare a stored timestamp to a later `now`
+
+A technician's phone corrects itself across a long shift: NTP pulls a fast
+handset back, or a different timezone offset is picked up on the road. **Any
+absolute device timestamp compared against a later device clock read is a stall
+waiting to happen**, because the clock can move backwards between the two reads.
+
+This shipped in two places and both are now fixed:
+
+| Site | Symptom of a backward jump |
+|---|---|
+| `outbox.ts` `nextReady()` | `nextAttemptAt` sat in the future — queued writes stalled for the length of the jump. Silent: no error, no dead-letter, badge just read "pending" while recorded labour went undelivered. |
+| `reads/source.ts` write-echo window | `echoUntil` sat in the future — **every read forced to the network**, defeating offline reads outright. A technician in a basement got failures while holding a complete local mirror. |
+
+Both now apply the same guard: each wait has a known maximum by construction
+(`MAX_BACKOFF_MS`, `ECHO_WINDOW_MS`), so **a remaining wait longer than that
+maximum is evidence the clock moved, not that the wait is real** — and the
+operation is released. Each has a negative-control test proving the ordinary
+window is still honoured, so the guard cannot decay into "ignore the wait".
+
+Checked and found sound: `hoursBetween()` in `repositories/timeEntries.ts`
+returns `null` when the end is not strictly after the start, so a backward jump
+between clock-in and clock-out cannot put negative hours on a timesheet.
+
 Related: `start()` and the reconnect handler launch drains with `void`, so
 anything thrown would become an **unhandled rejection — which React Native
 renders as a full-screen red box over a working app**. They route errors to an

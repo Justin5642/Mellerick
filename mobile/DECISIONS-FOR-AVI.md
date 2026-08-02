@@ -133,6 +133,46 @@ are flagged to Avi in real time per the plan's crucial-flag protocol.
 
 ## Open questions (resolve in cleanup MP11)
 
+### Raised 2026-07-30 (security/hardening session) — for Avi + Justin
+
+- **Q22 (CRUCIAL, flagged live — ACTION REQUIRED, not a decision):** migration
+  **0042 must be applied to production**. Until it runs, `xero_tokens` carries a
+  permissive policy and **any authenticated user, technicians included, can read
+  the org's Xero OAuth access + refresh tokens**. The corrected 0034 cannot do
+  this — the ledger records 0034 as applied, so `supabase db push` skips it.
+  Verify afterwards with `supabase/audit/production-security-audit.sql`: a clean
+  run returns zero `UNGATED POLICY` rows. **Decision needed separately:** whether
+  to rotate the Xero tokens on the assumption they were exposed. Rotating breaks
+  the integration until someone re-authorises it, so it is a business call, not a
+  technical one.
+
+- **Q23:** `google_tokens` may carry the same drift. 0042 **detects and raises**
+  but deliberately does not rewrite it, because that integration is live and
+  quietly changing a running integration's access rules during a security
+  migration trades one incident for another. If 0042 raises on google_tokens,
+  decide whether to lock it the same way.
+
+- **Q24:** the unattributable-`23505` trade in `gateway.supabase.ts`. When
+  Postgres returns a unique violation with no parseable constraint name, the
+  outbox treats it as an idempotent replay and drops the operation. The
+  alternative — throwing — dead-letters a legitimate replay and wedges the FIFO
+  queue behind it. Current choice favours queue liveness over one row in an
+  ambiguous case, and now logs the table name so a vanished row is traceable. A
+  third option (dead-letter with a visible badge) exists but adds a UI surface.
+  Confirm the trade or ask for the third option.
+
+- **Q25:** strict FIFO in the outbox derives from `createdAt`, which comes from
+  the device clock. Dependencies (`dependsOn`) protect every case where ordering
+  is semantically required, so this is not a correctness bug today. Introducing a
+  monotonic sequence number would make FIFO robust against clock skew but adds a
+  migration to the on-device schema. Probably over-engineering; recorded so the
+  decision is explicit rather than accidental.
+
+- **Q26:** production currently auto-deploys from `main` with no branch
+  protection and no staging environment. Recommended: protect `main` and promote
+  to production deliberately. Owner action, unchanged from the July handover.
+
+
 - **Q21 (RESOLVED, Avi 2026-07-27)**: pushing a supplier **expense** to Xero is **office + admin** (as applied in D79); pushing a customer **invoice** stays **admin-only**. Office staff handle supplier bills day-to-day. No further change needed.
 
 - **Q20 (write-result reporting + read-visibility — FULLY RESOLVED, D70 + D71)**: the whole-app audit (D69) flagged that `useFlush()` returns *connectivity* (`synced`), not per-op server acceptance. **RESOLVED (D70):** `Outbox.writeStatus(rowId)` + `useWriteOutcome()` report per-row acceptance, and every create-navigate / optimistic-insert screen surfaces an immediate "couldn't save — queued & will retry" instead of navigating to / silently dropping a non-persisted row. The audit's three minor count/ordering read gaps are **also RESOLVED (D71)**: Fleet inactive-equipment list + Reactivate, uncapped Customer-360 counts, and the Reports Overdue + Accepted-quote-value metrics. Nothing from the D69 audit remains open.
