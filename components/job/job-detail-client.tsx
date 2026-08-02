@@ -192,7 +192,7 @@ export function JobDetailClient({ job, currentUserId, photos: initialPhotos, doc
               />
             </TabsContent>
             <TabsContent value="time" className="m-0 h-full">
-              <JobTime jobId={job.id} currentUserId={currentUserId} timeEntries={timeEntries} pos={purchaseOrders} costCenters={costCenters} isAdmin={isAdmin} staff={staff} onUpdate={setTimeEntries} />
+              <JobTime jobId={job.id} currentUserId={currentUserId} timeEntries={timeEntries} pos={purchaseOrders} site={job.sites} costCenters={costCenters} isAdmin={isAdmin} staff={staff} onUpdate={setTimeEntries} />
             </TabsContent>
             <TabsContent value="variations" className="m-0 h-full">
               <JobVariations jobId={job.id} variations={variations} variationTypes={variationTypes} currentUserId={currentUserId} onUpdate={setVariations} highlightVariationId={highlightVariationId} />
