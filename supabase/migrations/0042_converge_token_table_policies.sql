@@ -56,34 +56,58 @@ create policy "Office/admin can manage xero tokens" on xero_tokens for all
 -- ---------------------------------------------------------------------------
 do $$
 declare
-  n_policies int;
+  -- The exact normalised form Postgres renders for the policy we just created.
+  -- Comparing against this rather than substring-matching on
+  -- '%is_office_or_admin%' matters: `USING (is_office_or_admin(auth.uid()) OR
+  -- true)` CONTAINS that substring and grants everyone. A substring test would
+  -- wave it through — which is the same species of near-miss that produced this
+  -- incident, so the assertion is exact.
+  expected text := 'is_office_or_admin(auth.uid())';
   rls_on boolean;
-  bad_policy text;
+  n_permissive int;
+  n_restrictive int;
+  actual_qual text;
+  actual_check text;
 begin
   select relrowsecurity into rls_on
     from pg_class where oid = 'public.xero_tokens'::regclass;
-
-  select count(*) into n_policies
-    from pg_policy where polrelid = 'public.xero_tokens'::regclass;
-
-  -- Any surviving policy whose USING clause does not go through
-  -- is_office_or_admin is, by definition, a way in for someone else.
-  select polname into bad_policy
-    from pg_policy
-   where polrelid = 'public.xero_tokens'::regclass
-     and coalesce(pg_get_expr(polqual, polrelid), '') not like '%is_office_or_admin%'
-   limit 1;
 
   if not rls_on then
     raise exception 'xero_tokens: row level security is OFF after migration 0042';
   end if;
 
-  if n_policies <> 1 then
-    raise exception 'xero_tokens: expected exactly 1 policy after 0042, found %', n_policies;
+  -- PERMISSIVE and RESTRICTIVE policies combine differently (OR versus AND), so
+  -- counting them together says nothing useful. Count them apart.
+  select count(*) filter (where polpermissive),
+         count(*) filter (where not polpermissive)
+    into n_permissive, n_restrictive
+    from pg_policy where polrelid = 'public.xero_tokens'::regclass;
+
+  if n_permissive <> 1 then
+    raise exception
+      'xero_tokens: expected exactly 1 PERMISSIVE policy after 0042, found % (permissive policies are OR-ed; more than one is how the original leak survived)',
+      n_permissive;
   end if;
 
-  if bad_policy is not null then
-    raise exception 'xero_tokens: policy "%" does not gate on is_office_or_admin', bad_policy;
+  if n_restrictive <> 0 then
+    raise exception
+      'xero_tokens: found % RESTRICTIVE policy/policies, which were not expected here', n_restrictive;
+  end if;
+
+  select regexp_replace(coalesce(pg_get_expr(polqual, polrelid), ''), '\s+', '', 'g'),
+         regexp_replace(coalesce(pg_get_expr(polwithcheck, polrelid), ''), '\s+', '', 'g')
+    into actual_qual, actual_check
+    from pg_policy
+   where polrelid = 'public.xero_tokens'::regclass and polpermissive;
+
+  if actual_qual <> regexp_replace(expected, '\s+', '', 'g') then
+    raise exception 'xero_tokens: USING clause is "%", expected "%"', actual_qual, expected;
+  end if;
+
+  -- USING governs reads; WITH CHECK governs writes. Asserting only the former
+  -- would let a policy that reads correctly still accept writes it should not.
+  if actual_check <> regexp_replace(expected, '\s+', '', 'g') then
+    raise exception 'xero_tokens: WITH CHECK clause is "%", expected "%"', actual_check, expected;
   end if;
 end $$;
 
@@ -114,10 +138,15 @@ begin
     raise exception 'google_tokens: RLS is OFF — any authenticated user can read Google OAuth tokens. Lock it before shipping.';
   end if;
 
+  -- Same exactness as above: a policy can mention is_office_or_admin and still
+  -- grant everyone via OR, so anything that is not exactly the expected gate is
+  -- reported for a human to look at.
   select polname into permissive_policy
     from pg_policy
    where polrelid = 'public.google_tokens'::regclass
-     and coalesce(pg_get_expr(polqual, polrelid), '') not like '%is_office_or_admin%'
+     and polpermissive
+     and regexp_replace(coalesce(pg_get_expr(polqual, polrelid), ''), '\s+', '', 'g')
+         <> 'is_office_or_admin(auth.uid())'
    limit 1;
 
   if permissive_policy is not null then

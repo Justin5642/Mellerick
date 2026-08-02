@@ -64,18 +64,38 @@ rls_off as (
    where not relrowsecurity
 ),
 
--- FINDING 2: a policy that does not gate on role. This is the exact shape of the
--- xero_tokens leak: a permissive policy using auth.role() = 'authenticated',
--- OR-ed alongside the intended one, silently defeating it.
+-- FINDING 2: a PERMISSIVE policy that does not gate on role. This is the exact
+-- shape of the xero_tokens leak: a permissive policy using
+-- auth.role() = 'authenticated', OR-ed alongside the intended one, silently
+-- defeating it.
+--
+-- Note this deliberately does NOT substring-match on 'is_office_or_admin'. A
+-- policy can name that function and still grant everyone —
+-- `USING (is_office_or_admin(auth.uid()) OR true)` contains the substring. Only
+-- an exact match on the expected expression is meaningful. Restrictive policies
+-- are excluded because they AND-combine and cannot widen access.
+--
+-- WITH CHECK is examined as well as USING: the first governs reads, the second
+-- governs writes, and a policy can be correct on one and wrong on the other.
 ungated_policy as (
   select 2 as severity,
          'UNGATED POLICY' as finding,
          e.tbl || ' :: ' || p.polname as object_name,
          'USING (' || coalesce(pg_get_expr(p.polqual, p.polrelid), 'true') ||
-           ') does not reference is_office_or_admin — ' || e.reason as detail
+           ') WITH CHECK (' || coalesce(pg_get_expr(p.polwithcheck, p.polrelid), '-') ||
+           ') is not exactly is_office_or_admin(auth.uid()) — ' || e.reason as detail
     from existing e
     join pg_policy p on p.polrelid = e.oid
-   where coalesce(pg_get_expr(p.polqual, p.polrelid), 'true') not like '%is_office_or_admin%'
+   where p.polpermissive
+     and (
+       regexp_replace(coalesce(pg_get_expr(p.polqual, p.polrelid), 'true'), '\s+', '', 'g')
+         <> 'is_office_or_admin(auth.uid())'
+       or (
+         p.polwithcheck is not null
+         and regexp_replace(pg_get_expr(p.polwithcheck, p.polrelid), '\s+', '', 'g')
+             <> 'is_office_or_admin(auth.uid())'
+       )
+     )
 ),
 
 -- FINDING 3: a sensitive table with RLS on but no policy at all. Postgres denies
