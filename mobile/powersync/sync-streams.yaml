@@ -51,13 +51,32 @@ streams:
 
   # Backflow compliance data (no money; matches the authenticated RLS posture —
   # technicians register devices and log tests in the field).
+  # Columns are listed explicitly, like every other technician-visible stream.
+  # A `SELECT *` here would sync whatever these tables hold now AND anything a
+  # future migration adds — a fee or price column would reach every technician
+  # device with no code change and no review. Enforced by
+  # tests/unit/sync-streams-contract.test.ts.
   backflow_devices:
     auto_subscribe: true
-    query: SELECT * FROM backflow_devices
+    query: |
+      SELECT id, customer_id, site_id, water_authority, device_type, protection_type,
+             make, model, serial_number, size_mm, location_description,
+             water_authority_property_number, water_meter_number,
+             fire_service_meter_number, test_frequency_months, is_active, notes,
+             created_by, created_at, updated_at
+      FROM backflow_devices
 
   backflow_tests:
     auto_subscribe: true
-    query: SELECT * FROM backflow_tests
+    query: |
+      SELECT id, device_id, job_id, test_type, test_date, result, mains_pressure_kpa,
+             permission_to_turn_off_water, strainer_installed, strainer_cleaned,
+             isolating_valves_padlocked, reason_for_failure, repair_scheduled_date,
+             test_kit_serial_number, test_kit_calibration_date, tester_name,
+             tester_licence_number, tester_phone, remarks, test_results,
+             signature_storage_path, certificate_storage_path,
+             submitted_to_water_authority_at, submitted_to_email, tested_by, created_at
+      FROM backflow_tests
 
   # ---- Technician: their assigned jobs + children, MONEY-STRIPPED ------------
   tech_jobs:

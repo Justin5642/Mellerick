@@ -78,6 +78,14 @@ which is why it is a JOIN rather than the obvious form.
 > **If you add a table to a technician stream, list its columns explicitly.
 > Never `SELECT *` on a table that has, or might later gain, a money column.**
 
+That rule was documented but not enforced, and two streams had drifted to
+`SELECT *` (`backflow_devices`, `backflow_tests`). Neither leaked money — those
+tables have no monetary column today — but either would have begun syncing one
+silently the moment a migration added it. Both now list columns explicitly, and
+`tests/unit/sync-streams-contract.test.ts` enforces all of it: no `SELECT *` in a
+technician-visible stream, no money-named column in one, and every `office_*`
+stream gated on the caller's own profile row.
+
 ### Web-side equivalent
 
 - Three roles: `admin`, `office`, `technician`. RLS is the primary boundary.
@@ -173,6 +181,51 @@ Nothing in the historical data distinguishes "was awaiting invoicing" from "was
 not", and guessing would inject phantom rows into the office queue.
 **Consequence: the Ready-to-Invoice queue contains only jobs signed off after the
 migration.** Office staff should be told this.
+
+### ⚠ Committed is not applied — and an edited migration never re-runs
+
+This has now caused a real credential exposure, so it is worth stating plainly.
+
+On 2026-07-30 a `pg_policies` check against production found that migration
+`0034`, which was written to lock the `xero_tokens` table, **had never taken
+effect**. It tried to remove the permissive policy by *name*; the policy created
+out-of-band in production was named differently, so `drop policy if exists`
+matched nothing and did nothing — no error, no warning. Postgres OR-es
+permissive policies, so one missed drop left the table open: **any authenticated
+user, a technician holding the anon key included, could read the organisation's
+Xero OAuth access and refresh tokens.**
+
+`0034` was then corrected in place. **That correction cannot help on its own.**
+The migration ledger already records `0034` as applied, so `supabase db push`
+will not re-run it — the edited file sits in the repo looking like a fix while
+production stays exposed. That is the same silent-failure shape as the original
+defect.
+
+**`0042_converge_token_table_policies.sql` is the actual fix.** It is written so
+it cannot fail the same way:
+
+- it drops policies by **enumerating `pg_policy`**, not by guessing names, so it
+  cannot miss one whatever it is called;
+- it **asserts the end state and raises** — if the table does not finish with RLS
+  on and exactly the intended policy, the migration fails loudly instead of
+  reporting success;
+- it additionally **detects, without changing**, the same drift on
+  `google_tokens`, raising if that table's policies do not gate on
+  `is_office_or_admin`. Detect-only is deliberate: quietly rewriting a live
+  integration's access rules during a security migration trades one incident for
+  another.
+
+**Rules that follow from this:**
+
+1. **Never edit an applied migration to fix it.** Write a new one. The ledger
+   makes in-place edits invisible.
+2. **Never drop a policy by guessed name** in a security migration. Enumerate.
+3. **Assert the end state.** A security migration that can silently achieve
+   nothing is worse than none, because it manufactures false confidence.
+4. **Verify against production, not against a local stack.** `npm run test:rls`
+   boots a local Supabase rebuilt *from these same migrations*, so it agrees with
+   them by construction and cannot detect drift. Only a query against the real
+   database can.
 
 ### The drift guard — read before writing a test
 

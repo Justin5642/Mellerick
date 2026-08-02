@@ -516,3 +516,8 @@
 2026-07-28T14:30:14.368Z | Write | C:\Dev\Mellerick\instrumentation.ts
 2026-07-28T14:31:21.376Z | Edit | C:\Dev\Mellerick\tests\unit\instrumentation.test.ts
 2026-07-28T14:35:53.515Z | Edit | C:\Dev\Mellerick\next.config.ts
+2026-08-02T12:50:08.846Z | Write | C:\Dev\Mellerick\tests\unit\sync-streams-contract.test.ts
+2026-08-02T12:51:24.094Z | Edit | C:\Dev\Mellerick\mobile\powersync\sync-streams.yaml
+2026-08-02T12:52:24.629Z | Write | C:\Dev\Mellerick\supabase\migrations\0042_converge_token_table_policies.sql
+2026-08-02T12:55:48.073Z | Edit | C:\Dev\Mellerick\HANDOVER.md
+2026-08-02T12:56:00.607Z | Edit | C:\Dev\Mellerick\HANDOVER.md
