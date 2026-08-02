@@ -24,10 +24,41 @@ Two applications sharing one Supabase backend.
 The mobile app reaches **feature parity across all 15 web areas**, role-aware for
 technician / office / admin, and keeps working with no network connection.
 
-**Node 22 is required.** `.node-version` and `engines` both pin `22.x`. Node 25
-crashes the Expo dev server with `RangeError: Too many message fragments` from
-`@react-native/dev-middleware` — observed twice, gone after switching to 22. It
-also breaks `@supabase/ssr` server-side. Use nvm-windows: `nvm use 22`.
+**Node 22 is required.** `.node-version` and `engines` both pin `22.x`, and CI
+runs it. Node 25 breaks `@supabase/ssr` server-side. Use nvm-windows:
+`nvm use 22`.
+
+**Metro crashes periodically, on every Node version — it is not your setup.**
+
+```
+RangeError: Too many message fragments
+  at Receiver.getData (…/@react-native/dev-middleware/node_modules/ws/lib/receiver.js:359)
+  Symbol(status-code): 1008
+```
+
+An unhandled `error` event on the dev-middleware WebSocket — the channel carrying
+device logs and debugger traffic. Nothing catches it, so it takes the whole Expo
+CLI process down and frees port 8081. The app then has no bundle server and looks
+broken.
+
+Observed on **Node 25.6.1 and Node 22.23.1 alike**. It was initially blamed on
+Node 25; that was wrong, and switching to 22 did not stop it. (Switching was
+still correct — it matches the pin and CI — just not a fix for this.)
+
+**It does not affect the shipped app.** Metro is a development-only bundle
+server; nothing in a release build talks to it.
+
+Until it is fixed upstream, run Metro under a supervisor so a crash self-heals
+instead of leaving a dead port mid-test:
+
+```bash
+cd mobile
+while ($true) { npx expo start --dev-client --port 8081; Start-Sleep 3 }
+```
+
+Diagnosing whether Metro is alive: `curl -s http://localhost:8081/status` →
+`packager-status:running`. Silence or connection-refused means it died; a long
+uptime with low CPU is normal and healthy.
 
 **Two separate npm projects.** Root and `mobile/` have their own lockfiles and no
 workspace linking them. Install in the right directory.
@@ -445,7 +476,9 @@ Things that have already cost time, roughly in order of how likely you are to hi
    lost to this. Native exceptions *do* reach logcat; JS logs do not.
 3. **Mocked tests cannot catch schema drift.** §4.
 4. **`sync-streams.yaml` bypasses RLS.** §2.
-5. **Node 25 breaks the dev server and `@supabase/ssr`.** §1.
+5. **Metro dies periodically on every Node version** (`ws` "Too many message
+   fragments"), and Node 25 additionally breaks `@supabase/ssr`. §1 — run Metro
+   supervised; the crash does not affect the shipped app.
 6. **Route-segment config is ignored in a `"use client"` module.**
    `export const dynamic = "force-dynamic"` under `"use client"` does *nothing*.
    Three such lines sat in `login`, `forgot-password` and `update-password` for
