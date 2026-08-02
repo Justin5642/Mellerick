@@ -78,6 +78,14 @@ which is why it is a JOIN rather than the obvious form.
 > **If you add a table to a technician stream, list its columns explicitly.
 > Never `SELECT *` on a table that has, or might later gain, a money column.**
 
+That rule was documented but not enforced, and two streams had drifted to
+`SELECT *` (`backflow_devices`, `backflow_tests`). Neither leaked money — those
+tables have no monetary column today — but either would have begun syncing one
+silently the moment a migration added it. Both now list columns explicitly, and
+`tests/unit/sync-streams-contract.test.ts` enforces all of it: no `SELECT *` in a
+technician-visible stream, no money-named column in one, and every `office_*`
+stream gated on the caller's own profile row.
+
 ### Web-side equivalent
 
 - Three roles: `admin`, `office`, `technician`. RLS is the primary boundary.
@@ -146,6 +154,30 @@ is durable on disk, so abandoning loses nothing.
 
 > **If you add async work that touches SQLite, add the same liveness check.**
 
+### The device clock lies — never compare a stored timestamp to a later `now`
+
+A technician's phone corrects itself across a long shift: NTP pulls a fast
+handset back, or a different timezone offset is picked up on the road. **Any
+absolute device timestamp compared against a later device clock read is a stall
+waiting to happen**, because the clock can move backwards between the two reads.
+
+This shipped in two places and both are now fixed:
+
+| Site | Symptom of a backward jump |
+|---|---|
+| `outbox.ts` `nextReady()` | `nextAttemptAt` sat in the future — queued writes stalled for the length of the jump. Silent: no error, no dead-letter, badge just read "pending" while recorded labour went undelivered. |
+| `reads/source.ts` write-echo window | `echoUntil` sat in the future — **every read forced to the network**, defeating offline reads outright. A technician in a basement got failures while holding a complete local mirror. |
+
+Both now apply the same guard: each wait has a known maximum by construction
+(`MAX_BACKOFF_MS`, `ECHO_WINDOW_MS`), so **a remaining wait longer than that
+maximum is evidence the clock moved, not that the wait is real** — and the
+operation is released. Each has a negative-control test proving the ordinary
+window is still honoured, so the guard cannot decay into "ignore the wait".
+
+Checked and found sound: `hoursBetween()` in `repositories/timeEntries.ts`
+returns `null` when the end is not strictly after the start, so a backward jump
+between clock-in and clock-out cannot put negative hours on a timesheet.
+
 Related: `start()` and the reconnect handler launch drains with `void`, so
 anything thrown would become an **unhandled rejection — which React Native
 renders as a full-screen red box over a working app**. They route errors to an
@@ -173,6 +205,51 @@ Nothing in the historical data distinguishes "was awaiting invoicing" from "was
 not", and guessing would inject phantom rows into the office queue.
 **Consequence: the Ready-to-Invoice queue contains only jobs signed off after the
 migration.** Office staff should be told this.
+
+### ⚠ Committed is not applied — and an edited migration never re-runs
+
+This has now caused a real credential exposure, so it is worth stating plainly.
+
+On 2026-07-30 a `pg_policies` check against production found that migration
+`0034`, which was written to lock the `xero_tokens` table, **had never taken
+effect**. It tried to remove the permissive policy by *name*; the policy created
+out-of-band in production was named differently, so `drop policy if exists`
+matched nothing and did nothing — no error, no warning. Postgres OR-es
+permissive policies, so one missed drop left the table open: **any authenticated
+user, a technician holding the anon key included, could read the organisation's
+Xero OAuth access and refresh tokens.**
+
+`0034` was then corrected in place. **That correction cannot help on its own.**
+The migration ledger already records `0034` as applied, so `supabase db push`
+will not re-run it — the edited file sits in the repo looking like a fix while
+production stays exposed. That is the same silent-failure shape as the original
+defect.
+
+**`0042_converge_token_table_policies.sql` is the actual fix.** It is written so
+it cannot fail the same way:
+
+- it drops policies by **enumerating `pg_policy`**, not by guessing names, so it
+  cannot miss one whatever it is called;
+- it **asserts the end state and raises** — if the table does not finish with RLS
+  on and exactly the intended policy, the migration fails loudly instead of
+  reporting success;
+- it additionally **detects, without changing**, the same drift on
+  `google_tokens`, raising if that table's policies do not gate on
+  `is_office_or_admin`. Detect-only is deliberate: quietly rewriting a live
+  integration's access rules during a security migration trades one incident for
+  another.
+
+**Rules that follow from this:**
+
+1. **Never edit an applied migration to fix it.** Write a new one. The ledger
+   makes in-place edits invisible.
+2. **Never drop a policy by guessed name** in a security migration. Enumerate.
+3. **Assert the end state.** A security migration that can silently achieve
+   nothing is worse than none, because it manufactures false confidence.
+4. **Verify against production, not against a local stack.** `npm run test:rls`
+   boots a local Supabase rebuilt *from these same migrations*, so it agrees with
+   them by construction and cannot detect drift. Only a query against the real
+   database can.
 
 ### The drift guard — read before writing a test
 

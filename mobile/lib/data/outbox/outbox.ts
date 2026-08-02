@@ -16,6 +16,35 @@ export function backoffMs(attempts: number): number {
 // retrying forever. ~8 attempts spans ~10 min of backoff before giving up.
 export const MAX_ATTEMPTS = 8;
 
+// How long a completed operation is kept before pruning. Long enough that
+// support can still see what a device sent for a recent job, short enough that
+// the queue stays small. See Outbox.pruneCompleted.
+export const DEFAULT_PRUNE_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
+
+// The largest wait backoffMs can ever schedule.
+const MAX_BACKOFF_MS = backoffMs(Number.MAX_SAFE_INTEGER);
+
+/**
+ * True when a backed-off operation is due to run again.
+ *
+ * `nextAttemptAt` is an ABSOLUTE timestamp taken from the device clock, and that
+ * clock is not trustworthy: a technician's phone corrects itself over a long
+ * shift — NTP pulling a fast handset back, or a different timezone offset picked
+ * up on the road. A backward jump would leave `nextAttemptAt` sitting far in the
+ * future, stalling queued work for as long as the jump. Hours of recorded labour
+ * would simply not reach payroll, with no error raised and a sync badge showing
+ * nothing worse than "pending".
+ *
+ * No legitimate backoff can schedule further out than MAX_BACKOFF_MS, so a gap
+ * larger than that is evidence the clock moved rather than that the wait is
+ * real, and the operation is released. Within that window the backoff is
+ * honoured normally, so a genuinely failing endpoint is not hammered.
+ */
+function isDue(nextAttemptAt: number, now: number): boolean {
+  if (nextAttemptAt <= now) return true;
+  return nextAttemptAt - now > MAX_BACKOFF_MS;
+}
+
 // The write-outbox queue. Owns enqueue (with side-effect coalescing) and the
 // FIFO/dependency-aware selection of the next operation to process. It does NOT
 // talk to the network — the processor drains it. Pure orchestration over an
@@ -157,7 +186,7 @@ export class Outbox {
     const doneIds = new Set(all.filter((o) => o.status === "done").map((o) => o.id));
     const ready = all
       .filter((o) => o.status === "pending" || o.status === "failed")
-      .filter((o) => o.nextAttemptAt <= now)
+      .filter((o) => isDue(o.nextAttemptAt, now))
       .filter((o) => !o.dependsOn || doneIds.has(o.dependsOn))
       .sort((a, b) => a.createdAt - b.createdAt);
     return ready[0];
@@ -183,6 +212,70 @@ export class Outbox {
       nextAttemptAt: this.clock.now() + backoffMs(attempts),
       error,
     });
+  }
+
+  /**
+   * Delete completed operations that nothing still needs, and report how many
+   * went.
+   *
+   * Nothing previously removed them, so the queue grew for the life of the
+   * install. That is not just untidy: `nextReady()` calls `store.all()`, which
+   * SELECTs the whole table and JSON.parses every row, and it runs in a loop
+   * inside `drain()`. Unbounded, a technician's phone does work quadratic in the
+   * number of operations it has EVER performed, and holds all of them in memory.
+   * A device doing ~50 writes a day passes 18,000 rows inside a year.
+   *
+   * Two rules make this safe:
+   *
+   *  - Only `done` operations are eligible. `pending`, `failed` and `inflight`
+   *    are live work; `dead` is retained deliberately so `retryDead()` can still
+   *    revive it and so the failure stays visible.
+   *  - A `done` operation is kept while any non-terminal operation still names it
+   *    in `dependsOn`. `nextReady()` unblocks a dependent by finding its
+   *    dependency among the done ids, so pruning one early would strand that
+   *    dependent as permanently un-runnable — the single way this could lose a
+   *    technician's work.
+   *
+   * The retention window keeps recent history so support can see what a device
+   * actually sent. It is measured on the device clock, which can move backwards
+   * (see `isDue`) — here that is harmless, since the only effect is pruning later
+   * than intended.
+   */
+  async pruneCompleted(retainMs: number = DEFAULT_PRUNE_RETENTION_MS): Promise<number> {
+    const all = await this.store.all();
+    const stillNeeded = new Set(
+      all
+        .filter((o) => o.status !== "done" && o.status !== "dead")
+        .map((o) => o.dependsOn)
+        .filter((id): id is string => Boolean(id))
+    );
+    const cutoff = this.clock.now() - retainMs;
+    let removed = 0;
+    for (const o of all) {
+      if (o.status !== "done") continue;
+      if (stillNeeded.has(o.id)) continue;
+      if (o.createdAt > cutoff) continue;
+      await this.store.remove(o.id);
+      removed++;
+    }
+    return removed;
+  }
+
+  /**
+   * Local attachment paths that some operation still expects to upload.
+   *
+   * Anything staged on disk and absent from this set is unreachable — nothing
+   * will ever read it. Includes 'dead' operations, whose files must survive so
+   * retryDead() can still upload them.
+   */
+  async referencedAttachmentUris(): Promise<Set<string>> {
+    const all = await this.store.all();
+    return new Set(
+      all
+        .filter((o) => o.kind === "write" && o.status !== "done")
+        .map((o) => (o as WriteOperation).attachmentLocalPath)
+        .filter((p): p is string => Boolean(p))
+    );
   }
 
   async pendingCount(): Promise<number> {

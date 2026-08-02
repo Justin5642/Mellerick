@@ -39,6 +39,25 @@ export function markWritesSettled(now: number = Date.now()): void {
   echoUntil = now + ECHO_WINDOW_MS;
 }
 
+/**
+ * True while the write-echo window is genuinely open.
+ *
+ * `echoUntil` is an ABSOLUTE device timestamp, and the phone's clock is not
+ * trustworthy across a long shift — NTP pulls a fast handset back, or a
+ * different timezone offset is picked up on the road. A backward jump would
+ * leave `now < echoUntil` true for the length of the jump, forcing EVERY read
+ * onto the network. Offline, that is not a slow read, it is no read at all: a
+ * technician in a basement would see failures while holding a complete local
+ * mirror, which is the one thing this app exists to prevent.
+ *
+ * The window is ECHO_WINDOW_MS wide by construction, so a remaining wait longer
+ * than that is evidence the clock moved rather than that the window is real.
+ */
+function isInEchoWindow(now: number): boolean {
+  if (now >= echoUntil) return false;
+  return echoUntil - now <= ECHO_WINDOW_MS;
+}
+
 export type ReadOrigin = "local" | "remote";
 export type ReadOriginReason =
   | "no-local"
@@ -85,7 +104,7 @@ export async function fromLocalOr<T>(
     emit("remote", "not-synced");
     return remote();
   }
-  if (now < echoUntil) {
+  if (isInEchoWindow(now)) {
     emit("remote", "write-echo");
     return remote();
   }

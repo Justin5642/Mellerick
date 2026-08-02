@@ -3,7 +3,8 @@ import { cryptoIdGen } from "./ids";
 
 // Durable staging dir for queued attachments, under app documents (persistent),
 // NOT cache/temp (which the OS can purge at any time).
-const DIR = `${FileSystem.documentDirectory}outbox-attachments/`;
+export const OUTBOX_ATTACHMENT_DIR = `${FileSystem.documentDirectory}outbox-attachments/`;
+const DIR = OUTBOX_ATTACHMENT_DIR;
 
 // Copy a picked/captured file out of its volatile picker/cache location into the
 // durable staging dir, so a queued photo survives app restarts and OS cache

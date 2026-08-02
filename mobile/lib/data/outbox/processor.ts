@@ -1,4 +1,5 @@
 import type { Outbox } from "./outbox";
+import { selectOrphanAttachments } from "./orphanAttachments";
 import type { Operation, WriteOperation } from "./types";
 import type { SupabaseGateway, ApiBridge } from "../gateway";
 import type { Connectivity } from "../net/connectivity";
@@ -41,8 +42,40 @@ export class Processor {
           await this.outbox.markFailed(op, err instanceof Error ? err.message : String(err));
         }
       }
+      // Drop completed work nothing still needs. Without this the queue grows for
+      // the life of the install, and nextReady() — which reads and parses the
+      // WHOLE table, once per operation — turns a long-serving device's drain
+      // into quadratic work. Pruning here is safe because the pass is over, so
+      // nothing is mid-flight; and it never removes a row a queued dependent
+      // still points at. Best-effort: a housekeeping failure must not fail the
+      // drain, whose real job (getting the technician's work to the server) has
+      // already succeeded by this point.
+      try {
+        await this.outbox.pruneCompleted();
+        await this.reclaimOrphanAttachments();
+      } catch (e) {
+        if (__DEV__) console.warn("[outbox] prune failed (harmless, will retry next drain):", e);
+      }
     } finally {
       this.draining = false;
+    }
+  }
+
+  // Delete staged attachment files that no operation will ever upload: a file
+  // written just before a crash that killed the enqueue, or one belonging to a
+  // 'dead' operation. Both otherwise sit on the technician's phone forever, and
+  // these are job photos and signature PNGs.
+  //
+  // The grace period in selectOrphanAttachments is what makes this safe: a file
+  // is written before the operation referencing it is enqueued, so a sweep in
+  // that window must not mistake a brand-new attachment for an orphan.
+  private async reclaimOrphanAttachments(): Promise<void> {
+    const [staged, referenced] = await Promise.all([
+      this.gateway.listStagedAttachments(),
+      this.outbox.referencedAttachmentUris(),
+    ]);
+    for (const uri of selectOrphanAttachments(staged, referenced, Date.now())) {
+      await this.gateway.cleanupAttachment(uri); // never throws
     }
   }
 

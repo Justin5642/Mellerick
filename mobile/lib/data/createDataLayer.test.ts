@@ -16,6 +16,7 @@ function makeGateway(): jest.Mocked<SupabaseGateway> {
     uploadObject: jest.fn().mockResolvedValue(undefined),
     removeObject: jest.fn().mockResolvedValue(undefined),
     cleanupAttachment: jest.fn().mockResolvedValue(undefined),
+    listStagedAttachments: jest.fn().mockResolvedValue([]),
   };
 }
 const makeApi = (): jest.Mocked<ApiBridge> => ({ callSideEffect: jest.fn().mockResolvedValue(undefined) });
@@ -190,6 +191,12 @@ describe("createDataLayer (end-to-end offline → reconnect)", () => {
 });
 
 // Let the fire-and-forget drain kicked by reconnect() settle.
+// Lets fire-and-forget drains settle. The count is a budget, not a contract:
+// a drain awaits once per queued operation plus its end-of-pass housekeeping
+// (pruneCompleted, reclaimOrphanAttachments), so the ceiling has to sit well
+// above the longest chain any test here builds. It was 20, which the
+// housekeeping pushed past — tests then failed on a retry that had not been
+// given room to run, rather than on anything the product did wrong.
 async function flushMicrotasks(): Promise<void> {
-  for (let i = 0; i < 20; i++) await Promise.resolve();
+  for (let i = 0; i < 200; i++) await Promise.resolve();
 }

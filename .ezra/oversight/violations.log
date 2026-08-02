@@ -45,3 +45,5 @@
 [2026-07-28T08:30:30.342Z] LOW SEC-LOG: console.log/debug in production code at line 2 (C:\Dev\Mellerick\mobile\lib\data\PowerSyncProvider.tsx)
 [2026-07-28T09:05:17.226Z] LOW STD-NAMING: File "PowerSyncProvider.tsx" uses PascalCase, expected camelCase (C:\Dev\Mellerick\mobile\lib\data\PowerSyncProvider.tsx)
 [2026-07-28T12:21:39.185Z] LOW STD-NAMING: File "HANDOVER-BACKEND.md" uses PascalCase, expected camelCase (C:\Dev\Mellerick\HANDOVER-BACKEND.md)
+[2026-08-02T12:57:33.417Z] HIGH STD-ANY: 'any' type detected at line 95 (C:\Dev\Mellerick\supabase\audit\production-security-audit.sql)
+[2026-08-02T13:19:59.256Z] LOW STD-NAMING: File "DECISIONS-FOR-AVI.md" uses PascalCase, expected camelCase (C:\Dev\Mellerick\mobile\DECISIONS-FOR-AVI.md)

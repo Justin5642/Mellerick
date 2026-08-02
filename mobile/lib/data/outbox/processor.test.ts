@@ -17,6 +17,7 @@ function makeGateway(): jest.Mocked<SupabaseGateway> {
     uploadObject: jest.fn().mockResolvedValue(undefined),
     removeObject: jest.fn().mockResolvedValue(undefined),
     cleanupAttachment: jest.fn().mockResolvedValue(undefined),
+    listStagedAttachments: jest.fn().mockResolvedValue([]),
   };
 }
 const makeApi = (): jest.Mocked<ApiBridge> => ({ callSideEffect: jest.fn().mockResolvedValue(undefined) });
@@ -239,5 +240,71 @@ describe("Processor", () => {
     gw.insertRow.mockRejectedValueOnce(new Error("network down"));
     await new Processor(outbox, gw, makeApi(), online(true)).drain();
     expect(await outbox.failedCount()).toBe(1); // still there, backed off
+  });
+});
+
+// The queue previously grew for the life of the install: nothing removed
+// completed operations, while nextReady() SELECTs the whole table and parses
+// every row inside the drain loop. Draining is the natural moment to prune —
+// it already runs whenever there is work, and the pass has just finished, so
+// nothing is mid-flight.
+describe("Processor — prunes completed work after a drain", () => {
+  it("removes completed operations older than the retention window", async () => {
+    const store = new InMemoryOutboxStore();
+    // Clock far past the retention window so anything created at t=0 is eligible.
+    const box = new Outbox(store, fixedClock(30 * 24 * 60 * 60 * 1000));
+    const proc = new Processor(box, makeGateway(), makeApi(), online(true));
+
+    await box.enqueue(write("a"));
+    await proc.drain();
+
+    // 'a' dispatched, was marked done, and then pruned in the same pass.
+    expect(await store.all()).toEqual([]);
+  });
+
+  it("does not prune a completed op a queued dependent still needs", async () => {
+    const store = new InMemoryOutboxStore();
+    const box = new Outbox(store, fixedClock(30 * 24 * 60 * 60 * 1000));
+    const gateway = makeGateway();
+    // The dependent fails, so it stays live and must keep its dependency.
+    gateway.updateRow.mockRejectedValue(new Error("offline mid-pass"));
+    const proc = new Processor(box, gateway, makeApi(), online(true));
+
+    await box.enqueue(write("insert-op"));
+    await box.enqueue(write("update-op", { op: "update", dependsOn: "insert-op" }));
+    await proc.drain();
+
+    const ids = (await store.all()).map((o) => o.id).sort();
+    expect(ids).toEqual(["insert-op", "update-op"]);
+  });
+});
+
+describe("Processor — reclaims orphaned attachment files", () => {
+  const OLD = Date.now() - 2 * 60 * 60 * 1000; // beyond the grace period
+
+  it("deletes a staged file no operation references", async () => {
+    const store = new InMemoryOutboxStore();
+    const box = new Outbox(store, fixedClock(0));
+    const gateway = makeGateway();
+    gateway.listStagedAttachments.mockResolvedValue([{ uri: "orphan.jpg", modifiedAt: OLD }]);
+    const proc = new Processor(box, gateway, makeApi(), online(true));
+
+    await proc.drain();
+
+    expect(gateway.cleanupAttachment).toHaveBeenCalledWith("orphan.jpg");
+  });
+
+  it("keeps the file of a dead operation, which retryDead still needs", async () => {
+    const store = new InMemoryOutboxStore();
+    const box = new Outbox(store, fixedClock(0));
+    const gateway = makeGateway();
+    gateway.listStagedAttachments.mockResolvedValue([{ uri: "dead-photo.jpg", modifiedAt: OLD }]);
+    const proc = new Processor(box, gateway, makeApi(), online(true));
+
+    await box.enqueue(write("d", { attachmentLocalPath: "dead-photo.jpg" }));
+    await store.update("d", { status: "dead" });
+    await proc.drain();
+
+    expect(gateway.cleanupAttachment).not.toHaveBeenCalledWith("dead-photo.jpg");
   });
 });

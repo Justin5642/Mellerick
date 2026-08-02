@@ -10,6 +10,8 @@ export interface OutboxStore {
   all(): Promise<Operation[]>;
   findByCoalesceKey(key: string): Promise<Operation | undefined>;
   countByStatus(status: OpStatus): Promise<number>;
+  /** Delete a single operation. Only the prune uses this — see Outbox.pruneCompleted. */
+  remove(id: string): Promise<void>;
 }
 
 // In-memory store for unit tests and previewing. Ordered by insertion.
@@ -42,5 +44,9 @@ export class InMemoryOutboxStore implements OutboxStore {
 
   async countByStatus(status: OpStatus): Promise<number> {
     return this.ops.filter((o) => o.status === status).length;
+  }
+
+  async remove(id: string): Promise<void> {
+    this.ops = this.ops.filter((o) => o.id !== id);
   }
 }

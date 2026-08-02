@@ -111,6 +111,110 @@ describe("Outbox", () => {
     expect((await box.nextReady())?.id).toBe("a"); // ready again after backoff
   });
 
+  // A technician's phone corrects its clock. NTP pulls a fast device back, or
+  // the handset picks up a different timezone offset on the road. Backoff is
+  // stored as an ABSOLUTE timestamp (now + backoff), so a backward jump leaves
+  // nextAttemptAt sitting far in the future and the queued work stalls for as
+  // long as the jump — hours of recorded labour not reaching payroll, with no
+  // error anywhere and a sync badge that just says "pending".
+  //
+  // No sane clock can put nextAttemptAt further out than the backoff cap, so a
+  // gap larger than that is proof the clock moved, not that the wait is real.
+  it("still runs a backed-off op after the device clock jumps backwards", async () => {
+    const clock = mockClock();
+    const box = new Outbox(new InMemoryOutboxStore(), clock);
+    await box.enqueue(write("a"));
+    const op = await box.nextReady();
+    await box.markFailed(op!, "network error");
+    expect(await box.nextReady()).toBeUndefined(); // correctly backed off
+
+    clock.advance(-60 * 60 * 1000); // phone corrects itself an hour backwards
+
+    expect((await box.nextReady())?.id).toBe("a");
+  });
+
+  it("does not treat an ordinary pending backoff as a clock jump", async () => {
+    // The guard must not become "retry everything immediately" — that would
+    // hammer a failing endpoint and defeat the backoff entirely.
+    const clock = mockClock();
+    const box = new Outbox(new InMemoryOutboxStore(), clock);
+    await box.enqueue(write("a"));
+    const op = await box.nextReady();
+    await box.markFailed(op!, "network error");
+
+    clock.advance(backoffMs(1) - 1); // still inside a legitimate backoff window
+
+    expect(await box.nextReady()).toBeUndefined();
+  });
+
+  // Nothing ever removed completed operations, so the outbox grew for the life of
+  // the install. That is not merely untidy: nextReady() calls store.all(), which
+  // SELECTs the whole table and JSON.parses every row, and it is called in a loop
+  // inside drain(). Left alone, a technician's phone does O(n²) work in the number
+  // of operations it has EVER performed, and holds all of them in memory. Invisible
+  // with small test fixtures; it degrades a real device over months of field use.
+  describe("pruneCompleted", () => {
+    it("removes completed operations so the queue does not grow for the life of the install", async () => {
+      const clock = mockClock();
+      const store = new InMemoryOutboxStore();
+      const box = new Outbox(store, clock);
+      await box.enqueue(write("a"));
+      const op = await box.nextReady();
+      await box.markDone(op!.id);
+
+      clock.advance(8 * 24 * 60 * 60 * 1000); // beyond the retention window
+      const removed = await box.pruneCompleted();
+
+      expect(removed).toBe(1);
+      expect(await store.all()).toEqual([]);
+    });
+
+    it("NEVER prunes a completed op that a live op still depends on", async () => {
+      // nextReady unblocks a dependent by looking its dependency up among the
+      // DONE ids. Prune that row and the dependent can never become ready again —
+      // it would sit pending forever, holding a technician's work hostage. This is
+      // the one way pruning could cause data loss, so it is tested explicitly.
+      const clock = mockClock();
+      const store = new InMemoryOutboxStore();
+      const box = new Outbox(store, clock);
+      await box.enqueue(write("insert-op"));
+      await box.enqueue(write("update-op", { dependsOn: "insert-op" }));
+      await box.markDone("insert-op");
+
+      clock.advance(8 * 24 * 60 * 60 * 1000);
+      const removed = await box.pruneCompleted();
+
+      expect(removed).toBe(0);
+      // and the dependent is still able to run
+      expect((await box.nextReady())?.id).toBe("update-op");
+    });
+
+    it("keeps recent completed ops so support can see what a device sent", async () => {
+      const clock = mockClock();
+      const store = new InMemoryOutboxStore();
+      const box = new Outbox(store, clock);
+      await box.enqueue(write("a"));
+      await box.markDone("a");
+
+      clock.advance(60 * 60 * 1000); // an hour — well inside retention
+      expect(await box.pruneCompleted()).toBe(0);
+      expect((await store.all()).length).toBe(1);
+    });
+
+    it("leaves pending, failed, inflight and dead operations alone", async () => {
+      const clock = mockClock();
+      const store = new InMemoryOutboxStore();
+      const box = new Outbox(store, clock);
+      await box.enqueue(write("pending-op"));
+      await box.enqueue(write("dead-op"));
+      await store.update("dead-op", { status: "dead" });
+
+      clock.advance(8 * 24 * 60 * 60 * 1000);
+      expect(await box.pruneCompleted()).toBe(0);
+      expect((await store.all()).length).toBe(2);
+    });
+  });
+
   it("counts pending/failed/inflight as outstanding for the sync badge", async () => {
     const box = new Outbox(new InMemoryOutboxStore(), mockClock());
     await box.enqueue(write("a"));

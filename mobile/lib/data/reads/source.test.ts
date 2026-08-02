@@ -56,6 +56,36 @@ describe("fromLocalOr", () => {
     ).resolves.toBe(LOCAL);
   });
 
+  // Same defect class as the outbox backoff stall. echoUntil is an ABSOLUTE
+  // device timestamp, and the phone's clock corrects itself over a long shift.
+  // A backward jump leaves `now < echoUntil` true for the length of the jump,
+  // forcing EVERY read to the network — which is worse here than in the outbox,
+  // because it defeats offline reads outright. A technician in a basement would
+  // get failures while holding a complete local mirror.
+  //
+  // The echo window is 5 seconds by construction, so a remaining wait longer
+  // than that is evidence the clock moved, not that the window is real.
+  it("ignores the write-echo window after the device clock jumps backwards", async () => {
+    setLocalReads(fakeReads());
+    const remote = jest.fn().mockResolvedValue(REMOTE);
+    markWritesSettled(1_000); // echo until 6_000
+
+    // Phone corrects itself an hour backwards mid-shift.
+    await expect(
+      fromLocalOr(async () => LOCAL, remote, { now: () => 1_000 - 60 * 60 * 1000 })
+    ).resolves.toBe(LOCAL);
+    expect(remote).not.toHaveBeenCalled();
+  });
+
+  it("still honours a legitimate echo window (the guard must not disable it)", async () => {
+    setLocalReads(fakeReads());
+    const remote = jest.fn().mockResolvedValue(REMOTE);
+    markWritesSettled(1_000);
+    await expect(
+      fromLocalOr(async () => LOCAL, remote, { now: () => 2_000 })
+    ).resolves.toBe(REMOTE);
+  });
+
   it("routes remote for a role outside the allow-list — RLS must stay the loud gate", async () => {
     setLocalReads(fakeReads({ role: () => "technician" }));
     const local = jest.fn();
