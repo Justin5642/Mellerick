@@ -16,6 +16,30 @@ export function backoffMs(attempts: number): number {
 // retrying forever. ~8 attempts spans ~10 min of backoff before giving up.
 export const MAX_ATTEMPTS = 8;
 
+// The largest wait backoffMs can ever schedule.
+const MAX_BACKOFF_MS = backoffMs(Number.MAX_SAFE_INTEGER);
+
+/**
+ * True when a backed-off operation is due to run again.
+ *
+ * `nextAttemptAt` is an ABSOLUTE timestamp taken from the device clock, and that
+ * clock is not trustworthy: a technician's phone corrects itself over a long
+ * shift — NTP pulling a fast handset back, or a different timezone offset picked
+ * up on the road. A backward jump would leave `nextAttemptAt` sitting far in the
+ * future, stalling queued work for as long as the jump. Hours of recorded labour
+ * would simply not reach payroll, with no error raised and a sync badge showing
+ * nothing worse than "pending".
+ *
+ * No legitimate backoff can schedule further out than MAX_BACKOFF_MS, so a gap
+ * larger than that is evidence the clock moved rather than that the wait is
+ * real, and the operation is released. Within that window the backoff is
+ * honoured normally, so a genuinely failing endpoint is not hammered.
+ */
+function isDue(nextAttemptAt: number, now: number): boolean {
+  if (nextAttemptAt <= now) return true;
+  return nextAttemptAt - now > MAX_BACKOFF_MS;
+}
+
 // The write-outbox queue. Owns enqueue (with side-effect coalescing) and the
 // FIFO/dependency-aware selection of the next operation to process. It does NOT
 // talk to the network — the processor drains it. Pure orchestration over an
@@ -157,7 +181,7 @@ export class Outbox {
     const doneIds = new Set(all.filter((o) => o.status === "done").map((o) => o.id));
     const ready = all
       .filter((o) => o.status === "pending" || o.status === "failed")
-      .filter((o) => o.nextAttemptAt <= now)
+      .filter((o) => isDue(o.nextAttemptAt, now))
       .filter((o) => !o.dependsOn || doneIds.has(o.dependsOn))
       .sort((a, b) => a.createdAt - b.createdAt);
     return ready[0];

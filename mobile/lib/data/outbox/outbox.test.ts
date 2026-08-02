@@ -111,6 +111,42 @@ describe("Outbox", () => {
     expect((await box.nextReady())?.id).toBe("a"); // ready again after backoff
   });
 
+  // A technician's phone corrects its clock. NTP pulls a fast device back, or
+  // the handset picks up a different timezone offset on the road. Backoff is
+  // stored as an ABSOLUTE timestamp (now + backoff), so a backward jump leaves
+  // nextAttemptAt sitting far in the future and the queued work stalls for as
+  // long as the jump — hours of recorded labour not reaching payroll, with no
+  // error anywhere and a sync badge that just says "pending".
+  //
+  // No sane clock can put nextAttemptAt further out than the backoff cap, so a
+  // gap larger than that is proof the clock moved, not that the wait is real.
+  it("still runs a backed-off op after the device clock jumps backwards", async () => {
+    const clock = mockClock();
+    const box = new Outbox(new InMemoryOutboxStore(), clock);
+    await box.enqueue(write("a"));
+    const op = await box.nextReady();
+    await box.markFailed(op!, "network error");
+    expect(await box.nextReady()).toBeUndefined(); // correctly backed off
+
+    clock.advance(-60 * 60 * 1000); // phone corrects itself an hour backwards
+
+    expect((await box.nextReady())?.id).toBe("a");
+  });
+
+  it("does not treat an ordinary pending backoff as a clock jump", async () => {
+    // The guard must not become "retry everything immediately" — that would
+    // hammer a failing endpoint and defeat the backoff entirely.
+    const clock = mockClock();
+    const box = new Outbox(new InMemoryOutboxStore(), clock);
+    await box.enqueue(write("a"));
+    const op = await box.nextReady();
+    await box.markFailed(op!, "network error");
+
+    clock.advance(backoffMs(1) - 1); // still inside a legitimate backoff window
+
+    expect(await box.nextReady()).toBeUndefined();
+  });
+
   it("counts pending/failed/inflight as outstanding for the sync badge", async () => {
     const box = new Outbox(new InMemoryOutboxStore(), mockClock());
     await box.enqueue(write("a"));
