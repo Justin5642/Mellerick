@@ -3,10 +3,11 @@ import * as Location from "expo-location";
 import { supabase } from "./supabase";
 import { useAuth } from "./auth-context";
 import { plausibleAutoClockHours, MAX_PLAUSIBLE_TRAVEL_HOURS, MAX_PLAUSIBLE_WORK_HOURS } from "./autoClockHours";
+import { nextGeofenceState, type TrackedSite } from "./geofenceState";
 
-// Mirrors the constant used on the web side (components/job/job-time.tsx)
-// so a tech is treated as "on site" consistently across platforms.
-const GEOFENCE_RADIUS_METERS = 150;
+// GEOFENCE_RADIUS_METERS and the distance maths now live in ./geofenceState,
+// shared with the background task so the two paths cannot disagree about what
+// "on site" means.
 
 // Plausibility ceilings for both auto-clocked durations live in
 // ./autoClockHours, together with the reasoning: a gap longer than the travel
@@ -31,21 +32,6 @@ function syncBilling(entryId: string) {
       headers: { Authorization: `Bearer ${token}` },
     }).catch(() => {});
   });
-}
-
-interface TrackedSite {
-  jobId: string;
-  lat: number;
-  lng: number;
-}
-
-function haversineDistance(lat1: number, lng1: number, lat2: number, lng2: number) {
-  const R = 6371000;
-  const toRad = (n: number) => (n * Math.PI) / 180;
-  const dLat = toRad(lat2 - lat1);
-  const dLng = toRad(lng2 - lng1);
-  const a = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
-  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
 const LocationTrackingContext = createContext<{ enabled: boolean }>({ enabled: false });
@@ -81,12 +67,24 @@ export function LocationTrackingProvider({ children }: { children: ReactNode }) 
     let cancelled = false;
 
     async function loadSites() {
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from("jobs")
         .select("id, status, sites(site_lat, site_lng)")
         .eq("assigned_to", userId)
         .not("status", "in", '("completed","cancelled")');
       if (cancelled) return;
+
+      // A failed refresh KEEPS the sites we already had. Blanking them on a
+      // transient network error would silently switch the auto-clock off for
+      // the rest of the shift — and because nextGeofenceState treats an empty
+      // list as "not loaded yet" (correctly, so it never fabricates a
+      // clock-out), the failure would be completely invisible: no error, no
+      // clock-in, no travel time, just quietly unpaid hours.
+      if (error) {
+        console.warn("[geofence] could not refresh job sites; keeping the previous list:", error.message);
+        return;
+      }
+
       sitesRef.current = (data ?? [])
         .filter((j: any) => j.sites?.site_lat && j.sites?.site_lng)
         .map((j: any) => ({ jobId: j.id, lat: j.sites.site_lat, lng: j.sites.site_lng }));
@@ -126,19 +124,13 @@ export function LocationTrackingProvider({ children }: { children: ReactNode }) 
     const sites = sitesRef.current;
     if (sites.length === 0) return;
 
-    let nearestJobId: string | null = null;
-    let nearestDist = Infinity;
-    for (const site of sites) {
-      const d = haversineDistance(position.coords.latitude, position.coords.longitude, site.lat, site.lng);
-      if (d < nearestDist) {
-        nearestDist = d;
-        nearestJobId = site.jobId;
-      }
-    }
-    const insideJobId = nearestDist <= GEOFENCE_RADIUS_METERS ? nearestJobId : null;
-    if (insideJobId === insideJobIdRef.current) return;
+    // Same decision the background task uses (lib/geofenceState.ts) — the two
+    // must not drift, or the auto-clock would behave differently depending on
+    // whether the technician happened to have the app open.
+    const next = nextGeofenceState(position.coords, sites, insideJobIdRef.current);
+    if (next.transition === "none") return;
 
-    const previousJobId = insideJobIdRef.current;
+    const { insideJobId, previousJobId } = next;
     insideJobIdRef.current = insideJobId;
     busyRef.current = true;
     try {
