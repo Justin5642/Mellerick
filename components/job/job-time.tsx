@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { toast } from "sonner";
+import { plausibleClockedHours } from "@/lib/time-entry-hours";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -173,7 +174,10 @@ export function JobTime({ jobId, currentUserId, timeEntries: initial, pos, costC
 
           if (open) {
             const clockOut = new Date().toISOString();
-            const hours = Math.round(((new Date(clockOut).getTime() - new Date(open.clock_in).getTime()) / 3600000) * 100) / 100;
+            // null when the duration cannot be believed — cross-device clock
+            // skew (clocked in on a fast phone, out here) would otherwise write
+            // NEGATIVE hours and subtract from the technician's pay.
+            const hours = plausibleClockedHours(open.clock_in, clockOut);
             const { data } = await supabase
               .from("time_entries")
               .update({ clock_out: clockOut, hours })
@@ -215,7 +219,7 @@ export function JobTime({ jobId, currentUserId, timeEntries: initial, pos, costC
     if (!myOpenEntry || loading) return;
     setLoading(true);
     const clockOutTime = new Date().toISOString();
-    const hours = Math.round(((new Date(clockOutTime).getTime() - new Date(myOpenEntry.clock_in).getTime()) / 3600000) * 100) / 100;
+    const hours = plausibleClockedHours(myOpenEntry.clock_in, clockOutTime);
     const { data } = await supabase
       .from("time_entries")
       .update({ clock_out: clockOutTime, hours })
