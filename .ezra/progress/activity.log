@@ -540,3 +540,5 @@
 2026-08-03T00:37:44.589Z | Edit | C:\Dev\Mellerick\tests\unit\schema-column-contract.test.ts
 2026-08-03T00:37:56.696Z | Edit | C:\Dev\Mellerick\tests\unit\schema-column-contract.test.ts
 2026-08-03T00:40:07.329Z | Write | C:\Dev\Mellerick\supabase\migrations\0043_capture_out_of_band_columns.sql
+2026-08-03T01:46:24.733Z | Write | C:\Dev\Mellerick\scripts\check-schema-drift.mjs
+2026-08-03T01:47:38.787Z | Edit | C:\Dev\Mellerick\HANDOVER.md

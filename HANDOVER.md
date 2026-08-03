@@ -295,6 +295,33 @@ remove `0040` and it names all four call sites; restore it and it goes green.
 > **Mocked tests cannot catch schema drift. A green suite is not proof that a
 > column exists.**
 
+It now covers **every table in the migration history** (33 today), derived from
+the migrations rather than a hand-maintained list — a list someone must remember
+to extend is a guard with a shrinking blast radius. It also catches **shorthand
+object properties** (`.insert({ hours, entry_type })`), which the original
+colon-only pattern walked straight past. That was not hypothetical: it is exactly
+how the geofence writes `hours`, and it is why real drift survived while the
+guard appeared to cover `time_entries`.
+
+### The other direction — `npm run check:drift`
+
+The test guard checks that every column the SOURCE names exists in the
+migrations. It cannot catch the reverse: a column that exists in **production**
+and in no migration, which no source file happens to reference. Nothing is broken
+today, so nothing complains — until someone rebuilds the database from migrations
+and it comes up subtly different.
+
+```bash
+npm run check:drift
+```
+
+Reads the live schema (`supabase gen types --linked`), diffs it against the
+migration history, names any drifted column and exits 1 — so it can gate a
+release. Run it after anyone touches production by hand.
+
+That check is what found `job_variations.attachment_file_name`, which the test
+guard could never have seen. Both are now captured in `0043`.
+
 ---
 
 ## 5. Running it

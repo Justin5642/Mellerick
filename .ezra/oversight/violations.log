@@ -49,3 +49,4 @@
 [2026-08-02T13:19:59.256Z] LOW STD-NAMING: File "DECISIONS-FOR-AVI.md" uses PascalCase, expected camelCase (C:\Dev\Mellerick\mobile\DECISIONS-FOR-AVI.md)
 [2026-08-02T14:56:57.537Z] LOW STD-NAMING: File "DECISIONS-FOR-AVI.md" uses PascalCase, expected camelCase (C:\Dev\Mellerick\mobile\DECISIONS-FOR-AVI.md)
 [2026-08-02T15:43:43.977Z] HIGH STD-ANY: 'any' type detected at line 65 (C:\Dev\Mellerick\mobile\lib\autoClockHours.test.ts)
+[2026-08-03T01:46:24.340Z] LOW SEC-LOG: console.log/debug in production code at line 101 (C:\Dev\Mellerick\scripts\check-schema-drift.mjs)

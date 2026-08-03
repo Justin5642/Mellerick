@@ -19,7 +19,8 @@
     "test:watch": "vitest --project unit",
     "test:coverage": "vitest run --project unit --coverage",
     "test:rls": "vitest run --project rls",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "check:drift": "node scripts/check-schema-drift.mjs"
   },
   "dependencies": {
     "@base-ui/react": "^1.6.0",
