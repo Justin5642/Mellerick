@@ -223,23 +223,43 @@ are flagged to Avi in real time per the plan's crucial-flag protocol.
   matching. It has never failed in CI, which runs from a clean checkout with
   nothing writing concurrently.
 
-- **Q28 (gap against the original plan — dark theme is not reachable):** the plan
-  called for "a real dark theme the web never built". What shipped is the token
-  groundwork, not a working feature: `tailwind.config.js` sets
-  `darkMode: "class"`, but **nothing calls `useColorScheme`** to ever add that
-  class, only three files carry `dark:` variants, and `app.json` pins
-  `userInterfaceStyle: "light"`. So the app is light-only and the dark styling is
-  unreachable.
+- **Q28 — INVESTIGATED 2026-08-03. My earlier scope estimate was wrong, and the
+  recommendation has flipped to: do NOT build this now.**
 
-  Not a defect — nothing is broken, and a plumbing app used in daylight has a
-  weak case for it. But it is a plan item recorded as delivered that is not.
-  **Decide:** finish it (wire `useColorScheme` → class, drop the
-  `userInterfaceStyle` pin, extend `dark:` coverage across the component library
-  — roughly a day), or drop it from scope and remove the half-built pieces so the
-  next reader is not misled.
+  I previously wrote that finishing the dark theme was "roughly a day". That was
+  based on assuming the app is styled with NativeWind classes, which `dark:`
+  variants can target. It is not.
 
-  The splash screen added 2026-08-03 carries a `dark.backgroundColor` for this
-  reason: it is correct the moment dark mode is enabled and inert until then.
+  | Measured | |
+  |---|---|
+  | Files using NativeWind `className` | **3** of 56 |
+  | Files using React Native `StyleSheet` | **53** — `dark:` cannot reach these by any means |
+  | Files importing `lib/theme.ts` as a **static** module | **55** |
+  | ThemeProvider / colour-scheme context | **none exists** |
+  | `app.json` | pins `userInterfaceStyle: "light"`, so the OS never reports dark |
+
+  So this is not a `dark:` class problem. Done properly it needs light and dark
+  palettes in `lib/theme.ts`, a provider driven by `useColorScheme()`, and **55
+  files moved from a static import to a hook** — a substantial refactor of an
+  app that currently works, carrying real regression risk across every screen,
+  for a plumbing app used outdoors in daylight that nobody has asked to be dark.
+
+  **Recommendation: leave it. Revisit only if a technician actually asks.**
+
+  **A real defect was found and fixed while investigating.** `tailwind.config.js`
+  claimed `darkMode: "class"` was "driven by NativeWind's colorScheme (see
+  design/theme/ThemeProvider)". That path does not exist and never did — nothing
+  imports `colorScheme`, and no provider was written. A comment asserting a
+  mechanism that is not there is precisely what let `jobs.ready_to_invoice`
+  survive review ("confirmed boolean in prod"). The config now states plainly
+  that the flag is inert and why.
+
+  Related architectural note worth recording on its own: the plan specified
+  "NativeWind v4" as the design system, and what shipped is React Native
+  StyleSheet consuming `lib/theme.ts` tokens, with NativeWind used in 3 files.
+  The app is consistent and works — 55 of 56 files share one token source — but
+  it is not what the plan describes, and anyone reading the plan first will be
+  surprised.
 
 - **Q27 — PARTIALLY RESOLVED 2026-08-03. Maestro is installed and the suite
   has RUN for the first time.** Avi approved installing from the official
