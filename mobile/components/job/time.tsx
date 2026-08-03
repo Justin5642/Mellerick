@@ -6,6 +6,8 @@ import { supabase } from "../../lib/supabase";
 import { colors } from "../../lib/theme";
 import { useTimeClock } from "../../lib/data/hooks/useTimeClock";
 import { getJobCostCentres, type JobCostCentre } from "../../lib/data/reads/jobBilling";
+import { ScreenError } from "../../design/components/ScreenError";
+import { unwrapRows } from "../../lib/data/reads/unwrap";
 import { hoursBetween } from "../../lib/data/repositories/timeEntries";
 import { netInfoConnectivity } from "../../lib/data/net/connectivity";
 import { useDataLayer } from "../../lib/data/DataProvider";
@@ -283,6 +285,8 @@ export function JobTimeTab({ jobId, currentUserId }: { jobId: string; currentUse
   const [assigningId, setAssigningId] = useState<string | null>(null);
   const [editing, setEditing] = useState<EditingEntry | null>(null);
   const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<unknown>(null);
+  const [costCentersFailed, setCostCentersFailed] = useState(false);
   const timeClock = useTimeClock();
   const layer = useDataLayer();
 
@@ -290,26 +294,49 @@ export function JobTimeTab({ jobId, currentUserId }: { jobId: string; currentUse
   // includes optimistic writes queued in the outbox) is authoritative. Even
   // online, we MERGE rather than replace, so an optimistic row whose write is
   // still pending isn't wiped by a reload that races the sync.
+  //
+  // A failed load must NOT land here as an empty list: this list renders "No
+  // time logged yet", and a technician who reads that when the query actually
+  // broke concludes their hours were never recorded. So the query error is
+  // raised rather than dropped, and every rejection on this path (the
+  // connectivity probe and the outbox scan included) is caught into `error`,
+  // which the render checks before it draws the log.
   const loadEntries = useCallback(async () => {
-    if (!(await netInfoConnectivity.isOnline())) return;
-    const { data } = await supabase
-      .from("time_entries")
-      // time_entries has two FKs to profiles (staff_id, edited_by) — must
-      // name the exact FK or PostgREST rejects the query as ambiguous.
-      .select("*, profiles!time_entries_staff_id_fkey(full_name)")
-      .eq("job_id", jobId)
-      .order("clock_in", { ascending: false });
-    const rows = (data as unknown as TimeEntry[]) ?? [];
-    const pending = layer ? await layer.outbox.pendingRowIds() : new Set<string>();
-    setEntries((prev) => reconcileRows(prev, rows, pending));
+    try {
+      setError(null);
+      if (!(await netInfoConnectivity.isOnline())) return;
+      const res = await supabase
+        .from("time_entries")
+        // time_entries has two FKs to profiles (staff_id, edited_by) — must
+        // name the exact FK or PostgREST rejects the query as ambiguous.
+        .select("*, profiles!time_entries_staff_id_fkey(full_name)")
+        .eq("job_id", jobId)
+        .order("clock_in", { ascending: false });
+      const rows = unwrapRows(res as never, "JobTimeTab.loadEntries") as unknown as TimeEntry[];
+      const pending = layer ? await layer.outbox.pendingRowIds() : new Set<string>();
+      setEntries((prev) => reconcileRows(prev, rows, pending));
+    } catch (e) {
+      setError(e);
+    }
   }, [jobId, layer]);
 
   // Reconcile with the server after each sync drain completes (queued writes
   // have actually landed) — not on a was-online guess.
   useSyncSettled(loadEntries);
 
+  // The stage list is an allocation aid, not the point of this tab: clocking on
+  // and off (including fully offline, before the local DB has synced, which is
+  // exactly when this read fails) has to keep working without it. So a failure
+  // degrades instead of taking the tab down — but it is CAUGHT, and it is SAID,
+  // because a stage picker that is missing because the read broke looks
+  // identical to one missing because the job has no PO stages.
   const loadCostCenters = useCallback(async () => {
-    setCostCenters(await getJobCostCentres(jobId));
+    try {
+      setCostCentersFailed(false);
+      setCostCenters(await getJobCostCentres(jobId));
+    } catch {
+      setCostCentersFailed(true);
+    }
   }, [jobId]);
 
   useEffect(() => {
@@ -436,6 +463,23 @@ export function JobTimeTab({ jobId, currentUserId }: { jobId: string; currentUse
     setEditing(null);
   }
 
+  // Checked BEFORE the log renders, so a failed load can never fall through to
+  // "No time logged yet". Telling a technician there are no hours on the job
+  // when the read broke is the confusion this change exists to remove.
+  if (error) {
+    return (
+      <View style={styles.container}>
+        <ScreenError
+          error={error}
+          onRetry={() => {
+            loadEntries();
+            loadCostCenters();
+          }}
+        />
+      </View>
+    );
+  }
+
   return (
     <View style={styles.container}>
       <View style={styles.clockRow}>
@@ -467,6 +511,11 @@ export function JobTimeTab({ jobId, currentUserId }: { jobId: string; currentUse
         <Text style={styles.addManualButtonText}>Add manual entry</Text>
       </TouchableOpacity>
       <Text style={styles.addManualHint}>Use this if auto clock-in/out didn't fire correctly — tap an entry below to correct it.</Text>
+      {costCentersFailed && (
+        <TouchableOpacity onPress={loadCostCenters}>
+          <Text style={styles.errorText}>Couldn't load PO stages — time still logs without one. Tap to retry.</Text>
+        </TouchableOpacity>
+      )}
 
       <FlatList
         data={entries}

@@ -8,8 +8,19 @@ import { listCustomers, type CustomerListRow } from "../../lib/data/reads/custom
 export function CustomerPicker({ visible, onClose, onSelect }: { visible: boolean; onClose: () => void; onSelect: (c: CustomerListRow) => void }) {
   const [rows, setRows] = useState<CustomerListRow[]>([]);
   const [query, setQuery] = useState("");
+  const [error, setError] = useState<unknown>(null);
 
-  const search = useCallback(async (q: string) => setRows(await listCustomers(0, 50, q)), []);
+  // listCustomers now THROWS on a failed query instead of returning []. Uncaught,
+  // that rejection would leave the sheet showing "No customers found." — the
+  // customer book looking empty rather than broken, which is the whole bug.
+  const search = useCallback(async (q: string) => {
+    try {
+      setError(null);
+      setRows(await listCustomers(0, 50, q));
+    } catch (e) {
+      setError(e);
+    }
+  }, []);
   useEffect(() => {
     if (!visible) return;
     const t = setTimeout(() => search(query), 200);
@@ -28,18 +39,26 @@ export function CustomerPicker({ visible, onClose, onSelect }: { visible: boolea
             <Ionicons name="search" size={16} color={colors.slate400} />
             <TextInput style={styles.searchInput} value={query} onChangeText={setQuery} placeholder="Search name or company" placeholderTextColor={colors.slate400} autoFocus />
           </View>
-          <FlatList
-            data={rows}
-            keyExtractor={(c) => c.id}
-            keyboardShouldPersistTaps="handled"
-            ListEmptyComponent={<Text style={styles.empty}>No customers found.</Text>}
-            renderItem={({ item }) => (
-              <TouchableOpacity style={styles.row} onPress={() => onSelect(item)}>
-                <Text style={styles.name}>{item.name}</Text>
-                {!!item.company && <Text style={styles.company}>{item.company}</Text>}
-              </TouchableOpacity>
-            )}
-          />
+          {/* Checked BEFORE the list, so a failed search can never fall through
+              to the "No customers found." empty state. */}
+          {error ? (
+            <TouchableOpacity onPress={() => search(query)}>
+              <Text style={styles.empty}>Couldn&apos;t load customers. Tap to retry.</Text>
+            </TouchableOpacity>
+          ) : (
+            <FlatList
+              data={rows}
+              keyExtractor={(c) => c.id}
+              keyboardShouldPersistTaps="handled"
+              ListEmptyComponent={<Text style={styles.empty}>No customers found.</Text>}
+              renderItem={({ item }) => (
+                <TouchableOpacity style={styles.row} onPress={() => onSelect(item)}>
+                  <Text style={styles.name}>{item.name}</Text>
+                  {!!item.company && <Text style={styles.company}>{item.company}</Text>}
+                </TouchableOpacity>
+              )}
+            />
+          )}
         </View>
       </View>
     </Modal>

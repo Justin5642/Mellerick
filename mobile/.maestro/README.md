@@ -23,8 +23,29 @@ standalone flow.
 
 ## Prerequisites
 
-1. **Maestro CLI** — `curl -Ls "https://get.maestro.mobile.dev" | bash` (or see
-   https://maestro.mobile.dev). Verify with `maestro --version`.
+1. **Maestro CLI** — install from the official GitHub release artifact, NOT the
+   `curl … | bash` one-liner on the website. Piping a remote script straight into
+   a shell executes whatever that URL serves at that moment, unverified; the
+   release artifact publishes a checksum you can actually check first.
+
+   ```bash
+   gh release download cli-2.8.0 --repo mobile-dev-inc/maestro \
+     --pattern "maestro.zip" --pattern "checksums_sha256.txt" --dir /tmp/maestro-dl
+   ```
+
+   Verify BEFORE extracting — this must print a match against
+   `checksums_sha256.txt`:
+
+   ```powershell
+   (Get-FileHash /tmp/maestro-dl/maestro.zip -Algorithm SHA256).Hash.ToLower()
+   ```
+
+   Then extract and copy `maestro/bin` and `maestro/lib` into `~/.maestro/`
+   (copy those two directories only — `~/.maestro` also holds sessions and
+   analytics that a wholesale overwrite would destroy). Add `~/.maestro/bin` to
+   PATH. Verify with `maestro --version` → `2.8.0`.
+
+   Needs a JRE on PATH (Java 17 works).
 2. **A running app build on a device/emulator** with app id `au.com.mellerick.field`:
    - iOS Simulator or Android emulator, or a physical device.
    - Install a build: `eas build --profile preview --platform android` (APK) then

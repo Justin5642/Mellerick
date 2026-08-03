@@ -4,6 +4,7 @@ import { Stack, useFocusEffect, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { colors } from "../../lib/theme";
 import { listBackflowDevices, type BackflowRow } from "../../lib/data/reads/backflow";
+import { ScreenError } from "../../design/components/ScreenError";
 import { BackflowDeviceRow } from "../../components/backflow/device-row";
 
 // Office/admin-reachable backflow list (from the More hub + the Dashboard KPI).
@@ -14,11 +15,21 @@ export default function BackflowListScreen() {
   const [rows, setRows] = useState<BackflowRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState<unknown>(null);
 
   const load = useCallback(async () => {
-    setRows(await listBackflowDevices());
-    setLoading(false);
-    setRefreshing(false);
+    // listBackflowDevices now THROWS on a failed query instead of returning [].
+    // Without this catch the throw would skip both flag resets and leave a
+    // spinner forever; without the finally, a retry could never clear it either.
+    try {
+      setError(null);
+      setRows(await listBackflowDevices());
+    } catch (e) {
+      setError(e);
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
   }, []);
 
   useFocusEffect(
@@ -40,6 +51,24 @@ export default function BackflowListScreen() {
       <View style={styles.center}>
         <Stack.Screen options={{ title: "Backflow" }} />
         <ActivityIndicator size="large" color={colors.blue600} />
+      </View>
+    );
+  }
+
+  // Checked BEFORE the list renders, so a failed load can never fall through to
+  // "No backflow devices registered yet." — a device list that silently reads as
+  // empty is how an overdue test gets missed.
+  if (error) {
+    return (
+      <View style={styles.container}>
+        <Stack.Screen options={{ title: "Backflow" }} />
+        <ScreenError
+          error={error}
+          onRetry={() => {
+            setLoading(true);
+            load();
+          }}
+        />
       </View>
     );
   }

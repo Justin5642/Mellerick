@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, Modal, FlatList } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { colors } from "../../lib/theme";
@@ -97,9 +97,23 @@ function TotalRow({ label, amount, strong }: { label: string; amount: number; st
 
 function CataloguePicker({ visible, onClose, onSelect }: { visible: boolean; onClose: () => void; onSelect: (p: PricingItem) => void }) {
   const [rows, setRows] = useState<PricingItem[]>([]);
+  const [error, setError] = useState<unknown>(null);
+
+  // listPricing now THROWS on a failed query instead of returning []. Uncaught,
+  // that rejection would leave the sheet showing "No pricing items." — the
+  // catalogue looking empty rather than broken, which is the whole bug.
+  const load = useCallback(async () => {
+    try {
+      setError(null);
+      setRows(await listPricing());
+    } catch (e) {
+      setError(e);
+    }
+  }, []);
+
   useEffect(() => {
-    if (visible) listPricing().then(setRows);
-  }, [visible]);
+    if (visible) load();
+  }, [visible, load]);
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
       <View style={styles.overlay}>
@@ -108,17 +122,25 @@ function CataloguePicker({ visible, onClose, onSelect }: { visible: boolean; onC
             <Text style={styles.sheetTitle}>Add from catalogue</Text>
             <TouchableOpacity onPress={onClose}><Ionicons name="close" size={22} color={colors.slate500} /></TouchableOpacity>
           </View>
-          <FlatList
-            data={rows}
-            keyExtractor={(p) => p.id}
-            ListEmptyComponent={<Text style={styles.empty}>No pricing items.</Text>}
-            renderItem={({ item }) => (
-              <TouchableOpacity style={styles.catRow} onPress={() => onSelect(item)}>
-                <Text style={styles.catName}>{item.name}</Text>
-                <MoneyText amount={item.unit_price} style={styles.catPrice} />
-              </TouchableOpacity>
-            )}
-          />
+          {/* Checked BEFORE the list, so a failed load can never fall through to
+              the "No pricing items." empty state. */}
+          {error ? (
+            <TouchableOpacity onPress={load}>
+              <Text style={styles.empty}>Couldn&apos;t load the catalogue. Tap to retry.</Text>
+            </TouchableOpacity>
+          ) : (
+            <FlatList
+              data={rows}
+              keyExtractor={(p) => p.id}
+              ListEmptyComponent={<Text style={styles.empty}>No pricing items.</Text>}
+              renderItem={({ item }) => (
+                <TouchableOpacity style={styles.catRow} onPress={() => onSelect(item)}>
+                  <Text style={styles.catName}>{item.name}</Text>
+                  <MoneyText amount={item.unit_price} style={styles.catPrice} />
+                </TouchableOpacity>
+              )}
+            />
+          )}
         </View>
       </View>
     </Modal>

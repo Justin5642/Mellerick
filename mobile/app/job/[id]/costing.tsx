@@ -4,6 +4,7 @@ import { Stack, useLocalSearchParams } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { colors } from "../../../lib/theme";
 import { MoneyText } from "../../../design/components/MoneyText";
+import { ScreenError } from "../../../design/components/ScreenError";
 import { getJobProfitability, type JobProfitabilityData } from "../../../lib/data/reads/jobCosting";
 
 function pct(v: number | null): string {
@@ -15,12 +16,31 @@ export default function JobCostingScreen() {
   const [data, setData] = useState<JobProfitabilityData | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState<unknown>(null);
 
-  const load = useCallback(async () => { setData(await getJobProfitability(id)); setLoading(false); }, [id]);
+  // getJobProfitability now THROWS on a failed query instead of returning null.
+  // Without this catch the throw would skip setLoading(false) and leave a
+  // spinner forever — and a null return still legitimately means "job not
+  // found", so the two must not be allowed to look the same.
+  const load = useCallback(async () => {
+    try {
+      setError(null);
+      setData(await getJobProfitability(id));
+    } catch (e) {
+      setError(e);
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  }, [id]);
   useEffect(() => { load(); }, [load]);
   const onRefresh = useCallback(async () => { setRefreshing(true); await load(); setRefreshing(false); }, [load]);
 
   if (loading) return <View style={styles.center}><Stack.Screen options={{ title: "Costing" }} /><ActivityIndicator size="large" color={colors.blue600} /></View>;
+  // Checked BEFORE the !data branch, so a failed query can never be reported as
+  // "Job not found." — telling an admin the job is gone when the read broke is
+  // exactly the confusion this change exists to remove.
+  if (error) return <View style={styles.container}><Stack.Screen options={{ title: "Costing" }} /><ScreenError error={error} onRetry={() => { setLoading(true); load(); }} /></View>;
   if (!data) return <View style={styles.center}><Stack.Screen options={{ title: "Costing" }} /><Text style={styles.muted}>Job not found.</Text></View>;
 
   const marginPositive = data.margin >= 0;
