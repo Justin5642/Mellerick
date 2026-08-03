@@ -372,9 +372,35 @@ Use `npm test`, not `npx jest` — `npx` can resolve a broken transient jest.
 
 ---
 
-## 6. Verification status, 29 July 2026
+## 6. Verification status, 4 August 2026
 
-Everything below was run on Node 22.23.1, not assumed.
+Everything below was run, not assumed.
+
+| Check | Result |
+|---|---|
+| Web tests | **195 passed** (24 files) |
+| Mobile tests | **430 passed** (66 suites) |
+| `tsc --noEmit`, both projects | clean |
+| `npm run check:drift` | no drift in either direction |
+| `npm run check:sync` | slot active, `wal_status=reserved` |
+| Maestro flows 01 / 03 / 04 | pass on Android emulator |
+| Maestro flow 02 | needs `ADMIN_EMAIL`/`ADMIN_PASSWORD` — not held by us |
+| Money boundary, populated technician device | job #833 carried 18 columns, **none financial**; no money-named column in any synced table |
+
+**Three things found on 4 August that had been silently wrong:**
+
+1. **PowerSync replication had been dead for 24 hours.** The slot was invalidated
+   (`wal_removed`) and every client-visible signal said healthy — devices kept
+   syncing, `ps_sync_state` kept advancing, no error fired. Only the PowerSync
+   dashboard logs knew. `npm run check:sync` now detects it in one command.
+2. **Every Maestro flow asserted the wrong screen.** The login subflow's
+   `LANDING` default overrode what each caller passed, so the technician flows
+   could never pass and the office flows passed while checking the wrong label.
+3. **Q29 was a timeout, not a flake.** `schema-column-contract` re-read every
+   source file once per table (~6,600 reads); under I/O contention one tipped
+   past vitest's 5s ceiling, and which one varied. Now 55ms.
+
+### Superseded — 29 July 2026
 
 | Check | Result |
 |---|---|
@@ -432,10 +458,41 @@ markdown.
 keystore is created on the first production build. The alternative, a local
 `.keystore`, means losing the file makes the app permanently un-updatable on Play.
 
-**Recommended for v1.0:** ship **when-in-use** location only and add background
-"always" location in v1.1. It removes the single largest store-review risk from
-the first submission; technicians can still clock in when they open the app on
-site.
+**Background location — this recommendation was REVERSED on 4 August 2026, and
+the reversal needs Avi's sign-off before submission.**
+
+The advice here used to be: ship **when-in-use** only, add background "always" in
+v1.1, because background location is the single largest store-review risk on a
+first submission. That reasoning still holds on the store-review axis. It was
+outweighed by what foreground-only actually does to payroll.
+
+The auto-clock is a *payroll* feature. Foreground-only means that the moment a
+technician pockets the phone and drives to the next site, tracking stops: the
+travel leg is never recorded and the arrival is only noticed when they next open
+the app. Nothing errors, nothing is logged, and the hours simply do not appear.
+The technician is paid for less time than they worked, and because the feature
+*looks* like it is working, nobody goes looking. A feature that is obviously
+absent is safer than one that silently under-records.
+
+So background tracking is now implemented (`mobile/lib/backgroundClock*.ts`,
+430 mobile tests green) and is **best-effort**: declining "Always" leaves the
+foreground watcher working exactly as before, and logs that drive time is not
+being recorded rather than swallowing it.
+
+**The store-review risk is real and has not gone away.** Apple and Google both
+scrutinise "Always" location. The submission needs a clear justification string
+(written, in `app.json`) and screenshots showing the Android foreground-service
+notification.
+
+**To revert to when-in-use for v1.0** — a config change, no code change: in
+`mobile/app.json`, set `isIosBackgroundLocationEnabled`,
+`isAndroidBackgroundLocationEnabled` and `isAndroidForegroundServiceEnabled` to
+`false`, drop `UIBackgroundModes`, and remove `ACCESS_BACKGROUND_LOCATION` /
+`FOREGROUND_SERVICE_LOCATION` from the Android permissions. The background task
+then never starts and the app behaves exactly as it did before. **If you take
+that path, tell the technicians that travel time is only captured while the app
+is open** — otherwise the silent under-recording is back, just with a
+justification.
 
 **Deployment gating** — `main` auto-deploys to production. Branch protection on
 `main`, and a staging environment, are still worth adding so production deploys
