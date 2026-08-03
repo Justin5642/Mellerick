@@ -1,0 +1,46 @@
+-- =============================================
+-- CAPTURE OUT-OF-BAND COLUMNS
+--
+-- Two columns exist in production and in no migration. They were added directly
+-- to the database at some point, so the versioned history could not rebuild
+-- production faithfully — a fresh environment would come up missing both, and
+-- every read and write against them would fail there while working in prod.
+--
+-- This is the third time this project has hit that: `jobs.ready_to_invoice`
+-- (0040) and `jobs.admin_status`/`admin_notes` (0041) were the same shape. The
+-- first two were found only because the app was visibly broken.
+--
+-- HOW THESE WERE FOUND, which is the part worth keeping
+-- `supabase gen types typescript --linked` reads the LIVE schema. Diffing that
+-- against the column set the migration history defines surfaces every drifted
+-- column, including ones no source file happens to reference yet — which the
+-- test-suite guard cannot see by construction, since it only inspects columns
+-- the code names.
+--
+--   npx supabase gen types typescript --linked > /tmp/prod.ts
+--   # then diff its Row types against the migrations
+--
+-- Worth re-running after anyone touches production by hand.
+--
+-- SAFETY
+-- `add column if not exists` is a no-op against production, where both columns
+-- already exist. The point is a rebuildable history, not a change to prod.
+--
+-- TYPES: taken from the generated types, which report `number | null` and
+-- `string | null`. Those do not carry precision, so `numeric(6,2)` follows the
+-- other hours columns in this schema (0014, 0016). If exact rebuild fidelity
+-- ever matters, confirm the real precision with:
+--   select column_name, data_type, numeric_precision, numeric_scale
+--     from information_schema.columns where table_name = 'time_entries';
+-- =============================================
+
+-- Worked hours on a time entry. Written by the manual clock-in/out UI, by the
+-- geofence auto-clock, and read by every billing and payroll path. NULLABLE by
+-- design: an entry that is still open has no hours yet, and the auto-clock
+-- deliberately records null rather than a duration it cannot believe (see
+-- mobile/lib/autoClockHours.ts).
+alter table time_entries add column if not exists hours numeric(6,2);
+
+-- Original filename of a variation's attachment, kept so the office sees the
+-- name the technician's device gave it rather than the storage key.
+alter table job_variations add column if not exists attachment_file_name text;

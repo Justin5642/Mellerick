@@ -35,8 +35,15 @@ function migrationSql(): string {
     .join("\n");
 }
 
-/** Tables whose column references are checked. Add to this as needed. */
-const TABLES = ["jobs", "invoices", "quotes", "time_entries", "job_variations"];
+/**
+ * Tables exempt from the check, with the reason. Everything else in the
+ * migration history is covered automatically — a hardcoded allow-list is how a
+ * guard silently stops guarding as the schema grows.
+ */
+const EXEMPT = new Set<string>([
+  // Supabase-managed; not in our migration history in full.
+  "schema_migrations",
+]);
 
 /** Parse `create table <name> ( … );` blocks into a column-name set. */
 function columnsFromSchema(sql: string): Map<string, Set<string>> {
@@ -101,7 +108,13 @@ function referencedColumns(src: string, table: string): Set<string> {
     }
     // `.update({ a: 1, b: 2 })` / `.insert({ … })` object keys
     for (const om of chunk.matchAll(/\.(?:update|insert|upsert)\(\s*\{([^}]*)\}/g)) {
-      for (const [, key] of om[1].matchAll(/(?:^|,)\s*(\w+)\s*:/g)) found.add(key);
+      const body = om[1];
+      for (const [, key] of body.matchAll(/(?:^|,)\s*(\w+)\s*:/g)) found.add(key);
+      // SHORTHAND properties — `{ hours, entry_type: "travel" }`. This is not a
+      // hypothetical: the geofence auto-clock wrote `hours` exactly this way, and
+      // the colon-only pattern above walked straight past it for months. A guard
+      // that misses the idiomatic spelling of a write is barely a guard.
+      for (const [, key] of body.matchAll(/(?:^|,)\s*(\w+)\s*(?=[,}]|$)/g)) found.add(key);
     }
   }
   return found;
@@ -111,9 +124,24 @@ describe("schema column contract", () => {
   const schema = columnsFromSchema(migrationSql());
   const files = sourceFiles(["app", "lib", "components", join("mobile", "lib"), join("mobile", "app"), join("mobile", "components")]);
 
+  // Every table the migration history defines, minus the exemptions. Derived
+  // rather than listed, so a table added tomorrow is covered without anyone
+  // remembering to add it here.
+  const TABLES = [...schema.keys()].filter((t) => !EXEMPT.has(t)).sort();
+
   it("parses the canonical schema", () => {
     expect(schema.get("jobs")?.size ?? 0).toBeGreaterThan(10);
     expect(files.length).toBeGreaterThan(50);
+  });
+
+  it("covers every table in the migration history, not a hand-maintained list", () => {
+    // The guard previously checked five named tables. Everything else could
+    // drift freely — and a list someone has to remember to extend is a guard
+    // with a shrinking blast radius.
+    expect(TABLES.length).toBeGreaterThan(25);
+    for (const t of ["jobs", "time_entries", "invoices", "backflow_tests", "job_photos"]) {
+      expect(TABLES, `${t} must be covered`).toContain(t);
+    }
   });
 
   for (const table of TABLES) {
