@@ -223,6 +223,39 @@ are flagged to Avi in real time per the plan's crucial-flag protocol.
   matching. It has never failed in CI, which runs from a clean checkout with
   nothing writing concurrently.
 
+- **MONEY BOUNDARY — VERIFIED ON A LIVE TECHNICIAN DEVICE, 2026-08-03.** The
+  central guarantee of this build had never been checked against a real
+  technician login until now. It was, by pulling the PowerSync database off the
+  device and reading it directly.
+
+  Account: "Avi Tech test" (`admin@basnmore.com.au`), role `technician`.
+
+  | Check | Result |
+  |---|---|
+  | Rows in the 12 money tables (invoices, invoice_items, quotes, quote_items, pricing_items, inventory, job_expenses, job_items, purchase_orders, po_cost_centers, equipment, equipment_expenses) | **0** |
+  | Money-named column in any populated table | **none** |
+  | `variation_types` | 5 cols — preset `rate` **stripped** |
+  | `profiles` | 4 cols — `full_name, id, is_active, role` only |
+  | Navigation | tab bar is **My Jobs · Search · Backflow** — no Dashboard, Approvals, Schedule or More hub |
+  | Deployed sync rules vs repo YAML | **identical**, 27/27 columns on `backflow_tests`, no drift either way |
+
+  What a technician's device does hold: customers (138), sites (519), profiles
+  (6, name/role only), backflow devices and tests, variation types. All
+  operationally necessary, none monetary.
+
+  The last row matters on its own: PowerSync rules are deployed separately from
+  the repo, so "the YAML is correct" never proved "the running rules are
+  correct". Now confirmed equal. Re-check after any sync-rule change, because
+  merging does not deploy them.
+
+  Method, for whoever repeats this:
+  ```
+  adb exec-out "run-as au.com.mellerick.field cat     /data/data/au.com.mellerick.field/databases/mellerick-powersync.db" > ps.db
+  ```
+  then read `ps_data__*` tables — each row is JSON, so the keys are the columns
+  that actually reached the device. Use `adb exec-out`, not `adb shell cat`:
+  the latter corrupts binary and yields "database disk image is malformed".
+
 - **Q28 — INVESTIGATED 2026-08-03. My earlier scope estimate was wrong, and the
   recommendation has flipped to: do NOT build this now.**
 
