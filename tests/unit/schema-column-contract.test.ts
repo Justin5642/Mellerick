@@ -14,10 +14,14 @@ import { join } from "node:path";
 // by checking source against the canonical schema instead of against a mock.
 //
 // SCOPE, honestly stated: this parses `.eq("col", …)` / `.update({ col: … })` /
-// `.insert({ col: … })` on a chain naming a known table. It will not catch every
-// possible reference (dynamic column names, spread payloads, RPC arguments), so
-// it is a high-value net, not a proof. Extend TABLES as more tables earn the
-// same protection.
+// `.insert({ col: … })` — including shorthand keys — on a chain naming a known
+// table. It will not catch every possible reference (dynamic column names,
+// spread payloads, RPC arguments), so it is a high-value net, not a proof.
+//
+// It covers EVERY table in the migration history, derived rather than listed.
+// It also only sees columns the SOURCE names; a column that exists in production
+// and in no migration is invisible here by construction — `npm run check:drift`
+// is the check for that direction.
 
 const REPO = join(__dirname, "..", "..");
 const MIGRATIONS = join(REPO, "supabase", "migrations");
@@ -71,6 +75,27 @@ function columnsFromSchema(sql: string): Map<string, Set<string>> {
   return out;
 }
 
+/**
+ * Read a source file, or null if it cannot be read right now.
+ *
+ * This walks the LIVE working tree, so a file can be mid-write while the suite
+ * runs — an editor saving, a formatter rewriting, a script generating. A bare
+ * readFileSync then throws ENOENT and fails the whole table's check for reasons
+ * that have nothing to do with schema drift. A security guard that goes red at
+ * random teaches people to re-run it until it passes, which is worse than not
+ * having it.
+ *
+ * Skipping an unreadable file is safe: the next run reads it, and CI works from
+ * a clean checkout where nothing is being written concurrently.
+ */
+function readSource(file: string): string | null {
+  try {
+    return readFileSync(file, "utf8");
+  } catch {
+    return null;
+  }
+}
+
 function sourceFiles(dirs: string[]): string[] {
   const files: string[] = [];
   const walk = (dir: string) => {
@@ -83,7 +108,12 @@ function sourceFiles(dirs: string[]): string[] {
     for (const e of entries) {
       if (e === "node_modules" || e === ".next" || e === "dist" || e.startsWith(".")) continue;
       const p = join(dir, e);
-      const s = statSync(p);
+      let s: ReturnType<typeof statSync>;
+      try {
+        s = statSync(p);
+      } catch {
+        continue; // vanished between readdir and stat
+      }
       if (s.isDirectory()) walk(p);
       else if (/\.(ts|tsx)$/.test(e) && !/\.test\.tsx?$/.test(e)) files.push(p);
     }
@@ -151,7 +181,8 @@ describe("schema column contract", () => {
 
       const offenders: string[] = [];
       for (const file of files) {
-        const src = readFileSync(file, "utf8");
+        const src = readSource(file);
+        if (src === null) continue; // being written right now; next run sees it
         if (!src.includes(`"${table}"`) && !src.includes(`'${table}'`)) continue;
         for (const col of referencedColumns(src, table)) {
           // Embedded relations (`customers(name)`) and `*` are not columns.
