@@ -248,11 +248,26 @@ are flagged to Avi in real time per the plan's crucial-flag protocol.
   published `checksums_sha256.txt` before extracting, unpacked to a scratch
   directory rather than installed system-wide. Maestro 2.8.0, Java 17.
 
-  **Results:** flow 02 (office approvals) PASSES end to end — every
-  assertion completed, and the destructive approve step correctly skipped
-  behind `APPROVE_FOR_REAL=false`. Flows 01, 03 and 04 are TECHNICIAN flows
-  and need a technician session; the device is signed in as admin. They are
-  not failing on their invariants — they cannot run against this identity.
+  **Results — 2 of 4 pass, 1 blocked on identity, 1 correctly refuses:**
+
+  | Flow | Result |
+  |---|---|
+  | 01 technician clock-in | **PASSES** — navigates to a job, opens Time, asserts Clock In; destructive taps skipped behind `CLOCK_FOR_REAL=false` |
+  | 02 office approvals | **PASSES** — stable across 2 runs, 7 assertions; approve step skipped behind `APPROVE_FOR_REAL=false` |
+  | 03 technician money gating | **BLOCKED** — needs a technician session; device is admin |
+  | 04 offline clock-in | **CORRECTLY REFUSES TO RUN** — see below |
+
+  01 and 02 run against the current admin session because admins also have a
+  "My Jobs" entry (D83) and their non-destructive modes assert navigation
+  rather than role. Only 03 asserts a technician-specific absence, so only 03
+  is identity-blocked.
+
+  04 is gated entirely behind `CLOCK_FOR_REAL` and was verified to skip
+  cleanly — zero writes, confirmed in logcat. That gate working is itself
+  worth having tested: it is what stops a full-suite run creating a live
+  `time_entries` row. It additionally needs a RELEASE build, because airplane
+  mode cuts a dev client off from Metro and the app would reload into a red
+  screen rather than test anything.
 
   **What running it actually caught**, which is the point: flow 03's first
   ever execution failed with `"Approvals" is not visible → FAILED`, which
