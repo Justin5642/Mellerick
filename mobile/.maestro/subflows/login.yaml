@@ -17,8 +17,22 @@
 #    vacuously (every "is X visible" is false, every "not visible" is true). The
 #    long wait below is what makes these flows trustworthy rather than flaky.
 appId: au.com.mellerick.field
-env:
-  LANDING: "Dashboard"
+# NO `env:` DEFAULT FOR LANDING — deliberately.
+#
+# This used to declare `LANDING: "Dashboard"`, and that default WON over the
+# value each caller passes via `runFlow: env:`. Every flow therefore asserted
+# "Dashboard" no matter which role it logged in as:
+#
+#   • the two technician flows (01, 03) could never pass, because a technician
+#     never sees a Dashboard — they land on "My Jobs"
+#   • the office flows passed for the WRONG REASON: they assert "Approvals" but
+#     were really checking "Dashboard", which happens to be visible for that
+#     role, so a broken Approvals screen would not have failed them
+#
+# A default here is worse than no default: it silently substitutes a value the
+# caller thought it had overridden. Omitting it means a caller that forgets
+# LANDING fails loudly on an unresolved variable instead of asserting the wrong
+# screen and calling it green.
 ---
 - runFlow:
     when:
