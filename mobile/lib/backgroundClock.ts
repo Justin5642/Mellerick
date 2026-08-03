@@ -1,5 +1,4 @@
 import * as Location from "expo-location";
-import * as TaskManager from "expo-task-manager";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { planBackgroundClockActions, type LocationReading } from "./backgroundClockPlan";
 import type { TrackedSite } from "./geofenceState";

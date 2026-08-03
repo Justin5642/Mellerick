@@ -1,4 +1,3 @@
-import * as TaskManager from "expo-task-manager";
 import { supabase } from "./supabase";
 import { plausibleAutoClockHours, MAX_PLAUSIBLE_TRAVEL_HOURS, MAX_PLAUSIBLE_WORK_HOURS } from "./autoClockHours";
 import {
@@ -116,7 +115,13 @@ export const supabaseClockDeps: BackgroundClockDeps = {
   },
 };
 
-TaskManager.defineTask(BACKGROUND_CLOCK_TASK, async ({ data, error }: any) => {
+/** What expo-location hands a background task on each delivery. */
+interface LocationTaskBody {
+  data?: { locations?: LocationReading[] };
+  error?: { message: string } | null;
+}
+
+async function handleDelivery({ data, error }: LocationTaskBody): Promise<void> {
   if (error) {
     // Nothing can be done from here — there is no UI to show and no user to
     // ask. Logging is the honest limit of what this layer can do.
@@ -137,4 +142,35 @@ TaskManager.defineTask(BACKGROUND_CLOCK_TASK, async ({ data, error }: any) => {
     // after its writes), so the next delivery re-derives the same transition.
     console.warn("[backgroundClock] batch failed; will re-derive on next delivery:", e);
   }
-});
+}
+
+interface TaskManagerModule {
+  defineTask(name: string, body: (payload: LocationTaskBody) => Promise<void>): void;
+}
+
+// GUARDED, NOT STATIC — and this was not caution, it was a bug found on a device.
+//
+// `import * as TaskManager from "expo-task-manager"` throws at module load when
+// the native module is absent, and this file is imported for its side effect at
+// the very top of app/_layout.tsx. On any build without the native module — an
+// existing dev client compiled before the dependency was added, Expo Go, a
+// misconfigured EAS build — that threw during startup and took the ENTIRE APP
+// down to a red "Cannot find native module 'ExpoTaskManager'" screen. Every
+// unit test passed while that was true; only launching the app revealed it.
+//
+// A missing background-tracking module must degrade to "no background
+// tracking", never to "no app". The foreground watcher still works, and
+// startBackgroundClock reports false so the provider logs that drive time is
+// only being captured while the app is open.
+try {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const TaskManager = require("expo-task-manager") as TaskManagerModule;
+  TaskManager.defineTask(BACKGROUND_CLOCK_TASK, handleDelivery);
+} catch (e) {
+  console.warn(
+    "[backgroundClock] expo-task-manager unavailable — background tracking is OFF for this build. " +
+      "Travel time will only be recorded while the app is open. Rebuild the dev client " +
+      "(npx expo run:android) after adding the dependency.",
+    e
+  );
+}
