@@ -169,11 +169,26 @@ are flagged to Avi in real time per the plan's crucial-flag protocol.
   the integration until someone re-authorises it, so it is a business call, not a
   technical one.
 
-- **Q23:** `google_tokens` may carry the same drift. 0042 **detects and raises**
-  but deliberately does not rewrite it, because that integration is live and
-  quietly changing a running integration's access rules during a security
-  migration trades one incident for another. If 0042 raises on google_tokens,
-  decide whether to lock it the same way.
+- **Q23 — RESOLVED 2026-08-04 (Avi: check first, then lock if drifted). It was
+  NOT drifted; nothing was changed.** Read-only check against `pg_policy`:
+
+      RLS enabled = true
+      policy[Office/admin can manage google tokens] PERMISSIVE cmd=*
+        USING = is_office_or_admin(auth.uid())
+        CHECK = is_office_or_admin(auth.uid())
+
+  Exactly one permissive policy, no restrictive ones, and both expressions are
+  the same gate `0042` enforced on `xero_tokens` — so `google_tokens` already
+  had the posture we would have migrated it to. **No migration written, and
+  that is the point:** the cheap read-only check cost minutes and avoided
+  rewriting a live Google Calendar integration's access rules to achieve
+  nothing. Verify before you migrate; "probably drifted too" is a hypothesis,
+  not a finding.
+
+  Original note: `google_tokens` may carry the same drift. 0042 **detects and
+  raises** but deliberately does not rewrite it, because that integration is
+  live and quietly changing a running integration's access rules during a
+  security migration trades one incident for another.
 
 - **Q24:** the unattributable-`23505` trade in `gateway.supabase.ts`. When
   Postgres returns a unique violation with no parseable constraint name, the
@@ -204,7 +219,14 @@ are flagged to Avi in real time per the plan's crucial-flag protocol.
   which means the APNs `.p8` is available today. See HANDOVER.md §7
   "Who owns what" for the full split.
 
-- **Q29 (unresolved intermittent — 1 web test in ~20 full runs):** the web
+- **Q29 — ACCEPTED 2026-08-04 (Avi's call): ship with it open, let the recorder
+  catch it.** Not fixed and not reproduced — deliberately. The run-recorder
+  (commit 0a7abf3) now writes every run to JSON, so the next occurrence names
+  the failing test automatically instead of vanishing. Chasing a 1-in-20 flake
+  blind can burn an hour and still not fire; waiting costs nothing now that the
+  instrumentation exists. **If it recurs, the JSON is the first place to look.**
+
+  Original note (unresolved intermittent — 1 web test in ~20 full runs): the web
   suite has twice reported `1 failed | 187 passed` and then passed on every
   subsequent run — 9 consecutive greens after the second occurrence, plus 3
   more under deliberately induced file churn. I could not reproduce it and I
@@ -256,8 +278,17 @@ are flagged to Avi in real time per the plan's crucial-flag protocol.
   that actually reached the device. Use `adb exec-out`, not `adb shell cat`:
   the latter corrupts binary and yields "database disk image is malformed".
 
-- **Q28 — INVESTIGATED 2026-08-03. My earlier scope estimate was wrong, and the
-  recommendation has flipped to: do NOT build this now.**
+- **Q28 — DECIDED 2026-08-04 (Avi): DEFERRED TO v1.1.** Not dropped, not built.
+  Ship v1 light-only; the item stays on the post-launch roadmap so it is a
+  scheduled decision rather than something that quietly disappeared. Do NOT
+  start a partial conversion before launch — a half-themed app looks worse than
+  a consistently light one, and the work below is all-or-nothing across 53
+  files. `app.json` keeps `userInterfaceStyle: "light"` until v1.1 begins,
+  which is what makes deferring safe: the OS never reports dark, so no screen
+  can half-render in a theme that does not exist yet.
+
+  Investigation that produced this call (2026-08-03) — my earlier scope
+  estimate was wrong, and the recommendation flipped to: do NOT build this now.
 
   I previously wrote that finishing the dark theme was "roughly a day". That was
   based on assuming the app is styled with NativeWind classes, which `dark:`
@@ -362,7 +393,9 @@ are flagged to Avi in real time per the plan's crucial-flag protocol.
 
 - **Q20 (write-result reporting + read-visibility — FULLY RESOLVED, D70 + D71)**: the whole-app audit (D69) flagged that `useFlush()` returns *connectivity* (`synced`), not per-op server acceptance. **RESOLVED (D70):** `Outbox.writeStatus(rowId)` + `useWriteOutcome()` report per-row acceptance, and every create-navigate / optimistic-insert screen surfaces an immediate "couldn't save — queued & will retry" instead of navigating to / silently dropping a non-persisted row. The audit's three minor count/ordering read gaps are **also RESOLVED (D71)**: Fleet inactive-equipment list + Reactivate, uncapped Customer-360 counts, and the Reports Overdue + Accepted-quote-value metrics. Nothing from the D69 audit remains open.
 
-- **Q19 (code COMPLETE → D39 + D88; apply pending Justin)**: `0035` locks the fully-lockable money tables; `0038` closes the deferred `purchase_orders`/`po_cost_centers` half via money-free views + base-table lock, with the client reads repointed and a two-sided role-impersonation test. Both migrations are PROPOSED — **Justin must apply + test them on the live DB**; until then the dollar-leak boundary is not in force.
+- **Q19 — RESOLVED 2026-08-04. Both migrations ARE applied; the boundary IS in force.** Verified directly against `supabase_migrations.schema_migrations`: `0035`, `0037`, `0038`, `0039`, `0040` and `0042` all present. `0035` locks the fully-lockable money tables; `0038` closes the deferred `purchase_orders`/`po_cost_centers` half via money-free views + base-table lock, with the client reads repointed and a two-sided role-impersonation test. Confirmed end-to-end the same day: a real job synced to a technician device carried 18 columns, none financial, and no money-named column appeared in any synced table on that device.
+
+  The stale text below stood for a week and said the opposite — that the migrations were "PROPOSED" and "the dollar-leak boundary is not in force." Anyone reading it would have believed the app was leaking money to technicians when it was not. The lesson is not about these two migrations: **a decision log that records intent is worth less than one that records verified state**, and "pending someone else" entries rot silently because nobody re-reads them after the other person acts. Check the ledger, not the note.
 
 - **Q1 (RESOLVED → D85)**: investigated and found a REAL BUG, now fixed — the route authenticated Bearer but used the cookie client, so mobile callers ran as `anon`, got a 200 `{skipped:true}`, and the calendar silently never synced. Fixed with the service-role client + explicit per-record authz, plus the one mobile call site that sent no Authorization header.
 - **Q2 (RESOLVED 2026-07-28 → D98)**: verified across all 22 outbox write targets — every one is `id uuid default uuid_generate_v4() primary key`, and a Postgres DEFAULT only applies when the column is omitted, so a client UUID is always honoured. The sweep also found a REAL bug in the process: the gateway swallowed *every* 23505, so a duplicate `inventory.sku` / `variation_types.name` silently discarded a new row — now fixed to swallow only `_pkey` violations (6 TDD tests).
