@@ -204,6 +204,25 @@ are flagged to Avi in real time per the plan's crucial-flag protocol.
   which means the APNs `.p8` is available today. See HANDOVER.md §7
   "Who owns what" for the full split.
 
+- **Q29 (unresolved intermittent — 1 web test in ~20 full runs):** the web
+  suite has twice reported `1 failed | 187 passed` and then passed on every
+  subsequent run — 9 consecutive greens after the second occurrence, plus 3
+  more under deliberately induced file churn. I could not reproduce it and I
+  do not know which test failed: my output capture missed vitest's failure
+  block both times, which is my error, not the suite's.
+
+  Both occurrences happened while files in the repo were being written
+  concurrently with the run. I hardened the most plausible mechanism — the
+  drift guard walks the live working tree and now tolerates a file that
+  vanishes or is mid-write — but it recurred once after that, so either the
+  hardening missed the real path or the cause is elsewhere.
+
+  **Not treated as fixed.** If it appears again, capture it properly:
+  `npm test 2>&1 | tee /tmp/vitest.log` then read the log — do not grep for
+  a pattern, because vitest's ANSI-coloured failure block defeats naive
+  matching. It has never failed in CI, which runs from a clean checkout with
+  nothing writing concurrently.
+
 - **Q28 (gap against the original plan — dark theme is not reachable):** the plan
   called for "a real dark theme the web never built". What shipped is the token
   groundwork, not a working feature: `tailwind.config.js` sets
