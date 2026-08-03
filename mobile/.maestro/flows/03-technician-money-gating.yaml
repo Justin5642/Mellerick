@@ -24,11 +24,34 @@ env:
       EMAIL: ${TECH_EMAIL}
       PASSWORD: ${TECH_PASSWORD}
       LANDING: "My Jobs"
-# The technician shell must not expose office/admin money areas at all — these
-# routes are never registered for the role, so absence is structural.
-- assertNotVisible: "Approvals"
-- assertNotVisible: "Dashboard"
-- assertNotVisible: "Schedule"
+# ---------------------------------------------------------------------------
+# PRECONDITION, not part of the invariant under test.
+#
+# The login subflow is deliberately conditional — it reuses a session a human
+# already signed in by hand, so a password never passes through a script. The
+# cost is that this flow will happily run against an OFFICE or ADMIN session and
+# then fail on the money assertions below, which reads exactly like a money leak
+# when it is nothing of the sort.
+#
+# That happened the first time this flow was ever executed (2026-08-03): the
+# device was signed in as an admin, "Approvals" was visible, and the failure
+# looked like a security regression rather than a wrong-role harness problem.
+#
+# So the role check comes first and says what it means. LANDING alone cannot do
+# this job — admins also have a "My Jobs" entry (D83), so it matches for both
+# roles.
+# ---------------------------------------------------------------------------
+- assertNotVisible:
+    text: "Approvals"
+    label: "PRECONDITION — session must be a TECHNICIAN. If this fails, the device is signed in as office/admin: sign out, or rerun with CLEAR_STATE=true and TECH_EMAIL/TECH_PASSWORD. It is NOT a money leak."
+# From here the assertions ARE the invariant: office/admin money areas are never
+# registered for a technician, so their absence is structural rather than hidden.
+- assertNotVisible:
+    text: "Dashboard"
+    label: "technician shell exposes no Dashboard"
+- assertNotVisible:
+    text: "Schedule"
+    label: "technician shell exposes no Schedule"
 # No dollar figure on the jobs list.
 - assertNotVisible: ".*\\$[0-9].*"
 # Open a job and sweep the tabs a technician can reach — none may show money.

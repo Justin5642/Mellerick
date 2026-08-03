@@ -222,7 +222,32 @@ are flagged to Avi in real time per the plan's crucial-flag protocol.
   The splash screen added 2026-08-03 carries a `dark.backgroundColor` for this
   reason: it is correct the moment dark mode is enabled and inert until then.
 
-- **Q27 (blocks the Maestro e2e suite):** the Maestro CLI is **not installed** on
+- **Q27 — PARTIALLY RESOLVED 2026-08-03. Maestro is installed and the suite
+  has RUN for the first time.** Avi approved installing from the official
+  GitHub release artifact rather than the piped `curl | bash` installer:
+  `maestro.zip` from release `cli-2.8.0`, SHA-256 verified against the
+  published `checksums_sha256.txt` before extracting, unpacked to a scratch
+  directory rather than installed system-wide. Maestro 2.8.0, Java 17.
+
+  **Results:** flow 02 (office approvals) PASSES end to end — every
+  assertion completed, and the destructive approve step correctly skipped
+  behind `APPROVE_FOR_REAL=false`. Flows 01, 03 and 04 are TECHNICIAN flows
+  and need a technician session; the device is signed in as admin. They are
+  not failing on their invariants — they cannot run against this identity.
+
+  **What running it actually caught**, which is the point: flow 03's first
+  ever execution failed with `"Approvals" is not visible → FAILED`, which
+  reads exactly like a money leak and was nothing of the sort. The login
+  subflow is deliberately conditional so a password never passes through a
+  script, and the cost is that a security flow will silently run against
+  whatever session exists. The flow now leads with a labelled precondition
+  saying so in the failure text. An unrun suite hid that; one run exposed it.
+
+  **To finish:** a technician account on the device (or `CLEAR_STATE=true`
+  with `TECH_EMAIL`/`TECH_PASSWORD` supplied at run time — no credential is
+  committed). Worth doing before store submission.
+
+- **Q27-original (superseded by the entry above):** the Maestro CLI is **not installed** on
   this machine — only its data directory survives from the 28 July runs. Its
   official installer is a piped remote shell script
   (`curl -Ls https://get.maestro.mobile.dev | bash`), which Claude will not
