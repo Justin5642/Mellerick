@@ -4,6 +4,7 @@ import { supabase } from "./supabase";
 import { useAuth } from "./auth-context";
 import { plausibleAutoClockHours, MAX_PLAUSIBLE_TRAVEL_HOURS, MAX_PLAUSIBLE_WORK_HOURS } from "./autoClockHours";
 import { nextGeofenceState, type TrackedSite } from "./geofenceState";
+import { startBackgroundClock, stopBackgroundClock, publishBackgroundClockContext } from "./backgroundClock";
 
 // GEOFENCE_RADIUS_METERS and the distance maths now live in ./geofenceState,
 // shared with the background task so the two paths cannot disagree about what
@@ -39,15 +40,21 @@ const LocationTrackingContext = createContext<{ enabled: boolean }>({ enabled: f
 /**
  * App-wide geofence watcher for auto clock in/out + travel-time logging.
  *
- * IMPORTANT — foreground only: this uses expo-location's foreground
- * watchPositionAsync, which only runs while the app is open (active or
- * backgrounded briefly by the OS — not force-quit). True background
- * tracking (app fully closed) needs expo-task-manager + background
- * location permissions, which Expo Go does not support (especially on
- * iOS) — that requires a custom dev client / EAS build. This is the
- * pragmatic v1 that works today in Expo Go: as long as a tech has the
- * app open (which they will, to see job details/photos/etc while working),
- * clock in/out and travel time are captured automatically.
+ * TWO WATCHERS, ONE DECISION. The foreground watcher below (watchPositionAsync)
+ * runs while the app is open; lib/backgroundClockTask.ts continues when it is
+ * not. Both route through nextGeofenceState, so they cannot disagree about what
+ * "on site" means.
+ *
+ * This used to be foreground-only, and the gap was invisible rather than
+ * cosmetic: a technician who pocketed the phone and drove to the next site had
+ * that travel time silently NOT recorded — no error, no log, just hours missing
+ * from the payslip. Background tracking needs "Always" location, a foreground
+ * service notification on Android, and a dev/EAS build (Expo Go cannot do it).
+ *
+ * Background is BEST-EFFORT: a technician may decline "Always", in which case
+ * the foreground watcher alone still works and the app behaves exactly as it did
+ * before. That case is logged rather than swallowed, because "your drive time is
+ * not being recorded" is something someone must be able to discover.
  */
 export function LocationTrackingProvider({ children }: { children: ReactNode }) {
   const { session } = useAuth();
@@ -88,6 +95,14 @@ export function LocationTrackingProvider({ children }: { children: ReactNode }) 
       sitesRef.current = (data ?? [])
         .filter((j: any) => j.sites?.site_lat && j.sites?.site_lng)
         .map((j: any) => ({ jobId: j.id, lat: j.sites.site_lat, lng: j.sites.site_lng }));
+
+      // Hand the same list to the background task. It runs with no React tree
+      // and cannot fetch this itself, so the foreground is the only place that
+      // can keep it current — and a stale list is what makes a technician
+      // arrive at a new job the task has never heard of.
+      publishBackgroundClockContext(userId, sitesRef.current).catch((e) =>
+        console.warn("[geofence] could not publish background context:", e)
+      );
     }
 
     loadSites();
@@ -111,12 +126,36 @@ export function LocationTrackingProvider({ children }: { children: ReactNode }) 
         { accuracy: Location.Accuracy.Balanced, timeInterval: 15000, distanceInterval: 25 },
         (position) => handlePosition(position, userId)
       );
+
+      // Ask for background tracking too. Declining is fine and expected — the
+      // foreground watcher above still works, so the app degrades to exactly
+      // the behaviour it had before. What it must never do is fail silently,
+      // hence the log: a technician who declined "Always" is not having their
+      // drive time recorded, and somebody should be able to find out why.
+      if (cancelled) return;
+      const started = await startBackgroundClock().catch((e) => {
+        console.warn("[geofence] background clock failed to start:", e);
+        return false;
+      });
+      if (!started) {
+        console.warn(
+          "[geofence] background tracking NOT active — travel time is only recorded while the app is open."
+        );
+      }
     })();
 
     return () => {
       cancelled = true;
       subscription?.remove();
     };
+  }, [userId]);
+
+  // Signing out stops background tracking and clears the cached context. Leaving
+  // it running would keep writing time entries against the previous user.
+  useEffect(() => {
+    if (userId) return;
+    stopBackgroundClock().catch(() => {});
+    publishBackgroundClockContext(null, []).catch(() => {});
   }, [userId]);
 
   async function handlePosition(position: Location.LocationObject, staffId: string) {

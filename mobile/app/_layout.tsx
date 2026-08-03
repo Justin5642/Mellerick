@@ -1,4 +1,10 @@
 import "../global.css";
+// Registers the background location task. Imported for its SIDE EFFECT and kept
+// at the very top on purpose: the OS can relaunch the app directly into that
+// task with no UI, and a delivery that arrives before defineTask has run is
+// dropped — the readings are simply gone, which is the silent data loss this
+// whole feature exists to stop.
+import "../lib/backgroundClockTask";
 import { useEffect } from "react";
 import { Stack, useRouter, useSegments } from "expo-router";
 import { StatusBar } from "expo-status-bar";

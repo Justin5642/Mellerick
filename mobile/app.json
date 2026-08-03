@@ -73,6 +73,11 @@
             ]
           }
         ]
+      },
+      "infoPlist": {
+        "UIBackgroundModes": [
+          "location"
+        ]
       }
     },
     "android": {
@@ -88,7 +93,10 @@
         "android.permission.RECORD_AUDIO",
         "android.permission.ACCESS_COARSE_LOCATION",
         "android.permission.ACCESS_FINE_LOCATION",
-        "android.permission.MODIFY_AUDIO_SETTINGS"
+        "android.permission.MODIFY_AUDIO_SETTINGS",
+        "android.permission.ACCESS_BACKGROUND_LOCATION",
+        "android.permission.FOREGROUND_SERVICE",
+        "android.permission.FOREGROUND_SERVICE_LOCATION"
       ]
     },
     "web": {
@@ -107,7 +115,11 @@
       [
         "expo-location",
         {
-          "locationWhenInUsePermission": "Mellerick Field uses your location to timestamp and geo-tag site photos, and to automatically clock you in/out and track travel time when you arrive at or leave a job site."
+          "locationWhenInUsePermission": "Mellerick Field uses your location to timestamp and geo-tag site photos, and to automatically clock you in/out and track travel time when you arrive at or leave a job site.",
+          "locationAlwaysAndWhenInUsePermission": "Mellerick Field records your job time automatically. Allowing location \"Always\" lets it clock you in and out and capture travel time even while the app is closed — without it, any driving you do with the app in your pocket is not recorded and you may be paid for less time than you worked.",
+          "isIosBackgroundLocationEnabled": true,
+          "isAndroidBackgroundLocationEnabled": true,
+          "isAndroidForegroundServiceEnabled": true
         }
       ],
       [
