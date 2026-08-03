@@ -542,3 +542,4 @@
 2026-08-03T00:40:07.329Z | Write | C:\Dev\Mellerick\supabase\migrations\0043_capture_out_of_band_columns.sql
 2026-08-03T01:46:24.733Z | Write | C:\Dev\Mellerick\scripts\check-schema-drift.mjs
 2026-08-03T01:47:38.787Z | Edit | C:\Dev\Mellerick\HANDOVER.md
+2026-08-03T02:26:35.090Z | Write | C:\Dev\Mellerick\tests\unit\staff-routes-auth.test.ts
