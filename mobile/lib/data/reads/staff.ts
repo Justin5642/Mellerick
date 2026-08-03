@@ -86,12 +86,12 @@ export interface LeaveEntry {
 }
 
 export async function listLeave(staffId: string): Promise<LeaveEntry[]> {
-  const { data } = await supabase
+  const res = await supabase
     .from("staff_leave")
     .select("id, leave_type, start_date, end_date, hours, notes")
     .eq("staff_id", staffId)
     .order("start_date", { ascending: false });
-  return (data as unknown as LeaveEntry[]) ?? [];
+  return unwrapRows(res as never, "listLeave") as unknown as LeaveEntry[];
 }
 
 export async function addLeave(input: {

@@ -6,6 +6,7 @@
 // change a money verdict. Pinned by supabaseOnly.test.ts.
 
 import { supabase } from "../../supabase";
+import { unwrap, unwrapRows } from "./unwrap";
 import { computeJobProfitability, type JobProfitabilityResult, type StaffCostProfile, type EquipmentOption } from "../../costing";
 
 export interface JobProfitabilityData extends JobProfitabilityResult {
@@ -30,20 +31,20 @@ export async function getJobProfitability(jobId: string): Promise<JobProfitabili
     supabase.from("billing_rate_config").select("min_margin_pct").eq("id", true).maybeSingle(),
   ]);
 
-  const job = jobRes.data as { job_number: number | null; title: string } | null;
+  const job = unwrap(jobRes as never, "getJobProfitability(job)") as unknown as { job_number: number | null; title: string } | null;
   if (!job) return null;
-  const cfg = cfgRes.data as { min_margin_pct: number | null } | null;
+  const cfg = unwrap(cfgRes as never, "getJobProfitability(billingRateConfig)") as unknown as { min_margin_pct: number | null } | null;
   const minMarginPct = cfg?.min_margin_pct != null ? Number(cfg.min_margin_pct) : 30;
 
   const result = computeJobProfitability({
-    timeEntries: (timeRes.data as unknown as { staff_id: string; hours: number | null }[]) ?? [],
-    staffCostProfiles: (profilesRes.data as unknown as StaffCostProfile[]) ?? [],
-    expenses: (expensesRes.data as unknown as { amount: number | null }[]) ?? [],
-    equipmentUsage: (usageRes.data as unknown as { equipment_id: string; hours: number }[]) ?? [],
-    equipmentOptions: (equipRes.data as unknown as EquipmentOption[]) ?? [],
-    invoices: (invoicesRes.data as unknown as { subtotal: number | null; status: string }[]) ?? [],
-    jobItems: (itemsRes.data as unknown as { total: number | null }[]) ?? [],
-    variations: (varsRes.data as unknown as { status: string; invoice_id: string | null; total_amount: number | null }[]) ?? [],
+    timeEntries: unwrapRows(timeRes as never, "getJobProfitability(timeEntries)") as unknown as { staff_id: string; hours: number | null }[],
+    staffCostProfiles: unwrapRows(profilesRes as never, "getJobProfitability(staffCostProfiles)") as unknown as StaffCostProfile[],
+    expenses: unwrapRows(expensesRes as never, "getJobProfitability(jobExpenses)") as unknown as { amount: number | null }[],
+    equipmentUsage: unwrapRows(usageRes as never, "getJobProfitability(equipmentUsage)") as unknown as { equipment_id: string; hours: number }[],
+    equipmentOptions: unwrapRows(equipRes as never, "getJobProfitability(equipment)") as unknown as EquipmentOption[],
+    invoices: unwrapRows(invoicesRes as never, "getJobProfitability(invoices)") as unknown as { subtotal: number | null; status: string }[],
+    jobItems: unwrapRows(itemsRes as never, "getJobProfitability(jobItems)") as unknown as { total: number | null }[],
+    variations: unwrapRows(varsRes as never, "getJobProfitability(variations)") as unknown as { status: string; invoice_id: string | null; total_amount: number | null }[],
     minMarginPct,
   });
   return { ...result, jobNumber: job.job_number, jobTitle: job.title };

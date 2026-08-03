@@ -2,6 +2,7 @@ import { supabase } from "../../supabase";
 import { computeEquipmentCost } from "../../costing";
 import { fromLocalOr, type RouteOptions } from "./source";
 import { nestOne, num } from "./rowMap";
+import { unwrap, unwrapRows } from "./unwrap";
 
 export interface Equipment {
   id: string;
@@ -93,8 +94,8 @@ export async function listEquipment(): Promise<Equipment[]> {
   return fromLocalOr(
     async (db) => (await db.getAll<RawEquipmentRow>(SQL_LIST_EQUIPMENT, [1])).map(mapEquipment),
     async () => {
-      const { data } = await supabase.from("equipment").select(SELECT).eq("is_active", true).order("category").order("name");
-      return (data as unknown as Equipment[]) ?? [];
+      const res = await supabase.from("equipment").select(SELECT).eq("is_active", true).order("category").order("name");
+      return unwrapRows(res as never, "listEquipment") as unknown as Equipment[];
     },
     FLEET_ROLES
   );
@@ -107,8 +108,8 @@ export async function listInactiveEquipment(): Promise<Equipment[]> {
   return fromLocalOr(
     async (db) => (await db.getAll<RawEquipmentRow>(SQL_LIST_EQUIPMENT, [0])).map(mapEquipment),
     async () => {
-      const { data } = await supabase.from("equipment").select(SELECT).eq("is_active", false).order("category").order("name");
-      return (data as unknown as Equipment[]) ?? [];
+      const res = await supabase.from("equipment").select(SELECT).eq("is_active", false).order("category").order("name");
+      return unwrapRows(res as never, "listInactiveEquipment") as unknown as Equipment[];
     },
     FLEET_ROLES
   );
@@ -121,8 +122,8 @@ export async function getEquipment(id: string): Promise<Equipment | null> {
       return row ? mapEquipment(row) : null;
     },
     async () => {
-      const { data } = await supabase.from("equipment").select(SELECT).eq("id", id).single();
-      return (data as unknown as Equipment) ?? null;
+      const res = await supabase.from("equipment").select(SELECT).eq("id", id).single();
+      return unwrap(res as never, "getEquipment") as unknown as Equipment | null;
     },
     FLEET_ROLES
   );
@@ -177,13 +178,13 @@ export async function listEquipmentExpenses(equipmentId: string): Promise<Equipm
     async (db) =>
       (await db.getAll<RawEquipmentExpenseRow>(SQL_LIST_EQUIPMENT_EXPENSES, [equipmentId])).map(mapEquipmentExpense),
     async () => {
-      const { data } = await supabase
+      const res = await supabase
         .from("equipment_expenses")
         .select("id, category, supplier_name, description, invoice_number, expense_date, amount, gst_amount, receipt_storage_path")
         .eq("equipment_id", equipmentId)
         .order("expense_date", { ascending: false })
         .order("created_at", { ascending: false });
-      return (data as unknown as EquipmentExpense[]) ?? [];
+      return unwrapRows(res as never, "listEquipmentExpenses") as unknown as EquipmentExpense[];
     },
     FLEET_ROLES
   );
@@ -225,23 +226,25 @@ export async function listEquipmentUsage(equipmentId: string): Promise<Equipment
     async (db) =>
       (await db.getAll<RawEquipmentUsageRow>(SQL_LIST_EQUIPMENT_USAGE, [equipmentId])).map(mapEquipmentUsage),
     async () => {
-      const { data } = await supabase
+      const res = await supabase
         .from("equipment_usage_log")
         .select("id, usage_date, hours, notes, job_id")
         .eq("equipment_id", equipmentId)
         .order("usage_date", { ascending: false })
         .order("created_at", { ascending: false });
-      return (data as unknown as EquipmentUsage[]) ?? [];
+      return unwrapRows(res as never, "listEquipmentUsage") as unknown as EquipmentUsage[];
     },
     FLEET_ROLES
   );
 }
 
 // Short-lived signed URL for an equipment-expense receipt (equipment-documents
-// bucket). Online-only; null if unavailable.
+// bucket). Online-only; null when Storage hands back no URL — but a Storage
+// ERROR now throws instead of posing as "no URL" (matches getReceiptSignedUrl).
 // Supabase-only: signed URLs are network-only by nature — no local path.
 export async function getEquipmentReceiptSignedUrl(storagePath: string): Promise<string | null> {
-  const { data } = await supabase.storage.from("equipment-documents").createSignedUrl(storagePath, 60);
+  const res = await supabase.storage.from("equipment-documents").createSignedUrl(storagePath, 60);
+  const data = unwrap(res as never, "getEquipmentReceiptSignedUrl") as { signedUrl: string } | null;
   return data?.signedUrl ?? null;
 }
 
@@ -262,17 +265,18 @@ export interface EquipmentDocument {
 // Supabase-only: equipment_documents is not in the PowerSync publication, so a
 // local read would silently return [] — never serve it from the device.
 export async function listEquipmentDocuments(equipmentId: string): Promise<EquipmentDocument[]> {
-  const { data } = await supabase
+  const res = await supabase
     .from("equipment_documents")
     .select("id, storage_path, file_name, file_size, file_type, created_at, profiles:uploaded_by(full_name)")
     .eq("equipment_id", equipmentId)
     .order("created_at", { ascending: false });
-  return (data as unknown as EquipmentDocument[]) ?? [];
+  return unwrapRows(res as never, "listEquipmentDocuments") as unknown as EquipmentDocument[];
 }
 
 // Supabase-only: signed URLs are network-only by nature — no local path.
 export async function getEquipmentDocumentSignedUrl(storagePath: string): Promise<string | null> {
-  const { data } = await supabase.storage.from("equipment-documents").createSignedUrl(storagePath, 300);
+  const res = await supabase.storage.from("equipment-documents").createSignedUrl(storagePath, 300);
+  const data = unwrap(res as never, "getEquipmentDocumentSignedUrl") as { signedUrl: string } | null;
   return data?.signedUrl ?? null;
 }
 

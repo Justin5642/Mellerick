@@ -1,6 +1,7 @@
 import { supabase } from "../../supabase";
 import { fromLocalOr, type LocalReads } from "./source";
 import { nestOne, num, numOrNull } from "./rowMap";
+import { unwrap, unwrapRows } from "./unwrap";
 
 // Read-repository layer for the job screens (phase 2 of the PowerSync read
 // integration — design §6 step 6). Each exported function owns one screen's
@@ -389,13 +390,16 @@ export async function listMyJobs(userId: string): Promise<MyJob[]> {
     },
     // Unchanged Supabase body (components/jobs/my-jobs-screen.tsx loadJobs).
     async () => {
-      const { data } = await supabase
+      const res = await supabase
         .from("jobs")
         .select("id, job_number, title, status, scheduled_start, scheduled_end, customers(name), sites(name, address_line1, suburb, site_lat, site_lng)")
         .eq("assigned_to", userId)
         .not("status", "in", '("completed","cancelled")')
         .order("scheduled_start", { ascending: true, nullsFirst: false });
-      return (data as unknown as MyJob[]) ?? [];
+      // The single most dangerous read in the app: a discarded error here
+      // renders "No jobs assigned" to a technician standing on site, who then
+      // goes home. Failing loudly is the only honest answer.
+      return unwrapRows(res as never, "listMyJobs") as unknown as MyJob[];
     }
   );
 }
@@ -412,14 +416,17 @@ export async function listMyJobs(userId: string): Promise<MyJob[]> {
 export async function getJob(id: string): Promise<JobDetail | null> {
   // Unchanged Supabase body (app/job/[id].tsx loadJob).
   const remote = async (): Promise<JobDetail | null> => {
-    const { data } = await supabase
+    const res = await supabase
       .from("jobs")
       .select(
         "id, job_number, title, status, priority, description, notes, job_type, created_at, scheduled_start, scheduled_end, actual_start, actual_end, completion_notes, overtime_reason, overtime_category, voice_report_transcript, customers(name, phone, mobile, email), sites(name, address_line1, suburb, state, postcode, site_lat, site_lng)"
       )
       .eq("id", id)
       .single();
-    return (data as unknown as JobDetail) ?? null;
+    // .single() reports "no rows" as PGRST116, which unwrap maps to null —
+    // absence is a normal answer here (the id may be a job this caller cannot
+    // see), while a genuine failure still throws.
+    return unwrap(res as never, "getJob") as unknown as JobDetail | null;
   };
   return fromLocalOr(async (db) => {
     const row = await db.getOptional<RawJobDetailRow>(SQL_GET_JOB, [id]);
@@ -440,13 +447,13 @@ export async function listOfficeJobs(offset: number, limit: number): Promise<Off
     },
     // Unchanged Supabase body (app/(office)/jobs.tsx loadMore).
     async () => {
-      const { data } = await supabase
+      const res = await supabase
         .from("jobs")
         .select(OFFICE_SELECT)
         .order("created_at", { ascending: false })
         .order("id", { ascending: false })
         .range(offset, offset + limit - 1);
-      return (data as unknown as OfficeJob[]) ?? [];
+      return unwrapRows(res as never, "listOfficeJobs") as unknown as OfficeJob[];
     },
     ROLES
   );
@@ -479,8 +486,8 @@ export async function searchOfficeJobs(query: string, limit: number): Promise<Of
         const numeric = /^\d+$/.test(safe);
         builder = builder.or(`title.ilike.%${safe}%${numeric ? `,job_number.eq.${safe}` : ""}`);
       }
-      const { data } = await builder;
-      return (data as unknown as OfficeJob[]) ?? [];
+      const res = await builder;
+      return unwrapRows(res as never, "searchOfficeJobs") as unknown as OfficeJob[];
     },
     ROLES
   );
@@ -504,12 +511,12 @@ export async function searchJobs(query: string): Promise<JobSearchRow[]> {
     },
     async () => {
       // Unchanged Supabase body (app/(tabs)/search.tsx loadJobs) …
-      const { data } = await supabase
+      const res = await supabase
         .from("jobs")
         .select("id, job_number, title, status, scheduled_start, customers(name), sites(name, address_line1, suburb, site_lat, site_lng)")
         .order("created_at", { ascending: false })
         .limit(10000);
-      const allJobs = (data as unknown as JobSearchRow[]) ?? [];
+      const allJobs = unwrapRows(res as never, "searchJobs") as unknown as JobSearchRow[];
       // … followed by the screen's client-side filter, moved verbatim
       // (app/(tabs)/search.tsx results useMemo).
       const q = query.trim().toLowerCase();

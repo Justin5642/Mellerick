@@ -6,6 +6,7 @@
 // that already requires the network. Pinned by supabaseOnly.test.ts.
 
 import { supabase } from "../../supabase";
+import { unwrap, unwrapRows } from "./unwrap";
 import type { LineItemInput } from "../repositories/finance";
 
 export interface ApprovalPlan {
@@ -28,10 +29,10 @@ export async function getApprovalPlan(jobId: string): Promise<ApprovalPlan | nul
     supabase.from("invoices").select("id").eq("job_id", jobId).maybeSingle(),
     supabase.from("job_items").select("name, description, quantity, unit_price").eq("job_id", jobId).order("created_at"),
   ]);
-  const job = jobRes.data as { customer_id: string; job_number: number; title: string } | null;
+  const job = unwrap(jobRes as never, "getApprovalPlan(job)") as { customer_id: string; job_number: number; title: string } | null;
   if (!job) return null;
-  const inv = invRes.data as { id: string } | null;
-  const rows = (itemsRes.data as unknown as { name: string; description: string | null; quantity: number; unit_price: number }[]) ?? [];
+  const inv = unwrap(invRes as never, "getApprovalPlan(invoice)") as { id: string } | null;
+  const rows = unwrapRows(itemsRes as never, "getApprovalPlan(items)") as unknown as { name: string; description: string | null; quantity: number; unit_price: number }[];
   return {
     jobId,
     customerId: job.customer_id,

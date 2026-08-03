@@ -1,6 +1,7 @@
 import { supabase } from "../../supabase";
 import { fromLocalOr } from "./source";
 import { num } from "./rowMap";
+import { unwrapRows } from "./unwrap";
 
 export interface InventoryItem {
   id: string;
@@ -78,8 +79,8 @@ export async function listInventory(query?: string): Promise<InventoryItem[]> {
         .order("name");
       const q = (query ?? "").replace(/[,()%]/g, " ").trim();
       if (q) builder = builder.or(`name.ilike.%${q}%,sku.ilike.%${q}%`);
-      const { data } = await builder;
-      return (data as unknown as InventoryItem[]) ?? [];
+      const res = await builder;
+      return unwrapRows(res as never, "listInventory") as unknown as InventoryItem[];
     },
     { roles: ["office", "admin"] }
   );

@@ -2,6 +2,7 @@ import { supabase } from "../../supabase";
 import { summarizeCustomerInvoices } from "../../customerSummary";
 import { fromLocalOr } from "./source";
 import { bool, num, numOrNull } from "./rowMap";
+import { unwrap, unwrapRows } from "./unwrap";
 
 // Read-repository layer for customers + sites (see reads/finance.ts for the
 // rationale — screens never touch supabase directly).
@@ -132,8 +133,8 @@ export async function listCustomers(offset: number, limit: number, query?: strin
       let builder = supabase.from("customers").select(LIST).eq("is_active", true).order("is_favorite", { ascending: false }).order("name").order("id");
       const q = (query ?? "").replace(/[,()%]/g, " ").trim();
       if (q) builder = builder.or(`name.ilike.%${q}%,company.ilike.%${q}%`);
-      const { data } = await builder.range(offset, offset + limit - 1);
-      return (data as unknown as CustomerListRow[]) ?? [];
+      const res = await builder.range(offset, offset + limit - 1);
+      return unwrapRows(res as never, "listCustomers") as unknown as CustomerListRow[];
     },
     ROLES
   );
@@ -160,12 +161,12 @@ export async function getCustomer(id: string): Promise<CustomerDetail | null> {
       };
     },
     async () => {
-      const { data } = await supabase
+      const res = await supabase
         .from("customers")
         .select("*, sites(id, name, address_line1, address_line2, suburb, state, postcode, notes)")
         .eq("id", id)
         .single();
-      return (data as unknown as CustomerDetail) ?? null;
+      return unwrap(res as never, "getCustomer") as unknown as CustomerDetail | null;
     },
     ROLES
   );
@@ -211,11 +212,11 @@ export async function getCustomerOverview(customerId: string): Promise<CustomerO
         supabase.from("quotes").select("id, title, status, total").eq("customer_id", customerId).order("created_at", { ascending: false }),
         supabase.from("invoices").select("id, title, status, total").eq("customer_id", customerId).order("created_at", { ascending: false }),
       ]);
-      const invoices = (invoicesRes.data as unknown as CustomerInvoice[]) ?? [];
+      const invoices = unwrapRows(invoicesRes as never, "getCustomerOverview invoices") as unknown as CustomerInvoice[];
       const { totalInvoiced, outstanding } = summarizeCustomerInvoices(invoices);
       return {
-        jobs: (jobsRes.data as unknown as CustomerJob[]) ?? [],
-        quotes: (quotesRes.data as unknown as CustomerQuote[]) ?? [],
+        jobs: unwrapRows(jobsRes as never, "getCustomerOverview jobs") as unknown as CustomerJob[],
+        quotes: unwrapRows(quotesRes as never, "getCustomerOverview quotes") as unknown as CustomerQuote[],
         invoices,
         totalInvoiced,
         outstanding,

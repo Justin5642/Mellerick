@@ -1,5 +1,6 @@
 import { supabase } from "../../supabase";
 import { fromLocalOr } from "./source";
+import { unwrapRows } from "./unwrap";
 
 export interface AssignableStaff {
   id: string;
@@ -29,12 +30,12 @@ export async function listAssignableStaff(): Promise<AssignableStaff[]> {
     },
     async () => {
       // ← unchanged pre-PowerSync Supabase body (byte-identical fallback).
-      const { data } = await supabase
+      const res = await supabase
         .from("profiles")
         .select("id, full_name, role")
         .eq("is_active", true)
         .order("full_name");
-      const rows = (data as unknown as AssignableStaff[]) ?? [];
+      const rows = unwrapRows(res as never, "listAssignableStaff") as unknown as AssignableStaff[];
       const rank = (r: string) => (r === "technician" ? 0 : r === "office" ? 1 : 2);
       // Stable: role first, then alphabetical (the query's full_name order isn't
       // preserved by a role-only sort).

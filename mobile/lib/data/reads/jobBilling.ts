@@ -2,6 +2,7 @@ import { supabase } from "../../supabase";
 import { computeEquipmentCost, type EquipmentCostInputs } from "../../costing";
 import { fromLocalOr } from "./source";
 import { groupByKey, num, numOrNull } from "./rowMap";
+import { unwrap, unwrapRows } from "./unwrap";
 
 // getJobBilling / getJobEquipment are served from the local PowerSync DB when
 // available, role-gated to office/admin. getJobCostCentres is ALSO reachable by
@@ -166,11 +167,11 @@ export async function getJobCostCentres(jobId: string): Promise<JobCostCentre[]>
       // ← unchanged pre-PowerSync Supabase body (byte-identical fallback);
       // ALSO the only path for technicians (role gate above).
       type PoRow = { po_number: string; po_cost_centers_public: { id: string; name: string; code: string | null }[] | null };
-      const { data } = await supabase
+      const res = await supabase
         .from("purchase_orders_public")
         .select("po_number, po_cost_centers_public(id, name, code)")
         .eq("job_id", jobId);
-      return ((data as unknown as PoRow[]) ?? []).flatMap((po) =>
+      return (unwrapRows(res as never, "getJobCostCentres") as unknown as PoRow[]).flatMap((po) =>
         (po.po_cost_centers_public ?? []).map((cc) => ({ id: cc.id, name: cc.name, code: cc.code, po_number: po.po_number }))
       );
     },
@@ -254,14 +255,14 @@ export async function getJobBilling(jobId: string): Promise<JobBilling | null> {
         supabase.from("job_expenses").select("id, supplier_name, category, description, amount, gst_amount, invoice_number, invoice_date, receipt_storage_path, cost_center_id").eq("job_id", jobId).order("created_at", { ascending: false }),
         supabase.from("purchase_orders").select("id, po_number, client_reference, total_value, po_cost_centers(id, name, allocated_amount)").eq("job_id", jobId).order("created_at"),
       ]);
-      const job = jobRes.data as { job_number: number | null; title: string } | null;
+      const job = unwrap(jobRes as never, "getJobBilling(job)") as { job_number: number | null; title: string } | null;
       if (!job) return null;
       return {
         jobNumber: job.job_number,
         jobTitle: job.title,
-        lineItems: (itemsRes.data as unknown as JobLineItem[]) ?? [],
-        expenses: (expRes.data as unknown as JobExpense[]) ?? [],
-        purchaseOrders: (poRes.data as unknown as JobPO[]) ?? [],
+        lineItems: unwrapRows(itemsRes as never, "getJobBilling(lineItems)") as unknown as JobLineItem[],
+        expenses: unwrapRows(expRes as never, "getJobBilling(expenses)") as unknown as JobExpense[],
+        purchaseOrders: unwrapRows(poRes as never, "getJobBilling(purchaseOrders)") as unknown as JobPO[],
       };
     },
     ROLES
@@ -368,11 +369,11 @@ export async function getJobEquipment(jobId: string): Promise<JobEquipment> {
       // screen (jobCosting.ts also filters is_active). The name is still shown from
       // the join (better than the web's "Unknown equipment"; a name is not money).
       type OptRow = { id: string; name: string; category: string } & EquipmentCostInputs;
-      const optionRows = (optRes.data as unknown as OptRow[]) ?? [];
+      const optionRows = unwrapRows(optRes as never, "getJobEquipment(options)") as unknown as OptRow[];
       const costById = new Map(optionRows.map((e) => [e.id, computeEquipmentCost(e).costPerHour]));
 
       type UsageRow = { id: string; equipment_id: string; usage_date: string; hours: number; notes: string | null; equipment: { name: string; category: string } | null };
-      const usage: JobEquipmentUsage[] = ((usageRes.data as unknown as UsageRow[]) ?? []).map((r) => {
+      const usage: JobEquipmentUsage[] = (unwrapRows(usageRes as never, "getJobEquipment(usage)") as unknown as UsageRow[]).map((r) => {
         const hours = Number(r.hours);
         const costPerHour = costById.get(r.equipment_id) ?? 0;
         return {
@@ -402,8 +403,11 @@ export async function getJobEquipment(jobId: string): Promise<JobEquipment> {
 }
 
 // Short-lived signed URL for a receipt object so the office user can view it.
-// Online-only (Storage has no offline story); returns null if unavailable.
+// Online-only (Storage has no offline story); returns null when Storage hands
+// back no URL — but a Storage ERROR now throws instead of posing as "no URL",
+// which is the same swallow this module's reads were just cured of.
 export async function getReceiptSignedUrl(storagePath: string): Promise<string | null> {
-  const { data } = await supabase.storage.from("job-documents").createSignedUrl(storagePath, 60);
+  const res = await supabase.storage.from("job-documents").createSignedUrl(storagePath, 60);
+  const data = unwrap(res as never, "getReceiptSignedUrl") as { signedUrl: string } | null;
   return data?.signedUrl ?? null;
 }

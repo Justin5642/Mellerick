@@ -1,6 +1,7 @@
 import { supabase } from "../../supabase";
 import { fromLocalOr, type RouteOptions } from "./source";
 import { nestOne, num, numOrNull } from "./rowMap";
+import { unwrap, unwrapRows } from "./unwrap";
 
 // The read-repository layer: the ONLY place screens get financial data. Screens
 // never call supabase directly, so a future offline cache (PowerSync or a
@@ -362,13 +363,13 @@ export async function listInvoices(offset: number, limit: number): Promise<Invoi
       }));
     },
     async () => {
-      const { data } = await supabase
+      const res = await supabase
         .from("invoices")
         .select(INVOICE_LIST)
         .order("created_at", { ascending: false })
         .order("id", { ascending: false }) // stable tiebreaker over non-unique created_at
         .range(offset, offset + limit - 1);
-      return (data as unknown as InvoiceListRow[]) ?? [];
+      return unwrapRows(res as never, "listInvoices") as unknown as InvoiceListRow[];
     },
     OFFICE_ADMIN
   );
@@ -402,12 +403,12 @@ export async function getInvoice(id: string): Promise<InvoiceDetail | null> {
       };
     },
     async () => {
-      const { data } = await supabase
+      const res = await supabase
         .from("invoices")
         .select("*, customers(name, email, phone), invoice_items(*)")
         .eq("id", id)
         .single();
-      return (data as unknown as InvoiceDetail) ?? null;
+      return unwrap(res as never, "getInvoice") as unknown as InvoiceDetail | null;
     },
     OFFICE_ADMIN
   );
@@ -447,8 +448,8 @@ export async function listReadyToInvoice(): Promise<{ jobs: ReadyJob[]; variatio
         supabase.from("job_variations").select("id, total_amount, jobs(id, job_number, title, customers(name))").in("status", ["approved", "auto_approved"]).is("invoice_id", null),
       ]);
       return {
-        jobs: (jobsRes.data as unknown as ReadyJob[]) ?? [],
-        variations: (varsRes.data as unknown as ReadyVariation[]) ?? [],
+        jobs: unwrapRows(jobsRes as never, "listReadyToInvoice(jobs)") as unknown as ReadyJob[],
+        variations: unwrapRows(varsRes as never, "listReadyToInvoice(variations)") as unknown as ReadyVariation[],
       };
     },
     OFFICE_ADMIN
@@ -504,11 +505,11 @@ export async function getInvoiceJobPrefill(jobId: string): Promise<InvoiceJobPre
         supabase.from("job_items").select("name, description, quantity, unit_price").eq("job_id", jobId).order("created_at"),
         supabase.from("job_variations").select("id, custom_name, quantity, unit, rate, total_amount, variation_types(name)").eq("job_id", jobId).in("status", ["approved", "auto_approved"]).is("invoice_id", null),
       ]);
-      const job = jobRes.data as { customer_id: string; title: string; completion_notes: string | null; voice_report_transcript: string | null; customers: { name: string } | null } | null;
+      const job = unwrap(jobRes as never, "getInvoiceJobPrefill(job)") as unknown as { customer_id: string; title: string; completion_notes: string | null; voice_report_transcript: string | null; customers: { name: string } | null } | null;
       if (!job) return null;
 
       type ItemRow = { name: string; description: string | null; quantity: number; unit_price: number };
-      const items = ((itemsRes.data as unknown as ItemRow[]) ?? []).map((i) => ({
+      const items = (unwrapRows(itemsRes as never, "getInvoiceJobPrefill(items)") as unknown as ItemRow[]).map((i) => ({
         name: i.name,
         description: i.description ?? null,
         quantity: Number(i.quantity),
@@ -516,7 +517,7 @@ export async function getInvoiceJobPrefill(jobId: string): Promise<InvoiceJobPre
       }));
 
       type VarRow = { id: string; custom_name: string | null; quantity: number; unit: string | null; rate: number | null; total_amount: number | null; variation_types: { name: string } | null };
-      const unbilledVariations = ((varsRes.data as unknown as VarRow[]) ?? []).map((v) => ({
+      const unbilledVariations = (unwrapRows(varsRes as never, "getInvoiceJobPrefill(variations)") as unknown as VarRow[]).map((v) => ({
         id: v.id,
         name: v.variation_types?.name ?? v.custom_name ?? "Variation",
         description: `${v.quantity} ${v.unit ?? ""}${v.rate != null ? ` @ $${Number(v.rate).toFixed(2)}` : ""}`.trim(),
@@ -551,13 +552,13 @@ export async function listQuotes(offset: number, limit: number): Promise<QuoteLi
       }));
     },
     async () => {
-      const { data } = await supabase
+      const res = await supabase
         .from("quotes")
         .select(QUOTE_LIST)
         .order("created_at", { ascending: false })
         .order("id", { ascending: false })
         .range(offset, offset + limit - 1);
-      return (data as unknown as QuoteListRow[]) ?? [];
+      return unwrapRows(res as never, "listQuotes") as unknown as QuoteListRow[];
     },
     OFFICE_ADMIN
   );
@@ -592,12 +593,12 @@ export async function getQuote(id: string): Promise<QuoteDetail | null> {
       };
     },
     async () => {
-      const { data } = await supabase
+      const res = await supabase
         .from("quotes")
         .select("*, customers(name, email, phone), quote_items(*)")
         .eq("id", id)
         .single();
-      return (data as unknown as QuoteDetail) ?? null;
+      return unwrap(res as never, "getQuote") as unknown as QuoteDetail | null;
     },
     OFFICE_ADMIN
   );
@@ -607,13 +608,13 @@ export async function listPricing(): Promise<PricingItem[]> {
   return fromLocalOr(
     async (db) => (await db.getAll<RawPricingRow>(SQL_PRICING, [1])).map(mapPricingRow),
     async () => {
-      const { data } = await supabase
+      const res = await supabase
         .from("pricing_items")
         .select("id, name, description, category, pricing_type, unit_price, unit")
         .eq("is_active", true)
         .order("category")
         .order("name");
-      return (data as unknown as PricingItem[]) ?? [];
+      return unwrapRows(res as never, "listPricing") as unknown as PricingItem[];
     },
     OFFICE_ADMIN
   );
@@ -625,13 +626,13 @@ export async function listInactivePricing(): Promise<PricingItem[]> {
   return fromLocalOr(
     async (db) => (await db.getAll<RawPricingRow>(SQL_PRICING, [0])).map(mapPricingRow),
     async () => {
-      const { data } = await supabase
+      const res = await supabase
         .from("pricing_items")
         .select("id, name, description, category, pricing_type, unit_price, unit")
         .eq("is_active", false)
         .order("category")
         .order("name");
-      return (data as unknown as PricingItem[]) ?? [];
+      return unwrapRows(res as never, "listInactivePricing") as unknown as PricingItem[];
     },
     OFFICE_ADMIN
   );
