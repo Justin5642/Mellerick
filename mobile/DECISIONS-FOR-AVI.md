@@ -195,6 +195,24 @@ are flagged to Avi in real time per the plan's crucial-flag protocol.
   protection and no staging environment. Recommended: protect `main` and promote
   to production deliberately. Owner action, unchanged from the July handover.
 
+- **Q28 (gap against the original plan — dark theme is not reachable):** the plan
+  called for "a real dark theme the web never built". What shipped is the token
+  groundwork, not a working feature: `tailwind.config.js` sets
+  `darkMode: "class"`, but **nothing calls `useColorScheme`** to ever add that
+  class, only three files carry `dark:` variants, and `app.json` pins
+  `userInterfaceStyle: "light"`. So the app is light-only and the dark styling is
+  unreachable.
+
+  Not a defect — nothing is broken, and a plumbing app used in daylight has a
+  weak case for it. But it is a plan item recorded as delivered that is not.
+  **Decide:** finish it (wire `useColorScheme` → class, drop the
+  `userInterfaceStyle` pin, extend `dark:` coverage across the component library
+  — roughly a day), or drop it from scope and remove the half-built pieces so the
+  next reader is not misled.
+
+  The splash screen added 2026-08-03 carries a `dark.backgroundColor` for this
+  reason: it is correct the moment dark mode is enabled and inert until then.
+
 - **Q27 (blocks the Maestro e2e suite):** the Maestro CLI is **not installed** on
   this machine — only its data directory survives from the 28 July runs. Its
   official installer is a piped remote shell script
