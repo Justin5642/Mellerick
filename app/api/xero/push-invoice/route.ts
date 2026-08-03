@@ -99,10 +99,49 @@ export async function POST(request: NextRequest) {
     if (!isUpdate) {
       // Record the Xero link first -- this is what stops a retry from creating
       // a duplicate, so it must land even if the number adoption below fails.
-      await supabase.from("invoices").update({
-        xero_invoice_id: result?.invoiceID,
-        status: "sent",
-      }).eq("id", invoiceId);
+      //
+      // THE RESULT USED TO BE DISCARDED, which made the comment above a wish
+      // rather than a guarantee: when this update failed the route still
+      // returned success, the next push saw no xero_invoice_id, took the CREATE
+      // branch again, and the customer received a SECOND invoice for the same
+      // work.
+      //
+      // This failure is unlike the others in this codebase, because by the time
+      // we detect it the invoice ALREADY EXISTS in Xero. Simply erroring would
+      // invite exactly the retry that duplicates it. So: retry the link a few
+      // times ourselves, and if it still will not land, fail with the Xero
+      // identifiers in the message so a human can reconcile by hand instead of
+      // pressing the button again.
+      let linkError: { message: string } | null = null;
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        const { error } = await supabase
+          .from("invoices")
+          .update({ xero_invoice_id: result?.invoiceID, status: "sent" })
+          .eq("id", invoiceId);
+        linkError = error;
+        if (!error) break;
+        // A serialization conflict or a blip clears on a retry; a permission
+        // failure will not, but three quick attempts cost nothing next to a
+        // duplicated invoice.
+        if (attempt < 3) await new Promise((r) => setTimeout(r, 150 * attempt));
+      }
+
+      if (linkError) {
+        console.error("Xero link write failed after 3 attempts:", linkError.message);
+        return NextResponse.json(
+          {
+            error:
+              `The invoice WAS created in Xero as ${result?.invoiceNumber ?? result?.invoiceID} ` +
+              `but could not be linked to this record (${linkError.message}). ` +
+              `DO NOT RETRY — pushing again would create a duplicate in Xero. ` +
+              `Set this invoice's Xero ID to ${result?.invoiceID} manually, or void the Xero invoice first.`,
+            xeroInvoiceId: result?.invoiceID,
+            xeroInvoiceNumber: result?.invoiceNumber,
+            requiresManualReconciliation: true,
+          },
+          { status: 409 }
+        );
+      }
 
       // Adopt the number Xero assigned so our record matches Xero's. Xero
       // returns it with the org's prefix (e.g. "INV-12144"), but our
