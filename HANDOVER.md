@@ -537,9 +537,18 @@ Things that have already cost time, roughly in order of how likely you are to hi
    Three such lines sat in `login`, `forgot-password` and `update-password` for
    weeks before being removed. Those pages are statically prerendered — which is
    why the build needs the Supabase env vars at compile time.
-7. **Any route using the service-role client must authorize the caller first.**
+7. **`[sync] status poll failed: … ERR_USING_RELEASED_SHARED_OBJECT` in the dev
+   log is EXPECTED, not a crash.** The sync badge polls SQLite every 3s. A tick
+   already in flight when the JS context is torn down — which every Fast Refresh
+   does — resumes against a released native handle. It is caught in
+   `useSyncStatus`, logged under `__DEV__` only, and the next tick recovers.
+   Production exposure is a poll in flight during sign-out: caught the same way,
+   the badge skips one update. It looks alarming in logcat and is not. I chased
+   it once believing it was a regression; it is the guard working.
+
+8. **Any route using the service-role client must authorize the caller first.**
    It bypasses RLS entirely.
-8. **Two lockfiles, two projects.** Install in the right directory.
+9. **Two lockfiles, two projects.** Install in the right directory.
 
 ---
 
