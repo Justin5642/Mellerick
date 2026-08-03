@@ -22,6 +22,10 @@ export interface ManualEntryInput {
   clockInIso: string;
   clockOutIso: string | null;
   costCenterId: string | null;
+  /** The job just left — set only for an auto-clocked travel leg. */
+  travelFromJobId?: string | null;
+  /** True when the geofence generated this entry rather than a person typing it. */
+  autoClocked?: boolean;
 }
 
 export interface EditEntryInput {
@@ -79,7 +83,12 @@ export class TimeEntriesRepository {
       clock_out: input.clockOutIso,
       hours: input.clockOutIso ? hoursBetween(input.clockInIso, input.clockOutIso) : null,
       cost_center_id: input.costCenterId,
-      auto_clocked: false,
+      // The geofence auto-clock reuses this method for its travel legs, which
+      // previously went straight to Supabase and were therefore lost outright
+      // when logged with no signal. Spread rather than always-present so the
+      // manual path's payload shape is unchanged.
+      auto_clocked: input.autoClocked ?? false,
+      ...(input.travelFromJobId ? { travel_from_job_id: input.travelFromJobId } : {}),
       edited_by: input.staffId,
       edited_at: this.time.nowIso(),
     });

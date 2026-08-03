@@ -2,6 +2,8 @@ import { createContext, useContext, useEffect, useRef, type ReactNode } from "re
 import * as Location from "expo-location";
 import { supabase } from "./supabase";
 import { useAuth } from "./auth-context";
+import { useDataLayer } from "./data/DataProvider";
+import type { DataLayer } from "./data/createDataLayer";
 import { plausibleAutoClockHours, MAX_PLAUSIBLE_TRAVEL_HOURS, MAX_PLAUSIBLE_WORK_HOURS } from "./autoClockHours";
 import { nextGeofenceState, type TrackedSite } from "./geofenceState";
 import { startBackgroundClock, stopBackgroundClock, publishBackgroundClockContext } from "./backgroundClock";
@@ -58,6 +60,12 @@ const LocationTrackingContext = createContext<{ enabled: boolean }>({ enabled: f
  */
 export function LocationTrackingProvider({ children }: { children: ReactNode }) {
   const { session } = useAuth();
+  // The geofence writes through the SAME durable outbox as the manual clock
+  // button. Before this it wrote straight to Supabase, so an automatic clock-in
+  // or clock-out made with no signal was discarded silently — the one path that
+  // fires when nobody is looking at the screen was the one that could not survive
+  // being offline.
+  const layer = useDataLayer();
   const userId = session?.user.id ?? null;
 
   const sitesRef = useRef<TrackedSite[]>([]);
@@ -163,6 +171,13 @@ export function LocationTrackingProvider({ children }: { children: ReactNode }) 
     const sites = sitesRef.current;
     if (sites.length === 0) return;
 
+    // Bail BEFORE the cursor moves. The data layer is null only for the moment
+    // between app start and its SQLite store opening; returning here leaves
+    // insideJobIdRef untouched, so the next position update re-derives the same
+    // transition. Bailing after the cursor advanced would consume the arrival
+    // and never write it — losing the visit rather than delaying it.
+    if (!layer) return;
+
     // Same decision the background task uses (lib/geofenceState.ts) — the two
     // must not drift, or the auto-clock would behave differently depending on
     // whether the technician happened to have the app open.
@@ -174,19 +189,23 @@ export function LocationTrackingProvider({ children }: { children: ReactNode }) 
     busyRef.current = true;
     try {
       if (insideJobId) {
-        await handleArrival(insideJobId, staffId);
+        await handleArrival(layer, insideJobId, staffId);
       } else if (previousJobId) {
-        await handleDeparture(previousJobId, staffId);
+        await handleDeparture(layer, previousJobId, staffId);
       }
     } finally {
       busyRef.current = false;
     }
   }
 
-  async function handleArrival(jobId: string, staffId: string) {
+  async function handleArrival(layer: DataLayer, jobId: string, staffId: string) {
     const arrivalTime = new Date().toISOString();
 
-    const { data: openEntry } = await supabase
+    // The open-entry check stays a network read: it is an IDEMPOTENCE guard, and
+    // treating "I could not check" as "there is none" would clock the technician
+    // in twice. When it fails we skip the insert rather than risk a duplicate —
+    // and the departure below still closes whatever is genuinely open.
+    const { data: openEntry, error: openError } = await supabase
       .from("time_entries")
       .select("id")
       .eq("job_id", jobId)
@@ -195,19 +214,24 @@ export function LocationTrackingProvider({ children }: { children: ReactNode }) 
       .is("clock_out", null)
       .maybeSingle();
 
+    // A failed check is NOT "no open entry" — see above. Skip rather than risk
+    // clocking the technician in on top of an entry that already exists.
+    if (openError) {
+      console.warn("[geofence] could not check for an open entry; skipping clock-in:", openError.message);
+      return;
+    }
+
     if (!openEntry) {
-      const { data } = await supabase
-        .from("time_entries")
-        .insert({
-          job_id: jobId,
-          staff_id: staffId,
-          clock_in: arrivalTime,
-          auto_clocked: true,
-          entry_type: "work",
-        })
-        .select("id")
-        .single();
-      if (data) syncBilling(data.id);
+      // THROUGH THE OUTBOX, not straight to Supabase.
+      //
+      // This used to be a direct insert, so a technician arriving somewhere with
+      // no signal produced no row, no queued operation, no error and no sync
+      // badge — the arrival was discarded and never re-derived after reconnect,
+      // losing the visit's entire clock-in. The MANUAL clock button has always
+      // been durable; the AUTOMATIC one, which fires precisely when nobody is
+      // watching the screen, was not. clockIn() also enqueues the billing sync,
+      // which the direct path did by hand.
+      await layer.timeEntries.clockIn({ jobId, staffId });
     }
 
     const departure = departureRef.current;
@@ -215,21 +239,21 @@ export function LocationTrackingProvider({ children }: { children: ReactNode }) 
     if (departure) {
       const hours = plausibleAutoClockHours(departure.time, arrivalTime, MAX_PLAUSIBLE_TRAVEL_HOURS);
       if (hours !== null) {
-        await supabase.from("time_entries").insert({
-          job_id: jobId,
-          staff_id: staffId,
-          clock_in: departure.time,
-          clock_out: arrivalTime,
-          hours,
-          entry_type: "travel",
-          travel_from_job_id: departure.jobId,
-          auto_clocked: true,
+        await layer.timeEntries.addManual({
+          jobId,
+          staffId,
+          clockInIso: departure.time,
+          clockOutIso: arrivalTime,
+          entryType: "travel",
+          costCenterId: null,
+          travelFromJobId: departure.jobId,
+          autoClocked: true,
         });
       }
     }
   }
 
-  async function handleDeparture(jobId: string, staffId: string) {
+  async function handleDeparture(layer: DataLayer, jobId: string, staffId: string) {
     const departTime = new Date().toISOString();
 
     const { data: openEntry } = await supabase
@@ -248,9 +272,10 @@ export function LocationTrackingProvider({ children }: { children: ReactNode }) 
       // entry open for days. The entry still CLOSES either way; leaving it open
       // is its own problem. The office then sees a gap to correct rather than a
       // number that quietly reconciles wrong.
-      const hours = plausibleAutoClockHours(openEntry.clock_in, departTime, MAX_PLAUSIBLE_WORK_HOURS);
-      await supabase.from("time_entries").update({ clock_out: departTime, hours }).eq("id", openEntry.id);
-      syncBilling(openEntry.id);
+      // Through the outbox, like the manual clock-out. A direct update meant a
+      // departure with no signal simply never closed the entry — the technician
+      // stayed clocked in, and the office saw an entry running for days.
+      await layer.timeEntries.clockOut({ entryId: openEntry.id, clockInIso: openEntry.clock_in });
     }
 
     departureRef.current = { time: departTime, jobId };

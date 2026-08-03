@@ -1,5 +1,7 @@
 import { describe, it, expect } from "vitest";
-// @ts-expect-error — plain .mjs script, no type declarations by design
+// No @ts-expect-error here: allowJs resolves the .mjs and infers `verdict`, so
+// suppressing would itself be an error (TS2578, "unused directive") — which is
+// exactly how CI caught it.
 import { verdict } from "../../scripts/check-sync-health.mjs";
 
 // WHY THIS TEST EXISTS
