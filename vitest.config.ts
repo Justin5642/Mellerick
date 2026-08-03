@@ -13,6 +13,18 @@ export default defineConfig({
   },
   test: {
     globals: true,
+    // Always write a machine-readable record of every run.
+    //
+    // The web suite has twice reported a single failure and then passed on every
+    // subsequent run (Q29). Both times the failing test was NOT identified,
+    // because the console output was filtered through a grep that vitest's
+    // ANSI-coloured failure block defeats — so an intermittent that had already
+    // occurred twice left no evidence either time.
+    //
+    // The JSON report removes that possibility: whatever fails is recorded with
+    // its full name and error, whether or not anyone was watching the terminal.
+    // An intermittent you cannot name is one you cannot fix.
+    reporters: ["default", ["json", { outputFile: "test-results/unit-results.json" }]],
     projects: [
       {
         extends: true,
