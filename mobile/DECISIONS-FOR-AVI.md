@@ -191,9 +191,18 @@ are flagged to Avi in real time per the plan's crucial-flag protocol.
   migration to the on-device schema. Probably over-engineering; recorded so the
   decision is explicit rather than accidental.
 
-- **Q26:** production currently auto-deploys from `main` with no branch
-  protection and no staging environment. Recommended: protect `main` and promote
-  to production deliberately. Owner action, unchanged from the July handover.
+- **Q26 (Justin's call — his GitHub org):** production currently auto-deploys
+  from `main` with no branch protection and no staging environment.
+  Recommended: protect `main` and promote to production deliberately.
+  Unchanged from the July handover.
+
+  **Ownership correction, 2026-08-03:** the store accounts are **Justin's**,
+  not Avi's — they sit under the client organisation, the same place the
+  Vercel `mellerick` team lives. So D-U-N-S → Google Play, the App Store
+  Connect app record, and the push credentials are all his to obtain. The
+  Apple Developer Program account already exists (Team ID `864FRPRM47`),
+  which means the APNs `.p8` is available today. See HANDOVER.md §7
+  "Who owns what" for the full split.
 
 - **Q28 (gap against the original plan — dark theme is not reachable):** the plan
   called for "a real dark theme the web never built". What shipped is the token

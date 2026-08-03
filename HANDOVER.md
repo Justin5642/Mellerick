@@ -398,23 +398,29 @@ now execute and pass in CI.
 
 None of it is blocked on code.
 
-**Store submission** — neither store account exists. In order:
+**Store accounts — Justin owns these.** They sit under the client's own
+organisation (the same place the Vercel `mellerick` team lives), not under
+BAS & More.
 
-1. **D-U-N-S number** — free, 1–14 days, required by *both* stores. Everything queues behind it.
-2. Apple Developer Program — USD 99/year
-3. Google Play Console — USD 25 once
+| | Status |
+|---|---|
+| **Apple Developer Program** | ✅ **Exists.** Team ID `864FRPRM47` is in `mobile/eas.json` |
+| **D-U-N-S number** | ❌ Still needed for Google Play. Free, but **1–14 days** — the long pole |
+| **Google Play Console** | ❌ USD 25 once, needs the D-U-N-S first |
 
-**No iOS build can exist yet.** iOS binaries cannot be compiled on Windows at
-all, and EAS cloud build still needs Apple-issued signing certificates, which
-require the paid account. There is no unsigned iOS fallback the way there is on
-Android. Once the account exists, `eas build --platform ios` produces one.
+**iOS builds are now unblocked.** They cannot be compiled on Windows — Xcode is
+macOS-only — but EAS builds them in the cloud, and the signing certificates it
+needs come from the Apple account, which now exists. `eas build --platform ios`
+will produce an `.ipa`. What still gates *submission* is the App Store Connect
+app record, which yields the `ascAppId` for `eas.json`.
 
 **Push notifications** — fully implemented and tested; cannot deliver without an
 APNs `.p8` from Apple and an FCM service-account JSON from Firebase. The `.p8`
 downloads **once only**.
 
-**`mobile/eas.json` placeholders** — `appleId`, `ascAppId`, `appleTeamId` are
-still `*_HERE` strings. `eas submit --platform ios` fails until they are filled.
+**`mobile/eas.json` placeholders** — `appleTeamId` is filled. `appleId` and
+`ascAppId` are still `*_HERE`; `eas submit --platform ios` fails until they are.
+`ascAppId` only exists once the App Store Connect app record is created.
 
 **Store assets** — screenshots (4 per platform, demo-safe data) and an Android
 feature graphic (1024×500). Listing copy, privacy answers and the privacy policy
@@ -433,7 +439,27 @@ site.
 
 **Deployment gating** — `main` auto-deploys to production. Branch protection on
 `main`, and a staging environment, are still worth adding so production deploys
-become deliberate. Owner action.
+become deliberate. Justin's call — it is his GitHub org and Vercel team.
+
+### Who owns what
+
+Worth stating plainly, because "outstanding" without an owner is how items sit
+for months.
+
+| Item | Owner |
+|---|---|
+| D-U-N-S number → Google Play Console | **Justin** |
+| Apple Developer Program | **Justin** — done |
+| App Store Connect app record → `ascAppId` | **Justin** |
+| APNs `.p8` (Apple) + FCM JSON (Firebase) | **Justin** — the Apple account is his, so the `.p8` is available now |
+| Vercel Preview environment variables | **Justin** — the `mellerick` team is his |
+| Branch protection / staging | **Justin** |
+| Screenshots, feature graphic | Whoever can run the app on a device with demo-safe data |
+| Privacy policy hosting, legal entity details, ABN | Mellerick Plumbing |
+
+The store packs are written to be handed over as-is — they address "whoever
+lodges and pays" rather than naming a person, so they do not go stale if that
+changes.
 
 ---
 
