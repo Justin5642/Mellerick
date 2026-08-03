@@ -34,6 +34,29 @@ jobs:
       - run: npm ci
       - run: npm test
 
+  # The mobile app had NO CI at all until 2026-08-04. Every job above runs at the
+  # repo root, so 433 mobile tests and the mobile typecheck never gated a merge —
+  # a regression in the field app that technicians actually use could not fail a
+  # PR check. The web app, which the office uses from a desk, was fully covered.
+  #
+  # Run as one job rather than two: `npm ci` in mobile/ is the slow part, and
+  # splitting it would pay that cost twice for no extra signal.
+  mobile:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: mobile
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .node-version
+          cache: npm
+          cache-dependency-path: mobile/package-lock.json
+      - run: npm ci
+      - run: npx tsc --noEmit -p tsconfig.json
+      - run: npm test
+
   build:
     runs-on: ubuntu-latest
     steps:
