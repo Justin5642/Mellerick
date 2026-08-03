@@ -8,6 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ArrowLeft, Plus, MapPin, CheckCircle2, XCircle, Mail, FileDown } from "lucide-react";
 import { formatDate } from "@/lib/date";
+import { DeleteDeviceButton } from "@/components/backflow/delete-device-button";
 import {
   computeNextDueDate,
   getDueStatus,
@@ -73,6 +74,7 @@ export default async function BackflowDevicePage({ params }: { params: Promise<{
           <Link href={`/dashboard/backflow/${id}/test/new`}>
             <Button className="gap-2"><Plus className="w-4 h-4" />Log Test</Button>
           </Link>
+          <DeleteDeviceButton deviceId={id} customerName={device.customers?.name ?? "this customer"} />
         </div>
       </div>
 

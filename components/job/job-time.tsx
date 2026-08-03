@@ -31,6 +31,12 @@ interface PO {
   site_address: string | null;
 }
 
+interface JobSite {
+  site_lat: number | null;
+  site_lng: number | null;
+  address_line1?: string | null;
+}
+
 interface CostCenterOption {
   id: string;
   name: string;
@@ -48,6 +54,7 @@ interface Props {
   currentUserId: string;
   timeEntries: TimeEntry[];
   pos: PO[];
+  site?: JobSite | null;
   costCenters: CostCenterOption[];
   isAdmin?: boolean;
   // Active staff for the admin "log on behalf of" picker in the edit dialog.
@@ -82,7 +89,7 @@ function syncBilling(entryId: string) {
   fetch(`/api/time-entries/${entryId}/sync-billing`, { method: "POST" }).catch(() => {});
 }
 
-export function JobTime({ jobId, currentUserId, timeEntries: initial, pos, costCenters, isAdmin, staff, onUpdate }: Props) {
+export function JobTime({ jobId, currentUserId, timeEntries: initial, pos, site, costCenters, isAdmin, staff, onUpdate }: Props) {
   const supabase = createClient();
   const [entries, setEntries] = useState<TimeEntry[]>(initial);
   const [loading, setLoading] = useState(false);
@@ -118,7 +125,13 @@ export function JobTime({ jobId, currentUserId, timeEntries: initial, pos, costC
     setEntries((prev) => prev.map((e) => (e.id === entryId ? (data as TimeEntry) : e)));
   }
 
-  const poWithLocation = pos.find(p => p.site_lat && p.site_lng);
+  // Prefer the job's own site coordinates -- a PO isn't required (many
+  // service jobs never get one) but the geofence should still work as soon
+  // as someone is assigned. Fall back to a PO's coordinates for jobs whose
+  // site predates migration 0009 and only has coords on the PO.
+  const poWithLocation = (site?.site_lat && site?.site_lng)
+    ? { site_lat: site.site_lat, site_lng: site.site_lng, site_address: site.address_line1 ?? null }
+    : pos.find(p => p.site_lat && p.site_lng);
   const myOpenEntry = entries.find(e => e.staff_id === currentUserId && e.entry_type !== "travel" && !e.clock_out);
   const workEntries = entries.filter(e => e.entry_type !== "travel");
   const travelEntries = entries.filter(e => e.entry_type === "travel");
@@ -263,7 +276,7 @@ export function JobTime({ jobId, currentUserId, timeEntries: initial, pos, costC
         </Card>
       ) : (
         <p className="text-xs text-slate-400 flex items-center gap-1.5">
-          <MapPin className="w-3 h-3" />Add a PO with a site address to enable automatic geo-fence clock-in/out
+          <MapPin className="w-3 h-3" />Add a site address to this job to enable automatic geo-fence clock-in/out
         </p>
       )}
 
