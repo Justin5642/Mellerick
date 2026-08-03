@@ -219,12 +219,32 @@ are flagged to Avi in real time per the plan's crucial-flag protocol.
   which means the APNs `.p8` is available today. See HANDOVER.md §7
   "Who owns what" for the full split.
 
-- **Q29 — ACCEPTED 2026-08-04 (Avi's call): ship with it open, let the recorder
-  catch it.** Not fixed and not reproduced — deliberately. The run-recorder
-  (commit 0a7abf3) now writes every run to JSON, so the next occurrence names
-  the failing test automatically instead of vanishing. Chasing a 1-in-20 flake
-  blind can burn an hour and still not fire; waiting costs nothing now that the
-  instrumentation exists. **If it recurs, the JSON is the first place to look.**
+- **Q29 — SOLVED 2026-08-04. It was never a flaky assertion; it was a TIMEOUT.**
+
+  Avi's call was to accept it and let the recorder catch the next occurrence.
+  That is exactly what happened, within the hour:
+
+      tests/unit/schema-column-contract.test.ts
+        > every backflow_devices column referenced in source exists in the
+          migration history
+        Test timed out in 5000ms
+
+  Cause: each of the 33 per-table tests re-read ALL ~200 source files from disk,
+  so one run did roughly 6,600 reads. That normally fits inside vitest's 5s
+  per-test default; under I/O contention one table tips over. **Which** table
+  varies — which is precisely why the failure never had a stable identity and
+  read as a mystery rather than a performance problem.
+
+  Fixed by reading the sources ONCE into memory instead of once per table:
+  **2334ms → 55ms for the suite, a 42x speedup**, so the 5s ceiling is now
+  unreachable rather than merely raised. 8 consecutive full-suite runs green.
+
+  Two lessons worth keeping. First, "intermittent" was a misdiagnosis all along
+  — three separate investigations looked for a race in the assertions when the
+  answer was in the timing. Second, the instrumentation earned its keep
+  immediately: a 1-in-20 flake that had escaped identification three times was
+  named on its first recurrence after the recorder was fixed to survive the next
+  run. Instrument before you hunt.
 
   Original note (unresolved intermittent — 1 web test in ~20 full runs): the web
   suite has twice reported `1 failed | 187 passed` and then passed on every

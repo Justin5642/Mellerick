@@ -159,6 +159,27 @@ describe("schema column contract", () => {
   // remembering to add it here.
   const TABLES = [...schema.keys()].filter((t) => !EXEMPT.has(t)).sort();
 
+  // Read every source file ONCE, not once per table.
+  //
+  // This was the cause of Q29 — a ~1-in-20 intermittent that escaped
+  // identification three times. Each of the 33 per-table tests used to re-read
+  // all ~200 source files from disk, so a single run did roughly 6,600 reads.
+  // Normally that finishes inside vitest's 5s per-test default; under I/O
+  // contention one table tips over and fails with "Test timed out in 5000ms".
+  // WHICH table varies, which is exactly why the failure never had a stable
+  // identity and looked like a mystery rather than a performance problem.
+  //
+  // Reading once is ~33x less I/O and removes the cause rather than raising the
+  // timeout, which would only have widened the window.
+  //
+  // Files that are mid-write read as null (see readSource) and are skipped for
+  // every table consistently, rather than for whichever table happened to be
+  // running at that instant.
+  const CONTENTS: [string, string][] = files
+    .map((file) => [file, readSource(file)] as const)
+    .filter((pair): pair is readonly [string, string] => pair[1] !== null)
+    .map(([file, src]) => [file, src]);
+
   it("parses the canonical schema", () => {
     expect(schema.get("jobs")?.size ?? 0).toBeGreaterThan(10);
     expect(files.length).toBeGreaterThan(50);
@@ -180,9 +201,7 @@ describe("schema column contract", () => {
       expect(known, `table ${table} missing from the migration history`).toBeTruthy();
 
       const offenders: string[] = [];
-      for (const file of files) {
-        const src = readSource(file);
-        if (src === null) continue; // being written right now; next run sees it
+      for (const [file, src] of CONTENTS) {
         if (!src.includes(`"${table}"`) && !src.includes(`'${table}'`)) continue;
         for (const col of referencedColumns(src, table)) {
           // Embedded relations (`customers(name)`) and `*` are not columns.
