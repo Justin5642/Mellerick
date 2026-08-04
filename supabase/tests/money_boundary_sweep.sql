@@ -132,6 +132,37 @@ where c.table_schema = 'public'
   and c.column_name !~* '(_id$|^id$)'
 order by c.table_name, c.column_name;
 
+-- THE OTHER DIRECTION: a column that is accidentally INVISIBLE.
+--
+-- 0045 secured rate_override by revoking table-level SELECT on time_entries and
+-- re-granting a column list generated at migration time. That has a failure mode
+-- pointing the opposite way to a leak: a column added by a LATER migration
+-- receives no grant, and `authenticated` simply cannot see it. Nothing errors —
+-- the value just never arrives, which in this codebase is the signature of every
+-- bug worth having: silently empty.
+--
+-- So the same sweep also asserts the inverse. Every column on time_entries
+-- except rate_override must be readable by `authenticated`.
+do $$
+declare
+  ungranted text;
+begin
+  select string_agg(column_name, ', ' order by ordinal_position) into ungranted
+  from information_schema.columns
+  where table_schema = 'public'
+    and table_name = 'time_entries'
+    and column_name <> 'rate_override'
+    and not has_column_privilege('authenticated', 'public.time_entries', column_name, 'SELECT');
+
+  if ungranted is not null then
+    raise exception
+      'COLUMN GRANT DRIFT: time_entries column(s) [%] are invisible to authenticated. '
+      'A migration added them after 0045 generated its grant list. Re-grant them, '
+      'or the app reads them as silently absent.', ungranted;
+  end if;
+end;
+$$;
+
 do $$
 declare leaks int;
 begin
