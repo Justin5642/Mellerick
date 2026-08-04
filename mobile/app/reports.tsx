@@ -5,6 +5,7 @@ import { colors, statusColors } from "../lib/theme";
 import { MoneyText } from "../design/components/MoneyText";
 import { StatCard } from "../design/components/StatCard";
 import { getReportSummary, getReportAnalytics, getStaffEfficiency, getEquipmentUtilization, type ReportSummary, type ReportAnalytics } from "../lib/data/reads/reports";
+import { ScreenError } from "../design/components/ScreenError";
 import { type StaffEffRow } from "../lib/staffEfficiency";
 import { type EquipUtilRow } from "../lib/equipmentUtilization";
 import { useIsAdmin } from "../design/guards/useRole";
@@ -23,22 +24,54 @@ export default function ReportsScreen() {
   const [staffEff, setStaffEff] = useState<StaffEffRow[] | null>(null);
   const [equipUtil, setEquipUtil] = useState<EquipUtilRow[] | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState<unknown>(null);
 
+  // These four reads now THROW on a failed query instead of returning empty.
+  // "Loading" on this screen is `summary === null`, so an uncaught throw would
+  // leave that null forever — a permanent spinner over the money figures, which
+  // tells the reader even less than a wrong zero did. The finally also clears
+  // `refreshing`, or a failed pull-to-refresh leaves the spinner stuck at the top.
   const load = useCallback(async () => {
-    const [s, a, eq] = await Promise.all([getReportSummary(), getReportAnalytics(), getEquipmentUtilization()]);
-    setSummary(s);
-    setAnalytics(a);
-    setEquipUtil(eq);
-    if (isAdmin) setStaffEff(await getStaffEfficiency());
+    try {
+      setError(null);
+      const [s, a, eq] = await Promise.all([getReportSummary(), getReportAnalytics(), getEquipmentUtilization()]);
+      setSummary(s);
+      setAnalytics(a);
+      setEquipUtil(eq);
+      if (isAdmin) setStaffEff(await getStaffEfficiency());
+    } catch (e) {
+      setError(e);
+    } finally {
+      setRefreshing(false);
+    }
   }, [isAdmin]);
   useEffect(() => { load(); }, [load]);
-  const onRefresh = useCallback(async () => { setRefreshing(true); await load(); setRefreshing(false); }, [load]);
+  const onRefresh = useCallback(() => { setRefreshing(true); load(); }, [load]);
 
   const jobsTotal = summary ? summary.jobsByStatus.reduce((s, j) => s + j.count, 0) : 0;
   // Win rate = accepted / (accepted + declined), matching the web (decided
   // quotes only, not drafts/sent/expired).
   const decided = summary ? summary.quotesAccepted + summary.quotesDeclined : 0;
   const acceptRate = decided > 0 ? Math.round((summary!.quotesAccepted / decided) * 100) : 0;
+
+  // Checked BEFORE the report renders, so a failed load can never fall through
+  // to a page of zeroes. A revenue figure that reads $0 because the query broke
+  // is worse than no figure at all. Retry drops back to the spinner by clearing
+  // `summary`, this screen's loading flag.
+  if (error) {
+    return (
+      <View style={styles.container}>
+        <Stack.Screen options={{ title: "Reports" }} />
+        <ScreenError
+          error={error}
+          onRetry={() => {
+            setSummary(null);
+            load();
+          }}
+        />
+      </View>
+    );
+  }
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.blue600} />}>

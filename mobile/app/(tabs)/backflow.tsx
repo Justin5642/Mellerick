@@ -5,6 +5,7 @@ import { useFocusEffect, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { colors } from "../../lib/theme";
 import { listBackflowDevices, type BackflowRow } from "../../lib/data/reads/backflow";
+import { ScreenError } from "../../design/components/ScreenError";
 import { BackflowDeviceRow } from "../../components/backflow/device-row";
 
 export default function BackflowScreen() {
@@ -12,11 +13,22 @@ export default function BackflowScreen() {
   const [rows, setRows] = useState<BackflowRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState<unknown>(null);
 
   const load = useCallback(async () => {
-    setRows(await listBackflowDevices());
-    setLoading(false);
-    setRefreshing(false);
+    // listBackflowDevices now THROWS on a failed query instead of returning [].
+    // Without this catch the throw skips both flag resets below and leaves a
+    // permanent spinner; without the finally, a pull-to-refresh failure would
+    // also leave the refresh control spinning forever.
+    try {
+      setError(null);
+      setRows(await listBackflowDevices());
+    } catch (e) {
+      setError(e);
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
   }, []);
 
   useFocusEffect(
@@ -37,6 +49,23 @@ export default function BackflowScreen() {
     return (
       <SafeAreaView style={styles.center}>
         <ActivityIndicator size="large" color={colors.blue600} />
+      </SafeAreaView>
+    );
+  }
+
+  // Checked BEFORE the list renders, so a failed load can never fall through to
+  // "No backflow devices registered yet." — a device nobody knows is overdue is
+  // exactly what this screen exists to prevent.
+  if (error) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <ScreenError
+          error={error}
+          onRetry={() => {
+            setLoading(true);
+            load();
+          }}
+        />
       </SafeAreaView>
     );
   }

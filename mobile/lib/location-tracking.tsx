@@ -2,16 +2,21 @@ import { createContext, useContext, useEffect, useRef, type ReactNode } from "re
 import * as Location from "expo-location";
 import { supabase } from "./supabase";
 import { useAuth } from "./auth-context";
+import { useDataLayer } from "./data/DataProvider";
+import type { DataLayer } from "./data/createDataLayer";
+import { plausibleAutoClockHours, MAX_PLAUSIBLE_TRAVEL_HOURS, MAX_PLAUSIBLE_WORK_HOURS } from "./autoClockHours";
+import { nextGeofenceState, type TrackedSite } from "./geofenceState";
+import { startBackgroundClock, stopBackgroundClock, publishBackgroundClockContext } from "./backgroundClock";
+import { startBackgroundSync, stopBackgroundSync } from "./backgroundSync";
 
-// Mirrors the constant used on the web side (components/job/job-time.tsx)
-// so a tech is treated as "on site" consistently across platforms.
-const GEOFENCE_RADIUS_METERS = 150;
+// GEOFENCE_RADIUS_METERS and the distance maths now live in ./geofenceState,
+// shared with the background task so the two paths cannot disagree about what
+// "on site" means.
 
-// If the gap between leaving one job's fence and arriving at another's is
-// longer than this, we don't log it as travel — most likely the app was
-// backgrounded/killed for a while (lunch break, end of day, etc.) rather
-// than genuine drive time between two jobs.
-const MAX_PLAUSIBLE_TRAVEL_HOURS = 3;
+// Plausibility ceilings for both auto-clocked durations live in
+// ./autoClockHours, together with the reasoning: a gap longer than the travel
+// ceiling is a backgrounded app rather than drive time, and a work stint longer
+// than its ceiling is a departure event that never fired.
 
 const API_BASE_URL = process.env.EXPO_PUBLIC_API_BASE_URL;
 
@@ -33,38 +38,35 @@ function syncBilling(entryId: string) {
   });
 }
 
-interface TrackedSite {
-  jobId: string;
-  lat: number;
-  lng: number;
-}
-
-function haversineDistance(lat1: number, lng1: number, lat2: number, lng2: number) {
-  const R = 6371000;
-  const toRad = (n: number) => (n * Math.PI) / 180;
-  const dLat = toRad(lat2 - lat1);
-  const dLng = toRad(lng2 - lng1);
-  const a = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
-  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-}
-
 const LocationTrackingContext = createContext<{ enabled: boolean }>({ enabled: false });
 
 /**
  * App-wide geofence watcher for auto clock in/out + travel-time logging.
  *
- * IMPORTANT — foreground only: this uses expo-location's foreground
- * watchPositionAsync, which only runs while the app is open (active or
- * backgrounded briefly by the OS — not force-quit). True background
- * tracking (app fully closed) needs expo-task-manager + background
- * location permissions, which Expo Go does not support (especially on
- * iOS) — that requires a custom dev client / EAS build. This is the
- * pragmatic v1 that works today in Expo Go: as long as a tech has the
- * app open (which they will, to see job details/photos/etc while working),
- * clock in/out and travel time are captured automatically.
+ * TWO WATCHERS, ONE DECISION. The foreground watcher below (watchPositionAsync)
+ * runs while the app is open; lib/backgroundClockTask.ts continues when it is
+ * not. Both route through nextGeofenceState, so they cannot disagree about what
+ * "on site" means.
+ *
+ * This used to be foreground-only, and the gap was invisible rather than
+ * cosmetic: a technician who pocketed the phone and drove to the next site had
+ * that travel time silently NOT recorded — no error, no log, just hours missing
+ * from the payslip. Background tracking needs "Always" location, a foreground
+ * service notification on Android, and a dev/EAS build (Expo Go cannot do it).
+ *
+ * Background is BEST-EFFORT: a technician may decline "Always", in which case
+ * the foreground watcher alone still works and the app behaves exactly as it did
+ * before. That case is logged rather than swallowed, because "your drive time is
+ * not being recorded" is something someone must be able to discover.
  */
 export function LocationTrackingProvider({ children }: { children: ReactNode }) {
   const { session } = useAuth();
+  // The geofence writes through the SAME durable outbox as the manual clock
+  // button. Before this it wrote straight to Supabase, so an automatic clock-in
+  // or clock-out made with no signal was discarded silently — the one path that
+  // fires when nobody is looking at the screen was the one that could not survive
+  // being offline.
+  const layer = useDataLayer();
   const userId = session?.user.id ?? null;
 
   const sitesRef = useRef<TrackedSite[]>([]);
@@ -81,15 +83,35 @@ export function LocationTrackingProvider({ children }: { children: ReactNode }) 
     let cancelled = false;
 
     async function loadSites() {
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from("jobs")
         .select("id, status, sites(site_lat, site_lng)")
         .eq("assigned_to", userId)
         .not("status", "in", '("completed","cancelled")');
       if (cancelled) return;
+
+      // A failed refresh KEEPS the sites we already had. Blanking them on a
+      // transient network error would silently switch the auto-clock off for
+      // the rest of the shift — and because nextGeofenceState treats an empty
+      // list as "not loaded yet" (correctly, so it never fabricates a
+      // clock-out), the failure would be completely invisible: no error, no
+      // clock-in, no travel time, just quietly unpaid hours.
+      if (error) {
+        console.warn("[geofence] could not refresh job sites; keeping the previous list:", error.message);
+        return;
+      }
+
       sitesRef.current = (data ?? [])
         .filter((j: any) => j.sites?.site_lat && j.sites?.site_lng)
         .map((j: any) => ({ jobId: j.id, lat: j.sites.site_lat, lng: j.sites.site_lng }));
+
+      // Hand the same list to the background task. It runs with no React tree
+      // and cannot fetch this itself, so the foreground is the only place that
+      // can keep it current — and a stale list is what makes a technician
+      // arrive at a new job the task has never heard of.
+      publishBackgroundClockContext(userId, sitesRef.current).catch((e) =>
+        console.warn("[geofence] could not publish background context:", e)
+      );
     }
 
     loadSites();
@@ -113,6 +135,27 @@ export function LocationTrackingProvider({ children }: { children: ReactNode }) 
         { accuracy: Location.Accuracy.Balanced, timeInterval: 15000, distanceInterval: 25 },
         (position) => handlePosition(position, userId)
       );
+
+      // Ask for background tracking too. Declining is fine and expected — the
+      // foreground watcher above still works, so the app degrades to exactly
+      // the behaviour it had before. What it must never do is fail silently,
+      // hence the log: a technician who declined "Always" is not having their
+      // drive time recorded, and somebody should be able to find out why.
+      if (cancelled) return;
+      const started = await startBackgroundClock().catch((e) => {
+        console.warn("[geofence] background clock failed to start:", e);
+        return false;
+      });
+      if (!started) {
+        console.warn(
+          "[geofence] background tracking NOT active — travel time is only recorded while the app is open."
+        );
+      }
+
+      // Separately from location: drain the outbox periodically while the app
+      // is CLOSED. Queued writes otherwise wait for someone to reopen the app,
+      // which after a late job may be the next morning.
+      startBackgroundSync(true).catch((e) => console.warn("[sync] background drain not registered:", e));
     })();
 
     return () => {
@@ -121,41 +164,55 @@ export function LocationTrackingProvider({ children }: { children: ReactNode }) 
     };
   }, [userId]);
 
+  // Signing out stops background tracking and clears the cached context. Leaving
+  // it running would keep writing time entries against the previous user.
+  useEffect(() => {
+    if (userId) return;
+    stopBackgroundClock().catch(() => {});
+    stopBackgroundSync().catch(() => {});
+    publishBackgroundClockContext(null, []).catch(() => {});
+  }, [userId]);
+
   async function handlePosition(position: Location.LocationObject, staffId: string) {
     if (busyRef.current) return;
     const sites = sitesRef.current;
     if (sites.length === 0) return;
 
-    let nearestJobId: string | null = null;
-    let nearestDist = Infinity;
-    for (const site of sites) {
-      const d = haversineDistance(position.coords.latitude, position.coords.longitude, site.lat, site.lng);
-      if (d < nearestDist) {
-        nearestDist = d;
-        nearestJobId = site.jobId;
-      }
-    }
-    const insideJobId = nearestDist <= GEOFENCE_RADIUS_METERS ? nearestJobId : null;
-    if (insideJobId === insideJobIdRef.current) return;
+    // Bail BEFORE the cursor moves. The data layer is null only for the moment
+    // between app start and its SQLite store opening; returning here leaves
+    // insideJobIdRef untouched, so the next position update re-derives the same
+    // transition. Bailing after the cursor advanced would consume the arrival
+    // and never write it — losing the visit rather than delaying it.
+    if (!layer) return;
 
-    const previousJobId = insideJobIdRef.current;
+    // Same decision the background task uses (lib/geofenceState.ts) — the two
+    // must not drift, or the auto-clock would behave differently depending on
+    // whether the technician happened to have the app open.
+    const next = nextGeofenceState(position.coords, sites, insideJobIdRef.current);
+    if (next.transition === "none") return;
+
+    const { insideJobId, previousJobId } = next;
     insideJobIdRef.current = insideJobId;
     busyRef.current = true;
     try {
       if (insideJobId) {
-        await handleArrival(insideJobId, staffId);
+        await handleArrival(layer, insideJobId, staffId);
       } else if (previousJobId) {
-        await handleDeparture(previousJobId, staffId);
+        await handleDeparture(layer, previousJobId, staffId);
       }
     } finally {
       busyRef.current = false;
     }
   }
 
-  async function handleArrival(jobId: string, staffId: string) {
+  async function handleArrival(layer: DataLayer, jobId: string, staffId: string) {
     const arrivalTime = new Date().toISOString();
 
-    const { data: openEntry } = await supabase
+    // The open-entry check stays a network read: it is an IDEMPOTENCE guard, and
+    // treating "I could not check" as "there is none" would clock the technician
+    // in twice. When it fails we skip the insert rather than risk a duplicate —
+    // and the departure below still closes whatever is genuinely open.
+    const { data: openEntry, error: openError } = await supabase
       .from("time_entries")
       .select("id")
       .eq("job_id", jobId)
@@ -164,41 +221,46 @@ export function LocationTrackingProvider({ children }: { children: ReactNode }) 
       .is("clock_out", null)
       .maybeSingle();
 
+    // A failed check is NOT "no open entry" — see above. Skip rather than risk
+    // clocking the technician in on top of an entry that already exists.
+    if (openError) {
+      console.warn("[geofence] could not check for an open entry; skipping clock-in:", openError.message);
+      return;
+    }
+
     if (!openEntry) {
-      const { data } = await supabase
-        .from("time_entries")
-        .insert({
-          job_id: jobId,
-          staff_id: staffId,
-          clock_in: arrivalTime,
-          auto_clocked: true,
-          entry_type: "work",
-        })
-        .select("id")
-        .single();
-      if (data) syncBilling(data.id);
+      // THROUGH THE OUTBOX, not straight to Supabase.
+      //
+      // This used to be a direct insert, so a technician arriving somewhere with
+      // no signal produced no row, no queued operation, no error and no sync
+      // badge — the arrival was discarded and never re-derived after reconnect,
+      // losing the visit's entire clock-in. The MANUAL clock button has always
+      // been durable; the AUTOMATIC one, which fires precisely when nobody is
+      // watching the screen, was not. clockIn() also enqueues the billing sync,
+      // which the direct path did by hand.
+      await layer.timeEntries.clockIn({ jobId, staffId });
     }
 
     const departure = departureRef.current;
     departureRef.current = null;
     if (departure) {
-      const hours = Math.round(((new Date(arrivalTime).getTime() - new Date(departure.time).getTime()) / 3600000) * 100) / 100;
-      if (hours > 0 && hours <= MAX_PLAUSIBLE_TRAVEL_HOURS) {
-        await supabase.from("time_entries").insert({
-          job_id: jobId,
-          staff_id: staffId,
-          clock_in: departure.time,
-          clock_out: arrivalTime,
-          hours,
-          entry_type: "travel",
-          travel_from_job_id: departure.jobId,
-          auto_clocked: true,
+      const hours = plausibleAutoClockHours(departure.time, arrivalTime, MAX_PLAUSIBLE_TRAVEL_HOURS);
+      if (hours !== null) {
+        await layer.timeEntries.addManual({
+          jobId,
+          staffId,
+          clockInIso: departure.time,
+          clockOutIso: arrivalTime,
+          entryType: "travel",
+          costCenterId: null,
+          travelFromJobId: departure.jobId,
+          autoClocked: true,
         });
       }
     }
   }
 
-  async function handleDeparture(jobId: string, staffId: string) {
+  async function handleDeparture(layer: DataLayer, jobId: string, staffId: string) {
     const departTime = new Date().toISOString();
 
     const { data: openEntry } = await supabase
@@ -211,9 +273,16 @@ export function LocationTrackingProvider({ children }: { children: ReactNode }) 
       .maybeSingle();
 
     if (openEntry) {
-      const hours = Math.round(((new Date(departTime).getTime() - new Date(openEntry.clock_in).getTime()) / 3600000) * 100) / 100;
-      await supabase.from("time_entries").update({ clock_out: departTime, hours }).eq("id", openEntry.id);
-      syncBilling(openEntry.id);
+      // Null when the duration cannot be believed — a backward clock correction
+      // (which would otherwise write NEGATIVE hours and subtract from the
+      // technician's pay) or a departure event that never fired, leaving the
+      // entry open for days. The entry still CLOSES either way; leaving it open
+      // is its own problem. The office then sees a gap to correct rather than a
+      // number that quietly reconciles wrong.
+      // Through the outbox, like the manual clock-out. A direct update meant a
+      // departure with no signal simply never closed the entry — the technician
+      // stayed clocked in, and the office saw an entry running for days.
+      await layer.timeEntries.clockOut({ entryId: openEntry.id, clockInIso: openEntry.clock_in });
     }
 
     departureRef.current = { time: departTime, jobId };

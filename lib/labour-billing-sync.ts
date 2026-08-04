@@ -47,10 +47,24 @@ function describeBreakdown(
   return overridden ? `${description} (rate manually overridden)` : description;
 }
 
+/**
+ * Refuse to price a job from a read that did not actually succeed.
+ *
+ * Named per table because three reads share one call site, and "permission
+ * denied" alone does not say which one — the difference between "we could not
+ * read the rates" and "we could not read the time entries" is the difference
+ * between a wrong price and a deleted invoice line.
+ */
+function requireRead(result: { error: { message?: string } | null }, table: string): void {
+  if (result.error) {
+    throw new Error(`syncJobBilling: ${table} read failed — ${result.error.message ?? "unknown error"}`);
+  }
+}
+
 // Recompute every auto billing item on a job from its current time entries.
 // Returns a small summary for the caller/UI.
 export async function syncJobBilling(admin: SupabaseClient, jobId: string) {
-  const [{ data: entries }, { data: rateConfigRow }, { data: existingAutoItems }] = await Promise.all([
+  const [entriesRes, rateConfigRes, existingItemsRes] = await Promise.all([
     admin
       .from("time_entries")
       .select("id, staff_id, clock_in, clock_out, entry_type, rate_override")
@@ -58,6 +72,30 @@ export async function syncJobBilling(admin: SupabaseClient, jobId: string) {
     admin.from("billing_rate_config").select("*").eq("id", true).maybeSingle(),
     admin.from("job_items").select("id, source, time_entry_id").eq("job_id", jobId).in("source", ["auto_labour", "auto_callout"]),
   ]);
+
+  // A DISCARDED ERROR HERE CHANGES WHAT A CUSTOMER IS CHARGED.
+  //
+  // Each of these three reads used to drop its error, and two of them silently
+  // produce a wrong invoice rather than no invoice:
+  //
+  //   billing_rate_config fails -> rateConfigRow is null -> indistinguishable
+  //     from "no rate row configured", so the job re-prices at
+  //     DEFAULT_LABOUR_RATE_CONFIG and a hardcoded $180 call-out.
+  //   time_entries fails        -> entries is null -> billable is [] -> the
+  //     reconcile below takes its DELETE path and erases the job's entire auto
+  //     labour billing for work that was genuinely done.
+  //   job_items fails           -> existingAutoItems is [] -> every line looks
+  //     new, so the reconcile inserts duplicates instead of updating.
+  //
+  // Refusing to reconcile is recoverable — the caller gets a 500 and can retry.
+  // A quietly mispriced invoice is not: it goes to the customer.
+  requireRead(entriesRes, "time_entries");
+  requireRead(rateConfigRes, "billing_rate_config");
+  requireRead(existingItemsRes, "job_items");
+
+  const entries = entriesRes.data;
+  const rateConfigRow = rateConfigRes.data;
+  const existingAutoItems = existingItemsRes.data;
 
   const rateConfig: LabourRateConfig = rateConfigRow
     ? {

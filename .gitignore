@@ -50,3 +50,7 @@ next-env.d.ts
 
 # one-off script run reports / raw data exports (contain customer PII, regenerable)
 /scripts/data/
+
+# Vitest machine-readable run record (Q29 — captures intermittents).
+# Regenerated every run; useful locally and in CI artifacts, not in history.
+test-results/

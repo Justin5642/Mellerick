@@ -56,8 +56,20 @@ export default function StaffScreen() {
   const [leave, setLeave] = useState<LeaveEntry[]>([]);
   const [leaveDraft, setLeaveDraft] = useState<{ leaveType: LeaveType; startDate: string; endDate: string; hours: string; notes: string } | null>(null);
   const [leaveSaving, setLeaveSaving] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
-  const load = useCallback(async () => setStaff(await listStaff()), []);
+  // A failed load must not look like an empty roster. listStaff now throws
+  // rather than returning [], so the screen can say "could not load" instead of
+  // "No staff." — the latter is a lie that reads as fact.
+  const load = useCallback(async () => {
+    try {
+      setStaff(await listStaff());
+      setLoadError(null);
+    } catch (e) {
+      setLoadError(e instanceof Error ? e.message : String(e));
+      if (__DEV__) console.warn("[staff] load failed:", e);
+    }
+  }, []);
   useEffect(() => { load(); }, [load]);
   const onRefresh = useCallback(async () => { setRefreshing(true); await load(); setRefreshing(false); }, [load]);
 
@@ -134,7 +146,15 @@ export default function StaffScreen() {
         data={staff}
         keyExtractor={(s) => s.id}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.blue600} />}
-        ListEmptyComponent={<Text style={styles.empty}>No staff.</Text>}
+        ListEmptyComponent={
+          loadError
+            ? <Text style={styles.empty}>{`Could not load staff.
+
+${loadError}
+
+Pull down to retry.`}</Text>
+            : <Text style={styles.empty}>No staff.</Text>
+        }
         renderItem={({ item }) => {
           const rc = roleColor[item.role] ?? roleColor.technician;
           return (

@@ -6,6 +6,7 @@
 // untouched. Pinned by supabaseOnly.test.ts.
 
 import { supabase } from "../../supabase";
+import { unwrapRows } from "./unwrap";
 
 export interface CostProfile {
   hourly_rate: number;
@@ -27,11 +28,21 @@ export interface StaffMember {
 }
 
 export async function listStaff(): Promise<StaffMember[]> {
-  const { data } = await supabase
+  // The embed MUST name the foreign key. staff_cost_profiles has two FKs to
+  // profiles — staff_id (whose cost profile this is) and updated_by (who last
+  // edited it) — so PostgREST cannot choose and fails the whole query with
+  // PGRST201. updated_by was added later, which broke this screen silently:
+  // the error was swallowed and it rendered "No staff." ever since.
+  //
+  // The error was previously destructured away, so a failed query returned []
+  // and the screen rendered "No staff." — indistinguishable from there being
+  // none. That is how this read appeared to work while returning nothing on an
+  // admin account that plainly had staff.
+  const res = await supabase
     .from("profiles")
-    .select("id, full_name, email, phone, role, is_active, staff_cost_profiles(hourly_rate, super_rate, workers_comp_rate, leave_loading_rate, annual_fixed_oncosts, target_hours_per_week, charge_out_rate)")
+    .select("id, full_name, email, phone, role, is_active, staff_cost_profiles!staff_cost_profiles_staff_id_fkey(hourly_rate, super_rate, workers_comp_rate, leave_loading_rate, annual_fixed_oncosts, target_hours_per_week, charge_out_rate)")
     .order("full_name");
-  return (data as unknown as StaffMember[]) ?? [];
+  return unwrapRows(res as never, "listStaff") as unknown as StaffMember[];
 }
 
 // Staff writes are DIRECT (online-only) — staff_cost_profiles has a staff_id PK
@@ -75,12 +86,12 @@ export interface LeaveEntry {
 }
 
 export async function listLeave(staffId: string): Promise<LeaveEntry[]> {
-  const { data } = await supabase
+  const res = await supabase
     .from("staff_leave")
     .select("id, leave_type, start_date, end_date, hours, notes")
     .eq("staff_id", staffId)
     .order("start_date", { ascending: false });
-  return (data as unknown as LeaveEntry[]) ?? [];
+  return unwrapRows(res as never, "listLeave") as unknown as LeaveEntry[];
 }
 
 export async function addLeave(input: {

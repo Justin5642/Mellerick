@@ -6,40 +6,59 @@
 # TARGETING NOTE: React Native flattens view hierarchies, so a `testID` on a
 # Touchable wrapper never reaches the native tree. This flow targets text.
 #
-# ⚠ THIS FLOW WRITES BY DESIGN — proving the offline write survives IS the test,
-# so there is no assert-only mode. It creates a `time_entries` row and then
+# ⚠ THE OFFLINE WRITE IS GATED behind CLOCK_FOR_REAL, because proving the write
+# survives requires actually making one: it creates a `time_entries` row and
 # leaves it open (clocked in). Run it against staging, or clock out and tidy the
-# entry afterwards. It is gated behind CLOCK_FOR_REAL for the same reason as
-# flow 01 so a full-suite run cannot write to production by accident.
+# entry afterwards.
 #
 # ⚠ DEV-BUILD CAVEAT: airplane mode also cuts the emulator's link to Metro, so a
-# dev client cannot fetch its bundle while offline. Run this against a RELEASE
-# build (bundle embedded) — otherwise the app reloads into a red screen rather
-# than testing anything.
+# dev client cannot fetch its bundle while offline. Run the gated section against
+# a RELEASE build (bundle embedded) — otherwise the app reloads into a red screen
+# rather than testing anything. Verified the hard way on 2026-08-04: killing the
+# network on the dev build produced "Unable to load script", not a data-loss
+# signal.
+#
+# WHY THE STRUCTURE CHANGED (2026-08-04): the ENTIRE flow used to sit inside the
+# CLOCK_FOR_REAL guard, so a default run executed nothing and reported success.
+# The suite's most important flow — the one covering offline write survival, the
+# single failure mode that loses a technician's work — was a green tick over an
+# empty body. Now the navigation path always runs and asserts, and only the
+# airplane-mode write cycle is gated, so a default run proves the clock-in path
+# is reachable even when it cannot prove durability.
 appId: au.com.mellerick.field
 env:
   EMAIL: ${TECH_EMAIL}
   PASSWORD: ${TECH_PASSWORD}
   CLOCK_FOR_REAL: "false"
 ---
+# ---------------------------------------------------------------------------
+# ALWAYS RUNS — read-only. Proves the offline-clock path is reachable and the
+# control is present, which is the precondition for the gated section below.
+# ---------------------------------------------------------------------------
+- runFlow:
+    file: ../subflows/login.yaml
+    env:
+      EMAIL: ${TECH_EMAIL}
+      PASSWORD: ${TECH_PASSWORD}
+      LANDING: "My Jobs"
+- tapOn: "#.* — .*"
+- extendedWaitUntil:
+    visible: "Time"
+    timeout: 30000
+- tapOn: "Time"
+- extendedWaitUntil:
+    visible: "Clock In"
+    timeout: 20000
+
+# ---------------------------------------------------------------------------
+# GATED — the actual durability proof. Needs CLOCK_FOR_REAL=true AND a release
+# build. Everything above has already established the path; this exercises the
+# offline write and the outbox replay.
+# ---------------------------------------------------------------------------
 - runFlow:
     when:
       true: ${CLOCK_FOR_REAL == 'true'}
     commands:
-      - runFlow:
-          file: ../subflows/login.yaml
-          env:
-            EMAIL: ${TECH_EMAIL}
-            PASSWORD: ${TECH_PASSWORD}
-            LANDING: "My Jobs"
-      - tapOn: "#.* — .*"
-      - extendedWaitUntil:
-          visible: "Time"
-          timeout: 30000
-      - tapOn: "Time"
-      - extendedWaitUntil:
-          visible: "Clock In"
-          timeout: 20000
       # Go offline, then clock in — the write is enqueued in the durable outbox
       # and the UI updates optimistically (Clock Out appears with no network).
       - setAirplaneMode: enabled

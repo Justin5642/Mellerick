@@ -2,6 +2,7 @@ import { supabase } from "../../supabase";
 import { computeNextDueDate, getDueStatus, type DueStatus } from "../../backflow";
 import { fromLocalOr, type LocalReads } from "./source";
 import { groupByKey, nestOne, num } from "./rowMap";
+import { unwrapRows } from "./unwrap";
 
 export interface BackflowDevice {
   id: string;
@@ -100,12 +101,12 @@ export async function listBackflowDevices(): Promise<BackflowRow[]> {
     listBackflowDevicesLocal,
     // Unchanged Supabase body — the byte-identical fallback.
     async () => {
-      const { data } = await supabase
+      const res = await supabase
         .from("backflow_devices")
         .select("id, water_authority, serial_number, test_frequency_months, customers(name), sites(name, suburb), backflow_tests(test_date, result)")
         .eq("is_active", true)
         .order("created_at", { ascending: false });
-      return computeBackflowRows((data as unknown as BackflowDevice[]) ?? []);
+      return computeBackflowRows(unwrapRows(res as never, "listBackflowDevices") as unknown as BackflowDevice[]);
     }
   );
 }

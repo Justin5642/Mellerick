@@ -14,6 +14,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { useFocusEffect, useRouter } from "expo-router";
 import { supabase } from "../../lib/supabase";
 import { listMyJobs } from "../../lib/data/reads/jobs";
+import { ScreenError } from "../../design/components/ScreenError";
 import { useAuth } from "../../lib/auth-context";
 import { colors, statusColors } from "../../lib/theme";
 
@@ -34,18 +35,29 @@ export function MyJobsScreen() {
   const [jobs, setJobs] = useState<Job[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState<unknown>(null);
 
   const loadJobs = useCallback(async () => {
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
-    if (!user) return;
+    // listMyJobs now THROWS on a failed query instead of returning [] — an
+    // empty list here used to mean "no jobs assigned" whether or not the query
+    // worked, and a technician who reads that goes home. Without this catch the
+    // throw would skip setLoading(false) and leave a spinner forever, which
+    // tells them even less.
+    try {
+      setError(null);
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      if (!user) return;
 
-    const data = await listMyJobs(user.id);
-
-    setJobs(data);
-    setLoading(false);
-    setRefreshing(false);
+      const data = await listMyJobs(user.id);
+      setJobs(data);
+    } catch (e) {
+      setError(e);
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
   }, []);
 
   useFocusEffect(
@@ -115,6 +127,22 @@ export function MyJobsScreen() {
     return (
       <SafeAreaView style={styles.center}>
         <ActivityIndicator size="large" color={colors.blue600} />
+      </SafeAreaView>
+    );
+  }
+
+  // Checked BEFORE the list renders, so a failed load can never fall through to
+  // the "No jobs assigned" empty state. That confusion is the entire bug.
+  if (error) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <ScreenError
+          error={error}
+          onRetry={() => {
+            setLoading(true);
+            loadJobs();
+          }}
+        />
       </SafeAreaView>
     );
   }

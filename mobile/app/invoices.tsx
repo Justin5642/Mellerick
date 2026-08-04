@@ -6,6 +6,7 @@ import { colors } from "../lib/theme";
 import { formatInvoiceNumber } from "../lib/finance";
 import { FinanceListRow } from "../design/components/FinanceListRow";
 import { MoneyText } from "../design/components/MoneyText";
+import { ScreenError } from "../design/components/ScreenError";
 import { listInvoices, listReadyToInvoice, type InvoiceListRow as Invoice, type ReadyJob, type ReadyVariation } from "../lib/data/reads/finance";
 
 const PAGE = 50;
@@ -18,32 +19,52 @@ export default function InvoicesScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [hasMore, setHasMore] = useState(true);
+  const [error, setError] = useState<unknown>(null);
 
   const loadFirst = useCallback(async () => {
-    const [rows, ready] = await Promise.all([listInvoices(0, PAGE), listReadyToInvoice()]);
-    setInvoices(rows);
-    setHasMore(rows.length === PAGE);
-    setReadyJobs(ready.jobs);
-    setReadyVars(ready.variations);
+    // listInvoices / listReadyToInvoice now THROW on a failed query instead of
+    // returning []. Uncaught, the throw would skip setRefreshing(false) and pin
+    // the pull-to-refresh spinner up forever; uncaught on first load it would
+    // leave the list at [], which reads as "No invoices yet." on a query that
+    // never actually ran.
+    try {
+      setError(null);
+      const [rows, ready] = await Promise.all([listInvoices(0, PAGE), listReadyToInvoice()]);
+      setInvoices(rows);
+      setHasMore(rows.length === PAGE);
+      setReadyJobs(ready.jobs);
+      setReadyVars(ready.variations);
+    } catch (e) {
+      setError(e);
+    } finally {
+      setRefreshing(false);
+    }
   }, []);
 
   useEffect(() => {
     loadFirst();
   }, [loadFirst]);
 
-  const onRefresh = useCallback(async () => {
+  const onRefresh = useCallback(() => {
     setRefreshing(true);
-    await loadFirst();
-    setRefreshing(false);
+    loadFirst();
   }, [loadFirst]);
 
   const loadMore = useCallback(async () => {
     if (loadingMore || !hasMore) return;
     setLoadingMore(true);
-    const next = await listInvoices(invoices.length, PAGE);
-    setInvoices((prev) => [...prev, ...next]);
-    setHasMore(next.length === PAGE);
-    setLoadingMore(false);
+    try {
+      const next = await listInvoices(invoices.length, PAGE);
+      setInvoices((prev) => [...prev, ...next]);
+      setHasMore(next.length === PAGE);
+    } catch (e) {
+      // A page that failed to load is not the end of the list. Swallowing this
+      // would leave a partial list looking complete — the same lie in a smaller
+      // package, and on invoices it is money that goes missing from the view.
+      setError(e);
+    } finally {
+      setLoadingMore(false);
+    }
   }, [loadingMore, hasMore, invoices.length]);
 
   function subtitle(inv: Invoice): string {
@@ -81,6 +102,25 @@ export default function InvoicesScreen() {
       ))}
     </View>
   );
+
+  // Checked BEFORE the list renders, so a failed load can never fall through to
+  // "No invoices yet." — that confusion is the entire bug.
+  if (error) {
+    return (
+      <View style={styles.container}>
+        <Stack.Screen options={{ title: "Invoices" }} />
+        <ScreenError
+          error={error}
+          onRetry={() => {
+            // This screen's only busy flag is `refreshing`, so the retry reuses
+            // it: the spinner it already has, rather than a blank list.
+            setRefreshing(true);
+            loadFirst();
+          }}
+        />
+      </View>
+    );
+  }
 
   return (
     <View style={styles.container}>

@@ -184,3 +184,61 @@ describe("TimeEntriesRepository", () => {
     expect(sides(ops)).toHaveLength(0);
   });
 });
+
+// The geofence auto-clock used to insert its travel leg straight into Supabase,
+// so a leg logged with no signal was discarded outright — no row, no queued
+// operation, no error. Routing it through the outbox needs two columns the
+// manual path never had: which job the technician drove FROM, and the fact that
+// the entry was generated rather than typed.
+describe("addManual — auto-clocked travel legs", () => {
+  it("records travel_from_job_id so the drive is attributable", async () => {
+    const { outbox, ops } = captureOutbox();
+    const repo = new TimeEntriesRepository(outbox, seqIds(), fixedTime());
+    await repo.addManual({
+      jobId: "job-b",
+      staffId: "staff-1",
+      entryType: "travel",
+      clockInIso: "2026-08-04T08:00:00.000Z",
+      clockOutIso: "2026-08-04T08:30:00.000Z",
+      costCenterId: null,
+      travelFromJobId: "job-a",
+      autoClocked: true,
+    });
+    const [w] = writes(ops);
+    expect(w.payload.travel_from_job_id).toBe("job-a");
+  });
+
+  it("marks the entry auto_clocked so the office can tell it apart from a typed one", async () => {
+    const { outbox, ops } = captureOutbox();
+    const repo = new TimeEntriesRepository(outbox, seqIds(), fixedTime());
+    await repo.addManual({
+      jobId: "job-b",
+      staffId: "staff-1",
+      entryType: "travel",
+      clockInIso: "2026-08-04T08:00:00.000Z",
+      clockOutIso: "2026-08-04T08:30:00.000Z",
+      costCenterId: null,
+      autoClocked: true,
+    });
+    const [w] = writes(ops);
+    expect(w.payload.auto_clocked).toBe(true);
+  });
+
+  it("still defaults to a hand-entered, non-travel entry when those are omitted", async () => {
+    // The manual Time tab passes neither, and its payload must not change shape
+    // — the exact-match assertion above in this file would catch it if it did.
+    const { outbox, ops } = captureOutbox();
+    const repo = new TimeEntriesRepository(outbox, seqIds(), fixedTime());
+    await repo.addManual({
+      jobId: "job-a",
+      staffId: "staff-1",
+      entryType: "work",
+      clockInIso: "2026-08-04T08:00:00.000Z",
+      clockOutIso: null,
+      costCenterId: null,
+    });
+    const [w] = writes(ops);
+    expect(w.payload.auto_clocked).toBe(false);
+    expect("travel_from_job_id" in w.payload).toBe(false);
+  });
+});

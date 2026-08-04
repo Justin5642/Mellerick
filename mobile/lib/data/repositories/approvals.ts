@@ -40,20 +40,34 @@ export class ApprovalsRepository {
   async approveJob(input: ApproveJobInput): Promise<{ invoiceId: string | null; invoiceCreated: boolean }> {
     let invoiceId = input.existingInvoiceId ?? null;
     let invoiceCreated = false;
+    const approvalPayload = {
+      admin_status: "approved",
+      admin_notes: input.adminNotes ?? null,
+      ready_to_invoice: false,
+    };
+
     if (!invoiceId && input.items.length > 0) {
+      // The jobs update is enqueued INSIDE createInvoice, gated on the invoice
+      // row landing. Previously the two writes were independent, so a
+      // dead-lettered invoice still left the job marked approved with
+      // ready_to_invoice cleared — dropping it out of the approvals queue AND
+      // the Ready-to-Invoice list, with no invoice anywhere. Completed work,
+      // billed to nobody, visible on no screen.
       invoiceId = await this.finance.createInvoice({
         customerId: input.customerId,
         jobId: input.jobId,
         title: `#${input.jobNumber} — ${input.jobTitle}`,
         items: input.items,
+        approve: { payload: approvalPayload },
       });
       invoiceCreated = true;
+      return { invoiceId, invoiceCreated };
     }
-    await this.updateJob(input.jobId, {
-      admin_status: "approved",
-      admin_notes: input.adminNotes ?? null,
-      ready_to_invoice: !invoiceId,
-    });
+
+    // Nothing to wait for: either there is nothing to invoice, or the invoice
+    // already exists. Gating on an op that was never enqueued would strand the
+    // approval permanently.
+    await this.updateJob(input.jobId, { ...approvalPayload, ready_to_invoice: !invoiceId });
     return { invoiceId, invoiceCreated };
   }
 

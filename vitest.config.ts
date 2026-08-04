@@ -1,5 +1,6 @@
 import { defineConfig } from "vitest/config";
 import { fileURLToPath } from "node:url";
+import FailureArchiveReporter from "./tests/setup/failure-archive-reporter";
 
 // Path alias mirrors tsconfig's "@/*" -> repo root so tests import app code the
 // same way the app does. Two projects: `unit` runs everywhere with no external
@@ -13,6 +14,27 @@ export default defineConfig({
   },
   test: {
     globals: true,
+    // Always write a machine-readable record of every run.
+    //
+    // The web suite has twice reported a single failure and then passed on every
+    // subsequent run (Q29). Both times the failing test was NOT identified,
+    // because the console output was filtered through a grep that vitest's
+    // ANSI-coloured failure block defeats — so an intermittent that had already
+    // occurred twice left no evidence either time.
+    //
+    // The JSON report removes that possibility: whatever fails is recorded with
+    // its full name and error, whether or not anyone was watching the terminal.
+    // An intermittent you cannot name is one you cannot fix.
+    //
+    // This path is OVERWRITTEN every run, which on its own defeats the purpose:
+    // Q29 fired again on 2026-08-04 (1 failed / 194 passed) and re-running the
+    // suite to read the failure erased it. globalTeardown archives failing runs
+    // to test-results/failures/ so the next run cannot destroy the evidence.
+    reporters: [
+      "default",
+      ["json", { outputFile: "test-results/unit-results.json" }],
+      new FailureArchiveReporter(),
+    ],
     projects: [
       {
         extends: true,

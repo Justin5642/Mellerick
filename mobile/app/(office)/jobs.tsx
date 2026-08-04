@@ -6,6 +6,7 @@ import { useRouter } from "expo-router";
 import { listOfficeJobs, searchOfficeJobs } from "../../lib/data/reads/jobs";
 import { colors } from "../../lib/theme";
 import { JobListRow } from "../../design/components/JobListRow";
+import { ScreenError } from "../../design/components/ScreenError";
 
 interface OfficeJob {
   id: string;
@@ -26,19 +27,31 @@ export default function OfficeJobsScreen() {
   const [loadingMore, setLoadingMore] = useState(false);
   const [hasMore, setHasMore] = useState(true);
   const [query, setQuery] = useState("");
+  const [error, setError] = useState<unknown>(null);
   // Guards against out-of-order responses when the query changes mid-flight.
   const reqId = useRef(0);
 
   // Search hits the SERVER (title ilike / job_number) so older jobs beyond the
   // first page are still found — not a client-side filter over a capped list.
+  //
+  // searchOfficeJobs now THROWS on a failed query instead of returning [] — an
+  // empty list here used to mean "no jobs" whether or not the query worked.
+  // Uncaught, that rejection would also skip every flag-clearing line below and
+  // leave the refresh spinner turning forever.
   const runSearch = useCallback(async (q: string) => {
     const id = ++reqId.current;
     // Same strip the module applies internally — kept here only to decide hasMore.
     const safe = q.replace(/[,()%]/g, " ").trim();
-    const data = await searchOfficeJobs(q, PAGE);
-    if (id !== reqId.current) return; // a newer query superseded this one
-    setJobs(data);
-    setHasMore(!safe && data.length === PAGE);
+    try {
+      setError(null);
+      const data = await searchOfficeJobs(q, PAGE);
+      if (id !== reqId.current) return; // a newer query superseded this one
+      setJobs(data);
+      setHasMore(!safe && data.length === PAGE);
+    } catch (e) {
+      if (id !== reqId.current) return; // a superseded query's failure isn't the screen's state
+      setError(e);
+    }
   }, []);
 
   // Debounce the search box.
@@ -49,19 +62,47 @@ export default function OfficeJobsScreen() {
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
-    await runSearch(query);
-    setRefreshing(false);
+    try {
+      await runSearch(query);
+    } finally {
+      // runSearch swallows its own failures, but this flag is owned here: if it
+      // is ever left set the pull-to-refresh spinner never stops.
+      setRefreshing(false);
+    }
   }, [query, runSearch]);
 
   // Infinite scroll (only when not searching).
   const loadMore = useCallback(async () => {
     if (loadingMore || !hasMore || query.trim()) return;
     setLoadingMore(true);
-    const next = await listOfficeJobs(jobs.length, PAGE);
-    setJobs((prev) => [...prev, ...next]);
-    setHasMore(next.length === PAGE);
-    setLoadingMore(false);
+    try {
+      const next = await listOfficeJobs(jobs.length, PAGE);
+      setJobs((prev) => [...prev, ...next]);
+      setHasMore(next.length === PAGE);
+    } catch (e) {
+      setError(e);
+    } finally {
+      // Without this, a thrown page leaves loadingMore stuck true — a permanent
+      // footer spinner, and the guard above then blocks every later page.
+      setLoadingMore(false);
+    }
   }, [loadingMore, hasMore, query, jobs.length]);
+
+  // Checked BEFORE the list renders, so a failed load can never fall through to
+  // the "No jobs found." empty state. That confusion is the entire bug.
+  // Retrying goes through onRefresh so the existing spinner shows while it runs.
+  if (error) {
+    return (
+      <SafeAreaView style={styles.safe} edges={["top"]}>
+        <ScreenError
+          error={error}
+          onRetry={() => {
+            onRefresh();
+          }}
+        />
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView style={styles.safe} edges={["top"]}>

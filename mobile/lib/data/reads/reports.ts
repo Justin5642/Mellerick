@@ -1,4 +1,5 @@
 import { supabase } from "../../supabase";
+import { unwrapRows, unwrapCount } from "./unwrap";
 import { fromLocalOr } from "./source";
 import { num, numOrNull } from "./rowMap";
 import { topCustomersBySpend, revenueByMonth, jobsByStaff, type InvoiceRow, type JobStaffRow } from "../../reportsAnalytics";
@@ -100,13 +101,18 @@ export async function getReportSummary(): Promise<ReportSummary> {
       ]);
 
       const sum = (rows: { total: number | null }[] | null) => (rows ?? []).reduce((s, r) => s + Number(r.total ?? 0), 0);
-      const outstandingRows = (outstandingRes.data as { total: number | null; status: string }[] | null) ?? [];
-      const quotes = (quotesRes.data as { status: string; total: number | null }[] | null) ?? [];
-      const jobsByStatus = JOB_STATUSES.map((status, i) => ({ status, count: jobCounts[i].count ?? 0 }));
+      const outstandingRows = unwrapRows(outstandingRes as never, "getReportSummary(outstandingInvoices)") as unknown as { total: number | null; status: string }[];
+      const quotes = unwrapRows(quotesRes as never, "getReportSummary(quotes)") as unknown as { status: string; total: number | null }[];
+      // Named per status: six sibling count queries whose failures would
+      // otherwise be indistinguishable from each other in a log line.
+      const jobsByStatus = JOB_STATUSES.map((status, i) => ({
+        status,
+        count: unwrapCount(jobCounts[i] as never, `getReportSummary(jobCount:${status})`),
+      }));
       const activeJobs = jobsByStatus.filter((j) => ["pending", "scheduled", "in_progress"].includes(j.status)).reduce((s, j) => s + j.count, 0);
 
       return {
-        revenuePaid: sum(paidRes.data as { total: number | null }[] | null),
+        revenuePaid: sum(unwrapRows(paidRes as never, "getReportSummary(paidInvoices)") as unknown as { total: number | null }[]),
         outstanding: sum(outstandingRows),
         // Overdue subset only — matches the web reports headline (Σ overdue invoices).
         totalOverdue: sum(outstandingRows.filter((r) => r.status === "overdue")),
@@ -167,13 +173,13 @@ export async function getStaffEfficiency(): Promise<StaffEffRow[]> {
 
   type NameRow = { id: string; full_name: string };
   const nameByStaff: Record<string, string> = {};
-  for (const p of (nameRes.data as unknown as NameRow[]) ?? []) nameByStaff[p.id] = p.full_name;
+  for (const p of unwrapRows(nameRes as never, "getStaffEfficiency(profileNames)") as unknown as NameRow[]) nameByStaff[p.id] = p.full_name;
 
   const input: StaffEffInput = {
-    profiles: (profilesRes.data as unknown as StaffEffProfile[]) ?? [],
-    workEntries: (workRes.data as unknown as { staff_id: string; hours: number | null }[]) ?? [],
-    leaveEntries: (leaveRes.data as unknown as { staff_id: string; leave_type: string; hours: number | null }[]) ?? [],
-    equipment: (equipRes.data as unknown as StaffEffInput["equipment"]) ?? [],
+    profiles: unwrapRows(profilesRes as never, "getStaffEfficiency(costProfiles)") as unknown as StaffEffProfile[],
+    workEntries: unwrapRows(workRes as never, "getStaffEfficiency(timeEntries)") as unknown as { staff_id: string; hours: number | null }[],
+    leaveEntries: unwrapRows(leaveRes as never, "getStaffEfficiency(leave)") as unknown as { staff_id: string; leave_type: string; hours: number | null }[],
+    equipment: unwrapRows(equipRes as never, "getStaffEfficiency(equipment)") as unknown as StaffEffInput["equipment"],
     nameByStaff,
   };
   return computeStaffEfficiency(input);
@@ -248,8 +254,8 @@ export async function getEquipmentUtilization(): Promise<EquipUtilRow[]> {
         supabase.from("equipment_usage_log").select("equipment_id, hours, usage_date").gte("usage_date", cutoffDate),
       ]);
       const input: EquipUtilInput = {
-        equipment: (equipRes.data as unknown as EquipUtilInput["equipment"]) ?? [],
-        usage: (usageRes.data as unknown as { equipment_id: string; hours: number | null }[]) ?? [],
+        equipment: unwrapRows(equipRes as never, "getEquipmentUtilization(equipment)") as unknown as EquipUtilInput["equipment"],
+        usage: unwrapRows(usageRes as never, "getEquipmentUtilization(usage)") as unknown as { equipment_id: string; hours: number | null }[],
       };
       return computeEquipmentUtilization(input);
     },
@@ -311,7 +317,7 @@ export async function getReportAnalytics(): Promise<ReportAnalytics> {
       ]);
 
       type InvRaw = { customer_id: string; total: number | null; status: string; created_at: string; customers: { name: string } | null };
-      const invoices: InvoiceRow[] = ((invRes.data as unknown as InvRaw[]) ?? []).map((r) => ({
+      const invoices: InvoiceRow[] = (unwrapRows(invRes as never, "getReportAnalytics(invoices)") as unknown as InvRaw[]).map((r) => ({
         customer_id: r.customer_id,
         customer_name: r.customers?.name ?? null,
         total: r.total,
@@ -320,7 +326,7 @@ export async function getReportAnalytics(): Promise<ReportAnalytics> {
       }));
 
       type JobRaw = { status: string; assigned_profile: { full_name: string } | null };
-      const jobs: JobStaffRow[] = ((jobsRes.data as unknown as JobRaw[]) ?? []).map((r) => ({
+      const jobs: JobStaffRow[] = (unwrapRows(jobsRes as never, "getReportAnalytics(jobs)") as unknown as JobRaw[]).map((r) => ({
         assignee_name: r.assigned_profile?.full_name ?? null,
         status: r.status,
       }));

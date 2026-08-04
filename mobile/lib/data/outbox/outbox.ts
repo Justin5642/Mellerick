@@ -184,10 +184,37 @@ export class Outbox {
     const now = this.clock.now();
     const all = await this.store.all();
     const doneIds = new Set(all.filter((o) => o.status === "done").map((o) => o.id));
+
+    // PER-ROW FIFO — the fix for a lost update across a retry.
+    //
+    // Sorting by createdAt alone let a later op for the SAME ROW overtake an
+    // earlier one that had failed and been backed off:
+    //
+    //   1. op A (job -> in_progress) fails on a blip, backs off
+    //   2. op B (job -> completed) is due, dispatches, wins
+    //   3. A's backoff elapses, A retries, and the row REVERTS to in_progress
+    //
+    // The technician marked the job finished and the app quietly un-finished it,
+    // with both writes reporting success. Blocking a row behind its own oldest
+    // outstanding op removes the overtake.
+    //
+    // Only "pending", "failed" and "inflight" block. "dead" deliberately does
+    // NOT: a dead op will never run again, so blocking on it would freeze that
+    // row's queue forever — trading a lost update for a lost everything.
+    const oldestOutstandingByRow = new Map<string, number>();
+    for (const o of all) {
+      if (o.kind !== "write") continue;
+      if (o.status !== "pending" && o.status !== "failed" && o.status !== "inflight") continue;
+      const seen = oldestOutstandingByRow.get(o.rowId);
+      if (seen === undefined || o.createdAt < seen) oldestOutstandingByRow.set(o.rowId, o.createdAt);
+    }
+
     const ready = all
       .filter((o) => o.status === "pending" || o.status === "failed")
       .filter((o) => isDue(o.nextAttemptAt, now))
       .filter((o) => !o.dependsOn || doneIds.has(o.dependsOn))
+      // Side effects are coalesced by key and carry no row, so they are exempt.
+      .filter((o) => o.kind !== "write" || oldestOutstandingByRow.get(o.rowId) === o.createdAt)
       .sort((a, b) => a.createdAt - b.createdAt);
     return ready[0];
   }

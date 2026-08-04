@@ -16,6 +16,12 @@ are flagged to Avi in real time per the plan's crucial-flag protocol.
 
 | # | Decision | Why |
 |---|---|---|
+| D95 | **A missing native module took the whole app down — found by launching it, not by testing.** `backgroundClockTask.ts` is imported for its side effect at the top of `_layout.tsx` (the OS can relaunch straight into the task with no UI, and a delivery before `defineTask` runs is dropped). A static `import * as TaskManager from "expo-task-manager"` throws at module load when the native module is absent, so the existing dev client — compiled before the dependency was added — showed `Uncaught Error: Cannot find native module 'ExpoTaskManager'` and nothing else. **All 430 unit tests passed while that was true**, because jest resolves the JS package happily. Now a guarded `require`: a missing background module costs background tracking and nothing else, and says so. 3 regression tests assert the CONSEQUENCE as well as the cause. | The sharpest reminder of the session that a green suite is not a running app. Only relaunching the emulator caught it |
+| D94 | **Background auto-clock built (`backgroundClock*.ts`) — treated as a PAYROLL BUG, not a feature.** Foreground-only tracking meant a technician who pocketed the phone and drove to the next site had that travel time silently unrecorded: no error, no log, just fewer hours on the payslip. A feature that *looks* like it works is worse than one obviously missing. Decision logic is pure and unit-tested (19 tests) because the native binding cannot be tested without physically driving between two sites; foreground and background share `nextGeofenceState` so they cannot drift. Cases pinned: a batch containing arrive-work-depart must yield BOTH entries; readings sort by timestamp not delivery order; each action is stamped with its own reading's time; an empty site list is "not loaded" and never a departure; signed-out does nothing; state persists only AFTER writes so a mid-way death re-derives rather than skips. | **REVERSES the HANDOVER §7 recommendation to ship when-in-use only — needs Avi's sign-off before store submission.** The store-review risk is real; it was outweighed by silent under-payment. The revert is config-only and documented |
+| D93 | **Q29 solved: it was a TIMEOUT, not a flaky assertion.** Three investigations looked for a race. The run-archiver caught it on its first recurrence: `schema-column-contract` re-read all ~200 source files once per table (~6,600 reads), so under I/O contention one table tipped past vitest's 5s ceiling — and WHICH table varied, which is why it never had a stable identity. Reading once: **2334ms → 55ms**, 8 consecutive green runs. | Fixed the cause, not the symptom — raising the timeout would have widened the window. "Intermittent" was a misdiagnosis for months |
+| D92 | **The Maestro suite was asserting the wrong screen in every flow.** `subflows/login.yaml` declared `env: LANDING: "Dashboard"`, which overrode the value every caller passed. The two technician flows could never pass; the office flows passed while checking the wrong label, so a broken Approvals screen would still have gone green. Separately, flow 04's entire body sat inside its write-gate, so a default run executed **nothing** and reported success — the flow covering offline write survival was an empty body wearing a pass. Both fixed; flows 01/03/04 now pass, and 03 finally asserts the money boundary against a POPULATED job. | Three vacuous-pass bugs in one night (this, flow 04, and the empty-table money check) — a green tick is a claim that has to be earned |
+| D91 | **Swallowed Supabase errors eliminated across all 13 read modules, in THREE spellings.** `const { data } = await supabase` → `data ?? []`; then `promiseAllResult.data ?? []`; then `.count ?? 0` on a head-count query, which rendered a failed query as **"0 jobs" on the reports dashboard** — a plausible number, therefore believed. Each spelling survived the guard written for the previous one. The guard now bans reaching for `.data` or `.count` on a result at all. Screens got matching failure states (`ScreenError` + inline variants), because throwing without them turned a wrong empty state into a permanent spinner. | The invariant is not a list of patterns: a swallowed error can wear any shape a Supabase result has fields |
+| D90 | **`npm run check:sync` — replication was dead for 24 hours and nothing said so.** The PowerSync slot had been invalidated (`wal_removed`); devices kept syncing, `ps_sync_state` kept advancing, no client error fired, and reads fell back to the network so screens looked normal. Only the PowerSync dashboard knew. Deliberately **not** an alerting pipeline: a ~10-technician business has nobody to maintain synthetic canaries, and a monitor that dies quietly converts "nobody is looking" into "everybody believes it is fine". One command, unambiguous exit code, verdict logic unit-tested so the ALARM paths are exercised — they otherwise only run during an outage. | Also documents the diagnostic order that cost two needless password rotations: **read the dashboard logs before touching credentials**, because `active=false` looks identical for a bad credential, an undeployed connection, and an invalidated slot |
 | D89 | **MP1 CLOSED — the dollar-leak RLS is APPLIED and VERIFIED in production.** Avi (owner) authorised doing Justin's items directly. Found the Supabase CLI already authenticated, identified the live project from `.env.local` (`ntdohrsujnyuqyeirqva`), and hit a landmine first: the remote **migration ledger was completely empty**, so a plain `supabase db push` would have replayed all 39 migrations onto a database that already had those objects. Repaired the history for 0000–0034 (ledger rows only, no SQL), leaving exactly 0035–0038 pending, then pushed. **0038 failed on the first attempt** — I had guessed the FK column as `purchase_order_id`; it is `po_id`. It failed cleanly, changed nothing, was fixed and re-applied. **All 39 now applied, zero pending.** **Verification did NOT use the seed-and-rollback scripts** — those insert throwaway rows into `auth.users`, which I was not willing to do on a live auth table. Instead: impersonated REAL existing identities (a technician and an admin) read-only inside a rolled-back transaction. Result — technician sees **0 rows** on job_expenses / equipment_expenses / inventory / equipment / purchase_orders / po_cost_centers, while the admin control sees **1 / 0 / 0 / 21 / 1 / 7**, proving the zeros are RLS and not empty tables; and the technician still reads all four money-free views (purchase_orders_public 1, po_cost_centers_public 7, variation_types_public 2, job_variations_public 3), proving the tech app isn't broken. Both halves hold. | The long-standing MP1 security BLOCKER is finally closed — and closed with evidence from production rather than an untested migration file. The empty ledger and the wrong FK column were both things that would have bitten whoever applied these |
 | D88 | **Did two of Justin's three items for him (Q6-web + Q19).** Avi asked whether we could close Justin's backlog ourselves. The **migrations still can't be applied** — no `SUPABASE_DB_URL`, CLI unlinked, Supabase MCP needs an OAuth flow this session can't run, and DDL can't go over PostgREST with a service key — but the *code* was ours to write. (1) **Q6 on the web**: `time-entry-edit-dialog.tsx handleDelete` deleted the entry and never resynced, leaving the auto-generated Labour line so the job stayed billed for hours that no longer existed. Now posts the **job-keyed** `/api/jobs/[id]/sync-billing` (the entry-keyed route resolves the job *from* the entry and 404s post-delete) — web and mobile now behave identically. (2) **Q19, the last dollar leak**: drafted `0038_hide_po_money_from_techs.sql` — the half deliberately deferred from 0035 because technicians legitimately read the NON-money columns of `purchase_orders`/`po_cost_centers`, so a blanket lock would break the tech app. Follows 0028's proven shape: publish money-free views (`purchase_orders_public` omits `total_value`; `po_cost_centers_public` omits `allocated_amount`), then lock the base tables to office/admin. **Verified both `drop policy` names against `0000_baseline.sql`** — a wrong name silently leaves the permissive policy in place and the leak open. Repointed the two technician-reachable reads (hours scoreboard, `getJobCostCentres`) to the views; the office-only `getJobBilling` stays on the base tables. Companion test `0038_rls_po_money_test.sql` asserts BOTH halves — techs denied on the base tables AND the views still returning the columns the tech screens need (a test proving only the lock would pass while the app was broken). **Migration + client must ship together.** Not attempted: **D30's atomic invoice/quote RPC** — a real architectural change across both platforms on a money path; scoping it properly with Justin beats rushing it. | Converts Justin's queue from "design and build these" to "review and apply" — the only genuinely blocked part is the DB access itself |
 | D87 | **Last three in-repo items closed — Q18(1), Q16, Q4.** (1) **Cost-centre on a job expense (Q18)**: an expense can now be allocated to a PO cost-centre stage — the same stages the Time tab allocates hours to. Added `costCenterId` to the expense write (outbox payload `cost_center_id`), surfaced `cost_center_id` on the read, added a stage picker to the expense sheet (only shown when the job has POs) and the stage name on each expense row. Extracted the cost-centre query into a shared `getJobCostCentres(jobId)` read now used by BOTH the Time tab and Billing, so the two can't drift (and it replaced an `any`-typed inline loader with a typed one). +1 test. (2) **Reports quotes-by-status (Q16)**: added the web dashboard's quote pipeline breakdown (draft/sent/accepted/declined/expired) as a proportional bar section, reusing the existing jobs-by-status bar styling and the shared status colours — closing the last Reports content gap. (3) **Q4 auth across a long offline workday**: verified the client config is correct (session persisted to AsyncStorage, `autoRefreshToken` + `persistSession` on), so a session survives an app restart and a long offline stretch. But that surfaced a real residual race: the drain fired by **reconnection** could beat the background token refresh, so every queued write would 401 and burn its retry budget (~8.5 min of backoff) and **dead-letter perfectly good work**. Closed it — `SyncEngine` now takes an injected `ensureSession()` that runs BEFORE each drain (wired to `supabase.auth.getSession()`, which is a no-op read when the token is still valid and refreshes it when it isn't); failures are swallowed so an offline refresh can't block replay. +3 tests asserting refresh-then-drain ordering. 218 mobile tests, tsc + bundle clean. | Q4 was filed as "confirm acceptable" but investigating it turned up an actual reliability defect — a full day's queued fieldwork could land in the dead-letter queue purely because of a token-refresh race on reconnect |
@@ -135,7 +141,30 @@ are flagged to Avi in real time per the plan's crucial-flag protocol.
 
 ### Raised 2026-07-30 (security/hardening session) — for Avi + Justin
 
-- **Q22 (CRUCIAL, flagged live — ACTION REQUIRED, not a decision):** migration
+- **Q22 — RESOLVED 2026-08-03. The leak is closed.** `supabase migration list
+  --linked` reports `0042` as applied on the remote. That is meaningful here in a
+  way it was not for `0034`: the CLI applies each migration in a transaction, so a
+  raised exception aborts it and it is never recorded — and `0042` ends with
+  assertion blocks that raise unless `xero_tokens` has RLS on, exactly one
+  permissive policy and zero restrictive, with `USING` **and** `WITH CHECK` both
+  exactly `is_office_or_admin(auth.uid())`. Recorded-as-applied therefore proves
+  every assertion passed. The `google_tokens` detector in the same migration did
+  not fire, so **Q23 is closed too** — that table was already correctly gated.
+
+  Also done 2026-08-03: the `powersync_role` password was rotated via
+  `scripts/set-powersync-password.ps1` after a plaintext value was exposed in a
+  chat paste. **Still open:** whether to rotate the Xero OAuth tokens themselves
+  on the assumption they were readable while the policy was permissive. That
+  breaks the accounting integration until someone re-authorises it, so it stays a
+  business call.
+
+  Near-miss worth recording: the same paste contained the pre-`0039` setup
+  snippet, including `CREATE PUBLICATION powersync FOR ALL TABLES`. It was run in
+  the SQL editor and failed with `42710 publication already exists` — which is the
+  only reason the publication is still scoped to 24 tables rather than being
+  reopened to all 68, token tables included. Do not re-run that snippet.
+
+- **Q22-original (superseded by the entry above):** migration
   **0042 must be applied to production**. Until it runs, `xero_tokens` carries a
   permissive policy and **any authenticated user, technicians included, can read
   the org's Xero OAuth access + refresh tokens**. The corrected 0034 cannot do
@@ -146,11 +175,26 @@ are flagged to Avi in real time per the plan's crucial-flag protocol.
   the integration until someone re-authorises it, so it is a business call, not a
   technical one.
 
-- **Q23:** `google_tokens` may carry the same drift. 0042 **detects and raises**
-  but deliberately does not rewrite it, because that integration is live and
-  quietly changing a running integration's access rules during a security
-  migration trades one incident for another. If 0042 raises on google_tokens,
-  decide whether to lock it the same way.
+- **Q23 — RESOLVED 2026-08-04 (Avi: check first, then lock if drifted). It was
+  NOT drifted; nothing was changed.** Read-only check against `pg_policy`:
+
+      RLS enabled = true
+      policy[Office/admin can manage google tokens] PERMISSIVE cmd=*
+        USING = is_office_or_admin(auth.uid())
+        CHECK = is_office_or_admin(auth.uid())
+
+  Exactly one permissive policy, no restrictive ones, and both expressions are
+  the same gate `0042` enforced on `xero_tokens` — so `google_tokens` already
+  had the posture we would have migrated it to. **No migration written, and
+  that is the point:** the cheap read-only check cost minutes and avoided
+  rewriting a live Google Calendar integration's access rules to achieve
+  nothing. Verify before you migrate; "probably drifted too" is a hypothesis,
+  not a finding.
+
+  Original note: `google_tokens` may carry the same drift. 0042 **detects and
+  raises** but deliberately does not rewrite it, because that integration is
+  live and quietly changing a running integration's access rules during a
+  security migration trades one incident for another.
 
 - **Q24:** the unattributable-`23505` trade in `gateway.supabase.ts`. When
   Postgres returns a unique violation with no parseable constraint name, the
@@ -168,11 +212,186 @@ are flagged to Avi in real time per the plan's crucial-flag protocol.
   migration to the on-device schema. Probably over-engineering; recorded so the
   decision is explicit rather than accidental.
 
-- **Q26:** production currently auto-deploys from `main` with no branch
-  protection and no staging environment. Recommended: protect `main` and promote
-  to production deliberately. Owner action, unchanged from the July handover.
+- **Q26 (Justin's call — his GitHub org):** production currently auto-deploys
+  from `main` with no branch protection and no staging environment.
+  Recommended: protect `main` and promote to production deliberately.
+  Unchanged from the July handover.
 
-- **Q27 (blocks the Maestro e2e suite):** the Maestro CLI is **not installed** on
+  **Ownership correction, 2026-08-03:** the store accounts are **Justin's**,
+  not Avi's — they sit under the client organisation, the same place the
+  Vercel `mellerick` team lives. So D-U-N-S → Google Play, the App Store
+  Connect app record, and the push credentials are all his to obtain. The
+  Apple Developer Program account already exists (Team ID `864FRPRM47`),
+  which means the APNs `.p8` is available today. See HANDOVER.md §7
+  "Who owns what" for the full split.
+
+- **Q29 — SOLVED 2026-08-04. It was never a flaky assertion; it was a TIMEOUT.**
+
+  Avi's call was to accept it and let the recorder catch the next occurrence.
+  That is exactly what happened, within the hour:
+
+      tests/unit/schema-column-contract.test.ts
+        > every backflow_devices column referenced in source exists in the
+          migration history
+        Test timed out in 5000ms
+
+  Cause: each of the 33 per-table tests re-read ALL ~200 source files from disk,
+  so one run did roughly 6,600 reads. That normally fits inside vitest's 5s
+  per-test default; under I/O contention one table tips over. **Which** table
+  varies — which is precisely why the failure never had a stable identity and
+  read as a mystery rather than a performance problem.
+
+  Fixed by reading the sources ONCE into memory instead of once per table:
+  **2334ms → 55ms for the suite, a 42x speedup**, so the 5s ceiling is now
+  unreachable rather than merely raised. 8 consecutive full-suite runs green.
+
+  Two lessons worth keeping. First, "intermittent" was a misdiagnosis all along
+  — three separate investigations looked for a race in the assertions when the
+  answer was in the timing. Second, the instrumentation earned its keep
+  immediately: a 1-in-20 flake that had escaped identification three times was
+  named on its first recurrence after the recorder was fixed to survive the next
+  run. Instrument before you hunt.
+
+  Original note (unresolved intermittent — 1 web test in ~20 full runs): the web
+  suite has twice reported `1 failed | 187 passed` and then passed on every
+  subsequent run — 9 consecutive greens after the second occurrence, plus 3
+  more under deliberately induced file churn. I could not reproduce it and I
+  do not know which test failed: my output capture missed vitest's failure
+  block both times, which is my error, not the suite's.
+
+  Both occurrences happened while files in the repo were being written
+  concurrently with the run. I hardened the most plausible mechanism — the
+  drift guard walks the live working tree and now tolerates a file that
+  vanishes or is mid-write — but it recurred once after that, so either the
+  hardening missed the real path or the cause is elsewhere.
+
+  **Not treated as fixed.** If it appears again, capture it properly:
+  `npm test 2>&1 | tee /tmp/vitest.log` then read the log — do not grep for
+  a pattern, because vitest's ANSI-coloured failure block defeats naive
+  matching. It has never failed in CI, which runs from a clean checkout with
+  nothing writing concurrently.
+
+- **MONEY BOUNDARY — VERIFIED ON A LIVE TECHNICIAN DEVICE, 2026-08-03.** The
+  central guarantee of this build had never been checked against a real
+  technician login until now. It was, by pulling the PowerSync database off the
+  device and reading it directly.
+
+  Account: "Avi Tech test" (`admin@basnmore.com.au`), role `technician`.
+
+  | Check | Result |
+  |---|---|
+  | Rows in the 12 money tables (invoices, invoice_items, quotes, quote_items, pricing_items, inventory, job_expenses, job_items, purchase_orders, po_cost_centers, equipment, equipment_expenses) | **0** |
+  | Money-named column in any populated table | **none** |
+  | `variation_types` | 5 cols — preset `rate` **stripped** |
+  | `profiles` | 4 cols — `full_name, id, is_active, role` only |
+  | Navigation | tab bar is **My Jobs · Search · Backflow** — no Dashboard, Approvals, Schedule or More hub |
+  | Deployed sync rules vs repo YAML | **identical**, 27/27 columns on `backflow_tests`, no drift either way |
+
+  What a technician's device does hold: customers (138), sites (519), profiles
+  (6, name/role only), backflow devices and tests, variation types. All
+  operationally necessary, none monetary.
+
+  The last row matters on its own: PowerSync rules are deployed separately from
+  the repo, so "the YAML is correct" never proved "the running rules are
+  correct". Now confirmed equal. Re-check after any sync-rule change, because
+  merging does not deploy them.
+
+  Method, for whoever repeats this:
+  ```
+  adb exec-out "run-as au.com.mellerick.field cat     /data/data/au.com.mellerick.field/databases/mellerick-powersync.db" > ps.db
+  ```
+  then read `ps_data__*` tables — each row is JSON, so the keys are the columns
+  that actually reached the device. Use `adb exec-out`, not `adb shell cat`:
+  the latter corrupts binary and yields "database disk image is malformed".
+
+- **Q28 — DECIDED 2026-08-04 (Avi): DEFERRED TO v1.1.** Not dropped, not built.
+  Ship v1 light-only; the item stays on the post-launch roadmap so it is a
+  scheduled decision rather than something that quietly disappeared. Do NOT
+  start a partial conversion before launch — a half-themed app looks worse than
+  a consistently light one, and the work below is all-or-nothing across 53
+  files. `app.json` keeps `userInterfaceStyle: "light"` until v1.1 begins,
+  which is what makes deferring safe: the OS never reports dark, so no screen
+  can half-render in a theme that does not exist yet.
+
+  Investigation that produced this call (2026-08-03) — my earlier scope
+  estimate was wrong, and the recommendation flipped to: do NOT build this now.
+
+  I previously wrote that finishing the dark theme was "roughly a day". That was
+  based on assuming the app is styled with NativeWind classes, which `dark:`
+  variants can target. It is not.
+
+  | Measured | |
+  |---|---|
+  | Files using NativeWind `className` | **3** of 56 |
+  | Files using React Native `StyleSheet` | **53** — `dark:` cannot reach these by any means |
+  | Files importing `lib/theme.ts` as a **static** module | **55** |
+  | ThemeProvider / colour-scheme context | **none exists** |
+  | `app.json` | pins `userInterfaceStyle: "light"`, so the OS never reports dark |
+
+  So this is not a `dark:` class problem. Done properly it needs light and dark
+  palettes in `lib/theme.ts`, a provider driven by `useColorScheme()`, and **55
+  files moved from a static import to a hook** — a substantial refactor of an
+  app that currently works, carrying real regression risk across every screen,
+  for a plumbing app used outdoors in daylight that nobody has asked to be dark.
+
+  **Recommendation: leave it. Revisit only if a technician actually asks.**
+
+  **A real defect was found and fixed while investigating.** `tailwind.config.js`
+  claimed `darkMode: "class"` was "driven by NativeWind's colorScheme (see
+  design/theme/ThemeProvider)". That path does not exist and never did — nothing
+  imports `colorScheme`, and no provider was written. A comment asserting a
+  mechanism that is not there is precisely what let `jobs.ready_to_invoice`
+  survive review ("confirmed boolean in prod"). The config now states plainly
+  that the flag is inert and why.
+
+  Related architectural note worth recording on its own: the plan specified
+  "NativeWind v4" as the design system, and what shipped is React Native
+  StyleSheet consuming `lib/theme.ts` tokens, with NativeWind used in 3 files.
+  The app is consistent and works — 55 of 56 files share one token source — but
+  it is not what the plan describes, and anyone reading the plan first will be
+  surprised.
+
+- **Q27 — PARTIALLY RESOLVED 2026-08-03. Maestro is installed and the suite
+  has RUN for the first time.** Avi approved installing from the official
+  GitHub release artifact rather than the piped `curl | bash` installer:
+  `maestro.zip` from release `cli-2.8.0`, SHA-256 verified against the
+  published `checksums_sha256.txt` before extracting, unpacked to a scratch
+  directory rather than installed system-wide. Maestro 2.8.0, Java 17.
+
+  **Results — 2 of 4 pass, 1 blocked on identity, 1 correctly refuses:**
+
+  | Flow | Result |
+  |---|---|
+  | 01 technician clock-in | **PASSES** — navigates to a job, opens Time, asserts Clock In; destructive taps skipped behind `CLOCK_FOR_REAL=false` |
+  | 02 office approvals | **PASSES** — stable across 2 runs, 7 assertions; approve step skipped behind `APPROVE_FOR_REAL=false` |
+  | 03 technician money gating | **BLOCKED** — needs a technician session; device is admin |
+  | 04 offline clock-in | **CORRECTLY REFUSES TO RUN** — see below |
+
+  01 and 02 run against the current admin session because admins also have a
+  "My Jobs" entry (D83) and their non-destructive modes assert navigation
+  rather than role. Only 03 asserts a technician-specific absence, so only 03
+  is identity-blocked.
+
+  04 is gated entirely behind `CLOCK_FOR_REAL` and was verified to skip
+  cleanly — zero writes, confirmed in logcat. That gate working is itself
+  worth having tested: it is what stops a full-suite run creating a live
+  `time_entries` row. It additionally needs a RELEASE build, because airplane
+  mode cuts a dev client off from Metro and the app would reload into a red
+  screen rather than test anything.
+
+  **What running it actually caught**, which is the point: flow 03's first
+  ever execution failed with `"Approvals" is not visible → FAILED`, which
+  reads exactly like a money leak and was nothing of the sort. The login
+  subflow is deliberately conditional so a password never passes through a
+  script, and the cost is that a security flow will silently run against
+  whatever session exists. The flow now leads with a labelled precondition
+  saying so in the failure text. An unrun suite hid that; one run exposed it.
+
+  **To finish:** a technician account on the device (or `CLEAR_STATE=true`
+  with `TECH_EMAIL`/`TECH_PASSWORD` supplied at run time — no credential is
+  committed). Worth doing before store submission.
+
+- **Q27-original (superseded by the entry above):** the Maestro CLI is **not installed** on
   this machine — only its data directory survives from the 28 July runs. Its
   official installer is a piped remote shell script
   (`curl -Ls https://get.maestro.mobile.dev | bash`), which Claude will not
@@ -200,7 +419,9 @@ are flagged to Avi in real time per the plan's crucial-flag protocol.
 
 - **Q20 (write-result reporting + read-visibility — FULLY RESOLVED, D70 + D71)**: the whole-app audit (D69) flagged that `useFlush()` returns *connectivity* (`synced`), not per-op server acceptance. **RESOLVED (D70):** `Outbox.writeStatus(rowId)` + `useWriteOutcome()` report per-row acceptance, and every create-navigate / optimistic-insert screen surfaces an immediate "couldn't save — queued & will retry" instead of navigating to / silently dropping a non-persisted row. The audit's three minor count/ordering read gaps are **also RESOLVED (D71)**: Fleet inactive-equipment list + Reactivate, uncapped Customer-360 counts, and the Reports Overdue + Accepted-quote-value metrics. Nothing from the D69 audit remains open.
 
-- **Q19 (code COMPLETE → D39 + D88; apply pending Justin)**: `0035` locks the fully-lockable money tables; `0038` closes the deferred `purchase_orders`/`po_cost_centers` half via money-free views + base-table lock, with the client reads repointed and a two-sided role-impersonation test. Both migrations are PROPOSED — **Justin must apply + test them on the live DB**; until then the dollar-leak boundary is not in force.
+- **Q19 — RESOLVED 2026-08-04. Both migrations ARE applied; the boundary IS in force.** Verified directly against `supabase_migrations.schema_migrations`: `0035`, `0037`, `0038`, `0039`, `0040` and `0042` all present. `0035` locks the fully-lockable money tables; `0038` closes the deferred `purchase_orders`/`po_cost_centers` half via money-free views + base-table lock, with the client reads repointed and a two-sided role-impersonation test. Confirmed end-to-end the same day: a real job synced to a technician device carried 18 columns, none financial, and no money-named column appeared in any synced table on that device.
+
+  The stale text below stood for a week and said the opposite — that the migrations were "PROPOSED" and "the dollar-leak boundary is not in force." Anyone reading it would have believed the app was leaking money to technicians when it was not. The lesson is not about these two migrations: **a decision log that records intent is worth less than one that records verified state**, and "pending someone else" entries rot silently because nobody re-reads them after the other person acts. Check the ledger, not the note.
 
 - **Q1 (RESOLVED → D85)**: investigated and found a REAL BUG, now fixed — the route authenticated Bearer but used the cookie client, so mobile callers ran as `anon`, got a 200 `{skipped:true}`, and the calendar silently never synced. Fixed with the service-role client + explicit per-record authz, plus the one mobile call site that sent no Authorization header.
 - **Q2 (RESOLVED 2026-07-28 → D98)**: verified across all 22 outbox write targets — every one is `id uuid default uuid_generate_v4() primary key`, and a Postgres DEFAULT only applies when the column is omitted, so a client UUID is always honoured. The sweep also found a REAL bug in the process: the gateway swallowed *every* 23505, so a duplicate `inventory.sku` / `variation_types.name` silently discarded a new row — now fixed to swallow only `_pkey` violations (6 TDD tests).
@@ -236,3 +457,13 @@ are flagged to Avi in real time per the plan's crucial-flag protocol.
 
 - **D98 — outbox idempotency is PK-scoped, not blanket.** All 22 write targets take a client-supplied UUID PK, so replay is safe. But swallowing every unique_violation was wrong: a duplicate `inventory.sku` or `variation_types.name` reported success for a row that was never written. Now only `<table>_pkey` collisions are swallowed. An *unattributable* 23505 still counts as a replay — deliberately, because losing one row in an ambiguous case beats dead-lettering a legitimate replay forever and wedging the queue behind it.
 - **D99 — two production schema defects found and fixed (migrations 0040, 0041, both applied 2026-07-28).** `jobs.ready_to_invoice` existed in no database and no migration while NINE call sites used it — including the **web's** Ready-to-Invoice queue and job sign-off — so those had been failing in production, not just on mobile. `jobs.admin_status`/`admin_notes` existed in production but in no migration, so a fresh environment would have lacked them. A new drift guard (`tests/unit/schema-column-contract.test.ts`) checks source column references against the real migration history; its negative control proves it: remove 0040 and it names all four call sites. 430+ mocked tests could never catch this, because a mock accepts any column you name.
+
+## Open questions from the 4 August 2026 session (for the cleanup phase)
+
+| # | Question | Why it needs you |
+|---|---|---|
+| Q30 | **Background "always" location — ship it in v1.0, or revert to when-in-use?** It is built and best-effort (declining leaves the foreground watcher working). Reverting is a config change in `mobile/app.json`, no code change — the exact keys are listed in HANDOVER §7. | Apple and Google both scrutinise "Always" location on a first submission. Keeping it means writing a clear justification and screenshotting the Android foreground-service notification. Removing it means telling technicians that travel time is only captured while the app is open — otherwise the silent under-recording returns. **This is a store-review vs payroll-accuracy trade, and it is yours.** |
+| Q31 | **Maestro flow 02 needs `ADMIN_EMAIL` / `ADMIN_PASSWORD`.** It is the only flow not covered. | Credentials are deliberately not held by the agent. Set them in your environment and the flow runs; otherwise the office/admin approve path has no e2e coverage. |
+| Q32 | **`max_slot_wal_keep_size` on Supabase.** | The setting that allowed a 24-hour silent replication outage. `npm run check:sync` now DETECTS the failure, but does not prevent it. This is a Supabase config/support change, not SQL. |
+| Q33 | **`reports.ts` head-count queries have no `.count` equivalent of the offline read seam.** They are now wrapped in `unwrapCount`, so a failure throws rather than reporting zero — but unlike list reads they have no local-mirror fallback, so they are online-only. | Decide whether the reports dashboard should degrade offline (show "unavailable") or stay online-only. Currently it throws, which the screen renders as an error state. |
+| Q34 | **The dev client must be rebuilt (`npx expo run:android`) after the `expo-task-manager` dependency.** Until then background tracking is off on that device and the app logs it. | Anyone picking this up on a machine with an older dev client will see "background tracking is OFF" and should know it is expected, not a regression. |

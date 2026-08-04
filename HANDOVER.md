@@ -24,10 +24,41 @@ Two applications sharing one Supabase backend.
 The mobile app reaches **feature parity across all 15 web areas**, role-aware for
 technician / office / admin, and keeps working with no network connection.
 
-**Node 22 is required.** `.node-version` and `engines` both pin `22.x`. Node 25
-crashes the Expo dev server with `RangeError: Too many message fragments` from
-`@react-native/dev-middleware` — observed twice, gone after switching to 22. It
-also breaks `@supabase/ssr` server-side. Use nvm-windows: `nvm use 22`.
+**Node 22 is required.** `.node-version` and `engines` both pin `22.x`, and CI
+runs it. Node 25 breaks `@supabase/ssr` server-side. Use nvm-windows:
+`nvm use 22`.
+
+**Metro crashes periodically, on every Node version — it is not your setup.**
+
+```
+RangeError: Too many message fragments
+  at Receiver.getData (…/@react-native/dev-middleware/node_modules/ws/lib/receiver.js:359)
+  Symbol(status-code): 1008
+```
+
+An unhandled `error` event on the dev-middleware WebSocket — the channel carrying
+device logs and debugger traffic. Nothing catches it, so it takes the whole Expo
+CLI process down and frees port 8081. The app then has no bundle server and looks
+broken.
+
+Observed on **Node 25.6.1 and Node 22.23.1 alike**. It was initially blamed on
+Node 25; that was wrong, and switching to 22 did not stop it. (Switching was
+still correct — it matches the pin and CI — just not a fix for this.)
+
+**It does not affect the shipped app.** Metro is a development-only bundle
+server; nothing in a release build talks to it.
+
+Until it is fixed upstream, run Metro under a supervisor so a crash self-heals
+instead of leaving a dead port mid-test:
+
+```bash
+cd mobile
+while ($true) { npx expo start --dev-client --port 8081; Start-Sleep 3 }
+```
+
+Diagnosing whether Metro is alive: `curl -s http://localhost:8081/status` →
+`packager-status:running`. Silence or connection-refused means it died; a long
+uptime with low CPU is normal and healthy.
 
 **Two separate npm projects.** Root and `mobile/` have their own lockfiles and no
 workspace linking them. Install in the right directory.
@@ -264,6 +295,33 @@ remove `0040` and it names all four call sites; restore it and it goes green.
 > **Mocked tests cannot catch schema drift. A green suite is not proof that a
 > column exists.**
 
+It now covers **every table in the migration history** (33 today), derived from
+the migrations rather than a hand-maintained list — a list someone must remember
+to extend is a guard with a shrinking blast radius. It also catches **shorthand
+object properties** (`.insert({ hours, entry_type })`), which the original
+colon-only pattern walked straight past. That was not hypothetical: it is exactly
+how the geofence writes `hours`, and it is why real drift survived while the
+guard appeared to cover `time_entries`.
+
+### The other direction — `npm run check:drift`
+
+The test guard checks that every column the SOURCE names exists in the
+migrations. It cannot catch the reverse: a column that exists in **production**
+and in no migration, which no source file happens to reference. Nothing is broken
+today, so nothing complains — until someone rebuilds the database from migrations
+and it comes up subtly different.
+
+```bash
+npm run check:drift
+```
+
+Reads the live schema (`supabase gen types --linked`), diffs it against the
+migration history, names any drifted column and exits 1 — so it can gate a
+release. Run it after anyone touches production by hand.
+
+That check is what found `job_variations.attachment_file_name`, which the test
+guard could never have seen. Both are now captured in `0043`.
+
 ---
 
 ## 5. Running it
@@ -314,9 +372,35 @@ Use `npm test`, not `npx jest` — `npx` can resolve a broken transient jest.
 
 ---
 
-## 6. Verification status, 29 July 2026
+## 6. Verification status, 4 August 2026
 
-Everything below was run on Node 22.23.1, not assumed.
+Everything below was run, not assumed.
+
+| Check | Result |
+|---|---|
+| Web tests | **195 passed** (24 files) |
+| Mobile tests | **430 passed** (66 suites) |
+| `tsc --noEmit`, both projects | clean |
+| `npm run check:drift` | no drift in either direction |
+| `npm run check:sync` | slot active, `wal_status=reserved` |
+| Maestro flows 01 / 03 / 04 | pass on Android emulator |
+| Maestro flow 02 | needs `ADMIN_EMAIL`/`ADMIN_PASSWORD` — not held by us |
+| Money boundary, populated technician device | job #833 carried 18 columns, **none financial**; no money-named column in any synced table |
+
+**Three things found on 4 August that had been silently wrong:**
+
+1. **PowerSync replication had been dead for 24 hours.** The slot was invalidated
+   (`wal_removed`) and every client-visible signal said healthy — devices kept
+   syncing, `ps_sync_state` kept advancing, no error fired. Only the PowerSync
+   dashboard logs knew. `npm run check:sync` now detects it in one command.
+2. **Every Maestro flow asserted the wrong screen.** The login subflow's
+   `LANDING` default overrode what each caller passed, so the technician flows
+   could never pass and the office flows passed while checking the wrong label.
+3. **Q29 was a timeout, not a flake.** `schema-column-contract` re-read every
+   source file once per table (~6,600 reads); under I/O contention one tipped
+   past vitest's 5s ceiling, and which one varied. Now 55ms.
+
+### Superseded — 29 July 2026
 
 | Check | Result |
 |---|---|
@@ -340,23 +424,29 @@ now execute and pass in CI.
 
 None of it is blocked on code.
 
-**Store submission** — neither store account exists. In order:
+**Store accounts — Justin owns these.** They sit under the client's own
+organisation (the same place the Vercel `mellerick` team lives), not under
+BAS & More.
 
-1. **D-U-N-S number** — free, 1–14 days, required by *both* stores. Everything queues behind it.
-2. Apple Developer Program — USD 99/year
-3. Google Play Console — USD 25 once
+| | Status |
+|---|---|
+| **Apple Developer Program** | ✅ **Exists.** Team ID `864FRPRM47` is in `mobile/eas.json` |
+| **D-U-N-S number** | ❌ Still needed for Google Play. Free, but **1–14 days** — the long pole |
+| **Google Play Console** | ❌ USD 25 once, needs the D-U-N-S first |
 
-**No iOS build can exist yet.** iOS binaries cannot be compiled on Windows at
-all, and EAS cloud build still needs Apple-issued signing certificates, which
-require the paid account. There is no unsigned iOS fallback the way there is on
-Android. Once the account exists, `eas build --platform ios` produces one.
+**iOS builds are now unblocked.** They cannot be compiled on Windows — Xcode is
+macOS-only — but EAS builds them in the cloud, and the signing certificates it
+needs come from the Apple account, which now exists. `eas build --platform ios`
+will produce an `.ipa`. What still gates *submission* is the App Store Connect
+app record, which yields the `ascAppId` for `eas.json`.
 
 **Push notifications** — fully implemented and tested; cannot deliver without an
 APNs `.p8` from Apple and an FCM service-account JSON from Firebase. The `.p8`
 downloads **once only**.
 
-**`mobile/eas.json` placeholders** — `appleId`, `ascAppId`, `appleTeamId` are
-still `*_HERE` strings. `eas submit --platform ios` fails until they are filled.
+**`mobile/eas.json` placeholders** — `appleTeamId` is filled. `appleId` and
+`ascAppId` are still `*_HERE`; `eas submit --platform ios` fails until they are.
+`ascAppId` only exists once the App Store Connect app record is created.
 
 **Store assets** — screenshots (4 per platform, demo-safe data) and an Android
 feature graphic (1024×500). Listing copy, privacy answers and the privacy policy
@@ -368,14 +458,65 @@ markdown.
 keystore is created on the first production build. The alternative, a local
 `.keystore`, means losing the file makes the app permanently un-updatable on Play.
 
-**Recommended for v1.0:** ship **when-in-use** location only and add background
-"always" location in v1.1. It removes the single largest store-review risk from
-the first submission; technicians can still clock in when they open the app on
-site.
+**Background location — this recommendation was REVERSED on 4 August 2026, and
+the reversal needs Avi's sign-off before submission.**
+
+The advice here used to be: ship **when-in-use** only, add background "always" in
+v1.1, because background location is the single largest store-review risk on a
+first submission. That reasoning still holds on the store-review axis. It was
+outweighed by what foreground-only actually does to payroll.
+
+The auto-clock is a *payroll* feature. Foreground-only means that the moment a
+technician pockets the phone and drives to the next site, tracking stops: the
+travel leg is never recorded and the arrival is only noticed when they next open
+the app. Nothing errors, nothing is logged, and the hours simply do not appear.
+The technician is paid for less time than they worked, and because the feature
+*looks* like it is working, nobody goes looking. A feature that is obviously
+absent is safer than one that silently under-records.
+
+So background tracking is now implemented (`mobile/lib/backgroundClock*.ts`,
+430 mobile tests green) and is **best-effort**: declining "Always" leaves the
+foreground watcher working exactly as before, and logs that drive time is not
+being recorded rather than swallowing it.
+
+**The store-review risk is real and has not gone away.** Apple and Google both
+scrutinise "Always" location. The submission needs a clear justification string
+(written, in `app.json`) and screenshots showing the Android foreground-service
+notification.
+
+**To revert to when-in-use for v1.0** — a config change, no code change: in
+`mobile/app.json`, set `isIosBackgroundLocationEnabled`,
+`isAndroidBackgroundLocationEnabled` and `isAndroidForegroundServiceEnabled` to
+`false`, drop `UIBackgroundModes`, and remove `ACCESS_BACKGROUND_LOCATION` /
+`FOREGROUND_SERVICE_LOCATION` from the Android permissions. The background task
+then never starts and the app behaves exactly as it did before. **If you take
+that path, tell the technicians that travel time is only captured while the app
+is open** — otherwise the silent under-recording is back, just with a
+justification.
 
 **Deployment gating** — `main` auto-deploys to production. Branch protection on
 `main`, and a staging environment, are still worth adding so production deploys
-become deliberate. Owner action.
+become deliberate. Justin's call — it is his GitHub org and Vercel team.
+
+### Who owns what
+
+Worth stating plainly, because "outstanding" without an owner is how items sit
+for months.
+
+| Item | Owner |
+|---|---|
+| D-U-N-S number → Google Play Console | **Justin** |
+| Apple Developer Program | **Justin** — done |
+| App Store Connect app record → `ascAppId` | **Justin** |
+| APNs `.p8` (Apple) + FCM JSON (Firebase) | **Justin** — the Apple account is his, so the `.p8` is available now |
+| Vercel Preview environment variables | **Justin** — the `mellerick` team is his |
+| Branch protection / staging | **Justin** |
+| Screenshots, feature graphic | Whoever can run the app on a device with demo-safe data |
+| Privacy policy hosting, legal entity details, ABN | Mellerick Plumbing |
+
+The store packs are written to be handed over as-is — they address "whoever
+lodges and pays" rather than naming a person, so they do not go stale if that
+changes.
 
 ---
 
@@ -445,15 +586,26 @@ Things that have already cost time, roughly in order of how likely you are to hi
    lost to this. Native exceptions *do* reach logcat; JS logs do not.
 3. **Mocked tests cannot catch schema drift.** §4.
 4. **`sync-streams.yaml` bypasses RLS.** §2.
-5. **Node 25 breaks the dev server and `@supabase/ssr`.** §1.
+5. **Metro dies periodically on every Node version** (`ws` "Too many message
+   fragments"), and Node 25 additionally breaks `@supabase/ssr`. §1 — run Metro
+   supervised; the crash does not affect the shipped app.
 6. **Route-segment config is ignored in a `"use client"` module.**
    `export const dynamic = "force-dynamic"` under `"use client"` does *nothing*.
    Three such lines sat in `login`, `forgot-password` and `update-password` for
    weeks before being removed. Those pages are statically prerendered — which is
    why the build needs the Supabase env vars at compile time.
-7. **Any route using the service-role client must authorize the caller first.**
+7. **`[sync] status poll failed: … ERR_USING_RELEASED_SHARED_OBJECT` in the dev
+   log is EXPECTED, not a crash.** The sync badge polls SQLite every 3s. A tick
+   already in flight when the JS context is torn down — which every Fast Refresh
+   does — resumes against a released native handle. It is caught in
+   `useSyncStatus`, logged under `__DEV__` only, and the next tick recovers.
+   Production exposure is a poll in flight during sign-out: caught the same way,
+   the badge skips one update. It looks alarming in logcat and is not. I chased
+   it once believing it was a regression; it is the guard working.
+
+8. **Any route using the service-role client must authorize the caller first.**
    It bypasses RLS entirely.
-8. **Two lockfiles, two projects.** Install in the right directory.
+9. **Two lockfiles, two projects.** Install in the right directory.
 
 ---
 

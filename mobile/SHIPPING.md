@@ -51,6 +51,38 @@ Until one is chosen, do not treat the local release APK as shippable.
 
 Push is fully implemented in-app; it simply cannot deliver without credentials.
 
+## ⚠ STEP ZERO — Supabase credentials must exist in EAS, not just on your machine
+
+**Do this before the first cloud build, or the build produces a brick.**
+
+`EXPO_PUBLIC_SUPABASE_URL` and `EXPO_PUBLIC_SUPABASE_ANON_KEY` are inlined by
+Expo at BUILD time. They live in `mobile/.env`, which is gitignored — and EAS
+Cloud builds from a **git archive**, so it never sees that file. Until 4 August
+2026 no build profile declared them either, which means `eas build --profile
+production` — the exact command below — would have shipped an app pointed at
+`undefined`: it installs, launches, renders, and then fails every request with
+errors that look like a network fault rather than a missing key.
+
+The app now refuses to start in that state and names the missing variable
+(`mobile/lib/env.ts`), so the failure is loud and immediate instead of appearing
+on a technician's phone. Setting the values is still your job:
+
+```bash
+eas env:create --scope project --environment production \
+  --name EXPO_PUBLIC_SUPABASE_URL --value "https://<project>.supabase.co"
+
+eas env:create --scope project --environment production \
+  --name EXPO_PUBLIC_SUPABASE_ANON_KEY --value "<anon key>"
+
+# repeat with --environment preview for the preview profile
+eas env:list --environment production        # verify before building
+```
+
+The build profiles in `eas.json` declare which environment they draw from
+(`production` → production, `development`/`preview` → preview). The anon key is
+public by design — it ships inside every bundle — so this is about the build
+working at all, not about secrecy.
+
 ## Build → submit sequence
 
 ```bash

@@ -6,6 +6,7 @@ import { colors } from "../../lib/theme";
 import { formatInvoiceNumber } from "../../lib/finance";
 import { MoneyText } from "../../design/components/MoneyText";
 import { StatusPill } from "../../design/components/StatusPill";
+import { ScreenError } from "../../design/components/ScreenError";
 import { getInvoice, type InvoiceDetail } from "../../lib/data/reads/finance";
 
 function fmtDate(iso: string | null): string {
@@ -17,10 +18,20 @@ export default function InvoiceDetailScreen() {
   const router = useRouter();
   const [invoice, setInvoice] = useState<InvoiceDetail | null>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<unknown>(null);
 
   const load = useCallback(async () => {
-    setInvoice(await getInvoice(id));
-    setLoading(false);
+    // getInvoice now THROWS on a failed query. Without this catch the throw
+    // skips setLoading(false) and the screen spins forever; with it, a failure
+    // is reported instead of being mistaken for "Invoice not found."
+    try {
+      setError(null);
+      setInvoice(await getInvoice(id));
+    } catch (e) {
+      setError(e);
+    } finally {
+      setLoading(false);
+    }
   }, [id]);
 
   useEffect(() => {
@@ -32,6 +43,22 @@ export default function InvoiceDetailScreen() {
       <View style={styles.center}>
         <Stack.Screen options={{ title: "Invoice" }} />
         <ActivityIndicator size="large" color={colors.blue600} />
+      </View>
+    );
+  }
+  // Checked BEFORE "Invoice not found." — a failed read must never be shown as a
+  // missing invoice. That confusion is the entire bug.
+  if (error) {
+    return (
+      <View style={styles.container}>
+        <Stack.Screen options={{ title: "Invoice" }} />
+        <ScreenError
+          error={error}
+          onRetry={() => {
+            setLoading(true);
+            load();
+          }}
+        />
       </View>
     );
   }

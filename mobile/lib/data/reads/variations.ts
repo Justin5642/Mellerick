@@ -1,6 +1,7 @@
 import { supabase } from "../../supabase";
 import { fromLocalOr } from "./source";
 import { nestOne, num, numOrNull } from "./rowMap";
+import { unwrapRows } from "./unwrap";
 
 // Office/admin read of a job's variations from the BASE table (carries the
 // money columns rate/total_amount/admin_notes — office/admin RLS only). The
@@ -79,12 +80,12 @@ export async function getJobVariationsForApproval(jobId: string): Promise<Variat
       ),
     async () => {
       // ← unchanged pre-PowerSync Supabase body (byte-identical fallback).
-      const { data } = await supabase
+      const res = await supabase
         .from("job_variations")
         .select("id, variation_type_id, custom_name, description, quantity, unit, rate, total_amount, admin_notes, photo_storage_path, status, created_at, variation_types(name)")
         .eq("job_id", jobId)
         .order("created_at", { ascending: false });
-      return (data as unknown as VariationForApproval[]) ?? [];
+      return unwrapRows(res as never, "getJobVariationsForApproval") as unknown as VariationForApproval[];
     },
     { roles: ["office", "admin"] }
   );

@@ -403,3 +403,75 @@ describe("backoffMs", () => {
     expect(backoffMs(20)).toBe(5 * 60 * 1000); // capped
   });
 });
+
+// LOST UPDATE ACROSS A RETRY.
+//
+// nextReady() sorts by createdAt but never asks whether an OLDER op for the
+// SAME ROW is still outstanding. That lets a transiently-failed write be
+// overtaken and then replay on top of the one that overtook it:
+//
+//   1. op A (job -> in_progress) is dispatched, fails on a network blip, and is
+//      backed off with a future nextAttemptAt
+//   2. op B (job -> completed) is created later, is due now, dispatches, wins
+//   3. A's backoff elapses, A retries, and the row reverts to in_progress
+//
+// The technician marked the job finished and the app quietly un-finishes it.
+// Both writes "succeeded"; neither reports anything.
+//
+// FIFO must therefore hold PER ROW, while remaining parallel ACROSS rows —
+// serialising everything would make one dead-lettered op stall the whole queue.
+describe("Outbox — per-row ordering", () => {
+  it("does not dispatch a later op for a row while an earlier one is still outstanding", async () => {
+    const clock = mockClock();
+    const box = new Outbox(new InMemoryOutboxStore(), clock);
+
+    // A failed and backed off; B queued after it for the SAME row.
+    await box.enqueue(write("a", { rowId: "job-1", op: "update", createdAt: 1, status: "failed", nextAttemptAt: clock.now() + 5_000 }));
+    await box.enqueue(write("b", { rowId: "job-1", op: "update", createdAt: 2 }));
+
+    // B is due and A is not — but running B now would let A overwrite it later.
+    const next = await box.nextReady();
+    expect(next).toBeUndefined();
+  });
+
+  it("dispatches the earlier op once its backoff elapses", async () => {
+    const clock = mockClock();
+    const box = new Outbox(new InMemoryOutboxStore(), clock);
+    await box.enqueue(write("a", { rowId: "job-1", op: "update", createdAt: 1, status: "failed", nextAttemptAt: clock.now() + 5_000 }));
+    await box.enqueue(write("b", { rowId: "job-1", op: "update", createdAt: 2 }));
+
+    clock.advance(5_001);
+    expect((await box.nextReady())?.id).toBe("a");
+  });
+
+  it("still runs a DIFFERENT row's op while one row is blocked", async () => {
+    // Per-row, not global: a single stuck row must not stall everything else.
+    const clock = mockClock();
+    const box = new Outbox(new InMemoryOutboxStore(), clock);
+    await box.enqueue(write("a", { rowId: "job-1", op: "update", createdAt: 1, status: "failed", nextAttemptAt: clock.now() + 5_000 }));
+    await box.enqueue(write("b", { rowId: "job-1", op: "update", createdAt: 2 }));
+    await box.enqueue(write("c", { rowId: "job-2", op: "update", createdAt: 3 }));
+
+    expect((await box.nextReady())?.id).toBe("c");
+  });
+
+  it("does not block a row behind an op that has already settled", async () => {
+    const clock = mockClock();
+    const box = new Outbox(new InMemoryOutboxStore(), clock);
+    await box.enqueue(write("a", { rowId: "job-1", op: "update", createdAt: 1, status: "done" }));
+    await box.enqueue(write("b", { rowId: "job-1", op: "update", createdAt: 2 }));
+
+    expect((await box.nextReady())?.id).toBe("b");
+  });
+
+  it("does not let a DEAD op block its row forever", async () => {
+    // A dead op will never run again. Blocking on it would freeze that row's
+    // queue permanently — trading a lost update for a lost everything.
+    const clock = mockClock();
+    const box = new Outbox(new InMemoryOutboxStore(), clock);
+    await box.enqueue(write("a", { rowId: "job-1", op: "update", createdAt: 1, status: "dead" }));
+    await box.enqueue(write("b", { rowId: "job-1", op: "update", createdAt: 2 }));
+
+    expect((await box.nextReady())?.id).toBe("b");
+  });
+});

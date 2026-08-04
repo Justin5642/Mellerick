@@ -14,6 +14,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect, useRouter } from "expo-router";
 import { searchJobs } from "../../lib/data/reads/jobs";
+import { ScreenError } from "../../design/components/ScreenError";
 import { colors, statusColors } from "../../lib/theme";
 
 interface Job {
@@ -31,6 +32,7 @@ export default function SearchJobsScreen() {
   const [allJobs, setAllJobs] = useState<Job[]>([]);
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState("");
+  const [error, setError] = useState<unknown>(null);
 
   // Guards against out-of-order responses when the query changes mid-flight.
   const reqId = useRef(0);
@@ -38,12 +40,26 @@ export default function SearchJobsScreen() {
   // searchJobs owns what used to be this screen's inline pull + filter: the
   // matching jobs (any job in the system — completed or not, theirs or not),
   // newest first, capped at 50; an empty query returns [] with no fetch.
+  //
+  // searchJobs THROWS now instead of returning [] when the query fails. Without
+  // the catch the throw would skip setLoading(false) and leave a permanent
+  // spinner; without the error state a failure would fall through to "No jobs
+  // match your search", which tells a technician the job doesn't exist.
   const loadJobs = useCallback(async (q: string) => {
     const id = ++reqId.current;
-    const data = await searchJobs(q);
-    if (id !== reqId.current) return; // a newer query superseded this one
-    setAllJobs(data);
-    setLoading(false);
+    try {
+      setError(null);
+      const data = await searchJobs(q);
+      if (id !== reqId.current) return; // a newer query superseded this one
+      setAllJobs(data);
+    } catch (e) {
+      if (id === reqId.current) setError(e);
+    } finally {
+      // Guarded like the success path: only the newest request owns the
+      // spinner, so a superseded response can't clear it out from under the
+      // query the user is actually waiting on.
+      if (id === reqId.current) setLoading(false);
+    }
   }, []);
 
   // Re-run the current search when the tab regains focus (jobs may have
@@ -116,6 +132,23 @@ export default function SearchJobsScreen() {
           </TouchableOpacity>
         )}
       </TouchableOpacity>
+    );
+  }
+
+  // Checked BEFORE the list renders, so a failed search can never fall through
+  // to the "No jobs match your search." empty state. That confusion is the
+  // entire bug.
+  if (error) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <ScreenError
+          error={error}
+          onRetry={() => {
+            setLoading(true);
+            loadJobs(query);
+          }}
+        />
+      </SafeAreaView>
     );
   }
 

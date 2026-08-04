@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { View, Text, StyleSheet, TouchableOpacity, TextInput, FlatList, Alert, Image, ActivityIndicator } from "react-native";
 import * as ImagePicker from "expo-image-picker";
+import { unwrapRows } from "../../lib/data/reads/unwrap";
 import { supabase } from "../../lib/supabase";
 import { colors } from "../../lib/theme";
 import { MoneyText } from "../../design/components/MoneyText";
@@ -69,19 +70,31 @@ export function JobVariationsTab({ jobId, currentUserId }: { jobId: string; curr
   const [pricing, setPricing] = useState<Record<string, { rate: string; quantity: string; notes: string }>>({});
   const [approvingId, setApprovingId] = useState<string | null>(null);
 
-  const load = useCallback(async () => {
+  const [loadError, setLoadError] = useState<string | null>(null);
+
+  const loadInner = useCallback(async () => {
     // Office/admin read the base table (with rate/total_amount) so they can price
     // and approve; technicians read the rate-stripped public view.
+    // Both reads used to discard their error. On the technician path that meant
+    // a failed query rendered "no variations logged" — indistinguishable from a
+    // job that genuinely has none — and an empty type picker, which silently
+    // makes it impossible to log one. A technician then does the work with no
+    // record that it was ever authorised.
     const variationsP = isOfficeOrAdmin
       ? getJobVariationsForApproval(jobId)
-      : supabase.from("job_variations_public").select("*").eq("job_id", jobId).order("created_at", { ascending: false }).then(({ data }) => (data as any) ?? []);
-    const [v, { data: t }] = await Promise.all([
+      : supabase
+          .from("job_variations_public")
+          .select("*")
+          .eq("job_id", jobId)
+          .order("created_at", { ascending: false })
+          .then((res) => unwrapRows(res as never, "loadVariations(technician)") as unknown as Variation[]);
+    const [v, typesRes] = await Promise.all([
       variationsP,
       supabase.from("variation_types_public").select("*").eq("is_active", true).order("name"),
     ]);
     const rows = (v as Variation[]) ?? [];
     setVariations(rows);
-    setTypes((t as VariationType[]) ?? []);
+    setTypes(unwrapRows(typesRes as never, "loadVariationTypes") as unknown as VariationType[]);
     // Resolve every photo's signed URL in parallel, then commit them in ONE
     // setUrls (a per-photo setState in the loop caused an extra re-render each).
     const withPhotos = rows.filter((item) => !!item.photo_storage_path);
@@ -98,6 +111,18 @@ export function JobVariationsTab({ jobId, currentUserId }: { jobId: string; curr
       if (Object.keys(next).length > 0) setUrls((prev) => ({ ...prev, ...next }));
     }
   }, [jobId, isOfficeOrAdmin]);
+
+  const load = useCallback(async () => {
+    try {
+      setLoadError(null);
+      await loadInner();
+    } catch (e) {
+      // Inline, not a full-screen error: this is a tab inside a job, and
+      // blanking it would throw away whatever the technician had half-typed
+      // into the form above.
+      setLoadError(e instanceof Error ? e.message : String(e));
+    }
+  }, [loadInner]);
 
   useEffect(() => {
     load();
@@ -223,6 +248,18 @@ export function JobVariationsTab({ jobId, currentUserId }: { jobId: string; curr
 
   return (
     <View style={styles.container}>
+      {loadError && (
+        // Says the list could not be loaded rather than showing an empty one.
+        // "No variations logged" on a failed read is the lie this whole change
+        // exists to remove — a technician reading it does the work believing
+        // nothing was ever authorised.
+        <TouchableOpacity style={styles.loadErrorBox} onPress={load} accessibilityRole="button">
+          <Text style={styles.loadErrorTitle}>Couldn&apos;t load variations. Tap to retry.</Text>
+          <Text style={styles.loadErrorDetail} numberOfLines={2}>
+            {loadError}
+          </Text>
+        </TouchableOpacity>
+      )}
       {!showForm && (
         <TouchableOpacity style={styles.addButton} onPress={() => setShowForm(true)}>
           <Text style={styles.addButtonText}>+ Log Variation</Text>
@@ -365,6 +402,14 @@ export function JobVariationsTab({ jobId, currentUserId }: { jobId: string; curr
 }
 
 const styles = StyleSheet.create({
+  loadErrorBox: {
+    backgroundColor: colors.red100,
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 12,
+  },
+  loadErrorTitle: { fontSize: 13, fontWeight: "600", color: colors.red600 },
+  loadErrorDetail: { fontSize: 11, color: colors.red600, marginTop: 4 },
   container: { padding: 16 },
   addButton: { backgroundColor: colors.blue600, borderRadius: 10, paddingVertical: 12, alignItems: "center" },
   addButtonText: { color: "#fff", fontWeight: "600", fontSize: 14 },

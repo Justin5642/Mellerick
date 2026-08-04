@@ -8,6 +8,7 @@ import { formatQuoteNumber } from "../../../lib/finance";
 import { useFinance } from "../../../lib/data/hooks/useFinance";
 import { LineItemsEditor, type EditableItem } from "../../../components/finance/line-items-editor";
 import { getQuote, type QuoteDetail } from "../../../lib/data/reads/finance";
+import { ScreenError } from "../../../design/components/ScreenError";
 import { localDateKey } from "../../../lib/date";
 
 export default function EditQuoteScreen() {
@@ -23,18 +24,28 @@ export default function EditQuoteScreen() {
   const [notes, setNotes] = useState("");
   const [existingItemIds, setExistingItemIds] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<unknown>(null);
 
+  // getQuote now THROWS on a failed query instead of returning null. Without this
+  // catch the throw would skip setLoading(false) and leave the editor spinning
+  // forever; with it, a failure that isn't "quote not found" says so.
   const load = useCallback(async () => {
-    const q = await getQuote(id);
-    setQuote(q);
-    if (q) {
-      setTitle(q.title);
-      setValidUntil(q.valid_until ? new Date(q.valid_until) : null);
-      setNotes(q.notes ?? "");
-      setExistingItemIds(q.quote_items.map((i) => i.id));
-      setItems(q.quote_items.map((i) => ({ key: `x-${i.id}`, name: i.name, description: i.description ?? "", quantity: String(i.quantity), unit_price: String(i.unit_price) })));
+    try {
+      setError(null);
+      const q = await getQuote(id);
+      setQuote(q);
+      if (q) {
+        setTitle(q.title);
+        setValidUntil(q.valid_until ? new Date(q.valid_until) : null);
+        setNotes(q.notes ?? "");
+        setExistingItemIds(q.quote_items.map((i) => i.id));
+        setItems(q.quote_items.map((i) => ({ key: `x-${i.id}`, name: i.name, description: i.description ?? "", quantity: String(i.quantity), unit_price: String(i.unit_price) })));
+      }
+    } catch (e) {
+      setError(e);
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   }, [id]);
 
   useEffect(() => { load(); }, [load]);
@@ -60,6 +71,22 @@ export default function EditQuoteScreen() {
 
   if (loading) {
     return <View style={styles.center}><Stack.Screen options={{ title: "Edit Quote" }} /><ActivityIndicator size="large" color={colors.blue600} /></View>;
+  }
+  // Checked BEFORE the "Quote not found." branch, so a failed load can never be
+  // reported as a missing quote. That confusion is the entire bug.
+  if (error) {
+    return (
+      <View style={styles.container}>
+        <Stack.Screen options={{ title: "Edit Quote" }} />
+        <ScreenError
+          error={error}
+          onRetry={() => {
+            setLoading(true);
+            load();
+          }}
+        />
+      </View>
+    );
   }
   if (!quote) {
     return <View style={styles.center}><Stack.Screen options={{ title: "Edit Quote" }} /><Text style={styles.muted}>Quote not found.</Text></View>;
