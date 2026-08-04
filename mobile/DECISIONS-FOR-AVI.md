@@ -467,3 +467,58 @@ are flagged to Avi in real time per the plan's crucial-flag protocol.
 | Q32 | **`max_slot_wal_keep_size` on Supabase.** | The setting that allowed a 24-hour silent replication outage. `npm run check:sync` now DETECTS the failure, but does not prevent it. This is a Supabase config/support change, not SQL. |
 | Q33 | **`reports.ts` head-count queries have no `.count` equivalent of the offline read seam.** They are now wrapped in `unwrapCount`, so a failure throws rather than reporting zero — but unlike list reads they have no local-mirror fallback, so they are online-only. | Decide whether the reports dashboard should degrade offline (show "unavailable") or stay online-only. Currently it throws, which the screen renders as an error state. |
 | Q34 | **The dev client must be rebuilt (`npx expo run:android`) after the `expo-task-manager` dependency.** Until then background tracking is off on that device and the app logs it. | Anyone picking this up on a machine with an older dev client will see "background tracking is OFF" and should know it is expected, not a regression. |
+
+- **Q30 — BACKGROUND GEOFENCE: config correct, BINARY was stale (found 2026-08-04).**
+  I reported the background auto-clock as "built and tested" on the strength of
+  the source and its unit tests. The device disagreed:
+
+      [geofence] background clock failed to start:
+        Error: Call to function 'ExpoLocation.requestBackgroundPermissionsAsync'
+        has been rejected.
+      [geofence] background tracking NOT active — travel time is only recorded
+        while the app is open.
+
+  `adb shell dumpsys package` confirmed the installed APK did not declare
+  `ACCESS_BACKGROUND_LOCATION`, and neither a location foreground service nor an
+  OS location request existed for the app. app.json was already correct
+  (`isAndroidBackgroundLocationEnabled`, `isAndroidForegroundServiceEnabled`,
+  the permission list, iOS `UIBackgroundModes: ["location"]`) — but a config
+  plugin only takes effect when the NATIVE PROJECT IS REGENERATED, so the dev
+  client on the emulator predated it.
+
+  **The lesson is the one this whole session keeps repeating in different
+  clothes: passing unit tests and correct source are not evidence that a native
+  capability works.** Only the device is. `expo run:android` regenerates and
+  reinstalls; verify with:
+
+      adb shell dumpsys package au.com.mellerick.field | grep ACCESS_BACKGROUND_LOCATION
+      adb shell dumpsys location | grep mellerick
+
+  Both must be non-empty, and the logcat warning above must be absent.
+
+- **Q31 — E2E FIXTURE: job #834 is permanent, by Avi's decision (2026-08-04).**
+
+  Flows 01, 03 and 04 each open a job, so the technician they run as must have
+  one. TEST-001 was deleted as instructed, and the flows went red — but the
+  investigation found the real problem was bigger than one stray row: **NO
+  technician in the database had an open job.** Jake Henderson had none either.
+  The e2e suite could never have run against real data.
+
+  Options put to Avi: a permanent fixture, assign a real job, leave the suite
+  red until real work exists, or seed-and-delete inside the flow. **Avi chose
+  the permanent fixture** — the standard approach for an e2e suite, and the only
+  one that lets the flows be run on demand.
+
+  Result: job **#834 "QA FIXTURE — do not invoice, do not delete"**, assigned to
+  `admin@basnmore.com.au`, status `scheduled`, priority `low`. Verified to sync
+  to the device mirror and all three technician flows pass against it.
+
+  **Do not delete it**, and do not invoice or complete it — it is not real work.
+  The recreate SQL is in `mobile/.maestro/README.md` and is idempotent.
+
+  The trade-off Avi accepted: one non-real job appears in job lists and counts.
+  It is named so that it cannot be mistaken for a customer job.
+
+  Rejected: seed-and-delete inside the flow. Flow 03 is deliberately READ-ONLY —
+  it asserts a security invariant and writes nothing — and a crashed run would
+  leave debris in a production database.

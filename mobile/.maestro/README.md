@@ -54,6 +54,34 @@ standalone flow.
 3. **Seeded test accounts** in the target Supabase env, one per role, and at least
    one job assigned to the technician and one job awaiting approval. Never use real
    customer data.
+
+   **⚠ THE TECHNICIAN MUST HAVE A JOB — this is not optional.** Flows 01, 03 and
+   04 each open one (`tapOn: "#.* — .*"`), so with an empty list they fail at
+   that step. Flow 03 is the sharp case: every assertion before the tap is an
+   `assertNotVisible`, and all of them are trivially true against an empty
+   list — so without a job it proves nothing at all. It carries an explicit
+   precondition saying exactly that, so the failure reads as "no fixture" rather
+   than as a UI regression or a money leak.
+
+   In production this is job **#834, "QA FIXTURE — do not invoice, do not
+   delete"**, assigned to the test technician (`admin@basnmore.com.au`).
+   It exists because on 4 August 2026 NO technician in the database had an open
+   job — Jake Henderson had none either — so this was never a matter of one
+   stray test row. Recreate it with:
+
+   ```sql
+   insert into jobs (title, description, status, priority, job_type,
+                     customer_id, site_id, assigned_to, scheduled_start)
+   select 'QA FIXTURE — do not invoice, do not delete',
+          'Permanent e2e fixture. Deleting this makes flows 01/03/04 fail.',
+          'scheduled', 'low', 'service', s.customer_id, s.id, p.id, now()
+   from sites s cross join profiles p
+   where p.email = 'admin@basnmore.com.au'
+     and not exists (select 1 from jobs where title like 'QA FIXTURE%')
+   limit 1;
+   ```
+
+   It is idempotent — re-running never creates a second one.
 4. **Credentials via environment variables** (never committed):
 
    ```bash
