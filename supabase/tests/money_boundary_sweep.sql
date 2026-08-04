@@ -65,9 +65,24 @@ begin
     where c.table_schema = 'public'
       -- Money-shaped names. Deliberately broad: a false positive costs one line
       -- of output, a false negative costs a leak.
-      and c.column_name ~* '(rate|cost|price|amount|total|sell|margin|markup|hourly|salary|wage|charge)'
-      -- ...minus foreign keys, which carry no value.
-      and c.column_name !~* '(_id$|cost_center_id|rate_config_id)'
+      --
+      -- WIDENED 2026-08-04 after a review asked what this MISSED. The original
+      -- list skipped four genuinely money-bearing columns —
+      -- billing_rate_config.call_out_fee and equipment's insurance_annual /
+      -- maintenance_annual / registration_annual — so the sweep had been
+      -- reporting "0 leaks" without ever looking at them. They turned out to be
+      -- safe (RLS denies the rows: equipment holds 21 priced rows and a
+      -- technician sees 0), but the test had no way of knowing that.
+      --
+      -- A test that silently under-samples is the same failure mode as a read
+      -- that silently returns []. Hence the unmatched-column report below,
+      -- which makes the blind spot visible instead of leaving it to the next
+      -- reviewer to guess at.
+      and c.column_name ~* '(rate|cost|price|amount|total|sell|margin|markup|hourly|salary|wage|charge'
+                         || '|fee|value|balance|paid|owing|gst|deposit|discount|surcharge|levy'
+                         || '|insurance|maintenance|registration|annual|subtotal|invoice_total)'
+      -- ...minus foreign keys and identifiers, which carry no value.
+      and c.column_name !~* '(_id$|^id$|cost_center_id|rate_config_id|_number$)'
     order by c.table_name, c.column_name
   loop
     perform set_config('request.jwt.claims',
@@ -95,6 +110,27 @@ from sweep group by verdict order by verdict;
 select tbl, col, rows_seen
 from sweep where verdict = 'READABLE WITH DATA'
 order by tbl, col;
+
+-- WHAT THIS SWEEP DID NOT LOOK AT.
+--
+-- The regex above decides coverage, and a regex is exactly the kind of thing
+-- that silently under-samples: the first version skipped four real money
+-- columns and still printed "0 leaks". So the test now shows its own blind
+-- spot. Every numeric column NOT matched is listed here — scan it, and if
+-- anything in it carries currency, widen the regex rather than assume.
+select c.table_name, c.column_name, c.data_type
+from information_schema.columns c
+join information_schema.tables t
+  on t.table_schema = c.table_schema
+ and t.table_name  = c.table_name
+ and t.table_type  = 'BASE TABLE'
+where c.table_schema = 'public'
+  and c.data_type in ('numeric','money','double precision','real')
+  and c.column_name !~* '(rate|cost|price|amount|total|sell|margin|markup|hourly|salary|wage|charge'
+                      || '|fee|value|balance|paid|owing|gst|deposit|discount|surcharge|levy'
+                      || '|insurance|maintenance|registration|annual|subtotal|invoice_total)'
+  and c.column_name !~* '(_id$|^id$)'
+order by c.table_name, c.column_name;
 
 do $$
 declare leaks int;
