@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { TIME_ENTRY_SELECT_WITH_STAFF } from "@/lib/time-entry-columns";
 
 type RateOverride = "normal" | "time_and_half" | "double_time";
 
@@ -96,6 +97,18 @@ export function TimeEntryEditDialog({ open, onOpenChange, mode, jobId, currentUs
       setClockOut(entry.clock_out ? toLocalInputValue(entry.clock_out) : "");
       setStillOpen(!entry.clock_out);
       setCostCenterId(entry.cost_center_id ?? "none");
+      // KNOWN GAP — `entry.rate_override` is ALWAYS undefined here.
+      //
+      // Migration 0045 revoked SELECT on that column from `authenticated`, and
+      // the revoke is not role-aware: admins cannot read it either. So this
+      // picker opens on "Auto" even for an entry that HAS an override, and
+      // saving without touching it writes null — silently clearing it.
+      //
+      // Writes still work (0045 left INSERT/UPDATE intact), so an admin can set
+      // an override; they just cannot see the current one. Per 0045's own
+      // instruction, the fix is NOT to re-grant the column — it is an
+      // office/admin-gated view or a service-role route that authorises the
+      // caller. Tracked in TODO-VERIFIED-2026-08-04.md as S1-followup.
       setRateOverride(entry.rate_override ?? AUTO_RATE_VALUE);
       setStaffId(entry.staff_id);
     } else {
@@ -148,7 +161,7 @@ export function TimeEntryEditDialog({ open, onOpenChange, mode, jobId, currentUs
         .insert({ job_id: jobId, staff_id: currentUserId, entry_type: entryType, auto_clocked: false, ...payload })
         // time_entries has two FKs to profiles (staff_id, edited_by) — must
         // name the exact FK or PostgREST rejects the query as ambiguous.
-        .select("*, profiles!time_entries_staff_id_fkey(full_name)")
+        .select(TIME_ENTRY_SELECT_WITH_STAFF)
         .single();
       setSaving(false);
       if (error || !data) {
@@ -156,7 +169,7 @@ export function TimeEntryEditDialog({ open, onOpenChange, mode, jobId, currentUs
         return;
       }
       toast.success("Manual entry added");
-      onSaved(data as TimeEntry);
+      onSaved(data as unknown as TimeEntry);
       onOpenChange(false);
       // Fire-and-forget: regenerates the job's auto labour line item from
       // this entry (see app/api/time-entries/[id]/sync-billing/route.ts).
@@ -166,7 +179,7 @@ export function TimeEntryEditDialog({ open, onOpenChange, mode, jobId, currentUs
         .from("time_entries")
         .update(payload)
         .eq("id", entry.id)
-        .select("*, profiles!time_entries_staff_id_fkey(full_name)")
+        .select(TIME_ENTRY_SELECT_WITH_STAFF)
         .single();
       setSaving(false);
       if (error || !data) {
@@ -174,7 +187,7 @@ export function TimeEntryEditDialog({ open, onOpenChange, mode, jobId, currentUs
         return;
       }
       toast.success("Entry updated");
-      onSaved(data as TimeEntry);
+      onSaved(data as unknown as TimeEntry);
       onOpenChange(false);
       fetch(`/api/time-entries/${data.id}/sync-billing`, { method: "POST" }).catch(() => {});
     }

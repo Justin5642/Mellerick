@@ -3,6 +3,7 @@ export const dynamic = "force-dynamic";
 import { createClient } from "@/lib/supabase/server";
 import { notFound } from "next/navigation";
 import { JobDetailClient } from "@/components/job/job-detail-client";
+import { TIME_ENTRY_SELECT_WITH_STAFF } from "@/lib/time-entry-columns";
 
 export default async function JobDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -38,7 +39,7 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
     // unhinted "profiles(...)" embed is ambiguous and PostgREST rejects the
     // whole query (PGRST201) — naming the exact FK fixes it (see
     // app/dashboard/page.tsx for the same class of bug on "jobs").
-    supabase.from("time_entries").select("*, profiles!time_entries_staff_id_fkey(full_name)").eq("job_id", id).order("clock_in", { ascending: false }),
+    supabase.from("time_entries").select(TIME_ENTRY_SELECT_WITH_STAFF).eq("job_id", id).order("clock_in", { ascending: false }),
     supabase.from("job_variations").select("*, variation_types(name), profiles!job_variations_logged_by_fkey(full_name)").eq("job_id", id).order("created_at", { ascending: false }),
     supabase.from("variation_types").select("*").eq("is_active", true).order("name"),
     supabase.from("job_expenses").select("*").eq("job_id", id).order("created_at", { ascending: false }),

@@ -13,6 +13,7 @@ import { netInfoConnectivity } from "../../lib/data/net/connectivity";
 import { useDataLayer } from "../../lib/data/DataProvider";
 import { useSyncSettled } from "../../lib/data/hooks/useSyncSettled";
 import { reconcileRows } from "../../lib/data/reconcile";
+import { TIME_ENTRY_SELECT_WITH_STAFF } from "../../lib/timeEntryColumns";
 
 interface TimeEntry {
   id: string;
@@ -307,9 +308,10 @@ export function JobTimeTab({ jobId, currentUserId }: { jobId: string; currentUse
       if (!(await netInfoConnectivity.isOnline())) return;
       const res = await supabase
         .from("time_entries")
-        // time_entries has two FKs to profiles (staff_id, edited_by) — must
-        // name the exact FK or PostgREST rejects the query as ambiguous.
-        .select("*, profiles!time_entries_staff_id_fkey(full_name)")
+        // Explicit columns, NOT `*` — migration 0045 uses column-level SELECT
+        // grants, under which `select *` is refused outright. See
+        // lib/timeEntryColumns.ts.
+        .select(TIME_ENTRY_SELECT_WITH_STAFF)
         .eq("job_id", jobId)
         .order("clock_in", { ascending: false });
       const rows = unwrapRows(res as never, "JobTimeTab.loadEntries") as unknown as TimeEntry[];
