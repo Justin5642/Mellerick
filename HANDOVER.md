@@ -372,14 +372,67 @@ Use `npm test`, not `npx jest` — `npx` can resolve a broken transient jest.
 
 ---
 
-## 6. Verification status, 4 August 2026
+## 6. Verification status, 4 August 2026 (end of session)
 
 Everything below was run, not assumed.
 
 | Check | Result |
 |---|---|
-| Web tests | **195 passed** (24 files) |
-| Mobile tests | **430 passed** (66 suites) |
+| Web tests | **203 passed** (26 files) |
+| Mobile tests | **458 passed** (69 suites) |
+| Web + mobile typecheck | clean |
+| Schema drift | none — every production column is in the migration history |
+| PowerSync replication | healthy — slot active, `wal_status=reserved` |
+| Money boundary sweep | **41 money columns swept by impersonation: 1 blocked, 40 return zero rows, 0 leaks** |
+| Maestro flows 01 / 03 / 04 | green on device |
+| Maestro flow 02 | **not run** — needs `ADMIN_EMAIL` / `ADMIN_PASSWORD` |
+| Background geofence clock | **running on device** — `isForeground=true, types=0x8` |
+
+### The two security holes found and closed on 4 August
+
+Both were found by an adversarially-verified audit AFTER the app had been
+reviewed repeatedly, and both were verified against production before and after
+the fix.
+
+**`0044` — anyone could make themselves an admin.** `Users can update own
+profile` was `for update using (auth.uid() = id)` with no `WITH CHECK`. Postgres
+reuses `USING` for the new row, and `auth.uid() = id` is still true after the
+role changes — so any technician could PATCH their own row to `role='admin'`.
+That one column is read by RLS, the PowerSync office streams, MoneyText/RoleGate
+and every `requireAdmin` route, so it defeated all four layers at once. Also
+closed a second path: `handle_new_user()` took the role straight from
+client-supplied signup metadata.
+
+**`0045` — a technician could read `time_entries.rate_override`.** A money
+column, readable through PostgREST with the anon key that ships inside the app.
+The sync path, the UI and the guards were all clean; RLS was not.
+
+### Why those two survived every earlier review
+
+Every previous check reasoned about POLICIES, and **a policy can look correct
+and still permit the read.** The money boundary had also been "verified" several
+times against tables that were empty, where every assertion is trivially true.
+
+`supabase/tests/money_boundary_sweep.sql` replaces that reasoning with evidence:
+it enumerates every money-named column, impersonates a real technician, and
+tries to actually SELECT it. Run it after any RLS or schema change.
+
+The result it reports needs one distinction to read correctly:
+
+- `blocked` — the read is refused (column grant revoked)
+- `readable, 0 rows` — the grant exists but RLS returns nothing. **Safe.**
+  Confirmed by comparing counts as `postgres` against the same query as a
+  technician: invoices 4→0, job_items 6→0, staff_cost_profiles 2→0. Zero is RLS
+  filtering, not an empty table.
+- `READABLE WITH DATA` — a leak. This is what `rate_override` looked like.
+
+That also explains why `rate_override` was the only one: `time_entries` is the
+single money-bearing table where a technician legitimately sees rows — their
+own — so the column grant was the only thing left protecting the value.
+Everywhere else, row-level filtering denies the row outright.
+
+**An empty table proves nothing here.** If you seed data and rerun, rerun this
+sweep too.
 | `tsc --noEmit`, both projects | clean |
 | `npm run check:drift` | no drift in either direction |
 | `npm run check:sync` | slot active, `wal_status=reserved` |
@@ -423,6 +476,33 @@ now execute and pass in CI.
 ## 7. What is NOT done
 
 None of it is blocked on code.
+
+### The four things a person has to do
+
+Every one of these needs an account, a credential or a dashboard I cannot reach.
+They are listed first because they are the only things standing between this and
+a shippable release.
+
+| | Who | Why it is not code |
+|---|---|---|
+| **Vercel Preview env vars** | Justin | Every PR's Vercel check fails on `Missing required environment variables: NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_ANON_KEY`. Proven by comparison, not inference: GitHub's `build` job runs the *identical* `next build` on the same commit and passes, because CI supplies those two. Set them on the Vercel project's Preview environment. |
+| **`max_slot_wal_keep_size`** | Justin / Avi | Supabase instance config, no SQL path. Without it a slot can be invalidated again — which cost 24 hours of silent, invisible outage on 3–4 August. `npm run check:sync` now turns that failure mode into one command. |
+| **EAS env vars** | Justin / Avi | `eas env:create` for the two `EXPO_PUBLIC_*` values, or a cloud build ships an app pointed at `undefined`. See SHIPPING.md **STEP ZERO**. The app now refuses to start in that state rather than failing mysteriously later. |
+| **Maestro flow 02** | Avi | Needs `ADMIN_EMAIL` / `ADMIN_PASSWORD` in the environment. The login subflow deliberately skips when a session already exists, so a password never passes through a script — which is why flows 01/03/04 could be run and 02 could not. |
+
+### QA fixture — do not delete
+
+Job **#834 "QA FIXTURE — do not invoice, do not delete"** is assigned to the
+test technician. Flows 01, 03 and 04 each open a job, so without it they fail.
+
+It exists because on 4 August **no technician in the database had an open job** —
+Jake Henderson had none either — so the e2e suite could never have run against
+real data. Avi chose a permanent fixture over assigning real work. Idempotent
+recreate SQL is in `mobile/.maestro/README.md`.
+
+Flow 03 is the sharp case: every assertion before it opens the job is an
+`assertNotVisible`, so against an empty job list they are all trivially true and
+the flow proves nothing while appearing to run.
 
 **Store accounts — Justin owns these.** They sit under the client's own
 organisation (the same place the Vercel `mellerick` team lives), not under
