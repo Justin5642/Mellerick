@@ -114,3 +114,55 @@ describe("ApprovalsRepository", () => {
     expect(invoiceInsert(ops)).toBeUndefined();
   });
 });
+
+// APPROVING A JOB MUST NOT OUTLIVE THE INVOICE IT CREATED.
+//
+// approveJob enqueues two writes: create the invoice, then mark the job
+// approved with ready_to_invoice = false. They were independent, so if the
+// invoice op dead-lettered the job update still landed — and the job dropped
+// out of BOTH the approvals queue (it is approved) and the Ready-to-Invoice
+// list (the flag is cleared), with no invoice anywhere. Completed work, billed
+// to nobody, visible on no screen.
+//
+// The dependency is expressed the way this codebase already expresses it: the
+// follow-up write carries dependsOn = the invoice op, so the queue will not run
+// it until the invoice row has actually landed.
+describe("approveJob — the job update is gated on the invoice", () => {
+  const input = {
+    jobId: "job-1",
+    jobNumber: 833,
+    jobTitle: "Test",
+    customerId: "cust-1",
+    items: [{ name: "Labour", quantity: 1, unitPrice: 100 }],
+    adminNotes: null,
+    existingInvoiceId: null,
+  };
+
+  it("makes the jobs update depend on the invoice insert", async () => {
+    const { outbox, ops } = captureOutbox();
+    await makeRepo(outbox).approveJob(input as never);
+
+    const inv = invoiceInsert(ops);
+    const job = jobUpdate(ops);
+    expect(inv).toBeDefined();
+    expect(job?.dependsOn).toBe(inv?.id);
+  });
+
+  it("still approves with no dependency when there is nothing to invoice", async () => {
+    // No items => no invoice is created, so there is nothing to wait for and
+    // gating on a non-existent op would strand the approval forever.
+    const { outbox, ops } = captureOutbox();
+    await makeRepo(outbox).approveJob({ ...input, items: [] } as never);
+
+    expect(invoiceInsert(ops)).toBeUndefined();
+    expect(jobUpdate(ops)?.dependsOn).toBeUndefined();
+  });
+
+  it("does not gate when an invoice already exists", async () => {
+    const { outbox, ops } = captureOutbox();
+    await makeRepo(outbox).approveJob({ ...input, existingInvoiceId: "inv-existing" } as never);
+
+    expect(invoiceInsert(ops)).toBeUndefined();
+    expect(jobUpdate(ops)?.dependsOn).toBeUndefined();
+  });
+});

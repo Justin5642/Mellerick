@@ -36,6 +36,12 @@ export interface CreateInvoiceInput {
    * ready_to_invoice flag so it drops off the queue — mirrors the web
    * invoices/new "create from job" flow. */
   reconcile?: { markVariationIds: string[] } | null;
+  /** Approval follow-up (requires jobId): a jobs UPDATE enqueued GATED on the
+   * invoice row landing. Without the gate, a dead-lettered invoice still left
+   * the job marked approved with ready_to_invoice cleared, so it vanished from
+   * the approvals queue AND the Ready-to-Invoice list with no invoice anywhere.
+   * Uses the same parentOp mechanism as `reconcile` above. */
+  approve?: { payload: Record<string, unknown> } | null;
 }
 export interface EditInvoiceInput {
   invoiceId: string;
@@ -110,6 +116,11 @@ export class FinanceRepository {
         await this.write("job_variation", "update", "job_variations", vid, { invoice_id: invoiceId }, parentOp);
       }
       await this.write("job", "update", "jobs", input.jobId, { ready_to_invoice: false }, parentOp);
+    }
+    // Approval follow-up, gated the same way: the job is only marked approved
+    // once the invoice it was approved against actually exists.
+    if (input.jobId && input.approve) {
+      await this.write("job", "update", "jobs", input.jobId, input.approve.payload, parentOp);
     }
     return invoiceId;
   }

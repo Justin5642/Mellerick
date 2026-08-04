@@ -2,6 +2,7 @@ import { useState } from "react";
 import { View, Text, StyleSheet, TextInput, TouchableOpacity, Linking, Alert, Modal, FlatList } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { supabase } from "../../lib/supabase";
+import { useJobEdit } from "../../lib/data/hooks/useJobEdit";
 import { colors } from "../../lib/theme";
 import { JobHoursScoreboard } from "./hours-scoreboard";
 
@@ -107,18 +108,28 @@ export function JobOverviewTab({ job, currentUserId }: { job: Job; currentUserId
   const [description, setDescription] = useState(job.description ?? "");
   const [notes, setNotes] = useState(job.notes ?? "");
   const [saving, setSaving] = useState(false);
+  const jobEdit = useJobEdit();
 
   async function save() {
-    setSaving(true);
-    const { error } = await supabase
-      .from("jobs")
-      .update({ status, priority, description, notes })
-      .eq("id", job.id);
-    setSaving(false);
-    if (error) {
-      Alert.alert("Error", error.message);
+    if (!jobEdit.ready) {
+      Alert.alert("Not ready", "Please try again in a moment.");
       return;
     }
+    setSaving(true);
+    // THROUGH THE OUTBOX. This used to write straight to Supabase, so a
+    // technician changing status/priority/description/notes with no signal lost
+    // the edit outright — nothing queued it and nothing replayed it on
+    // reconnect. The same screen already had a durable write path available
+    // (useJobEdit), which is what makes the direct call a plain oversight
+    // rather than a trade-off.
+    try {
+      await jobEdit.updateFields(job.id, { status, priority, description, notes });
+    } catch (e) {
+      setSaving(false);
+      Alert.alert("Error", e instanceof Error ? e.message : String(e));
+      return;
+    }
+    setSaving(false);
     // Best-effort calendar resync. MUST carry the Bearer token — React Native has
     // no cookie jar, so an unauthenticated POST just 401s silently (Q1).
     if (API_BASE_URL) {
