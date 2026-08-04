@@ -388,6 +388,27 @@ Everything below was run, not assumed.
 | Maestro flow 02 | **not run** — needs `ADMIN_EMAIL` / `ADMIN_PASSWORD` |
 | Background geofence clock | **running on device** — `isForeground=true, types=0x8` |
 
+### Re-verified AFTER both PRs merged to `main`
+
+The table above was produced while work was in flight. Everything in it was then
+re-run against the merged result, because "it passed on the branch" and "it
+passes on what is actually in `main`" are different claims, and only the second
+one matters to whoever picks this up.
+
+| Re-checked on merged `main` | Result |
+|---|---|
+| Web tests / typecheck | 203 passed (26 files), clean |
+| Mobile tests / typecheck | 458 passed (69 suites), clean |
+| Schema drift | none |
+| PowerSync replication | healthy — slot active, `wal_status=reserved` |
+| `0044` — technician self-promotion to admin | **BLOCKED** |
+| `0045` — technician reading a money column | **BLOCKED** |
+
+The last two were re-proven by impersonating a real technician against the live
+database inside a rolled-back transaction — not read out of a migration file.
+A migration that is present in `git` is not evidence that the hole is shut; the
+only evidence is attempting the attack and being refused.
+
 ### The two security holes found and closed on 4 August
 
 Both were found by an adversarially-verified audit AFTER the app had been
