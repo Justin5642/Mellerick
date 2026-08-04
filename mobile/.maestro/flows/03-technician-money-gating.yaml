@@ -54,6 +54,22 @@ env:
     label: "technician shell exposes no Schedule"
 # No dollar figure on the jobs list.
 - assertNotVisible: ".*\\$[0-9].*"
+# ---------------------------------------------------------------------------
+# PRECONDITION — this technician must actually HAVE a job.
+#
+# Everything above is an assertNotVisible, and every one of them is trivially
+# true against an empty job list. The tap below is what forces this flow to
+# engage with real data, and without this label its failure reads
+# "Element not found: #.* — .*", which looks like a UI regression rather than a
+# missing fixture — the same misdiagnosis the role check above exists to prevent.
+#
+# It is stated as its own assertion so the flow says WHY it stopped. A green run
+# of this flow is only meaningful when it walked into a populated job; if that is
+# impossible, the flow must fail rather than report a pass it did not earn.
+# ---------------------------------------------------------------------------
+- assertVisible:
+    text: "#.* — .*"
+    label: "PRECONDITION — the signed-in technician has NO jobs assigned. The money assertions above are vacuous against an empty list, so this flow cannot prove anything. Assign a job to this technician and rerun. It is NOT a money leak and NOT a UI regression."
 # Open a job and sweep the tabs a technician can reach — none may show money.
 - tapOn: "#.* — .*"
 - extendedWaitUntil:

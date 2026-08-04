@@ -7,6 +7,7 @@ import type { DataLayer } from "./data/createDataLayer";
 import { plausibleAutoClockHours, MAX_PLAUSIBLE_TRAVEL_HOURS, MAX_PLAUSIBLE_WORK_HOURS } from "./autoClockHours";
 import { nextGeofenceState, type TrackedSite } from "./geofenceState";
 import { startBackgroundClock, stopBackgroundClock, publishBackgroundClockContext } from "./backgroundClock";
+import { startBackgroundSync, stopBackgroundSync } from "./backgroundSync";
 
 // GEOFENCE_RADIUS_METERS and the distance maths now live in ./geofenceState,
 // shared with the background task so the two paths cannot disagree about what
@@ -150,6 +151,11 @@ export function LocationTrackingProvider({ children }: { children: ReactNode }) 
           "[geofence] background tracking NOT active — travel time is only recorded while the app is open."
         );
       }
+
+      // Separately from location: drain the outbox periodically while the app
+      // is CLOSED. Queued writes otherwise wait for someone to reopen the app,
+      // which after a late job may be the next morning.
+      startBackgroundSync(true).catch((e) => console.warn("[sync] background drain not registered:", e));
     })();
 
     return () => {
@@ -163,6 +169,7 @@ export function LocationTrackingProvider({ children }: { children: ReactNode }) 
   useEffect(() => {
     if (userId) return;
     stopBackgroundClock().catch(() => {});
+    stopBackgroundSync().catch(() => {});
     publishBackgroundClockContext(null, []).catch(() => {});
   }, [userId]);
 
