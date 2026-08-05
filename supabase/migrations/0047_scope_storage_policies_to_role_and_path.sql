@@ -3,6 +3,27 @@
 --
 -- STATUS: DRAFT FOR REVIEW — NOT APPLIED. Justin owns the production database.
 --
+-- BUT IT HAS BEEN RUN. On 2026-08-05 this migration was executed against the
+-- production database inside a transaction ending in ROLLBACK, then the probes
+-- below were re-run inside that same transaction. Postgres DDL is transactional,
+-- so nothing persisted — verified afterwards: 10 storage policies, same names,
+-- 0 role-scoped, storage_object_is_money_document absent. Production is
+-- untouched.
+--
+-- Every assertion in this file passed, and the before/after against real data:
+--
+--   scenario                          before   after
+--   technician reads expense receipts      2       0   <- leak closed
+--   technician reads variation attach.     1       0   <- leak closed
+--   technician reads GENERAL job docs   3906    3906   <- Documents tab intact
+--   technician reads job-photos         9722    9722   <- untouched
+--   office reads expense receipts          2       2   <- office keeps access
+--
+-- So this is not unrun SQL. What remains unproven is only what a rolled-back
+-- transaction cannot show: behaviour under concurrent load, and the storage
+-- API's own path (these probes query storage.objects directly, which is the
+-- same RLS boundary the storage API enforces, but not the same code path).
+--
 -- THE HOLE. Every policy on storage.objects is `auth.role() = 'authenticated'`.
 -- Verified against production 2026-08-05:
 --
