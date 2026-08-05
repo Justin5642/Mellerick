@@ -46,33 +46,35 @@ async function insertWorkClockIn(jobId: string, at: string, staffId: string): Pr
   if (insertError) throw new Error(`backgroundClock clockIn: ${insertError.message}`);
 }
 
-async function insertTravelLeg(toJobId: string, fromJobId: string, arrivedAt: string, staffId: string): Promise<void> {
-  // The travel leg spans the departure from the previous site to this arrival.
-  // Find that departure's clock_out to bound it.
-  const { data: lastDeparture, error } = await supabase
-    .from("time_entries")
-    .select("clock_out")
-    .eq("job_id", fromJobId)
-    .eq("staff_id", staffId)
-    .eq("entry_type", "work")
-    .not("clock_out", "is", null)
-    .order("clock_out", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-  if (error) throw new Error(`backgroundClock travelBounds: ${error.message}`);
-  if (!lastDeparture?.clock_out) return;
-
+async function insertTravelLeg(
+  toJobId: string,
+  fromJobId: string,
+  departedAt: string,
+  arrivedAt: string,
+  staffId: string
+): Promise<void> {
+  // The departure instant now arrives WITH the action, from the persisted
+  // pending departure, rather than being re-derived by querying the previous
+  // entry's clock_out.
+  //
+  // That query was the second of two reasons no travel leg could ever be
+  // written. In the only case the old code populated fromJobId — a single
+  // reading moving straight from site A to site B — the depart and the arrive
+  // were stamped from that same reading, so clock_out equalled arrivedAt, the
+  // duration was zero, and plausibleAutoClockHours discarded it. The reading
+  // that started the drive is the only honest start time, so it is carried.
+  //
   // Null when the duration cannot be believed. A gap longer than the travel
   // ceiling means the phone was off or the departure never fired — writing it
   // anyway would put an implausible drive on someone's timesheet, and a
   // NEGATIVE one would subtract from their pay.
-  const hours = plausibleAutoClockHours(lastDeparture.clock_out, arrivedAt, MAX_PLAUSIBLE_TRAVEL_HOURS);
+  const hours = plausibleAutoClockHours(departedAt, arrivedAt, MAX_PLAUSIBLE_TRAVEL_HOURS);
   if (hours === null) return;
 
   const { error: insertError } = await supabase.from("time_entries").insert({
     job_id: toJobId,
     staff_id: staffId,
-    clock_in: lastDeparture.clock_out,
+    clock_in: departedAt,
     clock_out: arrivedAt,
     hours,
     entry_type: "travel",
@@ -106,9 +108,11 @@ async function closeWorkEntry(jobId: string, at: string, staffId: string): Promi
 
 export const supabaseClockDeps: BackgroundClockDeps = {
   ...storageDeps,
-  onArrive: async (jobId, at, fromJobId, staffId) => {
+  onArrive: async (jobId, at, fromJobId, fromAt, staffId) => {
     await insertWorkClockIn(jobId, at, staffId);
-    if (fromJobId) await insertTravelLeg(jobId, fromJobId, at, staffId);
+    // Both are required: fromJobId says where the drive started, fromAt says
+    // when. Without the second the leg was always zero-length and discarded.
+    if (fromJobId && fromAt) await insertTravelLeg(jobId, fromJobId, fromAt, at, staffId);
   },
   onDepart: async (jobId, at, staffId) => {
     await closeWorkEntry(jobId, at, staffId);
