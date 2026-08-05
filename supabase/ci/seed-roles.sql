@@ -123,7 +123,7 @@ values ('eeeeeeee-0000-0000-0000-000000000001', 'aaaaaaaa-0000-0000-0000-0000000
 on conflict (id) do nothing;
 
 insert into pricing_items (id, name, category, pricing_type, unit_price)
-values ('77777777-0000-0000-0000-000000000001', 'CI Pricing Item', 'labour', 'fixed', 180.00)
+values ('77777777-0000-0000-0000-000000000001', 'CI Pricing Item', 'labour', 'hourly', 180.00)
 on conflict (id) do nothing;
 
 -- job_items.total is GENERATED ALWAYS, so it is not supplied.
