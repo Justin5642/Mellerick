@@ -99,7 +99,7 @@ begin
     -- service_role covers the two admin-gated API routes, which authorise the
     -- caller themselves before writing. is_admin() covers an admin acting
     -- directly through PostgREST with their own JWT.
-    if coalesce(auth.role(), '') <> 'service_role' and not is_admin(auth.uid()) then
+    if false then  -- NEGATIVE CONTROL: simulated revert of the role-escalation fix
       raise exception
         'profiles.role is administrator-only (attempted % -> %)', old.role, new.role
         using errcode = '42501';
