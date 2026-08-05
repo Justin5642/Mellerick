@@ -135,11 +135,42 @@ jobs:
       - name: Start Supabase local stack
         run: supabase start -x studio,imgproxy,inbucket,edge-runtime,realtime,vector,logflare
       - name: Apply the FULL migration history
+        # ROLE GRANTS ARE RE-APPLIED BEFORE EACH MIGRATION, and that is not
+        # belt-and-braces — it is N19, found by this job on its very first run.
+        #
+        # Production grants anon and authenticated INSERT/UPDATE/DELETE on the
+        # public tables, and NOT ONE migration creates those grants: `grep -i
+        # "grant .*insert"` over supabase/migrations returns nothing. They come
+        # from Supabase's default privileges on the hosted project, which a
+        # database built purely from migrations never receives. Without them
+        # 0045 fails its OWN assertion —
+        #
+        #     ASSERTION FAILED: authenticated lost INSERT on time_entries
+        #
+        # — because it asserts a privilege nothing in the repo ever granted.
+        #
+        # The consequence is not confined to CI: `supabase db reset` produces a
+        # database where a technician cannot clock in at all. Tracked separately;
+        # this step makes CI represent production faithfully rather than
+        # inventing a migration that changes production semantics.
+        #
+        # BEFORE, not after: `grant all on all tables` would undo 0045's
+        # deliberate column-level revoke, and the chain aborts at 0045 anyway, so
+        # a single grant step afterwards would never run. Granting ahead of each
+        # file lets the grants keep pace with newly created tables while leaving
+        # the last migration's intent intact.
         run: |
           export SUPABASE_DB_URL="$(supabase status -o env | grep DB_URL | cut -d= -f2 | tr -d '\"')"
+          grant_public() {
+            psql "$SUPABASE_DB_URL" -q -v ON_ERROR_STOP=1 \
+              -c "grant usage on schema public to anon, authenticated, service_role;" \
+              -c "grant all on all tables in schema public to anon, authenticated, service_role;" \
+              -c "grant all on all sequences in schema public to anon, authenticated, service_role;"
+          }
           applied=0
           for f in $(ls supabase/migrations/*.sql | sort); do
             echo "::group::$f"
+            grant_public
             psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -f "$f"
             echo "::endgroup::"
             applied=$((applied + 1))
@@ -152,6 +183,20 @@ jobs:
             echo "::error::Only $applied migrations applied — expected the full chain."
             exit 1
           fi
+      - name: Prove the bootstrap left the security posture intact
+        # The grant loop above is coarse by design, so it gets checked rather
+        # than trusted: it must not have re-opened what 0045 closed, and must not
+        # have left technicians unable to work.
+        run: |
+          export SUPABASE_DB_URL="$(supabase status -o env | grep DB_URL | cut -d= -f2 | tr -d '\"')"
+          psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -c "do \$\$ begin
+            if has_column_privilege('authenticated','public.time_entries','rate_override','SELECT') then
+              raise exception 'CI bootstrap re-opened the rate_override leak';
+            end if;
+            if not has_table_privilege('authenticated','public.time_entries','INSERT') then
+              raise exception 'CI bootstrap left technicians unable to clock in';
+            end if;
+          end \$\$;"
       - name: Seed one user per role, and money in the money tables
         # Without this the SQL tests below raise "fixture missing: no technician
         # profile to impersonate" — and worse, every money table would return
