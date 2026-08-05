@@ -4,6 +4,7 @@ import { useState, useEffect, useRef } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { toast } from "sonner";
 import { plausibleClockedHours } from "@/lib/time-entry-hours";
+import { TIME_ENTRY_SELECT_WITH_STAFF } from "@/lib/time-entry-columns";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -115,14 +116,14 @@ export function JobTime({ jobId, currentUserId, timeEntries: initial, pos, site,
       .eq("id", entryId)
       // time_entries has two FKs to profiles (staff_id, edited_by) — must
       // name the exact FK or PostgREST rejects the query as ambiguous.
-      .select("*, profiles!time_entries_staff_id_fkey(full_name)")
+      .select(TIME_ENTRY_SELECT_WITH_STAFF)
       .single();
     setAssigningId(null);
     if (error || !data) {
       toast.error("Failed to assign stage");
       return;
     }
-    setEntries((prev) => prev.map((e) => (e.id === entryId ? (data as TimeEntry) : e)));
+    setEntries((prev) => prev.map((e) => (e.id === entryId ? (data as unknown as TimeEntry) : e)));
   }
 
   // Prefer the job's own site coordinates -- a PO isn't required (many
@@ -165,16 +166,22 @@ export function JobTime({ jobId, currentUserId, timeEntries: initial, pos, site,
             .maybeSingle();
 
           if (!open) {
-            const { data } = await supabase
+            const { data, error } = await supabase
               .from("time_entries")
               .insert({ job_id: jobId, staff_id: currentUserId, clock_in: new Date().toISOString(), auto_clocked: true })
-              .select("*, profiles!time_entries_staff_id_fkey(full_name)")
+              .select(TIME_ENTRY_SELECT_WITH_STAFF)
               .single();
-            if (data) {
-              setEntries(e => [data as TimeEntry, ...e]);
-              toast.success("On site — clocked in automatically");
-              syncBilling(data.id);
+            // NEVER swallow this. Discarding the error here is how a technician
+            // gets told nothing while their arrival goes unrecorded — the exact
+            // shape of the 0045 outage. An auto clock-in that fails must say so,
+            // because the manual button is the only fallback.
+            if (error || !data) {
+              toast.error("Auto clock-in failed — please clock in manually");
+              return;
             }
+            setEntries(e => [data as unknown as TimeEntry, ...e]);
+            toast.success("On site — clocked in automatically");
+            syncBilling(data.id);
           }
         } else {
           const { data: open } = await supabase
@@ -191,17 +198,22 @@ export function JobTime({ jobId, currentUserId, timeEntries: initial, pos, site,
             // skew (clocked in on a fast phone, out here) would otherwise write
             // NEGATIVE hours and subtract from the technician's pay.
             const hours = plausibleClockedHours(open.clock_in, clockOut);
-            const { data } = await supabase
+            const { data, error } = await supabase
               .from("time_entries")
               .update({ clock_out: clockOut, hours })
               .eq("id", open.id)
-              .select("*, profiles!time_entries_staff_id_fkey(full_name)")
+              .select(TIME_ENTRY_SELECT_WITH_STAFF)
               .single();
-            if (data) {
-              setEntries(e => e.map(en => en.id === open.id ? data as TimeEntry : en));
-              toast.success("Left site — clocked out automatically");
-              syncBilling(data.id);
+            // A swallowed failure here leaves the entry OPEN and running. The
+            // office then sees an entry spanning days and has to reconstruct the
+            // real hours by hand.
+            if (error || !data) {
+              toast.error("Auto clock-out failed — please clock out manually");
+              return;
             }
+            setEntries(e => e.map(en => en.id === open.id ? data as unknown as TimeEntry : en));
+            toast.success("Left site — clocked out automatically");
+            syncBilling(data.id);
           }
         }
       },
@@ -215,17 +227,22 @@ export function JobTime({ jobId, currentUserId, timeEntries: initial, pos, site,
   async function clockIn() {
     if (myOpenEntry || loading) return;
     setLoading(true);
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from("time_entries")
       .insert({ job_id: jobId, staff_id: currentUserId, clock_in: new Date().toISOString(), auto_clocked: false })
-      .select("*, profiles!time_entries_staff_id_fkey(full_name)")
+      .select(TIME_ENTRY_SELECT_WITH_STAFF)
       .single();
-    if (data) {
-      setEntries(e => [data as TimeEntry, ...e]);
-      toast.success("Clocked in");
-      syncBilling(data.id);
-    }
     setLoading(false);
+    // This exact spot caused the 4 Aug outage: the error was discarded, so a
+    // refused RETURNING clause rolled the INSERT back while the UI still said
+    // "Clocked in". Unpaid hours, no error, nothing to notice.
+    if (error || !data) {
+      toast.error("Clock in failed — your time was NOT recorded. Try again.");
+      return;
+    }
+    setEntries(e => [data as unknown as TimeEntry, ...e]);
+    toast.success("Clocked in");
+    syncBilling(data.id);
   }
 
   async function clockOut() {
@@ -233,18 +250,21 @@ export function JobTime({ jobId, currentUserId, timeEntries: initial, pos, site,
     setLoading(true);
     const clockOutTime = new Date().toISOString();
     const hours = plausibleClockedHours(myOpenEntry.clock_in, clockOutTime);
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from("time_entries")
       .update({ clock_out: clockOutTime, hours })
       .eq("id", myOpenEntry.id)
-      .select("*, profiles!time_entries_staff_id_fkey(full_name)")
+      .select(TIME_ENTRY_SELECT_WITH_STAFF)
       .single();
-    if (data) {
-      setEntries(e => e.map(en => en.id === myOpenEntry.id ? data as TimeEntry : en));
-      toast.success("Clocked out");
-      syncBilling(data.id);
-    }
     setLoading(false);
+    // A discarded failure leaves the entry open and still running.
+    if (error || !data) {
+      toast.error("Clock out failed — you are still clocked in. Try again.");
+      return;
+    }
+    setEntries(e => e.map(en => en.id === myOpenEntry.id ? data as unknown as TimeEntry : en));
+    toast.success("Clocked out");
+    syncBilling(data.id);
   }
 
   return (
