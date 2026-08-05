@@ -49,14 +49,26 @@ begin;
 
 set local client_min_messages = warning;
 
+-- Seeding a role is an UPDATE once on_auth_user_created has run, and 0044
+-- refuses a role change from anyone who is not an admin or the service role.
+-- service_role is sanctioned in that trigger, so the claim is set rather than
+-- the control disabled. Transaction-local; the whole script rolls back.
+select set_config('request.jwt.claims', '{"role":"service_role"}', true);
+
 -- 1) Throwaway identities -------------------------------------------------
 insert into auth.users (id, email) values
   ('aaaaaaaa-0000-0000-0000-000000000001', 'rls38-tech@example.test'),
   ('bbbbbbbb-0000-0000-0000-000000000002', 'rls38-office@example.test');
 
+-- UPSERT, not INSERT — on_auth_user_created (0000_baseline.sql:318) has already
+-- created a profiles row for each user above, so a plain insert collides on
+-- profiles_pkey. Same latent defect as 0035: neither script could complete as
+-- written, which is direct evidence that neither had ever been run.
 insert into profiles (id, full_name, email, role) values
   ('aaaaaaaa-0000-0000-0000-000000000001', 'RLS38 Tech',   'rls38-tech@example.test',   'technician'),
-  ('bbbbbbbb-0000-0000-0000-000000000002', 'RLS38 Office', 'rls38-office@example.test', 'office');
+  ('bbbbbbbb-0000-0000-0000-000000000002', 'RLS38 Office', 'rls38-office@example.test', 'office')
+on conflict (id) do update
+  set role = excluded.role, full_name = excluded.full_name, email = excluded.email;
 
 -- 2) Sample $-bearing PO data --------------------------------------------
 insert into customers (id, name) values
