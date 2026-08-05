@@ -55,6 +55,32 @@ describe("TimeEntriesRepository", () => {
     });
   });
 
+  // The FOREGROUND geofence auto-clock calls clockIn(), which hardcoded
+  // auto_clocked: false — so every automatic clock-in was recorded as though the
+  // technician had typed it. The BACKGROUND task writes auto_clocked: true
+  // directly (backgroundClockTask.ts:43), so the two paths disagreed about the
+  // same event, while backgroundClockTask.ts:18-22 asserts in a comment that
+  // "the two paths produce the SAME rows … Divergence here would be invisible
+  // and would show up only as a disputed payslip." It was invisible, and this is
+  // the divergence.
+  it("clockIn records auto_clocked when the geofence, not the technician, started it", async () => {
+    const { outbox, ops } = captureOutbox();
+    const repo = new TimeEntriesRepository(outbox, seqIds(), fixedTime());
+    await repo.clockIn({ jobId: "j1", staffId: "s1", autoClocked: true });
+
+    const [w] = writes(ops);
+    expect(w.payload.auto_clocked).toBe(true);
+  });
+
+  it("clockIn still defaults to a manual entry when nothing says otherwise", async () => {
+    const { outbox, ops } = captureOutbox();
+    const repo = new TimeEntriesRepository(outbox, seqIds(), fixedTime());
+    await repo.clockIn({ jobId: "j1", staffId: "s1" });
+
+    const [w] = writes(ops);
+    expect(w.payload.auto_clocked).toBe(false);
+  });
+
   it("clockIn queues a sync-billing side-effect keyed on the entry, depending on the write", async () => {
     const { outbox, ops } = captureOutbox();
     const repo = new TimeEntriesRepository(outbox, seqIds(), fixedTime());

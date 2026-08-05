@@ -50,13 +50,22 @@ export class TimeEntriesRepository {
   ) {}
 
   /** Clock in now. Returns the new entry's client-generated id. */
-  async clockIn(input: { jobId: string; staffId: string }): Promise<string> {
+  /**
+   * `autoClocked` marks an entry the GEOFENCE started rather than the
+   * technician. It defaults false so the manual clock button is unchanged, but
+   * the foreground auto-clock must pass true: the background task writes
+   * `auto_clocked: true` directly, and until this option existed the two paths
+   * recorded the same event differently — exactly the divergence
+   * backgroundClockTask.ts:18-22 warns "would show up only as a disputed
+   * payslip".
+   */
+  async clockIn(input: { jobId: string; staffId: string; autoClocked?: boolean }): Promise<string> {
     const rowId = this.ids.newId();
     const opId = await this.enqueueWrite(rowId, "insert", {
       job_id: input.jobId,
       staff_id: input.staffId,
       clock_in: this.time.nowIso(),
-      auto_clocked: false,
+      auto_clocked: input.autoClocked ?? false,
     });
     await this.enqueueBillingSync(rowId, opId);
     return rowId;
