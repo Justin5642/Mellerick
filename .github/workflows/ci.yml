@@ -183,6 +183,12 @@ jobs:
             echo "::error::Only $applied migrations applied — expected the full chain."
             exit 1
           fi
+          # The grant above runs before EVERY file, so whichever migration sorts
+          # last leaves the coarse table-level grant in place and 0045's
+          # column-level revoke undone. Re-assert it once, at the end, using the
+          # helper 0046 exists to provide — order-independent, so adding a 0047
+          # cannot silently re-open the leak.
+          psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -c "select reapply_time_entries_grants();"
       - name: Prove the bootstrap left the security posture intact
         # The grant loop above is coarse by design, so it gets checked rather
         # than trusted: it must not have re-opened what 0045 closed, and must not
