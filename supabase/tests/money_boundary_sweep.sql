@@ -78,9 +78,16 @@ begin
       -- that silently returns []. Hence the unmatched-column report below,
       -- which makes the blind spot visible instead of leaving it to the next
       -- reviewer to guess at.
-      and c.column_name ~* '(rate|cost|price|amount|total|sell|margin|markup|hourly|salary|wage|charge'
+      -- PARENTHESISED, and that is not cosmetic. `~*` and `||` sit in the same
+      -- precedence class and are left-associative, so
+      --     c.column_name ~* 'A' || 'B'
+      -- parses as ((c.column_name ~* 'A') || 'B') — a boolean concatenated with
+      -- text — and the whole WHERE clause fails with "argument of AND must be
+      -- type boolean, not type text". This script could not execute at all until
+      -- CI began running it.
+      and c.column_name ~* ('(rate|cost|price|amount|total|sell|margin|markup|hourly|salary|wage|charge'
                          || '|fee|value|balance|paid|owing|gst|deposit|discount|surcharge|levy'
-                         || '|insurance|maintenance|registration|annual|subtotal|invoice_total)'
+                         || '|insurance|maintenance|registration|annual|subtotal|invoice_total)')
       -- ...minus foreign keys and identifiers, which carry no value.
       and c.column_name !~* '(_id$|^id$|cost_center_id|rate_config_id|_number$)'
     order by c.table_name, c.column_name
@@ -126,9 +133,12 @@ join information_schema.tables t
  and t.table_type  = 'BASE TABLE'
 where c.table_schema = 'public'
   and c.data_type in ('numeric','money','double precision','real')
-  and c.column_name !~* '(rate|cost|price|amount|total|sell|margin|markup|hourly|salary|wage|charge'
+  -- Parenthesised for the same precedence reason as the sweep above: without it
+  -- this reads as ((column_name !~* 'A') || 'B') and the clause is text, not
+  -- boolean.
+  and c.column_name !~* ('(rate|cost|price|amount|total|sell|margin|markup|hourly|salary|wage|charge'
                       || '|fee|value|balance|paid|owing|gst|deposit|discount|surcharge|levy'
-                      || '|insurance|maintenance|registration|annual|subtotal|invoice_total)'
+                      || '|insurance|maintenance|registration|annual|subtotal|invoice_total)')
   and c.column_name !~* '(_id$|^id$)'
 order by c.table_name, c.column_name;
 
