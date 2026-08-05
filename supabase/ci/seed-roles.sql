@@ -93,27 +93,33 @@ insert into customers (id, name)
 values ('aaaaaaaa-0000-0000-0000-000000000001', 'CI Customer')
 on conflict (id) do nothing;
 
-insert into sites (id, customer_id, name, suburb, state, postcode)
-values ('bbbbbbbb-0000-0000-0000-000000000001', 'aaaaaaaa-0000-0000-0000-000000000001', 'CI Site', 'Testville', 'VIC', '3000')
+-- The NOT NULL / no-default set for every table below was taken from
+-- information_schema against production rather than guessed, after three CI
+-- rounds lost to fixing one missing column at a time.
+insert into sites (id, customer_id, name, address_line1, suburb, state, postcode)
+values ('bbbbbbbb-0000-0000-0000-000000000001', 'aaaaaaaa-0000-0000-0000-000000000001', 'CI Site', '1 Test Street', 'Testville', 'VIC', '3000')
 on conflict (id) do nothing;
 
 -- Assigned to the technician, so the tech legitimately reads the JOB while the
 -- money hanging off it must still be refused. A fixture where the technician
 -- cannot see the job at all would make every assertion pass for the wrong
 -- reason.
-insert into jobs (id, customer_id, site_id, assigned_to, title, status, priority)
+-- status and priority are omitted so their column defaults apply: both carry
+-- CHECK constraints, and a guessed literal would fail the insert for a reason
+-- that has nothing to do with what this fixture is testing.
+insert into jobs (id, customer_id, site_id, assigned_to, title)
 values ('cccccccc-0000-0000-0000-000000000001', 'aaaaaaaa-0000-0000-0000-000000000001', 'bbbbbbbb-0000-0000-0000-000000000001',
-        '11111111-1111-1111-1111-111111111111', 'CI Job', 'scheduled', 'normal')
+        '11111111-1111-1111-1111-111111111111', 'CI Job')
 on conflict (id) do nothing;
 
-insert into invoices (id, customer_id, job_id, title, status, subtotal, tax_amount, total)
+insert into invoices (id, customer_id, job_id, title, subtotal, tax_amount, total)
 values ('dddddddd-0000-0000-0000-000000000001', 'aaaaaaaa-0000-0000-0000-000000000001', 'cccccccc-0000-0000-0000-000000000001',
-        'CI Invoice', 'draft', 1000.00, 100.00, 1100.00)
+        'CI Invoice', 1000.00, 100.00, 1100.00)
 on conflict (id) do nothing;
 
-insert into quotes (id, customer_id, site_id, title, status, subtotal, tax_amount, total)
+insert into quotes (id, customer_id, site_id, title, subtotal, tax_amount, total)
 values ('eeeeeeee-0000-0000-0000-000000000001', 'aaaaaaaa-0000-0000-0000-000000000001', 'bbbbbbbb-0000-0000-0000-000000000001',
-        'CI Quote', 'draft', 500.00, 50.00, 550.00)
+        'CI Quote', 500.00, 50.00, 550.00)
 on conflict (id) do nothing;
 
 insert into pricing_items (id, name, category, pricing_type, unit_price)
