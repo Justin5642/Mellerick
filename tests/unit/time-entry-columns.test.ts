@@ -2,7 +2,6 @@ import { describe, it, expect } from "vitest";
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { TIME_ENTRY_COLUMNS } from "../../lib/time-entry-columns";
-import { TIME_ENTRY_COLUMNS as MOBILE_TIME_ENTRY_COLUMNS } from "../../mobile/lib/timeEntryColumns";
 
 /**
  * Migration 0045 dropped the TABLE-level SELECT grant on `time_entries` and
@@ -46,6 +45,23 @@ function sourceFiles(dir: string): string[] {
 
 const ALL_SOURCES = SCAN_DIRS.flatMap(sourceFiles);
 
+/**
+ * The mobile copy is read as TEXT, never imported.
+ *
+ * Importing it makes vitest resolve mobile/tsconfig.json, which extends
+ * "expo/tsconfig.base" — and the CI `unit` job runs `npm ci` at the repo root
+ * only, so mobile/node_modules does not exist there. An import passes locally
+ * (where mobile deps happen to be installed) and dies in CI with
+ * TSConfckParseError. Reading the file keeps this test honest in both places,
+ * and matches what the rest of this suite already does.
+ */
+function mobileColumnList(): string {
+  const src = readFileSync(join(REPO_ROOT, "mobile", "lib", "timeEntryColumns.ts"), "utf8");
+  const match = src.match(/export const TIME_ENTRY_COLUMNS\s*=\s*\n?\s*"([^"]+)"/);
+  if (!match) throw new Error("could not parse TIME_ENTRY_COLUMNS out of mobile/lib/timeEntryColumns.ts");
+  return match[1];
+}
+
 describe("time_entries reads must name columns explicitly (migration 0045)", () => {
   it("scans a non-trivial number of files — guards against the walker silently finding nothing", () => {
     expect(ALL_SOURCES.length).toBeGreaterThan(50);
@@ -85,13 +101,13 @@ describe("time_entries reads must name columns explicitly (migration 0045)", () 
 
   it("never selects rate_override from a browser/session client", () => {
     expect(TIME_ENTRY_COLUMNS).not.toContain("rate_override");
-    expect(MOBILE_TIME_ENTRY_COLUMNS).not.toContain("rate_override");
+    expect(mobileColumnList()).not.toContain("rate_override");
   });
 
   it("the web and mobile column lists are identical", () => {
     // Two packages, two lockfiles, no workspace — the list is duplicated by
     // necessity. This is what stops the copies drifting.
-    expect(MOBILE_TIME_ENTRY_COLUMNS).toBe(TIME_ENTRY_COLUMNS);
+    expect(mobileColumnList()).toBe(TIME_ENTRY_COLUMNS);
   });
 
   it("the column list matches what the migrations actually create", () => {
