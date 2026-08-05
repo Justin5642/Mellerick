@@ -52,11 +52,11 @@ on conflict (id) do nothing;
 -- rows. `do update` is what actually assigns the role, and it is exactly the
 -- path 0044 governs — which is why the service-role claim above is required and
 -- not merely convenient.
-insert into profiles (id, full_name, role, is_active)
+insert into profiles (id, full_name, email, role, is_active)
 values
-  ('11111111-1111-1111-1111-111111111111', 'CI Technician', 'technician', true),
-  ('22222222-2222-2222-2222-222222222222', 'CI Office',     'office',     true),
-  ('33333333-3333-3333-3333-333333333333', 'CI Admin',      'admin',      true)
+  ('11111111-1111-1111-1111-111111111111', 'CI Technician', 'ci-tech@test.local',   'technician', true),
+  ('22222222-2222-2222-2222-222222222222', 'CI Office',     'ci-office@test.local', 'office',     true),
+  ('33333333-3333-3333-3333-333333333333', 'CI Admin',      'ci-admin@test.local',  'admin',      true)
 on conflict (id) do update
   set role = excluded.role,
       full_name = excluded.full_name,
