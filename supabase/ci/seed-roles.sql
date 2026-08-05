@@ -19,18 +19,27 @@
 -- now finds real data and raises; before, it found an empty table and reported
 -- "safe".
 --
--- Roles are set on INSERT, deliberately. Migration 0044 installs a BEFORE UPDATE
--- trigger on profiles that refuses a role change from anyone who is not an admin
--- or the service role, so seeding by UPDATE would be blocked by the very control
--- this database exists to test. Routing around it with elevated claims would
--- weaken the fixture, so the profile rows are inserted outright and the
--- auth.users trigger that would otherwise create them is suspended.
+-- HOW THE ROLES GET SET. Migration 0044 installs a BEFORE UPDATE trigger on
+-- profiles that refuses a role change from anyone who is not an admin or the
+-- service role. That control is the point of the database under test, so the
+-- fixture must not disable it.
+--
+-- It does not need to. `service_role` is an explicitly sanctioned actor in that
+-- trigger — it is how staff invitation legitimately assigns a role — so this
+-- seeds under service-role claims rather than switching the trigger off. The
+-- control stays armed and is exercised by the seed itself: if 0044 ever stops
+-- recognising the service role, this file fails.
+--
+-- (An earlier version suspended on_auth_user_created instead. That cannot work:
+-- psql connects as a role that does not own auth.users, so the ALTER is refused
+-- with "must be owner of table users".)
 -- ============================================================================
 
--- on_auth_user_created (0000_baseline.sql:318) creates a profile from signup
--- metadata. Suspended so these inserts define the roles rather than racing it —
--- and so the role never has to be applied by UPDATE.
-alter table auth.users disable trigger on_auth_user_created;
+-- on_auth_user_created (0000_baseline.sql:318) creates a profile row from signup
+-- metadata; 0044 hardened it so the role is NOT taken from client-supplied
+-- metadata. So each profile arrives with the default role and the role below is
+-- applied by UPDATE, under service-role claims.
+select set_config('request.jwt.claims', '{"role":"service_role"}', false);
 
 insert into auth.users (id, instance_id, aud, role, email, encrypted_password, email_confirmed_at, created_at, updated_at)
 values
@@ -39,14 +48,43 @@ values
   ('33333333-3333-3333-3333-333333333333', '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', 'ci-admin@test.local',  crypt('ci-password-3', gen_salt('bf')), now(), now(), now())
 on conflict (id) do nothing;
 
+-- Upsert rather than insert: on_auth_user_created has already created these
+-- rows. `do update` is what actually assigns the role, and it is exactly the
+-- path 0044 governs — which is why the service-role claim above is required and
+-- not merely convenient.
 insert into profiles (id, full_name, role, is_active)
 values
   ('11111111-1111-1111-1111-111111111111', 'CI Technician', 'technician', true),
   ('22222222-2222-2222-2222-222222222222', 'CI Office',     'office',     true),
   ('33333333-3333-3333-3333-333333333333', 'CI Admin',      'admin',      true)
-on conflict (id) do nothing;
+on conflict (id) do update
+  set role = excluded.role,
+      full_name = excluded.full_name,
+      is_active = true;
 
-alter table auth.users enable trigger on_auth_user_created;
+-- Prove the fixture is what the tests below assume. Without this, a silently
+-- failed role assignment would leave three technicians, every "office can read"
+-- positive control would fail for the wrong reason, and every "technician
+-- cannot read" assertion would pass for the wrong reason.
+do $$
+declare
+  n int;
+begin
+  select count(*) into n from profiles
+   where id in ('11111111-1111-1111-1111-111111111111',
+                '22222222-2222-2222-2222-222222222222',
+                '33333333-3333-3333-3333-333333333333');
+  if n <> 3 then
+    raise exception 'CI fixture: expected 3 seeded profiles, found %', n;
+  end if;
+
+  select count(*) into n from profiles
+   where id = '22222222-2222-2222-2222-222222222222' and role = 'office';
+  if n <> 1 then
+    raise exception 'CI fixture: the office role was not applied — 0044 may no longer accept service_role';
+  end if;
+end;
+$$;
 
 -- ---------------------------------------------------------------------------
 -- Business data, with dollar figures on it.
