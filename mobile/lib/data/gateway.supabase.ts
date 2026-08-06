@@ -159,19 +159,53 @@ const sideEffectPath: Record<SideEffectKind, (p: Record<string, unknown>) => str
   "backflow-submit": (p) => `/api/backflow/tests/${p.testId}/submit`,
 };
 
+/**
+ * How long a side-effect call may hang before the drain gives up on it.
+ *
+ * `fetch` has NO default timeout. On a flaky mobile connection — a van moving
+ * between cells, a site with one bar — a request can stay open indefinitely.
+ * Because the processor drains strictly one operation at a time, a single hung
+ * call stalls the ENTIRE queue behind it: every subsequent clock-out, photo and
+ * variation waits on a promise that will never settle, with the badge showing a
+ * pending count that never moves and no error anywhere.
+ *
+ * 30s is well past a healthy round trip on a poor connection, so a timeout here
+ * means something is genuinely wrong. Timing out is also strictly better than
+ * hanging: the operation is marked failed, backed off, and retried, and the rest
+ * of the queue keeps moving.
+ */
+const SIDE_EFFECT_TIMEOUT_MS = 30_000;
+
 export const apiBridge: ApiBridge = {
   async callSideEffect(effect, payload) {
     if (!API_BASE_URL) return; // degrade gracefully when the web API isn't configured
     const { data } = await supabase.auth.getSession();
     const token = data.session?.access_token;
-    const res = await fetch(`${API_BASE_URL}${sideEffectPath[effect](payload)}`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      },
-      body: JSON.stringify(payload),
-    });
-    if (!res.ok) throw new Error(`${effect}: HTTP ${res.status}`);
+
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), SIDE_EFFECT_TIMEOUT_MS);
+    try {
+      const res = await fetch(`${API_BASE_URL}${sideEffectPath[effect](payload)}`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify(payload),
+        signal: controller.signal,
+      });
+      if (!res.ok) throw new Error(`${effect}: HTTP ${res.status}`);
+    } catch (e) {
+      // An abort surfaces as a bare "Aborted", which tells whoever reads the
+      // dead-letter nothing. Name the effect and the limit.
+      if (e instanceof Error && e.name === "AbortError") {
+        throw new Error(`${effect}: timed out after ${SIDE_EFFECT_TIMEOUT_MS}ms`);
+      }
+      throw e;
+    } finally {
+      // Always cleared, including on success — an uncleared timer keeps a
+      // reference alive and fires abort() on a completed request.
+      clearTimeout(timer);
+    }
   },
 };

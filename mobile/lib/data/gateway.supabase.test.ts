@@ -1,4 +1,4 @@
-import { supabaseGateway } from "./gateway.supabase";
+import { supabaseGateway, apiBridge } from "./gateway.supabase";
 
 // The outbox replays writes, so a re-sent INSERT that already landed must count
 // as success — otherwise a confirmed write dead-letters forever. That is why a
@@ -27,7 +27,12 @@ const mockDelete = jest.fn(() => ({ eq: () => mockDeleteResult() }));
 
 const mockFrom = jest.fn(() => ({ insert: mockInsert, update: mockUpdate, delete: mockDelete }));
 
-jest.mock("../supabase", () => ({ supabase: { from: () => mockFrom() } }));
+jest.mock("../supabase", () => ({
+  supabase: {
+    from: () => mockFrom(),
+    auth: { getSession: async () => ({ data: { session: { access_token: "t" } } }) },
+  },
+}));
 jest.mock("expo-file-system/legacy", () => ({ readAsStringAsync: jest.fn(), EncodingType: { Base64: "base64" } }));
 jest.mock("base64-arraybuffer", () => ({ decode: jest.fn() }));
 
@@ -89,6 +94,58 @@ describe("updateRow — a write that changed nothing must not report success", (
     // being fixed. Absence is unknown, and unknown is not failure.
     mockUpdateResult.mockResolvedValue({ error: null, count: null });
     await expect(supabaseGateway.updateRow("time_entries", "row-1", { hours: 2 })).resolves.toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// A HUNG REQUEST STALLS THE WHOLE QUEUE.
+//
+// fetch has no default timeout. On a flaky mobile connection a request can stay
+// open indefinitely — and because the processor drains strictly one operation at
+// a time, a single hung call blocks every clock-out, photo and variation behind
+// it. The badge shows a pending count that never moves and no error anywhere.
+// ---------------------------------------------------------------------------
+describe("callSideEffect — a request that hangs must not stall the drain", () => {
+  const realFetch = global.fetch;
+  afterEach(() => {
+    global.fetch = realFetch;
+    jest.useRealTimers();
+  });
+
+  it("aborts and names the effect and the limit", async () => {
+    // API_BASE_URL is read at MODULE scope, and callSideEffect returns early
+    // without it ("degrade gracefully when the web API isn't configured"). So
+    // the module has to be loaded with the variable already set, or this test
+    // passes against the early return and proves nothing.
+    process.env.EXPO_PUBLIC_API_BASE_URL = "https://api.test.local";
+    jest.resetModules();
+
+    jest.useFakeTimers();
+    // A fetch that never settles unless aborted — the failure mode being fixed.
+    global.fetch = jest.fn(
+      (_url: string, init: { signal: AbortSignal }) =>
+        new Promise((_resolve, reject) => {
+          init.signal.addEventListener("abort", () => {
+            const err = new Error("Aborted");
+            err.name = "AbortError";
+            reject(err);
+          });
+        })
+    ) as never;
+
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { apiBridge: freshBridge } = require("./gateway.supabase");
+    const pending = freshBridge.callSideEffect("sync-billing", { entryId: "te-1" });
+    // The assertion is attached BEFORE the clock moves. The rejection fires
+    // during the advance, and an unattached rejection at that point surfaces as
+    // an unhandled one rather than the expected failure.
+    const assertion = expect(pending).rejects.toThrow(/sync-billing: timed out after \d+ms/);
+    // ASYNC advance: callSideEffect awaits getSession() before it ever reaches
+    // fetch, so a synchronous advanceTimersByTime runs before the timeout has
+    // been scheduled and the test hangs. The async form drains the microtask
+    // queue between ticks.
+    await jest.advanceTimersByTimeAsync(30_000);
+    await assertion;
   });
 });
 
