@@ -7,8 +7,8 @@ async function flushMicrotasks(): Promise<void> {
   for (let i = 0; i < 20; i++) await Promise.resolve();
 }
 
-function fakeProcessor(): jest.Mocked<Pick<Processor, "drain">> {
-  return { drain: jest.fn().mockResolvedValue(undefined) };
+function fakeProcessor(): jest.Mocked<Pick<Processor, "drain" | "stop">> {
+  return { drain: jest.fn().mockResolvedValue(undefined), stop: jest.fn() };
 }
 
 // Connectivity fake that lets a test fire an online transition on demand and
@@ -154,7 +154,7 @@ describe("SyncEngine — teardown must abort in-flight work", () => {
 describe("SyncEngine — a failing drain must not surface as an unhandled rejection", () => {
   it("swallows and reports a drain failure on start instead of rejecting", async () => {
     const boom = new Error("Cannot use shared object that was already released");
-    const proc = { drain: jest.fn().mockRejectedValue(boom) };
+    const proc = { drain: jest.fn().mockRejectedValue(boom), stop: jest.fn() };
     const net = fakeConnectivity();
     const onError = jest.fn();
 
@@ -167,7 +167,7 @@ describe("SyncEngine — a failing drain must not surface as an unhandled reject
   });
 
   it("swallows a drain failure on reconnection too", async () => {
-    const proc = { drain: jest.fn().mockRejectedValue(new Error("offline")) };
+    const proc = { drain: jest.fn().mockRejectedValue(new Error("offline")), stop: jest.fn() };
     const net = fakeConnectivity();
     const onError = jest.fn();
 
@@ -185,7 +185,7 @@ describe("SyncEngine — a failing drain must not surface as an unhandled reject
   it("still REJECTS from flush(), whose caller can handle it", async () => {
     // flush() is awaited by callers (the retry button), so it must keep
     // propagating — only the fire-and-forget paths swallow.
-    const proc = { drain: jest.fn().mockRejectedValue(new Error("nope")) };
+    const proc = { drain: jest.fn().mockRejectedValue(new Error("nope")), stop: jest.fn() };
     const net = fakeConnectivity();
     const engine = new SyncEngine(proc as unknown as Processor, net.connectivity);
     engine.start();
@@ -201,7 +201,7 @@ describe("SyncEngine — a failing drain must not surface as an unhandled reject
 describe("SyncEngine — session freshness before replay (Q4)", () => {
   it("refreshes the session BEFORE draining, on both start and reconnect", async () => {
     const order: string[] = [];
-    const processor = { drain: jest.fn(async () => void order.push("drain")) };
+    const processor = { drain: jest.fn(async () => void order.push("drain")), stop: jest.fn() };
     const net = fakeConnectivity();
     const ensureSession = jest.fn(async () => void order.push("session"));
 

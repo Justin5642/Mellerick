@@ -309,6 +309,58 @@ describe("Processor — reclaims orphaned attachment files", () => {
   });
 });
 
+describe("Processor — stop() abandons a drain already inside its loop", () => {
+  // HANDOVER.md:182-186 claims this was already fixed by a generation counter in
+  // syncEngine.ts. Both of those checks sit OUTSIDE processor.drain(): they stop
+  // a NEW drain starting and skip the post-drain notify, but cannot abandon a
+  // pass that is already running. Processor had no stop() at all.
+  //
+  // It matters because SqliteOutboxStore.open() returns a module-cached promise,
+  // so a remount produces a SECOND Processor over the SAME store with
+  // draining = false — and both loops call reclaimInflight(), each reclaiming
+  // and re-dispatching the other's in-flight work.
+  it("stops dispatching further operations once stopped mid-pass", async () => {
+    const store = new InMemoryOutboxStore();
+    const outbox = new Outbox(store, fixedClock());
+    const gw = makeGateway();
+    const proc = new Processor(outbox, gw, makeApi(), online(true));
+
+    await outbox.enqueue(write("a", { rowId: "row-a" }));
+    await outbox.enqueue(write("b", { rowId: "row-b" }));
+    await outbox.enqueue(write("c", { rowId: "row-c" }));
+
+    // Tear down during the FIRST dispatch, exactly as a sign-out or a dev reload
+    // would.
+    gw.insertRow.mockImplementationOnce(async () => {
+      proc.stop();
+    });
+
+    await proc.drain();
+
+    // Only the operation already in flight was attempted. Queued work is durable
+    // on disk, so abandoning loses nothing — the next drain picks it up.
+    expect(gw.insertRow).toHaveBeenCalledTimes(1);
+    const remaining = (await store.all()).filter((o) => o.status !== "done");
+    expect(remaining.length).toBeGreaterThan(0);
+  });
+
+  it("drains normally again after a subsequent start", async () => {
+    // stop() must not be terminal — the same Processor is reused across
+    // reconnects, so a stopped one that never drains again would silently end
+    // syncing for the rest of the shift.
+    const store = new InMemoryOutboxStore();
+    const outbox = new Outbox(store, fixedClock());
+    const gw = makeGateway();
+    const proc = new Processor(outbox, gw, makeApi(), online(true));
+
+    await outbox.enqueue(write("a", { rowId: "row-a" }));
+    proc.stop();
+    await proc.drain();
+
+    expect((await store.all()).every((o) => o.status === "done")).toBe(true);
+  });
+});
+
 describe("Processor — a drain requested mid-pass is not dropped", () => {
   it("loops once more to pick up work enqueued while it was running", async () => {
     // drain() short-circuits when a pass is already running, which correctly
