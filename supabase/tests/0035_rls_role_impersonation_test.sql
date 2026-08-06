@@ -46,14 +46,28 @@ begin;
 
 set local client_min_messages = warning;
 
+-- Seeding a role is an UPDATE once on_auth_user_created has run, and migration
+-- 0044 refuses a role change from anyone who is not an admin or the service
+-- role. service_role is a sanctioned actor in that trigger — it is how staff
+-- invitation legitimately assigns a role — so the claim is set rather than the
+-- control disabled. Transaction-local, and the whole script rolls back.
+select set_config('request.jwt.claims', '{"role":"service_role"}', true);
+
 -- 1) Throwaway identities (profiles.id -> auth.users.id FK) ----------------
 insert into auth.users (id, email) values
   ('aaaaaaaa-0000-0000-0000-000000000001', 'rls-test-tech@example.test'),
   ('bbbbbbbb-0000-0000-0000-000000000002', 'rls-test-office@example.test');
 
+-- UPSERT, not INSERT. The inserts above fire on_auth_user_created
+-- (0000_baseline.sql:318), which already creates a profiles row for each user —
+-- so a plain insert collides on profiles_pkey. This script therefore could never
+-- have completed as written, in the SQL editor or anywhere else, which is direct
+-- evidence it had never actually been run before CI began executing it.
 insert into profiles (id, full_name, email, role) values
   ('aaaaaaaa-0000-0000-0000-000000000001', 'RLS Test Tech',   'rls-test-tech@example.test',   'technician'),
-  ('bbbbbbbb-0000-0000-0000-000000000002', 'RLS Test Office', 'rls-test-office@example.test', 'office');
+  ('bbbbbbbb-0000-0000-0000-000000000002', 'RLS Test Office', 'rls-test-office@example.test', 'office')
+on conflict (id) do update
+  set role = excluded.role, full_name = excluded.full_name, email = excluded.email;
 
 -- 2) One money-bearing row per locked table (seeded as the privileged role,
 --    which bypasses RLS) ---------------------------------------------------

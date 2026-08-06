@@ -28,6 +28,12 @@ function deps(over: Partial<BackgroundClockDeps> = {}): BackgroundClockDeps & { 
   return {
     calls,
     readInside: jest.fn().mockResolvedValue(null),
+    // Persisted across invocations like insideJobId, so a drive that starts in
+    // one delivery and ends in the next can still be attributed.
+    readPendingDeparture: jest.fn().mockResolvedValue(null),
+    writePendingDeparture: jest.fn(async (d: { jobId: string; at: string } | null) => {
+      calls.push(`writePendingDeparture(${d ? d.jobId : null})`);
+    }),
     writeInside: jest.fn(async (j: string | null) => {
       calls.push(`writeInside(${j})`);
     }),
@@ -57,10 +63,18 @@ describe("applyBackgroundBatch", () => {
     expect(d.calls).toEqual(["depart(job-a)", "arrive(job-b)", "writeInside(job-b)"]);
   });
 
-  it("passes the previous job so the travel leg can be attributed", async () => {
+  it("passes the previous job AND when it was left, so the travel leg can be attributed", async () => {
+    // fromAt is the second half of the fix: knowing only WHERE the drive started
+    // left the leg zero-length, so it was computed as implausible and dropped.
     const d = deps({ readInside: jest.fn().mockResolvedValue("job-a") });
     await applyBackgroundBatch([at(SITE_B, T0)], d);
-    expect(d.onArrive).toHaveBeenCalledWith("job-b", new Date(T0).toISOString(), "job-a", "staff-1");
+    expect(d.onArrive).toHaveBeenCalledWith(
+      "job-b",
+      new Date(T0).toISOString(),
+      "job-a",
+      new Date(T0).toISOString(),
+      "staff-1"
+    );
   });
 
   // Writing time entries for a user who has signed out is worse than dropping
@@ -93,7 +107,11 @@ describe("applyBackgroundBatch", () => {
     // recorded in the time entries, not in the geofence cursor.
     const d = deps();
     await applyBackgroundBatch([at(SITE_A, T0), away(T0 + 90 * 60_000)], d);
-    expect(d.calls).toEqual(["arrive(job-a)", "depart(job-a)"]);
+    // The pending departure IS written: the technician has left site A and is
+    // now driving, and the arrival that closes this leg will very likely be
+    // delivered in a later batch — which is exactly the case that could never
+    // produce a travel leg before.
+    expect(d.calls).toEqual(["arrive(job-a)", "depart(job-a)", "writePendingDeparture(job-a)"]);
     expect(d.writeInside).not.toHaveBeenCalled();
   });
 

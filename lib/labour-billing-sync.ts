@@ -120,7 +120,7 @@ export async function syncJobBilling(admin: SupabaseClient, jobId: string) {
   const profileByStaff = new Map<string, any>();
   const vehicleCostByStaff = new Map<string, number>();
   if (staffIds.length > 0) {
-    const [{ data: profiles }, { data: vehicles }] = await Promise.all([
+    const [profilesRes, vehiclesRes] = await Promise.all([
       admin
         .from("staff_cost_profiles")
         .select("staff_id, hourly_rate, super_rate, workers_comp_rate, leave_loading_rate, annual_fixed_oncosts, target_hours_per_week, trade_level, charge_out_rate")
@@ -130,6 +130,29 @@ export async function syncJobBilling(admin: SupabaseClient, jobId: string) {
         .select("assigned_to, purchase_cost, estimated_life_years, insurance_annual, maintenance_annual, registration_annual, other_annual_costs, fuel_cost_per_hour, target_hours_per_year")
         .in("assigned_to", staffIds),
     ]);
+
+    // A DISCARDED ERROR HERE CHANGES WHAT A CUSTOMER IS CHARGED — the same rule
+    // the three reads above already follow, applied 50 lines later where it was
+    // originally missed.
+    //
+    //   staff_cost_profiles fails -> profileByStaff stays empty -> tradeLevel
+    //     falls to "qualified" and staffChargeOutRate to null. An APPRENTICE's
+    //     hours are then billed at rateConfig.qualifiedBaseRate instead of
+    //     loaded cost plus margin, and any staffer's per-person charge_out_rate
+    //     is ignored. The customer is OVER-charged, silently.
+    //   equipment fails -> vehicleCostByStaff stays empty -> an apprentice's
+    //     loaded cost is computed with vehicle_cost_per_hour = 0 and the job is
+    //     UNDER-priced. Quieter, equally wrong.
+    //
+    // Neither was reachable by the existing tests: with time_entries resolving
+    // to [], `billable` is empty and this whole block is skipped, so the fixture
+    // could not get here. The tests now seed a billable entry, and one of them
+    // asserts this code is actually reached so it cannot rot back.
+    requireRead(profilesRes, "staff_cost_profiles");
+    requireRead(vehiclesRes, "equipment");
+
+    const profiles = profilesRes.data;
+    const vehicles = vehiclesRes.data;
     (profiles ?? []).forEach((p) => profileByStaff.set(p.staff_id, p));
     (vehicles ?? []).forEach((v: any) => {
       if (!v.assigned_to) return;

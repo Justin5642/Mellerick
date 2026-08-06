@@ -4,8 +4,16 @@ import { supabase } from "./supabase";
 import { useAuth } from "./auth-context";
 import { useDataLayer } from "./data/DataProvider";
 import type { DataLayer } from "./data/createDataLayer";
-import { plausibleAutoClockHours, MAX_PLAUSIBLE_TRAVEL_HOURS, MAX_PLAUSIBLE_WORK_HOURS } from "./autoClockHours";
+
 import { nextGeofenceState, type TrackedSite } from "./geofenceState";
+import {
+  applyGeofenceTransition,
+  type GeofenceTransitionDeps,
+  type OpenEntryLookup,
+  type PendingDeparture,
+} from "./geofenceTransition";
+import { netInfoConnectivity } from "./data/net/connectivity";
+import { powersync } from "../powersync/db";
 import { startBackgroundClock, stopBackgroundClock, publishBackgroundClockContext } from "./backgroundClock";
 import { startBackgroundSync, stopBackgroundSync } from "./backgroundSync";
 
@@ -18,25 +26,12 @@ import { startBackgroundSync, stopBackgroundSync } from "./backgroundSync";
 // ceiling is a backgrounded app rather than drive time, and a work stint longer
 // than its ceiling is a departure event that never fired.
 
-const API_BASE_URL = process.env.EXPO_PUBLIC_API_BASE_URL;
-
-// Fire-and-forget: regenerates the job's auto-generated labour line item
-// (see app/api/time-entries/[id]/sync-billing/route.ts) right after this
-// geofence watcher writes a time_entries row -- mirrors the same call in
-// mobile/components/job/time.tsx's manual clock in/out UI. Needs the Bearer
-// token (no web session cookie here) since job_items writes are Admin-only
-// RLS and the route authenticates the caller itself.
-function syncBilling(entryId: string) {
-  if (!API_BASE_URL) return;
-  supabase.auth.getSession().then(({ data }) => {
-    const token = data.session?.access_token;
-    if (!token) return;
-    fetch(`${API_BASE_URL}/api/time-entries/${entryId}/sync-billing`, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${token}` },
-    }).catch(() => {});
-  });
-}
+// Billing sync is NOT fired from here. TimeEntriesRepository.clockIn/clockOut/
+// addManual each enqueue a sync-billing side-effect through the outbox
+// (enqueueBillingSync), so it survives being offline. A local syncBilling()
+// helper used to sit here doing it by hand over fetch; it had already stopped
+// being called by the time the writes moved to the outbox, and was removed
+// rather than left as a second, non-durable path someone might revive.
 
 const LocationTrackingContext = createContext<{ enabled: boolean }>({ enabled: false });
 
@@ -71,7 +66,7 @@ export function LocationTrackingProvider({ children }: { children: ReactNode }) 
 
   const sitesRef = useRef<TrackedSite[]>([]);
   const insideJobIdRef = useRef<string | null>(null);
-  const departureRef = useRef<{ time: string; jobId: string } | null>(null);
+  const departureRef = useRef<PendingDeparture | null>(null);
   const busyRef = useRef(false);
 
   // Keep the list of this tech's active job sites fresh.
@@ -192,101 +187,105 @@ export function LocationTrackingProvider({ children }: { children: ReactNode }) 
     if (next.transition === "none") return;
 
     const { insideJobId, previousJobId } = next;
+    const previousCursor = insideJobIdRef.current;
     insideJobIdRef.current = insideJobId;
     busyRef.current = true;
     try {
-      if (insideJobId) {
-        await handleArrival(layer, insideJobId, staffId);
-      } else if (previousJobId) {
-        await handleDeparture(layer, previousJobId, staffId);
+      const target = insideJobId ?? previousJobId;
+      if (!target) return;
+
+      const result = await applyGeofenceTransition(
+        {
+          kind: insideJobId ? "arrival" : "departure",
+          jobId: target,
+          staffId,
+          pendingDeparture: departureRef.current,
+        },
+        makeTransitionDeps(layer)
+      );
+
+      // THE CURSOR IS ONLY CONSUMED ON A DURABLE CONCLUSION.
+      //
+      // Restoring it here is the fix for the defect that lost whole visits: the
+      // old code advanced the cursor and then bailed when the offline
+      // idempotence read failed, so every later reading computed "none" and the
+      // clock-in was never re-derived. Putting the cursor back means the next
+      // position update derives the same transition and tries again.
+      if (!result.handled) {
+        insideJobIdRef.current = previousCursor;
+        return;
       }
+
+      if (result.clearPendingDeparture) departureRef.current = null;
+      if (result.setPendingDeparture) departureRef.current = result.setPendingDeparture;
     } finally {
       busyRef.current = false;
     }
   }
 
-  async function handleArrival(layer: DataLayer, jobId: string, staffId: string) {
-    const arrivalTime = new Date().toISOString();
-
-    // The open-entry check stays a network read: it is an IDEMPOTENCE guard, and
-    // treating "I could not check" as "there is none" would clock the technician
-    // in twice. When it fails we skip the insert rather than risk a duplicate —
-    // and the departure below still closes whatever is genuinely open.
-    const { data: openEntry, error: openError } = await supabase
-      .from("time_entries")
-      .select("id")
-      .eq("job_id", jobId)
-      .eq("staff_id", staffId)
-      .eq("entry_type", "work")
-      .is("clock_out", null)
-      .maybeSingle();
-
-    // A failed check is NOT "no open entry" — see above. Skip rather than risk
-    // clocking the technician in on top of an entry that already exists.
-    if (openError) {
-      console.warn("[geofence] could not check for an open entry; skipping clock-in:", openError.message);
-      return;
+  // The idempotence lookup, LOCAL-FIRST.
+  //
+  // The network read alone is what made the technician's offline arrival
+  // unresolvable. The on-device PowerSync mirror already carries this
+  // technician's own time entries, so offline it can answer the question
+  // authoritatively — and only when BOTH the network and the mirror are
+  // unavailable does this return "unknown" and leave the transition pending.
+  async function findOpenEntry(jobId: string, staffId: string): Promise<OpenEntryLookup> {
+    if (await netInfoConnectivity.isOnline()) {
+      const { data, error } = await supabase
+        .from("time_entries")
+        .select("id, clock_in")
+        .eq("job_id", jobId)
+        .eq("staff_id", staffId)
+        .eq("entry_type", "work")
+        .is("clock_out", null)
+        .maybeSingle();
+      if (!error) {
+        return data ? { status: "found", entryId: data.id, clockInIso: data.clock_in } : { status: "none" };
+      }
+      // Network answered with an error — fall through to the mirror rather
+      // than giving up, which is what lost the visit.
     }
 
-    if (!openEntry) {
-      // THROUGH THE OUTBOX, not straight to Supabase.
-      //
-      // This used to be a direct insert, so a technician arriving somewhere with
-      // no signal produced no row, no queued operation, no error and no sync
-      // badge — the arrival was discarded and never re-derived after reconnect,
-      // losing the visit's entire clock-in. The MANUAL clock button has always
-      // been durable; the AUTOMATIC one, which fires precisely when nobody is
-      // watching the screen, was not. clockIn() also enqueues the billing sync,
-      // which the direct path did by hand.
-      await layer.timeEntries.clockIn({ jobId, staffId });
+    try {
+      if (!powersync.currentStatus?.hasSynced) return { status: "unknown", reason: "mirror not synced" };
+      const rows = await powersync.getAll<{ id: string; clock_in: string }>(
+        `SELECT id, clock_in FROM time_entries
+          WHERE job_id = ? AND staff_id = ? AND entry_type = 'work' AND clock_out IS NULL
+          LIMIT 1`,
+        [jobId, staffId]
+      );
+      const row = rows[0];
+      return row ? { status: "found", entryId: row.id, clockInIso: row.clock_in } : { status: "none" };
+    } catch (e) {
+      return { status: "unknown", reason: e instanceof Error ? e.message : "local mirror unavailable" };
     }
+  }
 
-    const departure = departureRef.current;
-    departureRef.current = null;
-    if (departure) {
-      const hours = plausibleAutoClockHours(departure.time, arrivalTime, MAX_PLAUSIBLE_TRAVEL_HOURS);
-      if (hours !== null) {
+  function makeTransitionDeps(layer: DataLayer): GeofenceTransitionDeps {
+    return {
+      findOpenEntry,
+      // autoClocked: the geofence started this, not the technician. The
+      // background task records the same flag, so both paths now agree.
+      clockIn: (input) => layer.timeEntries.clockIn({ ...input, autoClocked: true }),
+      clockOut: (input) => layer.timeEntries.clockOut(input),
+      addTravelLeg: async (input) => {
         await layer.timeEntries.addManual({
-          jobId,
-          staffId,
-          clockInIso: departure.time,
-          clockOutIso: arrivalTime,
+          jobId: input.jobId,
+          staffId: input.staffId,
+          clockInIso: input.clockInIso,
+          clockOutIso: input.clockOutIso,
           entryType: "travel",
           costCenterId: null,
-          travelFromJobId: departure.jobId,
+          travelFromJobId: input.travelFromJobId,
           autoClocked: true,
         });
-      }
-    }
+      },
+      nowIso: () => new Date().toISOString(),
+      onWarn: (message) => console.warn(message),
+    };
   }
 
-  async function handleDeparture(layer: DataLayer, jobId: string, staffId: string) {
-    const departTime = new Date().toISOString();
-
-    const { data: openEntry } = await supabase
-      .from("time_entries")
-      .select("id, clock_in")
-      .eq("job_id", jobId)
-      .eq("staff_id", staffId)
-      .eq("entry_type", "work")
-      .is("clock_out", null)
-      .maybeSingle();
-
-    if (openEntry) {
-      // Null when the duration cannot be believed — a backward clock correction
-      // (which would otherwise write NEGATIVE hours and subtract from the
-      // technician's pay) or a departure event that never fired, leaving the
-      // entry open for days. The entry still CLOSES either way; leaving it open
-      // is its own problem. The office then sees a gap to correct rather than a
-      // number that quietly reconciles wrong.
-      // Through the outbox, like the manual clock-out. A direct update meant a
-      // departure with no signal simply never closed the entry — the technician
-      // stayed clocked in, and the office saw an entry running for days.
-      await layer.timeEntries.clockOut({ entryId: openEntry.id, clockInIso: openEntry.clock_in });
-    }
-
-    departureRef.current = { time: departTime, jobId };
-  }
 
   return <LocationTrackingContext.Provider value={{ enabled: !!userId }}>{children}</LocationTrackingContext.Provider>;
 }

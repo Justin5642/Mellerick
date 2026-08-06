@@ -36,7 +36,70 @@ function isTechnicianVisible(query: string): boolean {
   return !gated;
 }
 
-const MONEY_COLUMN = /\b(rate|total_amount|unit_cost|unit_sell|amount|price|cost|subtotal|admin_notes)\b/i;
+// SUBSTRING, NOT WORD-BOUNDARY. This was `/\b(rate|...|price|cost|...)\b/i`,
+// and `_` is a word character — so `\brate\b` did NOT match `rate_override`,
+// `\bprice\b` did not match `unit_price`, `\bcost\b` did not match `total_cost`,
+// and nothing matched `hourly_rate`, `charge_out_rate`, `sell_price`,
+// `call_out_fee` or `margin_pct`.
+//
+// The consequence was not theoretical: adding `rate_override` to
+// `tech_time_entries` — precisely the column migration 0045 exists to hide from
+// technicians — would have passed this test green. The guard protecting the
+// contractual money boundary could not see the one column the boundary had just
+// been breached on.
+//
+// supabase/tests/money_boundary_sweep.sql uses an unanchored `~*` and does catch
+// these. That file is run by hand; THIS one runs in CI, so this is the copy that
+// has to be right.
+const MONEY_TERMS = [
+  "rate",
+  "amount",
+  "price",
+  "cost",
+  "subtotal",
+  "total",
+  "fee",
+  "margin",
+  "markup",
+  "charge",
+  "invoice_value",
+  "admin_notes",
+];
+
+// IDENTIFIERS AND COUNTS ARE NOT MONEY. `cost_center_id` is a foreign key to a
+// job stage; `total_hours` is a duration; `invoice_number` is a reference. A
+// substring match alone flags all three, and a guard that cries wolf gets its
+// terms deleted one by one until it catches nothing.
+//
+// These exclusions are lifted from supabase/tests/money_boundary_sweep.sql:85,
+// which solved the same problem against the real schema:
+//     and c.column_name !~* '(_id$|^id$|cost_center_id|rate_config_id|_number$)'
+const NOT_MONEY = /(^id$|_id$|_number$|_hours$|^hours$|_count$|_at$|_by$)/i;
+
+/**
+ * Classify ONE column name. Deliberately per-column rather than a regex over the
+ * whole query string: the previous version tested the entire SELECT, so a single
+ * innocuous `cost_center_id` was indistinguishable from a real leak, and the
+ * word-boundary anchors added to compensate then missed every snake_case money
+ * column including `rate_override` — the exact column migration 0045 exists to
+ * hide.
+ */
+export function isMoneyColumn(column: string): boolean {
+  const name = column.trim().toLowerCase();
+  if (!name) return false;
+  if (NOT_MONEY.test(name)) return false;
+  return MONEY_TERMS.some((term) => name.includes(term));
+}
+
+/** The column list of a `SELECT a, b, c FROM ...` stream query. */
+function selectedColumns(query: string): string[] {
+  const match = query.match(/select\s+([\s\S]*?)\s+from\s/i);
+  if (!match) return [];
+  return match[1]
+    .split(",")
+    .map((c) => c.trim().replace(/^\w+\./, "")) // strip a table qualifier
+    .filter(Boolean);
+}
 
 // There must be exactly ONE deployable sync config. A second, superseded YAML
 // sitting beside the live one is a standing hazard: both are security-critical,
@@ -48,6 +111,58 @@ describe("PowerSync config — exactly one deployable artifact", () => {
     const yamls = readdirSync(dir).filter((f) => f.endsWith(".yaml") || f.endsWith(".yml"));
     expect(yamls).toEqual(["sync-streams.yaml"]);
   });
+});
+
+// THE CLASSIFIER NEEDS ITS OWN TEST.
+//
+// Every assertion below depends on MONEY_COLUMN actually classifying. A regex
+// that silently matches nothing makes the whole suite pass while the boundary is
+// wide open — which is exactly what the previous word-boundary version did for
+// every snake_case money column. Testing the streams without testing the
+// detector is testing nothing.
+describe("MONEY_COLUMN detector", () => {
+  const mustMatch = [
+    "rate_override", // the column 0045 exists to hide — missed by the old regex
+    "unit_price",
+    "total_cost",
+    "hourly_rate",
+    "charge_out_rate",
+    "sell_price",
+    "call_out_fee",
+    "margin_pct",
+    "total_amount",
+    "subtotal",
+    "admin_notes",
+    "invoice_value",
+  ];
+  for (const column of mustMatch) {
+    it(`flags ${column}`, () => {
+      expect(isMoneyColumn(column)).toBe(true);
+    });
+  }
+
+  const mustNotMatch = [
+    "id",
+    "job_id",
+    "clock_in",
+    "clock_out",
+    "status",
+    "serial_number",
+    "make",
+    "model",
+    // The false positives a naive substring match produces, each a real column
+    // in a technician-visible stream today.
+    "cost_center_id", // a job stage FK, not a cost
+    "total_hours", // a duration, not a total
+    "invoice_number", // a reference, not a value
+    "created_at",
+    "logged_by",
+  ];
+  for (const column of mustNotMatch) {
+    it(`does not flag ${column}`, () => {
+      expect(isMoneyColumn(column)).toBe(false);
+    });
+  }
 });
 
 describe("PowerSync sync rules — technician streams", () => {
@@ -70,12 +185,33 @@ describe("PowerSync sync rules — technician streams", () => {
   });
 
   it("names no money column in any technician-visible stream", () => {
+    // Per COLUMN, not per query string. PowerSync replicates with its own
+    // credentials and bypasses Postgres RLS entirely, so any column listed here
+    // lands in plaintext SQLite on that technician's phone whatever the policies
+    // say. This list is the only thing standing between a money column and the
+    // device.
     const offenders = Object.entries(streams)
       .filter(([, def]) => def.query && isTechnicianVisible(def.query))
-      .filter(([, def]) => MONEY_COLUMN.test(def.query!))
-      .map(([name]) => name);
+      .flatMap(([name, def]) =>
+        selectedColumns(def.query!)
+          .filter(isMoneyColumn)
+          .map((column) => `${name}.${column}`)
+      );
 
     expect(offenders).toEqual([]);
+  });
+
+  it("can actually see the columns it is checking (guards against a parse returning nothing)", () => {
+    // If selectedColumns ever fails to parse the dialect, the assertion above
+    // silently checks an empty list and passes forever. That is the failure mode
+    // this whole file exists to prevent, so it gets its own check.
+    const technicianStreams = Object.entries(streams).filter(
+      ([, def]) => def.query && isTechnicianVisible(def.query) && !/select\s+\*/i.test(def.query)
+    );
+    expect(technicianStreams.length).toBeGreaterThan(5);
+    for (const [name, def] of technicianStreams) {
+      expect(selectedColumns(def.query!).length, `${name} parsed to zero columns`).toBeGreaterThan(0);
+    }
   });
 
   it("keeps every office/admin stream gated on the caller's own profile row", () => {

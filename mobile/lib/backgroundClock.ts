@@ -1,6 +1,6 @@
 import * as Location from "expo-location";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { planBackgroundClockActions, type LocationReading } from "./backgroundClockPlan";
+import { planBackgroundClockActions, type LocationReading, type PendingDeparture } from "./backgroundClockPlan";
 import type { TrackedSite } from "./geofenceState";
 
 // Background half of the geofence auto-clock.
@@ -27,13 +27,32 @@ export const BACKGROUND_CLOCK_TASK = "mellerick-background-clock";
 const INSIDE_KEY = "mellerick.backgroundClock.insideJobId";
 const SITES_KEY = "mellerick.backgroundClock.sites";
 const STAFF_KEY = "mellerick.backgroundClock.staffId";
+const DEPARTURE_KEY = "mellerick.backgroundClock.pendingDeparture";
 
 export interface BackgroundClockDeps {
   readInside(): Promise<string | null>;
   writeInside(jobId: string | null): Promise<void>;
+  /**
+   * The departure awaiting the arrival that closes it into a travel leg.
+   *
+   * Persisted for the same reason insideJobId is: the OS kills and restarts this
+   * task freely, so a drive beginning in one delivery and ending in the next is
+   * the normal case. Without it a leg could only be attributed within a single
+   * batch, and since the state machine reports A->away->B as separate
+   * transitions, that meant never.
+   */
+  readPendingDeparture(): Promise<PendingDeparture | null>;
+  writePendingDeparture(departure: PendingDeparture | null): Promise<void>;
   readSites(): Promise<TrackedSite[]>;
   readStaffId(): Promise<string | null>;
-  onArrive(jobId: string, at: string, fromJobId: string | null, staffId: string): Promise<void>;
+  onArrive(
+    jobId: string,
+    at: string,
+    fromJobId: string | null,
+    /** When the previous site was left — the travel leg's start. */
+    fromAt: string | null,
+    staffId: string
+  ): Promise<void>;
   onDepart(jobId: string, at: string, staffId: string): Promise<void>;
 }
 
@@ -50,8 +69,12 @@ export async function applyBackgroundBatch(
   // longer authenticated is worse than missing the readings.
   if (!staffId) return;
 
-  const [sites, previousInside] = await Promise.all([deps.readSites(), deps.readInside()]);
-  const plan = planBackgroundClockActions(batch, sites, previousInside);
+  const [sites, previousInside, previousDeparture] = await Promise.all([
+    deps.readSites(),
+    deps.readInside(),
+    deps.readPendingDeparture(),
+  ]);
+  const plan = planBackgroundClockActions(batch, sites, previousInside, previousDeparture);
 
   // Actions are applied in order and SEQUENTIALLY: a depart must land before the
   // arrival that follows it, or the technician is briefly clocked in at two jobs
@@ -60,7 +83,7 @@ export async function applyBackgroundBatch(
     if (action.type === "depart") {
       await deps.onDepart(action.jobId, action.at, staffId);
     } else {
-      await deps.onArrive(action.jobId, action.at, action.fromJobId, staffId);
+      await deps.onArrive(action.jobId, action.at, action.fromJobId, action.fromAt, staffId);
     }
   }
 
@@ -71,12 +94,31 @@ export async function applyBackgroundBatch(
   if (plan.insideJobId !== previousInside) {
     await deps.writeInside(plan.insideJobId);
   }
+  if (plan.pendingDeparture?.at !== previousDeparture?.at || plan.pendingDeparture?.jobId !== previousDeparture?.jobId) {
+    await deps.writePendingDeparture(plan.pendingDeparture);
+  }
 }
 
 export const storageDeps = {
   readInside: async () => AsyncStorage.getItem(INSIDE_KEY),
   writeInside: async (jobId: string | null) =>
     jobId === null ? AsyncStorage.removeItem(INSIDE_KEY) : AsyncStorage.setItem(INSIDE_KEY, jobId),
+  readPendingDeparture: async (): Promise<PendingDeparture | null> => {
+    const raw = await AsyncStorage.getItem(DEPARTURE_KEY);
+    if (!raw) return null;
+    try {
+      const parsed = JSON.parse(raw);
+      // A corrupt value must not fabricate a leg from a bogus timestamp; treat
+      // it as "no departure pending" and lose one leg rather than invent one.
+      return typeof parsed?.jobId === "string" && typeof parsed?.at === "string" ? parsed : null;
+    } catch {
+      return null;
+    }
+  },
+  writePendingDeparture: async (departure: PendingDeparture | null) =>
+    departure === null
+      ? AsyncStorage.removeItem(DEPARTURE_KEY)
+      : AsyncStorage.setItem(DEPARTURE_KEY, JSON.stringify(departure)),
   readSites: async (): Promise<TrackedSite[]> => {
     const raw = await AsyncStorage.getItem(SITES_KEY);
     if (!raw) return [];
@@ -98,7 +140,7 @@ export const storageDeps = {
  */
 export async function publishBackgroundClockContext(staffId: string | null, sites: TrackedSite[]): Promise<void> {
   if (!staffId) {
-    await AsyncStorage.multiRemove([STAFF_KEY, SITES_KEY, INSIDE_KEY]);
+    await AsyncStorage.multiRemove([STAFF_KEY, SITES_KEY, INSIDE_KEY, DEPARTURE_KEY]);
     return;
   }
   await AsyncStorage.setItem(STAFF_KEY, staffId);

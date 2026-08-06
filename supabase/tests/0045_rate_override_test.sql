@@ -64,7 +64,7 @@ begin
 end $$;
 select coalesce(json_agg(row_to_json(t)),'[]'::json)::text from (
   select scenario, actual, case when expected=actual then 'PASS' else '*** FAIL ***' end as verdict
-  from r) t
+  from r) t;
 
 do $$
 declare failures int;

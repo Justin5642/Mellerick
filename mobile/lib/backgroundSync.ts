@@ -1,5 +1,3 @@
-import * as BackgroundFetch from "expo-background-fetch";
-import * as TaskManager from "expo-task-manager";
 import { SqliteOutboxStore } from "./data/outbox/sqliteStore";
 import { createDataLayer } from "./data/createDataLayer";
 import { supabaseGateway, apiBridge } from "./data/gateway.supabase";
@@ -25,7 +23,55 @@ import {
 
 export const BACKGROUND_SYNC_TASK = "mellerick-background-sync";
 
-TaskManager.defineTask(BACKGROUND_SYNC_TASK, async () => {
+// GUARDED, NOT STATIC — the same bug as backgroundClockTask.ts, one file later.
+//
+// `import * as TaskManager from "expo-task-manager"` throws at MODULE LOAD when
+// the native module is absent. This file is reached from app/_layout.tsx by way
+// of location-tracking.tsx, so that throw happens during startup and takes the
+// ENTIRE APP down to a red screen:
+//
+//     Uncaught Error: Cannot find native module 'ExpoTaskManager'
+//
+// backgroundClockTask.ts was fixed with a guarded require after exactly this was
+// found on a device, and pinned by backgroundClockTask.guard.test.ts. This file
+// was added afterwards with static imports and no guard, reintroducing it. Every
+// unit test passed while that was true, because jest resolves the JS package
+// happily — only a real launch reveals it.
+//
+// A missing background-sync module must degrade to "no background draining",
+// never to "no app". backgroundSync.guard.test.ts now pins BOTH modules.
+interface TaskManagerModule {
+  defineTask(name: string, body: () => Promise<number>): void;
+  isTaskRegisteredAsync(name: string): Promise<boolean>;
+}
+interface BackgroundFetchModule {
+  BackgroundFetchResult: { NoData: number; NewData: number; Failed: number };
+  registerTaskAsync(name: string, options: Record<string, unknown>): Promise<void>;
+  unregisterTaskAsync(name: string): Promise<void>;
+}
+
+let TaskManager: TaskManagerModule | null = null;
+let BackgroundFetch: BackgroundFetchModule | null = null;
+
+try {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  TaskManager = require("expo-task-manager") as TaskManagerModule;
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  BackgroundFetch = require("expo-background-fetch") as BackgroundFetchModule;
+} catch (e) {
+  console.warn(
+    "[backgroundSync] expo-task-manager/expo-background-fetch unavailable — background sync is OFF " +
+      "for this build. Queued writes will drain when the app is next opened rather than while it is " +
+      "closed. Rebuild the dev client (npx expo run:android) after adding the dependency.",
+    e
+  );
+}
+
+// Only define the task when BOTH modules loaded. Defining it against a null
+// module would move the same crash from import time to first invocation.
+if (TaskManager && BackgroundFetch) {
+  const fetchResult = BackgroundFetch.BackgroundFetchResult;
+  TaskManager.defineTask(BACKGROUND_SYNC_TASK, async () => {
   let drained = 0;
   let error: unknown = null;
 
@@ -62,18 +108,28 @@ TaskManager.defineTask(BACKGROUND_SYNC_TASK, async () => {
     error = e;
   }
 
-  switch (backgroundSyncOutcome({ drained, error })) {
-    case "new-data":
-      return BackgroundFetch.BackgroundFetchResult.NewData;
-    case "failed":
-      return BackgroundFetch.BackgroundFetchResult.Failed;
-    default:
-      return BackgroundFetch.BackgroundFetchResult.NoData;
-  }
-});
+    switch (backgroundSyncOutcome({ drained, error })) {
+      case "new-data":
+        return fetchResult.NewData;
+      case "failed":
+        return fetchResult.Failed;
+      default:
+        return fetchResult.NoData;
+    }
+  });
+}
 
-/** Register the periodic drain. Safe to call repeatedly; a no-op when already on. */
+/**
+ * Register the periodic drain. Safe to call repeatedly; a no-op when already on.
+ *
+ * Resolves FALSE rather than rejecting when the native module is absent. The
+ * caller in location-tracking.tsx uses `.catch()`, but an unhandled rejection in
+ * React Native renders as a full-screen red box over an otherwise working app —
+ * the same user-visible outcome the import guard above exists to prevent.
+ */
 export async function startBackgroundSync(signedIn: boolean): Promise<boolean> {
+  if (!TaskManager || !BackgroundFetch) return false;
+
   const alreadyRegistered = await TaskManager.isTaskRegisteredAsync(BACKGROUND_SYNC_TASK);
   if (!shouldRegisterBackgroundSync({ signedIn, alreadyRegistered })) return alreadyRegistered;
 
@@ -87,6 +143,7 @@ export async function startBackgroundSync(signedIn: boolean): Promise<boolean> {
 
 /** Stop on sign-out, so a queued write is never replayed under a new session. */
 export async function stopBackgroundSync(): Promise<void> {
+  if (!TaskManager || !BackgroundFetch) return;
   if (!(await TaskManager.isTaskRegisteredAsync(BACKGROUND_SYNC_TASK))) return;
   await BackgroundFetch.unregisterTaskAsync(BACKGROUND_SYNC_TASK);
 }

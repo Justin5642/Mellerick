@@ -84,10 +84,23 @@ jobs:
       - run: npm run lint
 
   rls:
-    # RLS policy tests against a local Supabase stack. The Supabase CLI only
-    # replays versioned migrations on `start`, so CI boots the stack without repo
-    # migrations, then loads the minimal baseline these tests need and applies the
-    # security migrations under test.
+    # RLS policy tests against a local Supabase stack built from THE WHOLE
+    # MIGRATION HISTORY.
+    #
+    # It used to boot from a hand-written fixture (supabase/ci/rls-baseline.sql)
+    # and then apply three hand-picked migrations. Two things were wrong with
+    # that, and together they made this job worse than useless:
+    #
+    #   1. The fixture RECREATED the exact role-escalation hole that migration
+    #      0044 exists to close — `for update using (auth.uid() = id)` with no
+    #      WITH CHECK. So the database these tests ran against was vulnerable by
+    #      construction.
+    #   2. Applying 0027/0033/0034 only meant 0035, 0038, 0042, 0044, 0045 and
+    #      0046 were absent. A commit reverting ANY of those security migrations
+    #      passed every check in this workflow.
+    #
+    # Applying the full chain also proves the tree applies cleanly end to end,
+    # which nothing else in CI did.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -121,13 +134,95 @@ jobs:
           PY
       - name: Start Supabase local stack
         run: supabase start -x studio,imgproxy,inbucket,edge-runtime,realtime,vector,logflare
-      - name: Bootstrap RLS schema + security migrations
+      - name: Apply the FULL migration history
+        # ROLE GRANTS ARE RE-APPLIED BEFORE EACH MIGRATION, and that is not
+        # belt-and-braces — it is N19, found by this job on its very first run.
+        #
+        # Production grants anon and authenticated INSERT/UPDATE/DELETE on the
+        # public tables, and NOT ONE migration creates those grants: `grep -i
+        # "grant .*insert"` over supabase/migrations returns nothing. They come
+        # from Supabase's default privileges on the hosted project, which a
+        # database built purely from migrations never receives. Without them
+        # 0045 fails its OWN assertion —
+        #
+        #     ASSERTION FAILED: authenticated lost INSERT on time_entries
+        #
+        # — because it asserts a privilege nothing in the repo ever granted.
+        #
+        # The consequence is not confined to CI: `supabase db reset` produces a
+        # database where a technician cannot clock in at all. Tracked separately;
+        # this step makes CI represent production faithfully rather than
+        # inventing a migration that changes production semantics.
+        #
+        # BEFORE, not after: `grant all on all tables` would undo 0045's
+        # deliberate column-level revoke, and the chain aborts at 0045 anyway, so
+        # a single grant step afterwards would never run. Granting ahead of each
+        # file lets the grants keep pace with newly created tables while leaving
+        # the last migration's intent intact.
         run: |
           export SUPABASE_DB_URL="$(supabase status -o env | grep DB_URL | cut -d= -f2 | tr -d '\"')"
-          psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -f supabase/ci/rls-baseline.sql
-          psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -f supabase/migrations/0027_restrict_financial_tables_to_office_admin.sql
-          psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -f supabase/migrations/0033_add_sales_account_code.sql
-          psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -f supabase/migrations/0034_restrict_xero_tokens_to_office_admin.sql
+          grant_public() {
+            psql "$SUPABASE_DB_URL" -q -v ON_ERROR_STOP=1 \
+              -c "grant usage on schema public to anon, authenticated, service_role;" \
+              -c "grant all on all tables in schema public to anon, authenticated, service_role;" \
+              -c "grant all on all sequences in schema public to anon, authenticated, service_role;"
+          }
+          applied=0
+          for f in $(ls supabase/migrations/*.sql | sort); do
+            echo "::group::$f"
+            grant_public
+            psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -f "$f"
+            echo "::endgroup::"
+            applied=$((applied + 1))
+          done
+          echo "Applied $applied migrations."
+          # A loop that silently matched nothing would leave an empty database
+          # and every assertion below trivially true — the exact failure mode
+          # this job was rebuilt to remove.
+          if [ "$applied" -lt 40 ]; then
+            echo "::error::Only $applied migrations applied — expected the full chain."
+            exit 1
+          fi
+          # The grant above runs before EVERY file, so whichever migration sorts
+          # last leaves the coarse table-level grant in place and 0045's
+          # column-level revoke undone. Re-assert it once, at the end, using the
+          # helper 0046 exists to provide — order-independent, so adding a 0047
+          # cannot silently re-open the leak.
+          psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -c "select reapply_time_entries_grants();"
+      - name: Prove the bootstrap left the security posture intact
+        # The grant loop above is coarse by design, so it gets checked rather
+        # than trusted: it must not have re-opened what 0045 closed, and must not
+        # have left technicians unable to work.
+        run: |
+          export SUPABASE_DB_URL="$(supabase status -o env | grep DB_URL | cut -d= -f2 | tr -d '\"')"
+          psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -c "do \$\$ begin
+            if has_column_privilege('authenticated','public.time_entries','rate_override','SELECT') then
+              raise exception 'CI bootstrap re-opened the rate_override leak';
+            end if;
+            if not has_table_privilege('authenticated','public.time_entries','INSERT') then
+              raise exception 'CI bootstrap left technicians unable to clock in';
+            end if;
+          end \$\$;"
+      - name: Seed one user per role, and money in the money tables
+        # Without this the SQL tests below raise "fixture missing: no technician
+        # profile to impersonate" — and worse, every money table would return
+        # "readable, 0 rows", which the sweep reports as SAFE. An empty database
+        # makes the whole security suite trivially true.
+        run: |
+          export SUPABASE_DB_URL="$(supabase status -o env | grep DB_URL | cut -d= -f2 | tr -d '\"')"
+          psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -f supabase/ci/seed-roles.sql
+      - name: Prove the security migrations are actually in force
+        # These five files were written to catch the defect class that has bitten
+        # this project three times, and until now they were executed by NOTHING —
+        # not this workflow, not any npm script, and vitest cannot run .sql. They
+        # were run-by-hand documents. Now they gate the build.
+        run: |
+          export SUPABASE_DB_URL="$(supabase status -o env | grep DB_URL | cut -d= -f2 | tr -d '\"')"
+          for t in supabase/tests/*.sql; do
+            echo "::group::$t"
+            psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -f "$t"
+            echo "::endgroup::"
+          done
       - name: Run RLS tests
         run: |
           export SUPABASE_TEST_URL="$(supabase status -o env | grep API_URL | cut -d= -f2 | tr -d '\"')"

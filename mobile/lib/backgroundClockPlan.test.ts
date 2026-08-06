@@ -32,7 +32,7 @@ describe("planBackgroundClockActions", () => {
   it("plans an arrival when the batch enters a site", () => {
     const { actions, insideJobId } = planBackgroundClockActions([at(SITE_A, T0)], [SITE_A], null);
     expect(insideJobId).toBe("job-a");
-    expect(actions).toEqual([{ type: "arrive", jobId: "job-a", at: new Date(T0).toISOString(), fromJobId: null }]);
+    expect(actions).toEqual([{ type: "arrive", jobId: "job-a", at: new Date(T0).toISOString(), fromJobId: null, fromAt: null }]);
   });
 
   // THE CASE THAT JUSTIFIES PROCESSING THE WHOLE BATCH.
@@ -54,8 +54,8 @@ describe("planBackgroundClockActions", () => {
     // time between them is unattributable and gets dropped.
     const { actions } = planBackgroundClockActions([at(SITE_B, T0)], [SITE_A, SITE_B], "job-a");
     expect(actions).toEqual([
-      { type: "depart", jobId: "job-a", at: new Date(T0).toISOString(), fromJobId: null },
-      { type: "arrive", jobId: "job-b", at: new Date(T0).toISOString(), fromJobId: "job-a" },
+      { type: "depart", jobId: "job-a", at: new Date(T0).toISOString(), fromJobId: null, fromAt: null },
+      { type: "arrive", jobId: "job-b", at: new Date(T0).toISOString(), fromJobId: "job-a", fromAt: new Date(T0).toISOString() },
     ]);
   });
 
@@ -102,5 +102,80 @@ describe("planBackgroundClockActions", () => {
   it("ignores readings with no usable timestamp rather than stamping them now", () => {
     const batch = [{ coords: { latitude: SITE_A.lat, longitude: SITE_A.lng }, timestamp: NaN }];
     expect(planBackgroundClockActions(batch, [SITE_A], null).actions).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// TRAVEL LEGS — the feature this module exists to deliver, and which it could
+// not produce at all.
+//
+// Two independent causes, both structural:
+//
+//   (a) fromJobId came from state.previousJobId, which nextGeofenceState only
+//       populates when ONE reading moves from inside site A to inside site B.
+//       Real driving — 15s/25m sampling, sites hundreds of metres apart — always
+//       produces readings outside both first. That emits a departure with
+//       insideJobId null, so the later arrival carried fromJobId null and the
+//       caller's `if (fromJobId)` never fired.
+//
+//   (b) In the one case it WAS populated (the teleport), depart and arrive were
+//       stamped from the same reading, so the computed duration was zero and the
+//       leg was discarded as implausible.
+//
+// Zero travel legs on both paths — while backgroundClockTask.ts:18-22 asserts
+// "the two paths produce the SAME rows … Divergence here would be invisible and
+// would show up only as a disputed payslip". The foreground watcher gets this
+// right by carrying departureRef ACROSS readings; the plan had no equivalent,
+// and none across invocations either.
+//
+// The pre-existing test for this asserted only the teleport case — the one that
+// can never yield hours — so it passed while the feature did nothing.
+// ---------------------------------------------------------------------------
+describe("planBackgroundClockActions — travel legs", () => {
+  it("attributes a leg across the away-readings of a real drive", () => {
+    // A -> away -> away -> B. The case that happens every time and could never
+    // produce a leg.
+    const batch = [at(SITE_A, T0), away(T0 + MIN), away(T0 + 2 * MIN), at(SITE_B, T0 + 20 * MIN)];
+    const { actions } = planBackgroundClockActions(batch, [SITE_A, SITE_B], "job-a");
+
+    const arrival = actions.find((a) => a.type === "arrive" && a.jobId === "job-b");
+    expect(arrival).toBeDefined();
+    expect(arrival!.fromJobId).toBe("job-a");
+    // Timed from the DEPARTURE, not the arrival — otherwise the duration is zero
+    // and the leg is thrown away as implausible.
+    expect(arrival!.fromAt).toBe(new Date(T0 + MIN).toISOString());
+  });
+
+  it("carries a pending departure ACROSS invocations", () => {
+    // The OS kills and restarts this task freely, so a drive that starts in one
+    // batch and ends in the next is the normal case, not an edge case.
+    const first = planBackgroundClockActions([at(SITE_A, T0), away(T0 + MIN)], [SITE_A, SITE_B], "job-a");
+    expect(first.pendingDeparture).toEqual({ jobId: "job-a", at: new Date(T0 + MIN).toISOString() });
+
+    const second = planBackgroundClockActions(
+      [at(SITE_B, T0 + 30 * MIN)],
+      [SITE_A, SITE_B],
+      first.insideJobId,
+      first.pendingDeparture
+    );
+    const arrival = second.actions.find((a) => a.type === "arrive");
+    expect(arrival!.fromJobId).toBe("job-a");
+    expect(arrival!.fromAt).toBe(new Date(T0 + MIN).toISOString());
+    // Consumed, so the next arrival cannot invent a second leg from it.
+    expect(second.pendingDeparture).toBeNull();
+  });
+
+  it("still attributes the teleport case, and times it from the departure", () => {
+    const { actions } = planBackgroundClockActions([at(SITE_B, T0)], [SITE_A, SITE_B], "job-a");
+    const arrival = actions.find((a) => a.type === "arrive");
+    expect(arrival!.fromJobId).toBe("job-a");
+    expect(arrival!.fromAt).toBe(new Date(T0).toISOString());
+  });
+
+  it("does not attribute a leg to an arrival that follows no departure", () => {
+    const { actions } = planBackgroundClockActions([at(SITE_A, T0)], [SITE_A], null);
+    const arrival = actions.find((a) => a.type === "arrive");
+    expect(arrival!.fromJobId).toBeNull();
+    expect(arrival!.fromAt).toBeNull();
   });
 });
