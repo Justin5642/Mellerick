@@ -11,6 +11,18 @@ import type { Connectivity } from "../net/connectivity";
 // dropped. Serialized (one drain at a time) so intra-device ordering holds.
 export class Processor {
   private draining = false;
+  /**
+   * Set when drain() is called while a pass is already running.
+   *
+   * The short-circuit below keeps drains serialized, which is right — but it
+   * also meant a mutation enqueued mid-pass got no drain of its own. flush()
+   * returned immediately, notified its settled listeners anyway, and the write
+   * waited for the next reconnect, app start or background-fetch slot (>=15
+   * minutes, at the OS's discretion). Not a loss — screens merge pendingRowIds —
+   * but the "kick a drain right after a mutation" guarantee in flush()'s own doc
+   * comment did not hold.
+   */
+  private redrainRequested = false;
 
   constructor(
     private outbox: Outbox,
@@ -23,9 +35,25 @@ export class Processor {
   // Each failed op is backed off so it won't be re-selected in this pass,
   // guaranteeing termination.
   async drain(): Promise<void> {
-    if (this.draining) return;
+    // A concurrent caller does not get its own pass — but it does get noticed,
+    // so the running pass loops once more and picks up whatever it enqueued.
+    if (this.draining) {
+      this.redrainRequested = true;
+      return;
+    }
     this.draining = true;
     try {
+      do {
+        this.redrainRequested = false;
+        await this.drainOnce();
+      } while (this.redrainRequested);
+    } finally {
+      this.draining = false;
+    }
+  }
+
+  private async drainOnce(): Promise<void> {
+    {
       if (!(await this.connectivity.isOnline())) return;
       // Recover any op stranded "inflight" by a crash mid-dispatch (drains are
       // serialized, so at this point an inflight op can only be a leftover).
@@ -56,8 +84,6 @@ export class Processor {
       } catch (e) {
         if (__DEV__) console.warn("[outbox] prune failed (harmless, will retry next drain):", e);
       }
-    } finally {
-      this.draining = false;
     }
   }
 

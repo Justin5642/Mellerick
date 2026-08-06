@@ -28,8 +28,30 @@ export const supabaseGateway: SupabaseGateway = {
     throw new Error(`${table} insert: ${error.message}`);
   },
   async updateRow(table, id, patch) {
-    const { error } = await supabase.from(table).update(patch).eq("id", id);
+    // `count: "exact"` because A WRITE THAT AFFECTED NO ROWS IS NOT A WRITE.
+    //
+    // PostgREST does not return an error when an UPDATE matches nothing: RLS
+    // filters the row out and the statement succeeds against zero rows. Checking
+    // only `error` therefore reported success for an edit that never happened —
+    // the processor marked the operation done and removed it from the outbox,
+    // leaving no error, no dead letter and no badge. The same shape as the
+    // geofence and clock-in defects: asking "did it fail?" when the question is
+    // "did it happen?".
+    const { error, count } = await supabase
+      .from(table)
+      .update(patch, { count: "exact" })
+      .eq("id", id);
     if (error) throw new Error(`${table} update: ${error.message}`);
+
+    // An ABSENT count is not zero. Some PostgREST configurations omit the
+    // header, and treating that as failure would dead-letter every healthy
+    // write — worse than the bug being fixed. Only an explicit zero is a loss.
+    if (count === 0) {
+      throw new Error(
+        `${table} update affected no rows (id ${id}) — the row is missing or RLS denied it. ` +
+          `Failing rather than reporting success, so the operation is retried and surfaced instead of vanishing.`
+      );
+    }
   },
   async deleteRow(table, id) {
     const { error } = await supabase.from(table).delete().eq("id", id);

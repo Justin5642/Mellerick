@@ -201,12 +201,26 @@ export class Outbox {
     // Only "pending", "failed" and "inflight" block. "dead" deliberately does
     // NOT: a dead op will never run again, so blocking on it would freeze that
     // row's queue forever — trading a lost update for a lost everything.
-    const oldestOutstandingByRow = new Map<string, number>();
+    // KEYED ON THE OP ID, NOT THE TIMESTAMP VALUE.
+    //
+    // This map used to hold `createdAt`, and the filter below compared
+    // `oldestOutstandingByRow.get(rowId) === o.createdAt`. Two outstanding
+    // writes for the same row created in the SAME MILLISECOND both satisfy that
+    // — a double-tap, or two repository calls in one tick — so both were
+    // released and the overtake protection this block exists to provide was
+    // void for exactly the case most likely to produce one.
+    //
+    // The id is unique by construction, so only one op can ever match.
+    const oldestOutstandingByRow = new Map<string, { id: string; createdAt: number }>();
     for (const o of all) {
       if (o.kind !== "write") continue;
       if (o.status !== "pending" && o.status !== "failed" && o.status !== "inflight") continue;
       const seen = oldestOutstandingByRow.get(o.rowId);
-      if (seen === undefined || o.createdAt < seen) oldestOutstandingByRow.set(o.rowId, o.createdAt);
+      // Ties broken by id so the choice is deterministic rather than dependent
+      // on the store's iteration order.
+      if (seen === undefined || o.createdAt < seen.createdAt || (o.createdAt === seen.createdAt && o.id < seen.id)) {
+        oldestOutstandingByRow.set(o.rowId, { id: o.id, createdAt: o.createdAt });
+      }
     }
 
     const ready = all
@@ -214,7 +228,7 @@ export class Outbox {
       .filter((o) => isDue(o.nextAttemptAt, now))
       .filter((o) => !o.dependsOn || doneIds.has(o.dependsOn))
       // Side effects are coalesced by key and carry no row, so they are exempt.
-      .filter((o) => o.kind !== "write" || oldestOutstandingByRow.get(o.rowId) === o.createdAt)
+      .filter((o) => o.kind !== "write" || oldestOutstandingByRow.get(o.rowId)?.id === o.id)
       .sort((a, b) => a.createdAt - b.createdAt);
     return ready[0];
   }
@@ -270,9 +284,20 @@ export class Outbox {
    */
   async pruneCompleted(retainMs: number = DEFAULT_PRUNE_RETENTION_MS): Promise<number> {
     const all = await this.store.all();
+    // DEAD OPS COUNT AS LIVE HERE. Excluding them looked safe — a dead op is not
+    // going to run — but retryDead() resets one to `pending` WITHOUT clearing
+    // dependsOn, and nextReady only unblocks a dependent by finding its
+    // dependency among the DONE ids. Prune that row and the revived op can never
+    // become ready: it sits "pending" forever, and the badge shows nothing worse
+    // than a queued write.
+    //
+    // Concrete path: an admin approves a job offline. createInvoice enqueues the
+    // invoice insert (P) and, gated on it, the jobs update (J). P lands. J is
+    // rejected MAX_ATTEMPTS times and goes dead. Seven days pass and a drain
+    // prunes P. The user taps Retry — and the job is never marked approved.
     const stillNeeded = new Set(
       all
-        .filter((o) => o.status !== "done" && o.status !== "dead")
+        .filter((o) => o.status !== "done")
         .map((o) => o.dependsOn)
         .filter((id): id is string => Boolean(id))
     );

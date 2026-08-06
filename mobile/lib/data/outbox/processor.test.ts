@@ -308,3 +308,38 @@ describe("Processor — reclaims orphaned attachment files", () => {
     expect(gateway.cleanupAttachment).not.toHaveBeenCalledWith("dead-photo.jpg");
   });
 });
+
+describe("Processor — a drain requested mid-pass is not dropped", () => {
+  it("loops once more to pick up work enqueued while it was running", async () => {
+    // drain() short-circuits when a pass is already running, which correctly
+    // keeps drains serialized — but it also meant a mutation enqueued mid-pass
+    // got no drain of its own. flush() returned immediately, fired its settled
+    // listeners anyway, and the write waited for the next reconnect, app start
+    // or background-fetch slot (>=15 minutes, at the OS's discretion). Not a
+    // loss, since screens merge pendingRowIds, but the "kick a drain right after
+    // a mutation" guarantee in flush()'s own doc comment did not hold.
+    const store = new InMemoryOutboxStore();
+    const outbox = new Outbox(store, fixedClock());
+    const gateway = makeGateway();
+    const proc = new Processor(outbox, gateway, makeApi(), online(true));
+
+    await outbox.enqueue(write("first", { rowId: "row-1", op: "insert" }));
+
+    // Enqueue a second op DURING the first dispatch, and ask for a drain — the
+    // exact shape of a technician tapping save while a pass is in flight.
+    let reentered = false;
+    (gateway.insertRow as jest.Mock).mockImplementation(async () => {
+      if (reentered) return;
+      reentered = true;
+      await outbox.enqueue(write("second", { rowId: "row-2", op: "insert" }));
+      await proc.drain(); // short-circuits, but must register the request
+    });
+
+    await proc.drain();
+
+    // Both landed in ONE call from the caller's perspective. Before the fix the
+    // second sat pending until something else happened to trigger a drain.
+    const remaining = (await store.all()).filter((o) => o.status !== "done");
+    expect(remaining).toEqual([]);
+  });
+});

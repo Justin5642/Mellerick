@@ -18,7 +18,14 @@ import { supabaseGateway } from "./gateway.supabase";
 // `mock`-prefixed names are the only out-of-scope variables a hoisted
 // jest.mock factory may reference.
 const mockInsert = jest.fn();
-const mockFrom = jest.fn(() => ({ insert: mockInsert }));
+const mockUpdateResult = jest.fn();
+const mockDeleteResult = jest.fn();
+
+// update/delete are chained: .update(patch).eq("id", id). The eq() resolves.
+const mockUpdate = jest.fn(() => ({ eq: () => mockUpdateResult() }));
+const mockDelete = jest.fn(() => ({ eq: () => mockDeleteResult() }));
+
+const mockFrom = jest.fn(() => ({ insert: mockInsert, update: mockUpdate, delete: mockDelete }));
 
 jest.mock("../supabase", () => ({ supabase: { from: () => mockFrom() } }));
 jest.mock("expo-file-system/legacy", () => ({ readAsStringAsync: jest.fn(), EncodingType: { Base64: "base64" } }));
@@ -28,7 +35,73 @@ const insert = mockInsert;
 
 beforeEach(() => {
   mockInsert.mockReset();
+  mockUpdateResult.mockReset();
+  mockDeleteResult.mockReset();
   mockFrom.mockClear();
+});
+
+// ---------------------------------------------------------------------------
+// A WRITE THAT AFFECTED NO ROWS IS NOT A WRITE.
+//
+// updateRow checked only `error`. PostgREST does not return an error when an
+// UPDATE matches nothing — RLS filters the row out and the statement succeeds
+// against zero rows. So a technician's edit that RLS denied, or one targeting a
+// row that is not theirs, came back clean; the processor marked the operation
+// done and deleted it from the outbox. No error, no dead letter, no badge. The
+// edit simply never happened.
+//
+// This is the same shape as the geofence and clock-in defects: the code asked
+// "did it fail?" when the question was "did it happen?".
+//
+// DELETE is deliberately NOT symmetric. Zero rows there means the row is already
+// gone, which for an idempotent replay is success, not loss.
+// ---------------------------------------------------------------------------
+describe("updateRow — a write that changed nothing must not report success", () => {
+  it("throws when the update matched no rows", async () => {
+    mockUpdateResult.mockResolvedValue({ error: null, count: 0 });
+    await expect(supabaseGateway.updateRow("time_entries", "row-1", { hours: 2 })).rejects.toThrow(
+      /affected no rows/i
+    );
+  });
+
+  it("names the table and row, because the outbox replays many of these", async () => {
+    mockUpdateResult.mockResolvedValue({ error: null, count: 0 });
+    await expect(supabaseGateway.updateRow("job_photos", "photo-9", { caption: "x" })).rejects.toThrow(
+      /job_photos.*photo-9|photo-9.*job_photos/
+    );
+  });
+
+  it("succeeds when a row was actually updated", async () => {
+    mockUpdateResult.mockResolvedValue({ error: null, count: 1 });
+    await expect(supabaseGateway.updateRow("time_entries", "row-1", { hours: 2 })).resolves.toBeUndefined();
+  });
+
+  it("still surfaces a genuine error", async () => {
+    mockUpdateResult.mockResolvedValue({ error: { message: "permission denied" }, count: null });
+    await expect(supabaseGateway.updateRow("time_entries", "row-1", { hours: 2 })).rejects.toThrow(
+      /permission denied/
+    );
+  });
+
+  it("does not fail when the driver reports no count at all", async () => {
+    // Some PostgREST configurations omit the count header. Treating an ABSENT
+    // count as zero would dead-letter every healthy write — worse than the bug
+    // being fixed. Absence is unknown, and unknown is not failure.
+    mockUpdateResult.mockResolvedValue({ error: null, count: null });
+    await expect(supabaseGateway.updateRow("time_entries", "row-1", { hours: 2 })).resolves.toBeUndefined();
+  });
+});
+
+describe("deleteRow — zero rows is success, not loss", () => {
+  it("succeeds when the row is already gone (an idempotent replay)", async () => {
+    mockDeleteResult.mockResolvedValue({ error: null, count: 0 });
+    await expect(supabaseGateway.deleteRow("job_photos", "photo-1")).resolves.toBeUndefined();
+  });
+
+  it("still surfaces a genuine error", async () => {
+    mockDeleteResult.mockResolvedValue({ error: { message: "boom" }, count: null });
+    await expect(supabaseGateway.deleteRow("job_photos", "photo-1")).rejects.toThrow(/boom/);
+  });
 });
 
 describe("insertRow — 23505 handling", () => {
