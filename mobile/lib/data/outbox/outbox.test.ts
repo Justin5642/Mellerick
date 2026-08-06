@@ -189,6 +189,42 @@ describe("Outbox", () => {
       expect((await box.nextReady())?.id).toBe("update-op");
     });
 
+    it("NEVER prunes a completed op that a DEAD op depends on, because retryDead can revive it", async () => {
+      // The dead case was excluded from `stillNeeded`, which looked safe: a dead
+      // op is not going to run. But retryDead() resets it to pending WITHOUT
+      // clearing dependsOn, and nextReady only unblocks via the DONE ids — so
+      // once the dependency row is pruned, the revived op can never become
+      // ready. It sits "pending" forever, and the badge shows nothing worse than
+      // a queued write.
+      //
+      // Concrete path: an admin approves a job offline. createInvoice enqueues
+      // the invoice insert (P) and, gated on it, the jobs update (J). P lands.
+      // J is rejected eight times and goes dead. Seven days pass and a drain
+      // prunes P. The user taps Retry — and the job is never marked approved.
+      const clock = mockClock();
+      const store = new InMemoryOutboxStore();
+      const box = new Outbox(store, clock);
+      await box.enqueue(write("insert-op"));
+      await box.enqueue(write("update-op", { dependsOn: "insert-op" }));
+      await box.markDone("insert-op");
+
+      // Drive it to the terminal state the honest way — MAX_ATTEMPTS failures —
+      // rather than reaching into the store, so the test exercises the same
+      // path production does.
+      for (let i = 0; i < MAX_ATTEMPTS; i++) {
+        const op = (await store.all()).find((o) => o.id === "update-op")!;
+        await box.markFailed(op, "network error");
+      }
+      expect((await store.all()).find((o) => o.id === "update-op")!.status).toBe("dead");
+
+      clock.advance(8 * 24 * 60 * 60 * 1000);
+      expect(await box.pruneCompleted()).toBe(0);
+
+      // And the revived op can still become ready — the property that matters.
+      await box.retryDead();
+      expect((await box.nextReady())?.id).toBe("update-op");
+    });
+
     it("keeps recent completed ops so support can see what a device sent", async () => {
       const clock = mockClock();
       const store = new InMemoryOutboxStore();
@@ -432,6 +468,24 @@ describe("Outbox — per-row ordering", () => {
     // B is due and A is not — but running B now would let A overwrite it later.
     const next = await box.nextReady();
     expect(next).toBeUndefined();
+  });
+
+  it("holds the ordering when two ops for a row share a millisecond", async () => {
+    // The guard used to compare the oldest outstanding op's createdAt VALUE, so
+    // two writes for the same row created in the same millisecond both matched
+    // and both were released — voiding the protection for exactly the case most
+    // likely to produce an overtake: a double-tap, or two repository calls in
+    // one tick. Keyed on the op id, only one can ever match.
+    const clock = mockClock();
+    const box = new Outbox(new InMemoryOutboxStore(), clock);
+    await box.enqueue(write("a", { rowId: "job-1", op: "update", createdAt: 7 }));
+    await box.enqueue(write("b", { rowId: "job-1", op: "update", createdAt: 7 }));
+
+    const first = await box.nextReady();
+    expect(first).toBeDefined();
+    // Exactly ONE is released; the other waits behind it.
+    await box.markInflight(first!.id);
+    expect(await box.nextReady()).toBeUndefined();
   });
 
   it("dispatches the earlier op once its backoff elapses", async () => {

@@ -28,8 +28,30 @@ export const supabaseGateway: SupabaseGateway = {
     throw new Error(`${table} insert: ${error.message}`);
   },
   async updateRow(table, id, patch) {
-    const { error } = await supabase.from(table).update(patch).eq("id", id);
+    // `count: "exact"` because A WRITE THAT AFFECTED NO ROWS IS NOT A WRITE.
+    //
+    // PostgREST does not return an error when an UPDATE matches nothing: RLS
+    // filters the row out and the statement succeeds against zero rows. Checking
+    // only `error` therefore reported success for an edit that never happened —
+    // the processor marked the operation done and removed it from the outbox,
+    // leaving no error, no dead letter and no badge. The same shape as the
+    // geofence and clock-in defects: asking "did it fail?" when the question is
+    // "did it happen?".
+    const { error, count } = await supabase
+      .from(table)
+      .update(patch, { count: "exact" })
+      .eq("id", id);
     if (error) throw new Error(`${table} update: ${error.message}`);
+
+    // An ABSENT count is not zero. Some PostgREST configurations omit the
+    // header, and treating that as failure would dead-letter every healthy
+    // write — worse than the bug being fixed. Only an explicit zero is a loss.
+    if (count === 0) {
+      throw new Error(
+        `${table} update affected no rows (id ${id}) — the row is missing or RLS denied it. ` +
+          `Failing rather than reporting success, so the operation is retried and surfaced instead of vanishing.`
+      );
+    }
   },
   async deleteRow(table, id) {
     const { error } = await supabase.from(table).delete().eq("id", id);
@@ -137,19 +159,53 @@ const sideEffectPath: Record<SideEffectKind, (p: Record<string, unknown>) => str
   "backflow-submit": (p) => `/api/backflow/tests/${p.testId}/submit`,
 };
 
+/**
+ * How long a side-effect call may hang before the drain gives up on it.
+ *
+ * `fetch` has NO default timeout. On a flaky mobile connection — a van moving
+ * between cells, a site with one bar — a request can stay open indefinitely.
+ * Because the processor drains strictly one operation at a time, a single hung
+ * call stalls the ENTIRE queue behind it: every subsequent clock-out, photo and
+ * variation waits on a promise that will never settle, with the badge showing a
+ * pending count that never moves and no error anywhere.
+ *
+ * 30s is well past a healthy round trip on a poor connection, so a timeout here
+ * means something is genuinely wrong. Timing out is also strictly better than
+ * hanging: the operation is marked failed, backed off, and retried, and the rest
+ * of the queue keeps moving.
+ */
+const SIDE_EFFECT_TIMEOUT_MS = 30_000;
+
 export const apiBridge: ApiBridge = {
   async callSideEffect(effect, payload) {
     if (!API_BASE_URL) return; // degrade gracefully when the web API isn't configured
     const { data } = await supabase.auth.getSession();
     const token = data.session?.access_token;
-    const res = await fetch(`${API_BASE_URL}${sideEffectPath[effect](payload)}`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      },
-      body: JSON.stringify(payload),
-    });
-    if (!res.ok) throw new Error(`${effect}: HTTP ${res.status}`);
+
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), SIDE_EFFECT_TIMEOUT_MS);
+    try {
+      const res = await fetch(`${API_BASE_URL}${sideEffectPath[effect](payload)}`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify(payload),
+        signal: controller.signal,
+      });
+      if (!res.ok) throw new Error(`${effect}: HTTP ${res.status}`);
+    } catch (e) {
+      // An abort surfaces as a bare "Aborted", which tells whoever reads the
+      // dead-letter nothing. Name the effect and the limit.
+      if (e instanceof Error && e.name === "AbortError") {
+        throw new Error(`${effect}: timed out after ${SIDE_EFFECT_TIMEOUT_MS}ms`);
+      }
+      throw e;
+    } finally {
+      // Always cleared, including on success — an uncleared timer keeps a
+      // reference alive and fires abort() on a completed request.
+      clearTimeout(timer);
+    }
   },
 };

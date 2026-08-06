@@ -46,7 +46,17 @@ export function PowerSyncProvider({ children }: { children: React.ReactNode }) {
   const { session, profile } = useAuth();
   const layer = useDataLayer();
   const role = asLocalRole(profile?.role);
+  /** The role PowerSync is CONNECTED as. Decides whether a disconnect is owed. */
   const connectedRole = useRef<LocalRole>(null);
+  /**
+   * The role whose first sync COMPLETED and whose local reads are registered.
+   *
+   * Deliberately separate from connectedRole. Gating the early return on
+   * "connected" made a lost seam permanent: a transition superseded during
+   * waitForFirstSync skipped registration, and the next one returned early
+   * because the connection had already been recorded.
+   */
+  const syncedRole = useRef<LocalRole>(null);
   // All connect/disconnect work appends here — one transition at a time.
   const transitions = useRef<Promise<void>>(Promise.resolve());
   // Bumped on every transition; a queued setLocalReads only applies if its
@@ -74,24 +84,43 @@ export function PowerSyncProvider({ children }: { children: React.ReactNode }) {
       if (gen !== generation.current) return; // superseded while queued
       try {
         if (session && role) {
-          if (connectedRole.current === role) return;
+          // GATED ON THE ROLE THAT FINISHED SYNCING, not the one we started
+          // connecting for.
+          //
+          // These used to be the same ref, set immediately after connect() and
+          // before waitForFirstSync(). That made a lost seam PERMANENT for the
+          // app session: a TOKEN_REFRESHED landing mid-sync bumps the
+          // generation, so transition #1 skipped setLocalReads — and transition
+          // #2 then returned early here, because the ref already said "we are
+          // on this role". Local reads were never registered again, and every
+          // read fell back to the network for the rest of the session. On a
+          // technician's phone in a basement that is not a slowdown, it is a
+          // dead app. auth-context re-emits on every token refresh, so the
+          // trigger was routine rather than exotic.
+          if (syncedRole.current === role) return;
+
           // Any previous connection's rows are for the wrong role now.
           setLocalReads(null);
           if (connectedRole.current !== null) {
             await powersync.disconnectAndClear();
           }
           await powersync.connect(connector);
+          // Tracked separately from syncedRole, and ONLY so the next transition
+          // knows a disconnect is owed. It must not gate the early return.
           connectedRole.current = role;
-          // Register the seam only once THIS connection has fully synced —
-          // a persisted hasSynced from the previous role must not count.
+
+          // Register the seam only once THIS connection has fully synced — a
+          // persisted hasSynced from the previous role must not count.
           const frozen = role;
           await powersync.waitForFirstSync();
           if (gen === generation.current && connectedRole.current === frozen) {
+            syncedRole.current = frozen;
             setLocalReads(makeLocalReads(() => frozen));
           }
         } else {
-          if (connectedRole.current === null) return;
+          if (connectedRole.current === null && syncedRole.current === null) return;
           connectedRole.current = null;
+          syncedRole.current = null;
           setLocalReads(null);
           // Sign-out (or unknown role): wipe the mirror. Financial rows must
           // not survive on a device with no authenticated user.

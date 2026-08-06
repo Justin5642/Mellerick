@@ -11,6 +11,49 @@ import type { Connectivity } from "../net/connectivity";
 // dropped. Serialized (one drain at a time) so intra-device ordering holds.
 export class Processor {
   private draining = false;
+  /**
+   * Set when drain() is called while a pass is already running.
+   *
+   * The short-circuit below keeps drains serialized, which is right — but it
+   * also meant a mutation enqueued mid-pass got no drain of its own. flush()
+   * returned immediately, notified its settled listeners anyway, and the write
+   * waited for the next reconnect, app start or background-fetch slot (>=15
+   * minutes, at the OS's discretion). Not a loss — screens merge pendingRowIds —
+   * but the "kick a drain right after a mutation" guarantee in flush()'s own doc
+   * comment did not hold.
+   */
+  private redrainRequested = false;
+
+  /**
+   * Bumped by stop(). A drain already inside its loop checks this at each await
+   * boundary and abandons itself.
+   *
+   * HANDOVER.md:182-186 claims this already existed — "Fix, in syncEngine.ts:
+   * stop() bumps a generation counter" — but both of those checks sit OUTSIDE
+   * processor.drain(). They stop a NEW drain from starting and skip the
+   * post-drain notify; they cannot abandon a pass that is already running.
+   *
+   * That matters because SqliteOutboxStore.open() returns a module-cached
+   * promise, so a remount produces a SECOND Processor over the SAME store with
+   * draining = false. Both loops then call reclaimInflight(), which is designed
+   * to recover ops stranded by a crash — and each would reclaim the other's
+   * in-flight work and dispatch it again.
+   *
+   * Queued work is durable on disk, so abandoning loses nothing: the next drain
+   * picks it up.
+   */
+  private generation = 0;
+
+  /**
+   * Abandon any running drain and refuse new ones until the next drain() call.
+   * Called on teardown, where the SQLite handles a running pass would use may be
+   * about to be released — the "Cannot use shared object that was already
+   * released" class this codebase has hit twice.
+   */
+  stop(): void {
+    this.generation++;
+    this.redrainRequested = false;
+  }
 
   constructor(
     private outbox: Outbox,
@@ -23,9 +66,27 @@ export class Processor {
   // Each failed op is backed off so it won't be re-selected in this pass,
   // guaranteeing termination.
   async drain(): Promise<void> {
-    if (this.draining) return;
+    // A concurrent caller does not get its own pass — but it does get noticed,
+    // so the running pass loops once more and picks up whatever it enqueued.
+    if (this.draining) {
+      this.redrainRequested = true;
+      return;
+    }
     this.draining = true;
+    const generation = this.generation;
     try {
+      do {
+        this.redrainRequested = false;
+        await this.drainOnce(generation);
+        if (generation !== this.generation) return;
+      } while (this.redrainRequested);
+    } finally {
+      this.draining = false;
+    }
+  }
+
+  private async drainOnce(generation: number): Promise<void> {
+    {
       if (!(await this.connectivity.isOnline())) return;
       // Recover any op stranded "inflight" by a crash mid-dispatch (drains are
       // serialized, so at this point an inflight op can only be a leftover).
@@ -34,14 +95,22 @@ export class Processor {
       await this.outbox.cascadeDeadDependencies();
       let op: Operation | undefined;
       while ((op = await this.outbox.nextReady())) {
+        // Checked INSIDE the loop, which is the whole point. A stop() during a
+        // long dispatch must not leave this pass writing through SQLite handles
+        // that are being torn down, and must not leave it racing a second
+        // Processor built over the same cached store.
+        if (generation !== this.generation) return;
         await this.outbox.markInflight(op.id);
         try {
           await this.dispatch(op);
+          if (generation !== this.generation) return;
           await this.outbox.markDone(op.id);
         } catch (err) {
+          if (generation !== this.generation) return;
           await this.outbox.markFailed(op, err instanceof Error ? err.message : String(err));
         }
       }
+      if (generation !== this.generation) return;
       // Drop completed work nothing still needs. Without this the queue grows for
       // the life of the install, and nextReady() — which reads and parses the
       // WHOLE table, once per operation — turns a long-serving device's drain
@@ -56,8 +125,6 @@ export class Processor {
       } catch (e) {
         if (__DEV__) console.warn("[outbox] prune failed (harmless, will retry next drain):", e);
       }
-    } finally {
-      this.draining = false;
     }
   }
 

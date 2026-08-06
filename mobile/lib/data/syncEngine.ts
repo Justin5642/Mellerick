@@ -64,6 +64,12 @@ export class SyncEngine {
     this.unsubscribe = undefined;
     this.started = false;
     this.generation += 1; // abandons any drain still in flight
+    // ...and the PROCESSOR's own loop, which this counter never reached. Both
+    // checks here sit outside processor.drain(): they stop a NEW drain starting
+    // and skip the post-drain notify, but a pass already inside its while-loop
+    // kept dispatching and kept writing through SQLite handles that teardown was
+    // about to release. HANDOVER.md:182-186 described this as already fixed.
+    this.processor.stop();
   }
 
   private drainInBackground(generation: number): void {
