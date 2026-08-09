@@ -250,6 +250,28 @@ begin
     case when raised is not null then 'BROKEN — office refused (' || raised || ')'
          when n = 1 then 'ok — allowed' else 'BROKEN — 0 rows' end, n);
 
+  -- =====================================================================
+  -- SERVER CONTEXT. The assignment trigger fires for EVERY writer, not just
+  -- end users — including the service role and plain psql, which carry no JWT
+  -- `sub` and so look like "not office/admin". The first version of this
+  -- trigger refused them, and CI's own fixture seed
+  -- (supabase/ci/seed-roles.sql:111) failed on it. Any backfill, import or
+  -- auto-dispatch would have failed the same way.
+  -- =====================================================================
+  perform set_config('request.jwt.claims', '{"role":"service_role"}', true);
+  raised := null;
+  begin
+    update jobs set assigned_to = tech where id = other_job;
+    get diagnostics n = row_count;
+  exception when others then
+    raised := sqlstate;
+    n := 0;
+  end;
+  insert into probe values ('jobs.assigned_to',
+    'SERVICE ROLE assigns a job', 'MUST be allowed — seeds and imports depend on it',
+    case when raised is not null then 'BROKEN — server context refused (' || raised || ')'
+         when n = 1 then 'ok — allowed' else 'BROKEN — 0 rows' end, n);
+
   perform set_config('request.jwt.claims', '', true);
 
   if seeded_assignment then

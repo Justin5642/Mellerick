@@ -404,6 +404,23 @@ security definer
 set search_path = public, pg_temp
 as $$
 begin
+  -- POLICE END USERS ONLY. A trigger fires for every writer, including ones
+  -- that hold the service-role key or a direct psql connection — and those
+  -- have no JWT `sub`, so auth.uid() is null and is_office_or_admin(null) is
+  -- false. Without this guard the trigger refuses every server-side write:
+  -- CI's own fixture seed (supabase/ci/seed-roles.sql:111, which runs as
+  -- service_role and assigns the CI job to the technician) failed on exactly
+  -- this, and so would any future backfill, import or auto-dispatch.
+  --
+  -- Exempting them grants nothing. The threat model is a technician holding
+  -- the anon key that ships inside the app, and PostgREST stamps that caller
+  -- 'authenticated' from a JWT they cannot forge. The service role already
+  -- bypasses RLS entirely, so it is trusted by construction, not by this line.
+  -- Same test the rest of the schema keys on (0000_baseline.sql:131, 0037:39).
+  if auth.role() is distinct from 'authenticated' then
+    return new;
+  end if;
+
   if tg_op = 'INSERT' then
     if new.assigned_to is not null and not is_office_or_admin(auth.uid()) then
       raise exception
