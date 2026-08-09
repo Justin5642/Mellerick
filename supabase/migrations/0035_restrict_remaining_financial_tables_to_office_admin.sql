@@ -2,12 +2,26 @@
 -- RESTRICT REMAINING FINANCIAL TABLES TO OFFICE/ADMIN
 -- (second $-hardening pass -- closes the leaks migration 0027 did not cover)
 --
--- STATUS: PROPOSED (mobile/full-parity branch). Authored + cross-checked by an
--- automated policy-name/tech-access audit, but NOT yet applied or RLS-tested
--- against a live database (RLS can't be exercised from the mobile repo). The
--- shared `supabase/` schema is owned by Justin -- he should review this, run the
--- companion role-impersonation test in ../tests/0035_rls_role_impersonation_test.sql
--- against a real DB, and apply it. Do NOT auto-apply unreviewed. See
+-- STATUS: ✅ APPLIED AND VERIFIED IN PRODUCTION. Confirmed 2026-08-05 by
+-- querying supabase_migrations.schema_migrations directly, and by impersonation:
+-- a technician reads 0 rows from equipment, equipment_expenses, inventory and
+-- job_expenses while an office control reads 21 / 0 / 0 / 1 — so the zeros are
+-- RLS, not empty tables.
+--
+-- The header below said "PROPOSED ... NOT yet applied" for roughly a week AFTER
+-- it was applied. That is not a cosmetic error. `supabase db push` applies
+-- whatever the ledger lacks regardless of what a comment claims, so a stale
+-- "do NOT auto-apply" header does not protect anything — it only misleads the
+-- next person into believing the dollar-leak boundary is not yet in force, or
+-- into "reviewing and applying" a migration that is already live. The same
+-- stale-header mistake had already misled three code comments in 0037.
+--
+-- Verify, do not trust this comment:
+--   select * from supabase_migrations.schema_migrations where version like '0035%';
+--
+-- Original note, kept for provenance: authored + cross-checked by an automated
+-- policy-name/tech-access audit; companion role-impersonation test lives in
+-- ../tests/0035_rls_role_impersonation_test.sql. See
 -- mobile/DECISIONS-FOR-AVI.md Q19/D39.
 --
 -- Business rule: technicians must NEVER see dollar figures -- pricing, costs

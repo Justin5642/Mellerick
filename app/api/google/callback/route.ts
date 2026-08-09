@@ -3,12 +3,23 @@ import { google } from "googleapis";
 import { getGoogleOAuthClient } from "@/lib/google";
 import { createClient } from "@/lib/supabase/server";
 import { requireAdmin } from "@/lib/api/guards";
+import { isValidOAuthState, GOOGLE_STATE_COOKIE } from "@/lib/oauth-state";
 
 export async function GET(request: NextRequest) {
   // Re-check admin at the callback (see xero/callback for the rationale): this
   // is where google_tokens is deleted and rewritten.
   const guard = await requireAdmin(request);
   if (!guard.ok) return guard.response;
+
+  // CSRF. Verified BEFORE the code is exchanged: a forged callback carries the
+  // attacker's code but no matching HttpOnly cookie, so it is refused before any
+  // token is issued or any row is deleted. The requireAdmin above cannot do this
+  // job — the attack works precisely BECAUSE the victim is an admin.
+  const state = request.nextUrl.searchParams.get("state");
+  const cookie = request.cookies.get(GOOGLE_STATE_COOKIE)?.value;
+  if (!isValidOAuthState(cookie, state)) {
+    return NextResponse.redirect(new URL("/dashboard/settings?google=state_mismatch", request.url));
+  }
 
   const code = request.nextUrl.searchParams.get("code");
   if (!code) {

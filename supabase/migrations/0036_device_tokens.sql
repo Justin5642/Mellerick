@@ -1,8 +1,16 @@
--- PROPOSED (not applied) — flagged for Justin's review, like 0035.
+-- STATUS: ✅ APPLIED IN PRODUCTION. Confirmed 2026-08-05 against
+-- supabase_migrations.schema_migrations. The previous "PROPOSED (not applied)"
+-- header was stale and actively misleading: it implied push was still waiting on
+-- a database change when the table has existed for some time, so the real
+-- blocker — APNs and FCM credentials — was hidden behind a false one.
+--
 -- Backs the mobile push-notification registration (MP9): each device stores its
 -- Expo push token so the backend can target it. The mobile client upserts here
 -- after sign-in (see mobile/lib/push/*); the app degrades gracefully if this
--- table does not yet exist, so applying it is what "turns push on" server-side.
+-- table does not exist.
+--
+-- WHAT ACTUALLY REMAINS for push: an APNs .p8 from Apple (it downloads ONCE) and
+-- an FCM service-account JSON. Nothing in the database.
 
 create table if not exists device_tokens (
   token text primary key,                    -- the Expo push token (unique per install)

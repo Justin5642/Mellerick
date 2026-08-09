@@ -5,6 +5,7 @@ import { renderDocumentPdf } from "@/lib/pdf/render";
 import { businessInfo } from "@/lib/business-info";
 import { getResend, getFromAddress } from "@/lib/resend";
 import { formatDate } from "@/lib/date";
+import { escapeHtml } from "@/lib/html";
 
 export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
@@ -51,7 +52,12 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     });
 
     const resend = getResend();
-    const personalNote = body.message ? `<p>${String(body.message).replace(/\n/g, "<br/>")}</p>` : "";
+    // ESCAPE FIRST, then convert newlines — the other order would escape the
+    // <br/> tags this line just inserted. body.message is typed by a user and
+    // lands in an email sent to a customer.
+    const personalNote = body.message
+      ? `<p>${escapeHtml(String(body.message)).replace(/\n/g, "<br/>")}</p>`
+      : "";
     const validUntilLine = quote.valid_until
       ? `<p>This quote is valid until <strong>${formatDate(quote.valid_until)}</strong>.</p>`
       : "";
@@ -62,8 +68,8 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       subject: `Quote #${quote.quote_number} from ${businessInfo.name}`,
       html: `
         <div style="font-family: sans-serif; color: #1e293b; line-height: 1.5;">
-          <p>Hi ${quote.customers?.name ?? "there"},</p>
-          <p>Please find attached your quote <strong>#${quote.quote_number} — ${quote.title}</strong> for <strong>$${Number(quote.total).toFixed(2)}</strong> (inc. GST).</p>
+          <p>Hi ${escapeHtml(quote.customers?.name ?? "there")},</p>
+          <p>Please find attached your quote <strong>#${quote.quote_number} — ${escapeHtml(quote.title)}</strong> for <strong>$${Number(quote.total).toFixed(2)}</strong> (inc. GST).</p>
           ${personalNote}
           ${validUntilLine}
           <p>If you have any questions, just reply to this email.</p>

@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
+import { resolveExistingInvoice } from "@/lib/approval-invoice-guard";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -70,14 +71,22 @@ export default function ApprovalsPage() {
 
     // Guard against double-creating an invoice if one already exists for
     // this job (e.g. office manually built one before approval finished).
-    const { data: existingInvoice } = await supabase
-      .from("invoices")
-      .select("id, xero_invoice_id")
-      .eq("job_id", jobId)
-      .maybeSingle();
+    // FAILS CLOSED. This lookup's error used to be discarded, so a failed check
+    // read as "no invoice exists" and the approval created one — a duplicate
+    // invoice to a real customer, silently. Worse, .maybeSingle() RAISES when
+    // the job already has more than one invoice, so the case the guard exists
+    // for was the case that defeated it.
+    const guard = resolveExistingInvoice(
+      await supabase.from("invoices").select("id, xero_invoice_id").eq("job_id", jobId).maybeSingle()
+    );
+    if (!guard.proceed) {
+      toast.error(guard.reason);
+      setSaving(null);
+      return;
+    }
 
-    let invoiceId: string | null = existingInvoice?.id ?? null;
-    const alreadyPushed = !!existingInvoice?.xero_invoice_id;
+    let invoiceId: string | null = guard.invoiceId;
+    const alreadyPushed = guard.alreadyPushed;
     let invoiceCreated = false;
 
     if (!invoiceId && job) {

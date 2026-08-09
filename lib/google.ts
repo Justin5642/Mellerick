@@ -14,12 +14,15 @@ export function getGoogleOAuthClient() {
   );
 }
 
-export function getGoogleConsentUrl() {
+export function getGoogleConsentUrl(state?: string) {
   const oauth2Client = getGoogleOAuthClient();
   return oauth2Client.generateAuthUrl({
     access_type: "offline",
     prompt: "consent",
     scope: SCOPES,
+    // CSRF: echoed back by Google and matched against an HttpOnly cookie in
+    // callback/route.ts. See lib/oauth-state.ts for the attack this closes.
+    ...(state ? { state } : {}),
   });
 }
 
