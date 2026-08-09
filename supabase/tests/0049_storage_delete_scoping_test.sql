@@ -83,8 +83,22 @@ begin
    where id <> my_job
      and (assigned_to is null or assigned_to <> tech)
    limit 1;
+
+  -- Create one rather than raising. CI's fixture (supabase/ci/seed-roles.sql)
+  -- contains exactly ONE job, deliberately assigned to the technician, so
+  -- demanding a pre-existing second job made this test unrunnable against the
+  -- very database CI uses to prove the migration. Everything here rolls back.
+  --
+  -- customer_id and title are the only NOT NULL columns without a default
+  -- (0000_baseline.sql:109,113); job_number is serial and status/priority carry
+  -- CHECK constraints with defaults, so all three are left alone. assigned_to
+  -- is deliberately NULL — the point of this job is that it is not the
+  -- technician's.
   if other_job is null then
-    raise exception 'need a second job that is not assigned to the technician';
+    insert into jobs (customer_id, site_id, title)
+    select customer_id, site_id, 'S4 probe — job not assigned to the technician'
+      from jobs where id = my_job
+    returning id into other_job;
   end if;
 
   -- Seed objects under the real key convention (<jobId>/...), and the matching
@@ -168,7 +182,15 @@ begin
          when n > 0 then 'HOLE OPEN — REASSIGNED'
          else 'ok — 0 rows' end, n);
   -- Undo it if it went through, so probes 6+ still test what they claim to.
+  -- The claims are cleared first, not just the DB role: the trigger keys on
+  -- auth.role(), which reads the JWT, so with the technician's claims still set
+  -- this undo would itself be refused and abort the whole test. Post-migration
+  -- the WHERE matches nothing anyway — but a test that only works because the
+  -- thing it is testing works is not a test.
+  perform set_config('request.jwt.claims', '', true);
   update jobs set assigned_to = null where id = other_job and assigned_to = tech;
+  perform set_config('request.jwt.claims',
+                     json_build_object('sub', tech::text, 'role', 'authenticated')::text, true);
   perform set_config('role', 'authenticated', true);
 
   -- 6. BYPASS 3 — the cascade. job_photos.job_id is ON DELETE CASCADE.
@@ -281,6 +303,36 @@ end;
 $$;
 
 select surface, scenario, expectation, observed, rows_hit from probe order by surface, scenario;
+
+-- ---------------------------------------------------------------------------
+-- MAKE IT A GATE, NOT A PRINTOUT.
+--
+-- CI runs every supabase/tests/*.sql with ON_ERROR_STOP=1 (.github/workflows/
+-- ci.yml:221-223), so a RAISE fails the build but a table of results does not.
+-- Without this block a probe could read HOLE OPEN and the job would still go
+-- green — the security boundary would be documented rather than enforced,
+-- which is the same shape of rot that let tests/rls/financial-tables.test.ts
+-- assert toHaveLength(0) against tables it never seeded.
+--
+-- Every probe seeds its own fixtures above, so this is deterministic against a
+-- freshly migrated database. It is expected to FAIL on a database where 0049
+-- has not been applied — that is the point, and it is what makes the before/
+-- after run meaningful rather than decorative.
+-- ---------------------------------------------------------------------------
+do $$
+declare
+  bad text;
+begin
+  select string_agg(format('%s / %s -> %s', surface, scenario, observed), E'\n  ')
+    into bad
+  from probe
+  where observed not like 'ok%';
+
+  if bad is not null then
+    raise exception E'0049 boundary NOT in force:\n  %', bad;
+  end if;
+end;
+$$;
 
 rollback;
 
