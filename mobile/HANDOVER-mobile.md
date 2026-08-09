@@ -116,8 +116,30 @@ Env: `EXPO_PUBLIC_SUPABASE_URL`, `EXPO_PUBLIC_SUPABASE_ANON_KEY`,
 
 ### EAS
 ```bash
-eas build --profile development --platform ios   # dev client (background location)
-eas build --profile preview --platform android   # internal APK
+eas build --profile ios-simulator --platform ios  # unsigned .app — NO Apple account needed
+eas build --profile preview --platform android    # internal APK
 eas build --profile production --platform all
 eas submit --profile production --platform ios    # after filling eas.json placeholders + accounts
 ```
+
+`ios-simulator` is the only iOS build obtainable without an Apple Developer
+account: a simulator build is unsigned, so EAS skips Apple credentials entirely.
+The artifact runs only in Xcode's Simulator, so producing it needs no Mac but
+opening it does.
+
+The line that used to head this list — `eas build --profile development
+--platform ios` — **cannot succeed and never could.** That profile sets
+`developmentClient: true` (eas.json), and `expo-dev-client` is not a dependency,
+so eas-cli stops to ask whether it should install it and exits 1 if declined.
+Either run `npx expo install expo-dev-client` first, or use a different profile.
+
+An iOS build on the `development` or `preview` profile is also ad-hoc
+distribution, which needs a paid Apple Developer account AND device UDIDs
+registered via `eas device:create`. There is no account yet.
+
+Note for anyone on Windows: `npx expo prebuild --platform ios` refuses outright
+("Run npx expo prebuild again from macOS or Linux"). That is local-only — EAS
+prebuilds on its own macOS workers, so cloud iOS builds are unaffected. To check
+what the worker will generate without leaving Windows, use
+`npx expo config --type introspect --json`, which runs the same prebuild config
+pipeline and prints the resulting Info.plist.

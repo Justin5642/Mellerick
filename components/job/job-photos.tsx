@@ -59,11 +59,51 @@ export function JobPhotos({ jobId, photos, onUpdate, currentUserId }: Props) {
     if (inputRef.current) inputRef.current.value = "";
   }
 
-  async function handleDelete(photo: any) {
-    await supabase.storage.from("job-photos").remove([photo.storage_path]);
-    await supabase.from("job_photos").delete().eq("id", photo.id);
+  async function handleDelete(photo: { id: string; storage_path: string }) {
+    // The ROW goes first, and its result is checked before the object is
+    // touched. Both were previously fired and ignored, with an unconditional
+    // success toast — which was harmless only while everyone could delete
+    // everything. Migration 0049 scopes both to office/admin or the job's
+    // assigned technician, so a refusal is now reachable, and neither call
+    // throws on one: storage.remove() returns { data, error }, and a
+    // PostgREST delete that RLS filters out succeeds against zero rows.
+    //
+    // Row first because it is the authoritative record and it fails closed: if
+    // it is refused, nothing has been destroyed and nothing is orphaned. The
+    // old order removed the file first, so a refused row delete left a photo
+    // the app still listed but could no longer display.
+    const { error: rowError, count } = await supabase
+      .from("job_photos")
+      .delete({ count: "exact" })
+      .eq("id", photo.id);
+
+    if (rowError) {
+      toast.error(`Could not delete photo: ${rowError.message}`);
+      return;
+    }
+    if (count === 0) {
+      toast.error("You can only delete photos on jobs assigned to you.");
+      return;
+    }
+
+    // Checking `error` alone is not enough. A bulk remove that RLS filters out
+    // comes back HTTP 200 with an EMPTY ARRAY — no error at all — so the only
+    // reliable signal that the file actually went is that it is named in `data`.
+    const { data: removed, error: objectError } = await supabase.storage
+      .from("job-photos")
+      .remove([photo.storage_path]);
+
+    if (objectError || !removed?.length) {
+      // The record is gone, so the photo has left every screen and report —
+      // which is what the user asked for. The file is now an orphan. Say so
+      // rather than reporting a clean delete.
+      console.error("job-photos: row deleted but object remains", photo.storage_path, objectError);
+      toast.warning("Photo removed, but the file could not be cleaned up.");
+    } else {
+      toast.success("Photo deleted");
+    }
+
     onUpdate(photos.filter((p) => p.id !== photo.id));
-    toast.success("Photo deleted");
   }
 
   async function openLightbox(path: string) {

@@ -31,6 +31,12 @@ yarn-error.*
 *.pem
 
 # local env files
+# .env itself is listed too, not just *.local. It was previously protected only
+# by the repo-root .gitignore, which also happens to be what stops EAS uploading
+# it as build sources — so the guarantee lived one directory away from the app
+# it protects. Kept local so moving or vendoring mobile/ cannot quietly commit
+# the Supabase keys.
+.env
 .env*.local
 
 # typescript

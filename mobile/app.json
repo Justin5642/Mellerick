@@ -75,6 +75,7 @@
         ]
       },
       "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false,
         "UIBackgroundModes": [
           "location"
         ]
@@ -116,6 +117,7 @@
         "expo-location",
         {
           "locationWhenInUsePermission": "Mellerick Field uses your location to timestamp and geo-tag site photos, and to automatically clock you in/out and track travel time when you arrive at or leave a job site.",
+          "locationAlwaysPermission": "Mellerick Field records your job time automatically. Allowing location \"Always\" lets it clock you in and out and capture travel time even while the app is closed — without it, any driving you do with the app in your pocket is not recorded and you may be paid for less time than you worked.",
           "locationAlwaysAndWhenInUsePermission": "Mellerick Field records your job time automatically. Allowing location \"Always\" lets it clock you in and out and capture travel time even while the app is closed — without it, any driving you do with the app in your pocket is not recorded and you may be paid for less time than you worked.",
           "isIosBackgroundLocationEnabled": true,
           "isAndroidBackgroundLocationEnabled": true,

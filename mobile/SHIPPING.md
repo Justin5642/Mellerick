@@ -56,8 +56,14 @@ Push is fully implemented in-app; it simply cannot deliver without credentials.
 **Do this before the first cloud build, or the build produces a brick.**
 
 `EXPO_PUBLIC_SUPABASE_URL` and `EXPO_PUBLIC_SUPABASE_ANON_KEY` are inlined by
-Expo at BUILD time. They live in `mobile/.env`, which is gitignored — and EAS
-Cloud builds from a **git archive**, so it never sees that file. Until 4 August
+Expo at BUILD time. They live in `mobile/.env`, which is gitignored, and EAS
+never sees that file — but NOT for the reason this file used to give. It said
+EAS "builds from a git archive". It does not: `cli.requireCommit` is unset in
+`eas.json`, so eas-cli takes a shallow COPY of the working tree and filters it
+through `.gitignore`. Two consequences worth knowing before you build:
+uncommitted edits DO ship, and the working tree does not need to be clean. The
+conclusion still holds — `.env` is excluded — via gitignore filtering, not
+archiving. Until 4 August
 2026 no build profile declared them either, which means `eas build --profile
 production` — the exact command below — would have shipped an app pointed at
 `undefined`: it installs, launches, renders, and then fails every request with
@@ -68,15 +74,37 @@ The app now refuses to start in that state and names the missing variable
 on a technician's phone. Setting the values is still your job:
 
 ```bash
-eas env:create --scope project --environment production \
-  --name EXPO_PUBLIC_SUPABASE_URL --value "https://<project>.supabase.co"
+eas env:set --scope project --environment production \
+  --name EXPO_PUBLIC_SUPABASE_URL --value "https://<project>.supabase.co" \
+  --visibility plaintext --type string
 
-eas env:create --scope project --environment production \
-  --name EXPO_PUBLIC_SUPABASE_ANON_KEY --value "<anon key>"
+eas env:set --scope project --environment production \
+  --name EXPO_PUBLIC_SUPABASE_ANON_KEY --value "<anon key>" \
+  --visibility sensitive --type string
 
-# repeat with --environment preview for the preview profile
+# THE THIRD ONE, and the one that fails silently — see below.
+eas env:set --scope project --environment production \
+  --name EXPO_PUBLIC_API_BASE_URL --value "https://<web app>" \
+  --visibility plaintext --type string
+
+# repeat with --environment preview for the preview and ios-simulator profiles
 eas env:list --environment production        # verify before building
 ```
+
+`env:set`, not `env:create` — the latter is deprecated and hidden in current
+eas-cli, which prints "This command is deprecated. Use eas env:set instead."
+
+`EXPO_PUBLIC_API_BASE_URL` is the dangerous one, because unlike the other two it
+is NOT in `lib/env.ts`'s REQUIRED list, so the app starts perfectly without it.
+`lib/data/gateway.supabase.ts` reads it and returns early when it is unset —
+"degrade gracefully when the web API isn't configured" — which silently no-ops
+five server-side side-effects: sync-billing, sync-job-billing, sync-calendar,
+transcribe-voice-report and backflow-submit. The outbox marks each operation
+DONE. No error, no retry, no badge. Only the two backflow screens say anything.
+
+To prove it is set correctly, do not read a log line: record a voice completion
+report on a job, then look for the transcript on the web side. No transcript and
+no error means this variable is missing.
 
 The build profiles in `eas.json` declare which environment they draw from
 (`production` → production, `development`/`preview` → preview). The anon key is
