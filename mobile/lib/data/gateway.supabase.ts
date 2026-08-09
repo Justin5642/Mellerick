@@ -54,9 +54,45 @@ export const supabaseGateway: SupabaseGateway = {
     }
   },
   async deleteRow(table, id) {
-    const { error } = await supabase.from(table).delete().eq("id", id);
+    // Zero rows deleted has two opposite causes, and PostgREST reports them
+    // identically — no error, no rows:
+    //
+    //   the row was already gone   an outbox replay of a delete that landed.
+    //                              Success; dead-lettering it strands the op.
+    //   RLS refused it             the row is still there and the user has been
+    //                              told it was deleted. Loss.
+    //
+    // Counting is not enough to tell them apart, so ask whether the row
+    // SURVIVED. That is one extra round trip, and only on the zero-row path.
+    //
+    // This matters as of migration 0049: job_photos rows are now deletable only
+    // by office/admin or the assigned technician, so the second case is
+    // reachable — and everything above here treats a resolved promise as done
+    // (the processor marks the op complete, the outbox drops it, the badge
+    // clears). Same reasoning as updateRow's `count: "exact"` above.
+    const { error, count } = await supabase.from(table).delete({ count: "exact" }).eq("id", id);
     // A missing row on replay is success (idempotent delete).
     if (error && !/not found/i.test(error.message)) throw new Error(`${table} delete: ${error.message}`);
+
+    // An ABSENT count is not zero — some PostgREST configurations omit the
+    // header, and probing on every delete would turn an unreadable-but-deleted
+    // row into a dead letter. Only an explicit zero is worth asking about.
+    if (count !== 0) return;
+
+    const { data: survivor, error: checkError } = await supabase
+      .from(table)
+      .select("id")
+      .eq("id", id)
+      .maybeSingle();
+
+    // If the check itself failed we know nothing, and guessing "denied" would
+    // dead-letter a delete that may well have happened. Stay quiet.
+    if (checkError || !survivor) return;
+
+    throw new Error(
+      `${table} delete affected no rows (id ${id}) but the row is still present — RLS denied it. ` +
+        `Failing rather than reporting success, so the operation is retried and surfaced instead of vanishing.`
+    );
   },
   async uploadObject(bucket, path, localUri) {
     const base64 = await FileSystem.readAsStringAsync(localUri, { encoding: FileSystem.EncodingType.Base64 });
@@ -67,12 +103,17 @@ export const supabaseGateway: SupabaseGateway = {
     if (error) throw new Error(`storage ${bucket}/${path}: ${error.message}`);
   },
   async removeObject(bucket, path) {
-    // Best-effort, never throws — mirrors the web app's unchecked
-    // storage.remove(). Migration 0037 IS applied (verified against pg_policies
-    // 2026-07-28), so job-photos/job-audio deletes now genuinely remove the
-    // object rather than being RLS-denied. Staying best-effort regardless: a
-    // storage hiccup must never dead-letter the row delete behind it, and
-    // "not found" is success on an idempotent replay.
+    // Best-effort, never throws — and that stays correct after migration 0049
+    // only because the ROW delete is now the gate. deleteRow throws when RLS
+    // refuses, so an unauthorized photo delete fails there, loudly, before this
+    // ever runs; both are scoped by the same predicate, so an authorized caller
+    // cannot be refused here. What remains is genuine best-effort: a storage
+    // hiccup must never dead-letter the row delete behind it, and "not found"
+    // is success on an idempotent replay.
+    //
+    // Note this cannot detect a denial even if it wanted to — a bulk remove
+    // that RLS filters returns HTTP 200 with an empty array, not an error, so
+    // the catch below would not fire either way.
     try {
       await supabase.storage.from(bucket).remove([path]);
     } catch {

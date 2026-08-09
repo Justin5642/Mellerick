@@ -20,12 +20,20 @@ import { supabaseGateway, apiBridge } from "./gateway.supabase";
 const mockInsert = jest.fn();
 const mockUpdateResult = jest.fn();
 const mockDeleteResult = jest.fn();
+const mockSelectResult = jest.fn();
 
 // update/delete are chained: .update(patch).eq("id", id). The eq() resolves.
 const mockUpdate = jest.fn(() => ({ eq: () => mockUpdateResult() }));
 const mockDelete = jest.fn(() => ({ eq: () => mockDeleteResult() }));
+// deleteRow's survival check: .select("id").eq("id", id).maybeSingle().
+const mockSelect = jest.fn(() => ({ eq: () => ({ maybeSingle: () => mockSelectResult() }) }));
 
-const mockFrom = jest.fn(() => ({ insert: mockInsert, update: mockUpdate, delete: mockDelete }));
+const mockFrom = jest.fn(() => ({
+  insert: mockInsert,
+  update: mockUpdate,
+  delete: mockDelete,
+  select: mockSelect,
+}));
 
 jest.mock("../supabase", () => ({
   supabase: {
@@ -42,6 +50,7 @@ beforeEach(() => {
   mockInsert.mockReset();
   mockUpdateResult.mockReset();
   mockDeleteResult.mockReset();
+  mockSelectResult.mockReset();
   mockFrom.mockClear();
 });
 
@@ -149,15 +158,61 @@ describe("callSideEffect — a request that hangs must not stall the drain", () 
   });
 });
 
-describe("deleteRow — zero rows is success, not loss", () => {
+// Zero rows deleted has TWO causes and they are opposites.
+//
+//   the row was already gone   an outbox replay of a delete that landed.
+//                              Success — dead-lettering it would strand the op.
+//   RLS refused it             the row is still there and the user was told it
+//                              was deleted. Loss.
+//
+// PostgREST reports both identically: no error, zero rows. Until migration 0049
+// only office/admin and the assigned technician may delete a job photo, so the
+// second case did not arise and treating every zero as success was safe. It is
+// not safe now, and the failure is silent at every layer above — the processor
+// marks the op done, the outbox drops it, the badge clears.
+//
+// So the count is not the question. Whether the row SURVIVED is the question.
+describe("deleteRow — zero rows is success only when the row is really gone", () => {
   it("succeeds when the row is already gone (an idempotent replay)", async () => {
     mockDeleteResult.mockResolvedValue({ error: null, count: 0 });
+    mockSelectResult.mockResolvedValue({ data: null, error: null });
     await expect(supabaseGateway.deleteRow("job_photos", "photo-1")).resolves.toBeUndefined();
+  });
+
+  it("THROWS when the row survived — RLS refused, and success would lose it", async () => {
+    mockDeleteResult.mockResolvedValue({ error: null, count: 0 });
+    mockSelectResult.mockResolvedValue({ data: { id: "photo-1" }, error: null });
+    await expect(supabaseGateway.deleteRow("job_photos", "photo-1")).rejects.toThrow(
+      /affected no rows.*still present/i
+    );
+  });
+
+  it("does not pay for the extra round trip on the normal path", async () => {
+    mockDeleteResult.mockResolvedValue({ error: null, count: 1 });
+    await expect(supabaseGateway.deleteRow("job_photos", "photo-1")).resolves.toBeUndefined();
+    expect(mockSelectResult).not.toHaveBeenCalled();
+  });
+
+  it("treats an ABSENT count as success, the way updateRow does", async () => {
+    // Some PostgREST configurations omit the count header. Reading absent as
+    // zero would send every healthy delete through the survival check and
+    // dead-letter it whenever the row is unreadable — worse than the bug.
+    mockDeleteResult.mockResolvedValue({ error: null, count: null });
+    await expect(supabaseGateway.deleteRow("job_photos", "photo-1")).resolves.toBeUndefined();
+    expect(mockSelectResult).not.toHaveBeenCalled();
   });
 
   it("still surfaces a genuine error", async () => {
     mockDeleteResult.mockResolvedValue({ error: { message: "boom" }, count: null });
     await expect(supabaseGateway.deleteRow("job_photos", "photo-1")).rejects.toThrow(/boom/);
+  });
+
+  it("does not let the survival check itself turn a real deletion into a failure", async () => {
+    // If the follow-up read errors we know nothing, and guessing "denied" would
+    // dead-letter a delete that may well have happened.
+    mockDeleteResult.mockResolvedValue({ error: null, count: 0 });
+    mockSelectResult.mockResolvedValue({ data: null, error: { message: "network" } });
+    await expect(supabaseGateway.deleteRow("job_photos", "photo-1")).resolves.toBeUndefined();
   });
 });
 
