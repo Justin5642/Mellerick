@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getXeroClient } from "@/lib/xero";
 import { createClient } from "@/lib/supabase/server";
 import { requireAdmin } from "@/lib/api/guards";
+import { isValidOAuthState, XERO_STATE_COOKIE } from "@/lib/oauth-state";
 
 export async function GET(request: NextRequest) {
   // Re-check admin at the callback, not just at initiation: the callback is
@@ -10,6 +11,16 @@ export async function GET(request: NextRequest) {
   // business's invoicing by hitting this URL directly with their session.
   const guard = await requireAdmin(request);
   if (!guard.ok) return guard.response;
+
+  // CSRF. Verified BEFORE the code is exchanged: a forged callback carries the
+  // attacker's code but no matching HttpOnly cookie, so it is refused before any
+  // token is issued or any row is deleted. The requireAdmin above cannot do this
+  // job — the attack works precisely BECAUSE the victim is an admin.
+  const state = request.nextUrl.searchParams.get("state");
+  const cookie = request.cookies.get(XERO_STATE_COOKIE)?.value;
+  if (!isValidOAuthState(cookie, state)) {
+    return NextResponse.redirect(new URL("/dashboard/settings?xero=state_mismatch", request.url));
+  }
 
   const xero = getXeroClient();
 

@@ -6,6 +6,7 @@ import { businessInfo } from "@/lib/business-info";
 import { getResend, getFromAddress } from "@/lib/resend";
 import { formatDate } from "@/lib/date";
 import { formatInvoiceNumber } from "@/lib/utils";
+import { escapeHtml } from "@/lib/html";
 
 export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
@@ -54,7 +55,12 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     });
 
     const resend = getResend();
-    const personalNote = body.message ? `<p>${String(body.message).replace(/\n/g, "<br/>")}</p>` : "";
+    // ESCAPE FIRST, then convert newlines — the other order would escape the
+    // <br/> tags this line just inserted. body.message is typed by a user and
+    // lands in an email sent to a customer.
+    const personalNote = body.message
+      ? `<p>${escapeHtml(String(body.message)).replace(/\n/g, "<br/>")}</p>`
+      : "";
     const dueDateLine = invoice.due_date
       ? `<p>Payment is due by <strong>${formatDate(invoice.due_date, { day: "numeric", month: "short", year: "numeric" })}</strong>.</p>`
       : "";
@@ -65,8 +71,8 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       subject: `Invoice ${formatInvoiceNumber(invoice.invoice_number)} from ${businessInfo.name}`,
       html: `
         <div style="font-family: sans-serif; color: #1e293b; line-height: 1.5;">
-          <p>Hi ${invoice.customers?.name ?? "there"},</p>
-          <p>Please find attached your invoice <strong>${formatInvoiceNumber(invoice.invoice_number)} — ${invoice.title}</strong> for <strong>$${Number(invoice.total).toFixed(2)}</strong> (inc. GST).</p>
+          <p>Hi ${escapeHtml(invoice.customers?.name ?? "there")},</p>
+          <p>Please find attached your invoice <strong>${formatInvoiceNumber(invoice.invoice_number)} — ${escapeHtml(invoice.title)}</strong> for <strong>$${Number(invoice.total).toFixed(2)}</strong> (inc. GST).</p>
           ${personalNote}
           ${dueDateLine}
           <p>If you have any questions, just reply to this email.</p>
