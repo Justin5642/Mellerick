@@ -122,6 +122,34 @@ streams:
   # Gate: JOIN the requesting user's profiles row; the stream only yields rows
   # when that row exists AND its role is office/admin. A technician (or missing
   # profile) joins to nothing — fail-closed.
+  #
+  # WHY THESE USE `SELECT <table>.*` WHEN THE TECHNICIAN STREAMS ABOVE DO NOT.
+  # The rule at :55-58 exists to keep MONEY off technician devices. Office and
+  # admin are entitled to money, so that rule does not apply here, and listing
+  # columns would buy nothing on that axis. Measured 2026-08-10 by
+  # scripts/check-storage-path-scoping.mjs's sibling,
+  # scripts/check-sync-stream-columns.mjs: 223 columns across these tables reach
+  # an office device today, and NO column name matches
+  # /token|secret|password|api_key|credential|bank|bsb|account_number|iban/.
+  # The credential tables (xero_tokens, google_tokens) are not streamed at all.
+  #
+  # What the wildcard DOES cost is a review step: a migration adding a column to
+  # one of these tables replicates it with no code change. That is accepted
+  # deliberately rather than by omission — and the failure it actually caused
+  # was the OPPOSITE of a leak. `SELECT *` means the stream can never
+  # under-deliver, so nobody regenerated lib/powersync/schema.ts after migration
+  # 0040, and jobs.ready_to_invoice was absent from the DEVICE schema while
+  # lib/data/reads/finance.ts read it locally. PowerSync builds its view from
+  # declared columns, so the query raised "no such column", reads/source.ts
+  # swallowed it into a network fallback, and the screen worked online and was
+  # permanently broken offline while reporting nothing.
+  #
+  # lib/powersync/schema.test.ts could not catch it: it skips wildcard tables
+  # (`if (cols === "ALL") continue;`), which is every stream below.
+  # lib/powersync/readColumns.test.ts now closes that from the other end — it
+  # asserts every column the offline read layer names exists on the device,
+  # wildcard or not. If you add a column here, regenerate:
+  #   node mobile/scripts/generate-powersync-schema.mjs
   office_jobs:
     auto_subscribe: true
     query: SELECT jobs.* FROM jobs JOIN profiles ON profiles.id = auth.user_id() WHERE profiles.role = 'office' OR profiles.role = 'admin'
