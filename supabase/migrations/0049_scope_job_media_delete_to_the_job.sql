@@ -671,11 +671,29 @@ $$;
 --
 --     psql "$SUPABASE_DB_URL" -f supabase/tests/0049_storage_delete_scoping_test.sql
 --
--- Run it BEFORE and AFTER. Before, the "technician deletes another job's ..."
--- rows must read HOLE OPEN. If they do not, the test is not reaching the hole
--- and its silence afterwards means nothing — which is precisely how
--- tests/rls/financial-tables.test.ts rotted, asserting toHaveLength(0) against
--- tables it never seeded.
+-- Run it BEFORE and AFTER. Before, the bypass rows must read HOLE OPEN. If they
+-- do not, the test is not reaching the hole and its silence afterwards means
+-- nothing — which is precisely how tests/rls/financial-tables.test.ts rotted,
+-- asserting toHaveLength(0) against tables it never seeded. It raises on any
+-- non-ok row, so CI fails rather than printing a red table nobody reads.
+--
+-- ONE THING THAT TEST CANNOT REACH, and it is the storage half. Supabase
+-- refuses every direct SQL delete on storage.objects — "Direct deletion from
+-- storage tables is not allowed. Use the Storage API instead."
+-- (storage.protect_delete()) — and that fires before RLS is observable. So the
+-- test checks the DECISION instead: under real impersonation,
+-- user_can_manage_job() must be false for a foreign job and true for the
+-- technician's own. All four storage policies above are one-line wrappers
+-- around that call, and assertion (a) proves they reference it.
+--
+-- Close the remaining gap by hand, once, from a real technician session:
+--
+--     supabase.storage.from('job-photos').remove([<a foreign job's key>])
+--
+-- then confirm the object is still listed. The API returns HTTP 200 with an
+-- EMPTY ARRAY when RLS filters the delete rather than an error, so inspect
+-- `data`, not just `error`. Repeat the upsert half — upload twice to one key on
+-- an assigned job (must succeed) and on an unassigned one (must fail).
 --
 -- Then re-run scripts/check-storage-path-scoping.mjs: the counts must be
 -- unchanged, since this migration touches no objects.
