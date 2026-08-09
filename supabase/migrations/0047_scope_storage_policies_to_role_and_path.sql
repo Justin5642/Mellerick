@@ -1,7 +1,18 @@
 -- ============================================================================
 -- Storage is the last place a technician can still read a dollar figure.
 --
--- STATUS: DRAFT FOR REVIEW — NOT APPLIED. Justin owns the production database.
+-- STATUS: APPLIED AND VERIFIED IN PRODUCTION (2026-08-05).
+--
+-- Pre-state matched this file's own claim exactly (10 storage policies, 0
+-- role-scoped, helper absent), the self-assertions passed, and it was then
+-- verified BY IMPERSONATION with an office control:
+--
+--   technician money job documents  2 -> 0     office control still 3
+--   technician general job docs     3,906      unchanged
+--   technician job photos           9,722      unchanged
+--
+-- The office control is the load-bearing half. Without it, "technician sees 0"
+-- is equally consistent with "the boundary works" and "the bucket is empty".
 --
 -- BUT IT HAS BEEN RUN. On 2026-08-05 this migration was executed against the
 -- production database inside a transaction ending in ROLLBACK, then the probes

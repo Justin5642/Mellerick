@@ -1,8 +1,23 @@
 -- =============================================
 -- CLOSE THE LAST DOLLAR LEAK: purchase_orders + po_cost_centers
 --
--- STATUS: PROPOSED (not applied). The shared `supabase/` schema and the live
--- database are Justin's — he reviews, tests and applies. Do NOT auto-apply.
+-- STATUS: ✅ APPLIED AND VERIFIED IN PRODUCTION. Confirmed 2026-08-05 against
+-- supabase_migrations.schema_migrations, and by impersonation: `purchase_orders`
+-- is locked to office/admin and both `_public` views exist and still return the
+-- non-money columns the technician screens need.
+--
+-- Both halves matter. A test proving only the lock would pass while the tech app
+-- was broken — technicians legitimately read the NON-money columns of these two
+-- tables, which is exactly why this was deferred out of 0035 in the first place.
+--
+-- The previous "PROPOSED (not applied) ... do NOT auto-apply" header outlived
+-- the apply by about a week. `supabase db push` goes by the ledger, not by
+-- comments, so such a header protects nothing and misleads everything: it told
+-- readers the last dollar leak was still open when it had been closed.
+--
+-- Verify, do not trust this comment:
+--   select * from supabase_migrations.schema_migrations where version like '0038%';
+--
 -- See mobile/DECISIONS-FOR-AVI.md Q19 (the deferred half of migration 0035).
 --
 -- WHY THIS WAS DEFERRED FROM 0035: every other money-bearing table could simply

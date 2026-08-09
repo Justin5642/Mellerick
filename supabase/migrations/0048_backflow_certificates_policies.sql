@@ -1,7 +1,16 @@
 -- ============================================================================
 -- backflow-certificates has NO storage policies, so signature upload fails.
 --
--- STATUS: DRAFT FOR REVIEW — NOT APPLIED. Justin owns the production database.
+-- STATUS: APPLIED AND VERIFIED IN PRODUCTION (2026-08-05).
+--
+-- Verified after applying, by impersonation, including the negative control —
+-- "upload works" and "upload works AND ONLY for signatures" are different
+-- claims and only the second one is the guarantee:
+--
+--   technician uploads a SIGNATURE     ALLOWED
+--   technician forges a CERTIFICATE    DENIED    (path-scoped to signatures/)
+--   technician reads the bucket        0
+--   office reads the bucket            2
 --
 -- This is the OPPOSITE of 0047. That migration closed a leak. This one repairs a
 -- live DENIAL: RLS is enabled on storage.objects and not one policy names this
