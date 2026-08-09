@@ -23,9 +23,27 @@ const single = vi.fn();
 
 vi.mock("@/lib/api/guards", () => ({
   requireUser: (...a: unknown[]) => requireUser(...a),
+  // transcribe-voice-report now uses the SHARED getCallerId rather than a local
+  // Bearer-only copy. Delegating to the same anonGetUser these tests already
+  // drive keeps the two 401 cases below meaning exactly what they meant before.
+  getCallerId: async (req: NextRequest) => {
+    const h = req.headers.get("authorization") ?? "";
+    if (!h.startsWith("Bearer ")) return null;
+    const { data, error } = await anonGetUser();
+    return error || !data?.user ? null : data.user.id;
+  },
   requireAdmin: vi.fn(),
   requireOfficeOrAdmin: vi.fn(),
   requireCronSecret: vi.fn(),
+}));
+
+// Membership is asserted in tests/unit/transcribe-voice-report-auth.test.ts.
+// Here it must PASS, so the path-ownership assertions below are reached — the
+// point of these tests is the IDOR guard, not the membership one.
+vi.mock("@/lib/api/job-authz", () => ({
+  canManageJobBilling: vi.fn(async () => true),
+  canManageTimeEntryBilling: vi.fn(async () => true),
+  isOfficeOrAdmin: vi.fn(async () => true),
 }));
 
 vi.mock("@/lib/supabase/admin", () => ({

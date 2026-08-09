@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { getCallerId } from "@/lib/api/guards";
+import { canManageJobBilling } from "@/lib/api/job-authz";
 
 // Uses the service-role key (not the cookie-based server client) because
 // this route is called from the mobile app with no browser session/cookies
@@ -15,23 +17,12 @@ function getAdminClient() {
   });
 }
 
-async function getAuthenticatedUserId(request: NextRequest) {
-  const authHeader = request.headers.get("authorization") ?? "";
-  const token = authHeader.startsWith("Bearer ") ? authHeader.slice("Bearer ".length) : null;
-  if (!token) return null;
-
-  const anonClient = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!, {
-    auth: { autoRefreshToken: false, persistSession: false },
-  });
-  const { data, error } = await anonClient.auth.getUser(token);
-  if (error || !data.user) return null;
-  return data.user.id;
-}
-
 export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
 
-  const callerId = await getAuthenticatedUserId(request);
+  // Shared helper rather than a local copy: it accepts the mobile Bearer token
+  // AND the browser cookie session, where the local version handled only Bearer.
+  const callerId = await getCallerId(request);
   if (!callerId) {
     return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
   }
@@ -47,7 +38,8 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
   }
 
-  const { storagePath, recordedBy } = body;
+  // `recordedBy` is deliberately NOT read from the body. See the update below.
+  const { storagePath } = body;
   if (!storagePath) {
     return NextResponse.json({ error: "storagePath is required" }, { status: 400 });
   }
@@ -63,6 +55,19 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   }
 
   const supabase = getAdminClient();
+
+  // MEMBERSHIP. The update below runs under the service-role key, which bypasses
+  // RLS, and targets `.eq("id", id)` — so without this, ANY authenticated user
+  // could replace ANY job's transcript and audio path.
+  //
+  // This was easy to miss precisely because the route is guarded in one place
+  // already: storagePath is pinned to the job, which stops a cross-job FILE
+  // read. That partial guard made the route look protected while the WRITE was
+  // open to everyone. Same policy as the billing routes — office/admin, or the
+  // technician the job is assigned to.
+  if (!(await canManageJobBilling(supabase, callerId, id))) {
+    return NextResponse.json({ error: "Not authorized for this job" }, { status: 403 });
+  }
 
   try {
     const { data: audioBlob, error: downloadError } = await supabase.storage.from("job-audio").download(storagePath);
@@ -94,7 +99,11 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       .update({
         voice_report_storage_path: storagePath,
         voice_report_transcript: transcript,
-        voice_report_recorded_by: recordedBy ?? null,
+        // The AUTHENTICATED caller, never the request body. A voice report is
+        // a record of who said what on a job; letting the sender choose the
+        // author makes it worthless as evidence and lets one technician
+        // attribute a report to another.
+        voice_report_recorded_by: callerId,
         voice_report_recorded_at: new Date().toISOString(),
       })
       .eq("id", id);
