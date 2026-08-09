@@ -30,9 +30,9 @@
 // in the ordinary mobile CI job.
 import { readFileSync, readdirSync } from "fs";
 import { join } from "path";
-import { AppSchema } from "./schema";
+import { AppSchema } from "../../powersync/schema";
 
-const READS_DIR = join(__dirname, "..", "data", "reads");
+const READS_DIR = __dirname;
 
 // PowerSync declares `id` implicitly on every table — schema.ts does not list
 // it (see its "// id (text) is implicit" comment), but the device view has it.
@@ -124,6 +124,31 @@ describe("offline reads only name columns the device actually has", () => {
     // reference would become "unknown alias" and be skipped as unresolvable.
     const resolved = queries.filter((q) => aliasMap(q.sql).size > 0);
     expect(resolved.length).toBe(queries.length);
+  });
+
+  // A multi-table query that qualifies NOTHING cannot be attributed to a table,
+  // so every column in it is skipped — silently, and by design, since guessing
+  // which of two tables owns a bare column name would produce false failures.
+  //
+  // That skip is the guard's blind spot, so the two queries in it are named
+  // here rather than filtered by a rule. A committed literal means a THIRD one
+  // appearing is a visible coverage loss that fails this test, instead of being
+  // quietly absorbed into an exemption nobody re-reads.
+  const UNATTRIBUTABLE = [
+    "backflow.ts::SQL_LIST_BACKFLOW_TESTS",
+    "jobBilling.ts::SQL_JOB_BILLING_PO_COST_CENTERS",
+  ];
+
+  it("has not quietly grown its own blind spot", () => {
+    const unattributable = queries
+      .filter((q) => {
+        const tables = [...q.sql.matchAll(/\b(?:from|join)\s+[a-z_][a-z0-9_]*/gi)];
+        return tables.length > 1 && dottedRefs(q.sql).length === 0;
+      })
+      .map((q) => `${q.file}::${q.name}`)
+      .sort();
+
+    expect(unattributable).toEqual([...UNATTRIBUTABLE].sort());
   });
 
   it("names no column the device schema lacks", () => {
