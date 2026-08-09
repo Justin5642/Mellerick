@@ -148,6 +148,62 @@
 -- ============================================================================
 
 -- ---------------------------------------------------------------------------
+-- 0. THE BUCKETS THIS SCHEMA HAS BEEN POLICING WITHOUT EVER CREATING.
+--
+--    Found by CI, which is the only place anyone had rebuilt from migrations:
+--
+--      ERROR: insert or update on table "objects" violates foreign key
+--      constraint "objects_bucketId_fkey"
+--      DETAIL: Key (bucket_id)=(job-audio) is not present in table "buckets".
+--
+--    Only two buckets are in the migration tree — job-photos
+--    (0000_baseline.sql:325) and equipment-documents (0023:66). Three more
+--    exist in production and in no migration:
+--
+--      job-audio              created by scripts/create-job-audio-bucket.mjs
+--      backflow-certificates  created by scripts/create-backflow-certificates-bucket.mjs
+--      job-documents          created NOWHERE in this repo — 3909 objects in
+--                             production, and no record of how it came to exist
+--
+--    So a database rebuilt from migrations has policies governing buckets it
+--    does not have. That is why this went unnoticed: 0047's and 0048's tests
+--    only COUNT rows, and a select against a non-existent bucket returns zero
+--    without complaint. It took an INSERT to surface it.
+--
+--    0006_add_voice_reports.sql:24-25 justified the script with "buckets aren't
+--    manageable via plain SQL migrations the same way tables are". The baseline
+--    had already done exactly that one line at a time, 319 lines earlier.
+--
+--    `on conflict do nothing`, so this is a no-op against production and the
+--    fix in a rebuilt database. All three are private — public here would
+--    publish every job photo, signature and voice report to anyone with a URL.
+-- ---------------------------------------------------------------------------
+insert into storage.buckets (id, name, public)
+values ('job-audio',             'job-audio',             false),
+       ('job-documents',         'job-documents',         false),
+       ('backflow-certificates', 'backflow-certificates', false)
+on conflict (id) do nothing;
+
+do $$
+declare
+  leaky text;
+begin
+  -- If any of these already existed as PUBLIC, `on conflict do nothing` left it
+  -- that way and every policy in 0047, 0048 and this file is decorative — a
+  -- public bucket serves objects to anyone holding the URL, RLS or not.
+  select string_agg(id, ', ') into leaky
+  from storage.buckets
+  where id in ('job-photos', 'job-audio', 'job-documents',
+               'equipment-documents', 'backflow-certificates')
+    and public;
+  if leaky is not null then
+    raise exception
+      'ASSERTION FAILED: bucket(s) [%] are PUBLIC — storage RLS on them is decorative', leaky;
+  end if;
+end;
+$$;
+
+-- ---------------------------------------------------------------------------
 -- 1. The rule, in one place.
 --
 --    Takes TEXT, not uuid, and compares j.id::text. The cast direction is
