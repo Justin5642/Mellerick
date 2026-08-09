@@ -1,6 +1,6 @@
 # Mellerick — verified to-do list
 
-**Repo:** `github.com/Justin5642/Mellerick` @ `ae5287e` (main)
+**Repo:** `github.com/Justin5642/Mellerick` @ `ae5287e` (main) — **main has since moved 27 commits; see §2 and §3.0 for what was re-verified against current source**
 **Database:** production project `ntdohrsujnyuqyeirqva`, queried live 4–5 Aug 2026
 **Supersedes:** `TODO-MASTER.md` (30 July, written against `1ef5e43`) and
 `TODO-VERIFIED-2026-08-04.md`
@@ -23,7 +23,7 @@ Where only a dashboard or a human decision can settle it, it is marked
 | — answered-negative | 1 |
 | — NOT-CHECKABLE-IN-REPO | 13 |
 | **New findings this review** | **36** (S1–S8, C1–C11, N1–N17) |
-| — of those, fixed or drafted | 2 (S1 → PR #14, S2 → PR #15) |
+| — of those, fixed or drafted | 3 (S1 → PR #14 merged; S2 → `0047` **applied**; N17 → `0048` merged, not applied) |
 | Doc claims found false or overstated | 13 |
 
 The old list's header claim — *"0 of the 58 code and infrastructure items are done"* — was
@@ -55,22 +55,60 @@ the numbers are not inflated.
 | `has_column_privilege(authenticated, time_entries, rate_override)` | **false** — leak closed |
 | `has_table_privilege(authenticated, time_entries, SELECT)` | **false** — `select *` refused |
 | Storage buckets | 5, all private |
-| **Storage policies scoped by role** | **ZERO** |
+| **Storage policies scoped by role** | ~~**ZERO**~~ -> **8**, since `0047` was applied 2026-08-05 (see §2) |
 
 ---
 
 ## 2. In flight
 
-### [PR #14](https://github.com/Justin5642/Mellerick/pull/14) — clock-in outage · all GitHub checks pass
+> **UPDATE 2026-08-05 (later).** PRs #14 and #15 are both **MERGED**, and `0047` is now
+> **APPLIED TO PRODUCTION**. PRs #16, #18, #19 and #20 have merged since as well. The
+> ranked list in §3 is superseded — see §3.0 for what is actually next.
 
-Fixes **S1**. Six `select("*")` sites on `time_entries` now name columns explicitly; four
-swallowed errors now surface. Also closes the `job-time.tsx` half of **2.6**. Guarded by
-`tests/unit/time-entry-columns.test.ts`, a source scan (a mocked test cannot catch this),
-negative-control verified.
+### `0047` — APPLIED to production ✅
 
-### [PR #15](https://github.com/Justin5642/Mellerick/pull/15) — storage policy migration · DRAFT, all GitHub checks pass
+Applied 2026-08-05. Pre-state matched the migration's own claim exactly (10 storage
+policies, 0 role-scoped, helper absent), and its self-assertions passed — including the
+negative control that an ordinary job document is not misclassified as money.
 
-Drafts **S2** as `0047`. Executed against production inside `BEGIN … ROLLBACK`; all
+Verified afterwards **by impersonation**, with an office control so the zeros cannot be
+mistaken for empty buckets:
+
+| | technician | office |
+|---|---|---|
+| money job documents | **0** | **3** |
+| general job documents | 3,906 | — |
+| job photos | 9,722 | — |
+
+The office column is the load-bearing half: without it, "technician sees 0" is equally
+consistent with "the boundary works" and "the bucket is empty."
+
+### `0048` — merged, NOT applied · [PR #20](https://github.com/Justin5642/Mellerick/pull/20)
+
+Closes **N17**, and it is the *opposite* of `0047`: not a leak, a **live denial**. No policy
+names `backflow-certificates`, so signature upload is refused for every signed-in user —
+office included. The web form catches the error, shows "continuing without it", and submits
+the compliance test **without the signature the water authority receives**.
+
+Dry-run against production inside `BEGIN … ROLLBACK`, with a negative control:
+
+| Scenario | Result |
+|---|---|
+| technician uploads a **signature** | ALLOWED ✅ |
+| technician forges a **certificate PDF** | DENIED ✅ (path-scoped to `signatures/`) |
+| technician reads the bucket | 0 ✅ |
+| office reads the bucket | 2 ✅ |
+
+**A bug in its own assertion was caught by that dry run.** The first draft checked `0047`
+had survived by counting `qual like '%is_office_or_admin%' >= 8`. Wrong twice: an INSERT
+policy stores its expression in `with_check`, not `qual`, so `0047`'s real 8 read as 6 —
+and it still went green only because the two policies `0048` itself adds are qual-matching,
+pushing 6 back to 8 inside the transaction. It would have passed while measuring the wrong
+thing. Now counts both columns and excludes its own policies by name.
+
+### Superseded record — [PR #15](https://github.com/Justin5642/Mellerick/pull/15) as drafted
+
+Drafted **S2** as `0047`. Executed against production inside `BEGIN … ROLLBACK`; all
 assertions passed and production verified untouched afterwards.
 
 | Scenario | Before | After |
@@ -88,7 +126,36 @@ Both PRs show Vercel red. That is item 5.1 and unrelated — see §7.
 
 ---
 
-## 3. Do next — ranked
+## 3.0 Do next — RE-VERIFIED 2026-08-05 (later)
+
+The §3 list below was written at `ae5287e`. `main` has since moved 27 commits
+(hardening phases 1–4). Each of its top three was re-checked **against current source**,
+not assumed:
+
+| Was | Now | Evidence |
+|---|---|---|
+| 1 — offline geofence arrival discarded | **FIXED** | `mobile/lib/geofenceTransition.ts` exists and routes through the outbox (`deps.clockIn`); its header documents the exact bug |
+| 2 — offline departure discards its error | **FIXED** | same module, `geofenceTransition.test.ts` |
+| 3 — CI would pass a revert of the role-escalation fix | **FIXED** | `supabase/ci/rls-baseline.sql` deleted, replaced by `seed-roles.sql`; `ci.yml:137` applies the **full** migration history |
+| 4 — backflow upload denied | **DRAFTED** as `0048` (PR #20, merged) — needs applying |
+| 5 — `0035/0036/0038` say "PROPOSED" | **still open**, all three still carry the marker |
+
+### Actually next
+
+| # | What | Why it ranks here |
+|---|---|---|
+| 1 | **Apply `0048`** | Backflow signatures are being dropped *today*. Compliance certificates are going to the water authority unsigned, and the only symptom is a toast the technician can dismiss |
+| 2 | **Correct the `0035`/`0036`/`0038` headers** | They claim "PROPOSED (not applied)" while production has them. A `db push` applies three "unreviewed" migrations as a side effect (**1.16**) |
+| 3 | **`transcribe-voice-report` trusts `recordedBy` from the request body** under service-role (`route.ts:43,50`) — re-confirmed present (**S3**, 1.5) |
+| 4 | **Approvals duplicate-invoice guard fails open** — `approvals/page.tsx:77` `.maybeSingle()` — re-confirmed present (1.6) |
+| 5 | **No OAuth `state` parameter** in either flow, and `escapeHtml` is still unused in both send routes (1.1, 1.7) |
+
+Suites on current `main`: web **237 passed / 27 files**, mobile **490 / 71 suites**, both
+typechecks clean. (The §1 scoreboard's 208/458 predates the hardening phases.)
+
+---
+
+## 3. Do next — ranked *(superseded by §3.0)*
 
 | # | What | Where | Why it ranks here |
 |---|---|---|---|
@@ -234,13 +301,13 @@ Both PRs show Vercel red. That is item 5.1 and unrelated — see §7.
 | | Severity | Finding |
 |---|---|---|
 | **S1** | **FIXED — PR #14** | `select *` on `time_entries` refused by production under `0045`'s column grants; four call sites discarded the error, so web clock-in silently recorded nothing |
-| **S2** | **DRAFTED — PR #15** | Zero storage policies scoped by role. Technicians could read/delete expense receipts and supplier invoices. Confirmed with data: 2 + 1 rows |
+| **S2** | **APPLIED to production 2026-08-05** | Zero storage policies scoped by role. Technicians could read/delete expense receipts and supplier invoices. Confirmed with data: 2 + 1 rows. `0047` applied; re-verified by impersonation — technician money documents **2 -> 0**, office control still **3**, general documents 3,906 and photos 9,722 unchanged |
 | **S3** | MEDIUM-HIGH | IDOR on `transcribe-voice-report` (`:34-37,:61-65,:92-100`). Any authenticated user can overwrite any job's voice report and attribute it to anyone. `job-authz.ts` already exports `canManageJobBilling`; the sibling `sync-calendar` route uses it. `storage-routes-auth.test.ts:117` comments `// THE IDOR` but tests the *path* check, not job ownership |
 | **S4** | MEDIUM | `0037:38-45` — any authenticated user can permanently delete any job's photos and audio. Deferred by `0047` |
 | **S5** | MEDIUM | `sync-streams-contract.test.ts:39` `MONEY_COLUMN` uses `\b` anchors, so `\brate\b` misses `rate_override`, `\bprice\b` misses `unit_price`. **Adding `rate_override` to `tech_time_entries` would pass this test green** |
 | **S6** | MEDIUM | All 18 `office_*` streams use `SELECT <table>.*` and the contract test exempts them by construction. Bounded — `0044` blocks self-promotion — but any new column replicates unreviewed to office devices in plaintext SQLite (PowerSync bypasses RLS *and* `0045`'s grants) |
 | **S7** | LOW | `0046:34-39` `reapply_time_entries_grants()` is PUBLIC-executable SECURITY DEFINER DDL. Cannot escalate (inputs are catalog-derived and `quote_ident`-escaped); impact is catalog churn |
-| **S8** | LOW | `job-documents` and `backflow-certificates` have no bucket definition in the repo. Resolved by live query — see N17 |
+| **S8** | LOW | `job-documents` and `backflow-certificates` have no bucket definition in the repo. Resolved by live query — see N17. Both buckets confirmed private; `backflow-certificates` holds 1 object |
 
 ## 12. New findings — correctness (C)
 
