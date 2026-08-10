@@ -19,7 +19,7 @@ import { createClient } from "@/lib/supabase/client";
 // Both drag handlers go through this: it writes the row AND pushes the job to
 // Google Calendar. Writing the table directly here is what left the calendar
 // stale, which the poll in lib/google.ts then "corrected" by undoing the drag.
-import { applyScheduleChange } from "@/lib/schedule-dispatch";
+import { applyScheduleChange, type ScheduleWriteClient } from "@/lib/schedule-dispatch";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -48,13 +48,17 @@ type Job = {
   assigned_to: string | null;
   customers?: { name?: string } | null;
   profiles?: { full_name?: string } | null;
+  // Nullable, not optional. These are database columns that are NULL when a
+  // site has no coordinates, and the generated types said so the moment the
+  // client was typed (item 3.3). Declaring them `?: number` claimed the field
+  // would be absent, which is a different thing and never what arrives.
   sites?: {
     name?: string;
-    address_line1?: string;
-    suburb?: string;
-    state?: string;
-    site_lat?: number;
-    site_lng?: number;
+    address_line1?: string | null;
+    suburb?: string | null;
+    state?: string | null;
+    site_lat?: number | null;
+    site_lng?: number | null;
   } | null;
 };
 
@@ -293,7 +297,12 @@ export function TeamScheduleView({
   upcomingJobs: Job[];
   staff: StaffMember[];
 }) {
-  const supabase = createClient();
+  // Narrowed to the three methods the dispatcher uses. Not cosmetic: matching
+  // the fully-generic typed client against the dispatcher's structural
+  // parameter makes TypeScript give up with TS2589 ("type instantiation is
+  // excessively deep"). This says exactly what this component does with the
+  // client — .from().update().eq() — rather than widening anything to `any`.
+  const supabase = createClient() as unknown as ScheduleWriteClient;
   const [tab, setTab] = useState("team");
   // Every job passed in here already has a scheduled_start (the page query
   // filters that) — jobs with no time yet stay in the general Jobs list

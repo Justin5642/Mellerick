@@ -25,7 +25,7 @@
 // that invariant in two places.
 
 /** The narrow slice of the Supabase client this module needs. */
-type ScheduleWriteClient = {
+export type ScheduleWriteClient = {
   from(table: string): {
     update(patch: Record<string, unknown>): {
       eq(column: string, value: string): PromiseLike<{ error: { message: string } | null }>;
