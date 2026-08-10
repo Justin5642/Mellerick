@@ -12,17 +12,37 @@
 // database from migrations and it comes up subtly different, or a later
 // migration collides with a column it did not know was there.
 //
-// This project has hit the drift class three times (jobs.ready_to_invoice,
-// jobs.admin_status/admin_notes, time_entries.hours). Two were found only
-// because the app was visibly broken. This is the check that finds them before
-// that.
+// This project has hit the drift class five times: jobs.ready_to_invoice
+// (0040), jobs.admin_status/admin_notes (0041), time_entries.hours and
+// job_variations.attachment_file_name (0043), three storage buckets that existed
+// in production and in no migration (0049), and the generated device schema that
+// went stale behind a wildcard sync stream. Most were found only because
+// something was visibly broken.
+//
+// AND THIS CHECK EXISTED THROUGHOUT. It never ran, because it required a
+// logged-in Supabase CLI that nobody had — so a working guard sat in the repo
+// while the thing it guards against happened five times. That is the real
+// lesson, and it is why the default path below needs nothing but the
+// service-role key that is already in .env.
 //
 // USAGE
-//   node scripts/check-schema-drift.mjs
+//   npm run check:drift                 # PostgREST + service-role key
+//   node scripts/check-schema-drift.mjs --linked   # Supabase CLI instead
 //
-// Requires the Supabase CLI linked to the project (supabase/.temp/project-ref)
-// and run from the repo root. Read-only: it generates types and reads files.
+// Run from the repo root. Read-only: two GETs and some file reads, no writes.
 // Exits 1 when drift is found, so it can gate a release.
+//
+// WHAT IT COVERS: table columns, and storage buckets (including a public-bucket
+// check, since a public bucket makes every storage policy on it decorative).
+// WHAT IT DOES NOT: views, functions, triggers, RLS policies, the powersync
+// publication, and anything in a non-public schema.
+//
+// IT CANNOT RUN IN CI. .github/workflows/ci.yml holds no secrets at all, by
+// design, so nothing there can reach production. The half that needs no
+// credentials — "did the repo create schema somewhere the migration history
+// will not record it?" — lives in tests/unit/schema-outside-migrations.test.ts
+// and does run on every push. This one is a human gate: run it before a release,
+// and after anyone touches the database by hand.
 
 import { execFileSync } from "node:child_process";
 import { readFileSync, readdirSync } from "node:fs";
@@ -30,19 +50,85 @@ import { join } from "node:path";
 
 const MIGRATIONS = join(process.cwd(), "supabase", "migrations");
 
-function liveTypes() {
-  try {
-    return execFileSync("npx", ["supabase", "gen", "types", "typescript", "--linked"], {
-      encoding: "utf8",
-      maxBuffer: 32 * 1024 * 1024,
-      stdio: ["ignore", "pipe", "ignore"],
-      shell: process.platform === "win32",
-    });
-  } catch (e) {
-    console.error("Could not read the live schema. Is the CLI linked, and are you in the repo root?");
-    console.error(String(e.message ?? e));
+// WHY THERE ARE TWO SOURCES.
+//
+// This check was written to catch production columns missing from the migration
+// history, and it has never once run — `npm run check:drift` needs a LOGGED-IN
+// Supabase CLI, and nobody has one to hand. Meanwhile the drift it exists to
+// find has landed five times: jobs.ready_to_invoice (0040), jobs.admin_status
+// and admin_notes (0041), time_entries.hours and
+// job_variations.attachment_file_name (0043), three storage buckets created only
+// by scripts, and jobs.ready_to_invoice again on the device side.
+//
+// A guard that cannot be run is not a guard. The default path now uses
+// PostgREST's OpenAPI description and the service-role key already in .env —
+// the same route every other script in this repo takes. `--linked` keeps the
+// original CLI path for anyone who has it.
+function readEnvFile() {
+  for (const file of [".env.local", ".env"]) {
+    try {
+      for (const line of readFileSync(file, "utf8").split(/\r?\n/)) {
+        const m = line.match(/^\s*([A-Z0-9_]+)\s*=\s*(.*)\s*$/);
+        if (m && !process.env[m[1]]) process.env[m[1]] = m[2].replace(/^["']|["']$/g, "");
+      }
+    } catch {}
+  }
+}
+
+/** Live columns per table, as Map<table, Set<column>>. */
+async function liveColumns() {
+  if (process.argv.includes("--linked")) {
+    let types;
+    try {
+      types = execFileSync("npx", ["supabase", "gen", "types", "typescript", "--linked"], {
+        encoding: "utf8",
+        maxBuffer: 32 * 1024 * 1024,
+        stdio: ["ignore", "pipe", "ignore"],
+        shell: process.platform === "win32",
+      });
+    } catch (e) {
+      console.error("Could not read the live schema. Is the CLI linked, and are you in the repo root?");
+      console.error(String(e.message ?? e));
+      process.exit(2);
+    }
+    const out = new Map();
+    for (const m of types.matchAll(/^ {6}(\w+): \{\n {8}Row: \{([\s\S]*?)\n {8}\}/gm)) {
+      out.set(m[1], new Set([...m[2].matchAll(/^\s+(\w+)\??:/gm)].map((x) => x[1])));
+    }
+    return out;
+  }
+
+  readEnvFile();
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!url || !key) {
+    console.error(
+      "Need NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY in .env (or pass --linked\n" +
+        "to use a logged-in Supabase CLI instead)."
+    );
     process.exit(2);
   }
+  const res = await fetch(`${url}/rest/v1/`, {
+    headers: { apikey: key, Authorization: `Bearer ${key}` },
+  });
+  if (!res.ok) {
+    console.error(`Could not read the live schema over PostgREST: ${res.status} ${await res.text()}`);
+    process.exit(2);
+  }
+  const spec = await res.json();
+  const defs = spec.definitions ?? spec.components?.schemas ?? {};
+  const out = new Map();
+  for (const [table, def] of Object.entries(defs)) {
+    if (def?.properties) out.set(table, new Set(Object.keys(def.properties)));
+  }
+  // A source that returns nothing would make every assertion below trivially
+  // true and print "No drift" — the exact vacuous pass this repo keeps getting
+  // bitten by.
+  if (out.size === 0) {
+    console.error("The live schema came back with zero tables. Refusing to report 'no drift'.");
+    process.exit(2);
+  }
+  return out;
 }
 
 function migrationSql() {
@@ -74,7 +160,7 @@ function migrationColumns(sql, table) {
   return cols;
 }
 
-const types = liveTypes();
+const live = await liveColumns();
 const sql = migrationSql();
 
 // The generated file lists views alongside tables. A view has no `create table`,
@@ -84,28 +170,76 @@ const sql = migrationSql();
 const isView = (name) => new RegExp(`create (?:or replace )?view ${name}\\b`, "i").test(sql);
 
 const drift = [];
-for (const m of types.matchAll(/^ {6}(\w+): \{\n {8}Row: \{([\s\S]*?)\n {8}\}/gm)) {
-  const table = m[1];
+for (const [table, liveCols] of live) {
   if (isView(table)) continue;
-  const live = new Set([...m[2].matchAll(/^\s+(\w+)\??:/gm)].map((x) => x[1]));
   const known = migrationColumns(sql, table);
   if (known.size === 0) {
     drift.push(`${table}: table exists in production but no migration creates it`);
     continue;
   }
-  const missing = [...live].filter((c) => !known.has(c)).sort();
+  const missing = [...liveCols].filter((c) => !known.has(c)).sort();
   if (missing.length) drift.push(`${table}: ${missing.join(", ")}`);
 }
 
-if (drift.length === 0) {
-  console.log("No drift: every production column is accounted for in the migration history.");
+// ---------------------------------------------------------------------------
+// STORAGE BUCKETS — the drift class a column check cannot see.
+//
+// Buckets live in storage.buckets, not in any table this script compares, so
+// they were invisible to it. Three of the five existed in production and in NO
+// migration (job-audio and backflow-certificates were created by scripts;
+// job-documents, with 3909 objects, by nothing recorded in this repo at all).
+// A database rebuilt from migrations therefore carried storage POLICIES for
+// buckets it did not have — which is why 0047's and 0048's storage tests could
+// never fail: a select against a bucket that does not exist returns zero rows
+// perfectly happily. It took an INSERT, in CI, to surface it.
+// ---------------------------------------------------------------------------
+const bucketDrift = [];
+{
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (url && key) {
+    const res = await fetch(`${url}/storage/v1/bucket`, {
+      headers: { apikey: key, Authorization: `Bearer ${key}` },
+    });
+    if (res.ok) {
+      const liveBuckets = await res.json();
+      const declared = new Set(
+        [...sql.matchAll(/insert into storage\.buckets[\s\S]*?values\s*([\s\S]*?);/gi)]
+          .flatMap((m) => [...m[1].matchAll(/\(\s*'([^']+)'/g)].map((x) => x[1]))
+      );
+      for (const b of liveBuckets) {
+        if (!declared.has(b.id)) {
+          bucketDrift.push(`${b.id}: bucket exists in production and in no migration`);
+        }
+        // A public bucket serves objects to anyone with the URL, RLS or not, so
+        // every storage policy on it is decorative. Worth reporting loudly even
+        // when the bucket IS declared.
+        if (b.public) bucketDrift.push(`${b.id}: bucket is PUBLIC — storage RLS on it is decorative`);
+      }
+    } else {
+      bucketDrift.push(`(could not read buckets: ${res.status} — bucket drift NOT checked)`);
+    }
+  }
+}
+
+const problems = [...drift.map((d) => ["column", d]), ...bucketDrift.map((d) => ["bucket", d])];
+
+if (problems.length === 0) {
+  console.log(
+    `No drift: ${live.size} live relations and every storage bucket are accounted for in the\n` +
+      `migration history. (Checked columns AND buckets — see the header for what is still\n` +
+      `out of scope: views, functions, triggers, policies and the publication.)`
+  );
   process.exit(0);
 }
 
 console.error("SCHEMA DRIFT — present in production, absent from the migration history:\n");
-for (const d of drift) console.error(`  ${d}`);
+for (const [kind, d] of problems) console.error(`  [${kind}] ${d}`);
 console.error(
-  "\nCapture each one in a new migration with `add column if not exists`, which is a\n" +
-    "no-op against production. The goal is a history that can rebuild production."
+  "\nCapture each one in a new migration. Columns: `add column if not exists`.\n" +
+    "Buckets: `insert into storage.buckets (id, name, public) values (...) on conflict (id)\n" +
+    "do nothing`. Both are no-ops against production. The goal is a history that can rebuild\n" +
+    "production — because until it can, every test that runs against a rebuilt database is\n" +
+    "testing a different database from the one your users are on."
 );
 process.exit(1);
