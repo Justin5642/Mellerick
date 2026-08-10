@@ -14,6 +14,11 @@ export default async function DashboardLayout({ children }: { children: React.Re
     .eq("id", user.id)
     .single();
 
+  // Route-level gating for technicians lives in middleware.ts, not here: a
+  // layout cannot see the pathname, and hiding a sidebar link only changes what
+  // is CLICKABLE — a typed or bookmarked /dashboard/staff still rendered the
+  // full roster.
+
   return (
     <div className="flex h-screen overflow-hidden bg-slate-50">
       <AppSidebar

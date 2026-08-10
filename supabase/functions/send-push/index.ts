@@ -17,6 +17,30 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { sendExpoPush, type PushNotification } from "./pushSender.ts";
 
+/**
+ * Constant-time string comparison, for Deno.
+ *
+ * The Node twin is lib/constant-time.ts; an edge function cannot import from
+ * lib/, so the property is restated rather than shared. Keep them in step.
+ *
+ * XORs every byte and accumulates, so the loop always runs to the end — no
+ * early return, no data-dependent branch. Empty input is refused on both sides:
+ * two empty strings are byte-identical, and an unset secret must not be
+ * satisfied by an absent header.
+ */
+function timingSafeEquals(a: string | null | undefined, b: string | null | undefined): boolean {
+  if (typeof a !== "string" || typeof b !== "string") return false;
+  if (a.length === 0 || b.length === 0) return false;
+
+  const left = new TextEncoder().encode(a);
+  const right = new TextEncoder().encode(b);
+  if (left.length !== right.length) return false;
+
+  let diff = 0;
+  for (let i = 0; i < left.length; i++) diff |= left[i] ^ right[i];
+  return diff === 0;
+}
+
 Deno.serve(async (req: Request) => {
   if (req.method !== "POST") return json({ error: "Method not allowed" }, 405);
 
@@ -24,8 +48,13 @@ Deno.serve(async (req: Request) => {
   const admin = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
 
   // AuthZ: either the internal secret (trigger path) OR an office/admin caller.
+  //
+  // Compared in constant time. `===` on a secret short-circuits at the first
+  // differing byte, so the time taken leaks how much of it the caller got right.
+  // Written out here rather than imported: this is a Deno edge function and
+  // cannot reach lib/constant-time.ts, which is the Node twin of this.
   const providedSecret = req.headers.get("x-internal-secret");
-  let authorized = !!internalSecret && providedSecret === internalSecret;
+  let authorized = !!internalSecret && timingSafeEquals(providedSecret, internalSecret);
   if (!authorized) {
     const token = (req.headers.get("authorization") ?? "").replace(/^Bearer\s+/i, "");
     if (!token) return json({ error: "Not authenticated" }, 401);

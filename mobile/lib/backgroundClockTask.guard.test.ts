@@ -43,7 +43,6 @@ describe("backgroundClockTask registration", () => {
     // The assertion IS that this does not throw. If it does, the app shows a
     // red screen on launch instead of merely losing background tracking.
     expect(() => {
-      // eslint-disable-next-line @typescript-eslint/no-require-imports
       require("./backgroundClockTask");
     }).not.toThrow();
   });
@@ -61,7 +60,6 @@ describe("backgroundClockTask registration", () => {
       multiRemove: jest.fn(),
     }));
 
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
     require("./backgroundClockTask");
 
     const said = warn.mock.calls.flat().join(" ");
@@ -83,7 +81,6 @@ describe("backgroundClockTask registration", () => {
       multiRemove: jest.fn(),
     }));
 
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
     require("./backgroundClockTask");
 
     expect(defineTask).toHaveBeenCalledTimes(1);

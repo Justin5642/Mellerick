@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
 import { getCallerId } from "@/lib/api/guards";
 import { canManageJobBilling } from "@/lib/api/job-authz";
+import { createAdminClient } from "@/lib/supabase/admin";
 
 // Uses the service-role key (not the cookie-based server client) because
 // this route is called from the mobile app with no browser session/cookies
@@ -11,11 +11,7 @@ import { canManageJobBilling } from "@/lib/api/job-authz";
 // this route must verify the caller's identity itself: the mobile app
 // attaches its Supabase session access token as a Bearer header, which we
 // validate against the anon-key client below before touching any data.
-function getAdminClient() {
-  return createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!, {
-    auth: { autoRefreshToken: false, persistSession: false },
-  });
-}
+const getAdminClient = createAdminClient;
 
 export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;

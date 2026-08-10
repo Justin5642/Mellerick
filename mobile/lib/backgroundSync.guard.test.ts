@@ -51,7 +51,6 @@ describe("backgroundSync registration", () => {
     // The assertion IS that this does not throw. If it does, the app shows a red
     // screen on launch instead of merely losing background draining.
     expect(() => {
-      // eslint-disable-next-line @typescript-eslint/no-require-imports
       require("./backgroundSync");
     }).not.toThrow();
   });
@@ -64,7 +63,6 @@ describe("backgroundSync registration", () => {
     mockEverythingExceptTheNativeModules();
 
     expect(() => {
-      // eslint-disable-next-line @typescript-eslint/no-require-imports
       require("./backgroundSync");
     }).not.toThrow();
   });
@@ -80,7 +78,6 @@ describe("backgroundSync registration", () => {
     }));
     mockEverythingExceptTheNativeModules();
 
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
     require("./backgroundSync");
 
     // A silent degradation here means queued writes wait for someone to reopen
@@ -100,7 +97,6 @@ describe("backgroundSync registration", () => {
     }));
     mockEverythingExceptTheNativeModules();
 
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
     const mod = require("./backgroundSync");
 
     // location-tracking calls this with .catch(), but an unhandled rejection in

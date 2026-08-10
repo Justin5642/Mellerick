@@ -61,7 +61,7 @@ local Supabase stack) are being added — see the hardening plan in `.ezra/plans
 
 ## Database
 
-Schema lives in [`supabase/`](supabase/): `schema.sql` is the baseline and
+Schema lives in [`supabase/`](supabase/): `migrations/0000_baseline.sql` is the baseline and
 `migrations/` holds the ordered changes. Apply them with the Supabase CLI
 (`supabase db reset` against a local stack, or `supabase db push` to a project).
 

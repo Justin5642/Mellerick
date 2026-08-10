@@ -25,7 +25,44 @@ import { assertRequiredEnv } from "./lib/env";
 // where nobody does.
 assertRequiredEnv();
 
+// Response headers the app had none of (item 3.5). Deliberately conservative:
+// every one of these can break a working page if set too tightly, and this app
+// serves PDFs, signed Supabase Storage URLs and Google OAuth redirects.
+//
+// NOT SET, and why — so the next person does not read the omission as an
+// oversight:
+//   Content-Security-Policy  Next injects inline scripts for hydration, and a
+//                            CSP without 'unsafe-inline' or a nonce pipeline
+//                            breaks the app outright. Worth doing, but it needs
+//                            a report-only rollout against real traffic first,
+//                            not a guess in a config file.
+//   HSTS                     Vercel already serves it on the apex domain, and
+//                            setting max-age wrong is the one header you cannot
+//                            walk back — browsers honour it after the fix.
+const securityHeaders = [
+  // Stops a browser second-guessing a declared Content-Type. The real target is
+  // uploaded files served back to a user: a .png that is actually HTML must not
+  // be sniffed into a script.
+  { key: "X-Content-Type-Options", value: "nosniff" },
+  // No third party frames this app, so clickjacking has no surface to work
+  // with. DENY rather than SAMEORIGIN because nothing here frames itself.
+  { key: "X-Frame-Options", value: "DENY" },
+  // Referrers leak URLs, and this app's URLs contain job, invoice and customer
+  // ids. Same-origin gets the full path; anyone else gets the origin only.
+  { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
+  // The app never uses these, so denying them means a compromised dependency
+  // cannot start.
+  { key: "Permissions-Policy", value: "camera=(), microphone=(), geolocation=(), payment=()" },
+];
+
 const nextConfig: NextConfig = {
+  // Removes the `X-Powered-By: Next.js` version advertisement.
+  poweredByHeader: false,
+
+  async headers() {
+    return [{ source: "/:path*", headers: securityHeaders }];
+  },
+
   // Lint is enforced during builds (and in CI). Rules are tuned in
   // eslint.config.mjs so the build fails only on genuine errors, not on the
   // codebase's deliberate `any` convention (surfaced as warnings instead).

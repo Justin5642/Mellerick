@@ -88,10 +88,32 @@ export function JobDocuments({ jobId, documents, onUpdate, currentUserId }: Prop
 
   async function handleDelete(doc: any) {
     setDeleting(doc.id);
-    await supabase.storage.from("job-documents").remove([doc.storage_path]);
-    await supabase.from("job_documents").delete().eq("id", doc.id);
+
+    // ROW FIRST — see components/job/job-photos.tsx for the full reasoning. The
+    // old order removed the file before the row, so a refused row delete left a
+    // document the app still listed but could no longer open, and neither result
+    // was checked. 0047 scopes money documents in this bucket to office/admin,
+    // so a refusal is reachable.
+    const { error: rowError } = await supabase.from("job_documents").delete().eq("id", doc.id);
+    if (rowError) {
+      toast.error(`Could not delete the document: ${rowError.message}`);
+      setDeleting(null);
+      return;
+    }
+
+    const { data: removed, error: fileError } = await supabase.storage
+      .from("job-documents")
+      .remove([doc.storage_path]);
+
     onUpdate(documents.filter((d) => d.id !== doc.id));
-    toast.success("Document deleted");
+    // An RLS-filtered bulk remove returns 200 with an empty array, so `data` is
+    // the signal, not `error`.
+    if (fileError || !removed?.length) {
+      console.error("job-documents: row deleted but file remains", doc.storage_path, fileError);
+      toast.warning("Document removed, but the file could not be cleaned up.");
+    } else {
+      toast.success("Document deleted");
+    }
     setDeleting(null);
   }
 

@@ -48,7 +48,16 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
         } catch (e: any) {
           if (e?.code !== 404 && e?.code !== 410) throw e;
         }
-        await supabase.from("jobs").update({ google_event_id: null }).eq("id", id);
+        // The event is gone from Google. If clearing the id fails, the job
+        // still points at an event that no longer exists, and the next sync
+        // takes the UPDATE branch, gets a 404, and falls through to recreate —
+        // so the failure is self-correcting rather than duplicating. Worth
+        // saying, not worth failing the request over.
+        const { error: clearError } = await supabase.from("jobs").update({ google_event_id: null }).eq("id", id);
+        if (clearError) {
+          console.error("Calendar sync: event deleted but job still references it:", clearError.message);
+          return NextResponse.json({ removed: true, linkCleared: false, warning: clearError.message });
+        }
       }
       return NextResponse.json({ removed: true });
     }
@@ -85,7 +94,39 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     }
 
     const res = await calendar.events.insert({ calendarId: "primary", requestBody: eventBody });
-    await supabase.from("jobs").update({ google_event_id: res.data.id }).eq("id", id);
+
+    // Recording the event id is the ONLY thing that stops the next sync taking
+    // this same create branch — `if (job.google_event_id)` above is the whole
+    // dedupe. The result used to be discarded, so a failed write meant a SECOND
+    // calendar event for the same job, and a first event the app could never
+    // update or delete because it no longer knew its id.
+    //
+    // Same shape, and same remedy, as the Xero link writes in push-invoice and
+    // push-expense: retry, then refuse in terms that stop a human retrying
+    // blind, because by now the event EXISTS in Google.
+    let linkError: { message: string } | null = null;
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      const { error } = await supabase.from("jobs").update({ google_event_id: res.data.id }).eq("id", id);
+      linkError = error;
+      if (!error) break;
+      if (attempt < 3) await new Promise((r) => setTimeout(r, 150 * attempt));
+    }
+
+    if (linkError) {
+      console.error("Calendar link write failed after 3 attempts:", linkError.message);
+      return NextResponse.json(
+        {
+          error:
+            `The calendar event WAS created (${res.data.id}) but could not be linked to this job ` +
+            `(${linkError.message}). DO NOT RETRY — syncing again would create a duplicate event. ` +
+            `Delete the event in Google Calendar, or set this job's google_event_id manually.`,
+          eventId: res.data.id,
+          requiresManualReconciliation: true,
+        },
+        { status: 409 }
+      );
+    }
+
     return NextResponse.json({ created: true, eventId: res.data.id });
   } catch (err: any) {
     console.error("Calendar sync error:", err);

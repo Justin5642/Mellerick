@@ -45,7 +45,6 @@ function exportedSql(): Array<[string, string]> {
   const out: Array<[string, string]> = [];
   for (const file of readdirSync(__dirname).sort()) {
     if (!file.endsWith(".ts") || file.includes(".test.")) continue;
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
     const mod = require(join(__dirname, file)) as Record<string, unknown>;
     for (const [name, value] of Object.entries(mod)) {
       if (name.startsWith("SQL_") && typeof value === "string") out.push([`${file.replace(/\.ts$/, "")}.${name}`, value]);

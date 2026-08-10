@@ -12,7 +12,6 @@ import { readFileSync } from "fs";
 import { join } from "path";
 import { AppSchema } from "./schema";
 
-// eslint-disable-next-line @typescript-eslint/no-var-requires
 const { parseStreams } = require("../../scripts/powersync-schema-lib.js");
 
 const MONEY_COLUMNS = new Set([

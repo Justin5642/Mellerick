@@ -91,10 +91,28 @@ export function EquipmentDocuments({ equipmentId, documents, onUpdate, currentUs
 
   async function handleDelete(doc: any) {
     setDeleting(doc.id);
-    await supabase.storage.from("equipment-documents").remove([doc.storage_path]);
-    await supabase.from("equipment_documents").delete().eq("id", doc.id);
+
+    // ROW FIRST — see the twin in components/job/job-documents.tsx.
+    // equipment-documents is office/admin-only for all four commands after
+    // 0047, so a refusal here is reachable and used to be invisible.
+    const { error: rowError } = await supabase.from("equipment_documents").delete().eq("id", doc.id);
+    if (rowError) {
+      toast.error(`Could not delete the document: ${rowError.message}`);
+      setDeleting(null);
+      return;
+    }
+
+    const { data: removed, error: fileError } = await supabase.storage
+      .from("equipment-documents")
+      .remove([doc.storage_path]);
+
     onUpdate(documents.filter((d) => d.id !== doc.id));
-    toast.success("Document deleted");
+    if (fileError || !removed?.length) {
+      console.error("equipment-documents: row deleted but file remains", doc.storage_path, fileError);
+      toast.warning("Document removed, but the file could not be cleaned up.");
+    } else {
+      toast.success("Document deleted");
+    }
     setDeleting(null);
   }
 

@@ -29,24 +29,27 @@ import {
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { useState } from "react";
+import { navItemsFor } from "@/lib/nav-items";
 
-const navItems = [
-  { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
-  { href: "/dashboard/jobs", label: "Jobs", icon: Briefcase },
-  { href: "/dashboard/my-jobs", label: "My Jobs", icon: Wrench },
-  { href: "/dashboard/approvals", label: "Approvals", icon: ClipboardCheck },
-  { href: "/dashboard/schedule", label: "Schedule", icon: Calendar },
-  { href: "/dashboard/customers", label: "Customers", icon: Users },
-  { href: "/dashboard/quotes", label: "Quotes", icon: FileText },
-  { href: "/dashboard/invoices", label: "Invoices", icon: Receipt },
-  { href: "/dashboard/pricing", label: "Pricing", icon: DollarSign },
-  { href: "/dashboard/inventory", label: "Inventory", icon: Package },
-  { href: "/dashboard/fleet", label: "Fleet", icon: Truck },
-  { href: "/dashboard/backflow", label: "Backflow Testing", icon: Droplets },
-  { href: "/dashboard/staff", label: "Staff", icon: Users },
-  { href: "/dashboard/reports", label: "Reports", icon: BarChart3 },
-  { href: "/dashboard/settings", label: "Settings", icon: Settings },
-];
+// Icons live here; the route list and the role rule live in lib/nav-items.ts so
+// middleware.ts can import them without dragging React into the Edge bundle.
+const ICONS: Record<string, typeof LayoutDashboard> = {
+  "/dashboard": LayoutDashboard,
+  "/dashboard/jobs": Briefcase,
+  "/dashboard/my-jobs": Wrench,
+  "/dashboard/approvals": ClipboardCheck,
+  "/dashboard/schedule": Calendar,
+  "/dashboard/customers": Users,
+  "/dashboard/quotes": FileText,
+  "/dashboard/invoices": Receipt,
+  "/dashboard/pricing": DollarSign,
+  "/dashboard/inventory": Package,
+  "/dashboard/fleet": Truck,
+  "/dashboard/backflow": Droplets,
+  "/dashboard/staff": Users,
+  "/dashboard/reports": BarChart3,
+  "/dashboard/settings": Settings,
+};
 
 interface AppSidebarProps {
   userEmail?: string;
@@ -177,7 +180,8 @@ export function AppSidebar({ userEmail, userName, userRole }: AppSidebarProps) {
 
         {/* Nav */}
         <nav className="flex-1 px-2 py-4 space-y-1 overflow-y-auto">
-          {navItems.map(({ href, label, icon: Icon }) => {
+          {navItemsFor(userRole).map(({ href, label }) => {
+            const Icon = ICONS[href];
             const active = pathname === href || (href !== "/dashboard" && pathname.startsWith(href));
             return (
               <Link

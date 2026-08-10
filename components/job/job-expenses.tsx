@@ -117,10 +117,35 @@ export function JobExpenses({ jobId, jobNumber, expenses: initialExpenses, onUpd
   }
 
   async function deleteExpense(expense: Expense) {
-    if (expense.receipt_storage_path) {
-      await supabase.storage.from("job-documents").remove([expense.receipt_storage_path]);
+    // ROW FIRST, then the receipt — the ordering job-photos.tsx was rewritten
+    // to use. Removing the file first meant a refused row delete left an
+    // expense the app still listed with a receipt it could no longer show, and
+    // neither call was checked: storage.remove() returns { data, error } rather
+    // than throwing, and a PostgREST delete that RLS filters out succeeds
+    // against zero rows. Migration 0047 scoped these receipts to office/admin,
+    // so a refusal here is reachable.
+    const { error: rowError } = await supabase.from("job_expenses").delete().eq("id", expense.id);
+    if (rowError) {
+      toast.error(`Could not remove the expense: ${rowError.message}`);
+      return;
     }
-    await supabase.from("job_expenses").delete().eq("id", expense.id);
+
+    if (expense.receipt_storage_path) {
+      const { data: removed, error: fileError } = await supabase.storage
+        .from("job-documents")
+        .remove([expense.receipt_storage_path]);
+      // A bulk remove that RLS filters returns HTTP 200 with an EMPTY ARRAY,
+      // not an error, so `data` is the only reliable signal the file went.
+      if (fileError || !removed?.length) {
+        console.error("job-expenses: row deleted but receipt remains", expense.receipt_storage_path, fileError);
+        toast.warning("Expense removed, but its receipt file could not be cleaned up.");
+        const partial = expenses.filter((e) => e.id !== expense.id);
+        setExpenses(partial);
+        onUpdate(partial);
+        return;
+      }
+    }
+
     const updated = expenses.filter((e) => e.id !== expense.id);
     setExpenses(updated);
     onUpdate(updated);

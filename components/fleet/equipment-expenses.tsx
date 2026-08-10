@@ -115,10 +115,31 @@ export function EquipmentExpenses({ equipmentId, expenses: initialExpenses, onUp
   }
 
   async function deleteExpense(expense: Expense) {
-    if (expense.receipt_storage_path) {
-      await supabase.storage.from("equipment-documents").remove([expense.receipt_storage_path]);
+    // ROW FIRST — see the twin in components/job/job-expenses.tsx. The old
+    // order removed the receipt before the row, so a refused row delete left an
+    // expense listed with a receipt it could no longer show, and neither result
+    // was checked. equipment-documents is office/admin-only after 0047, so a
+    // refusal is reachable.
+    const { error: rowError } = await supabase.from("equipment_expenses").delete().eq("id", expense.id);
+    if (rowError) {
+      toast.error(`Could not remove the expense: ${rowError.message}`);
+      return;
     }
-    await supabase.from("equipment_expenses").delete().eq("id", expense.id);
+
+    if (expense.receipt_storage_path) {
+      const { data: removed, error: fileError } = await supabase.storage
+        .from("equipment-documents")
+        .remove([expense.receipt_storage_path]);
+      if (fileError || !removed?.length) {
+        console.error("equipment-expenses: row deleted but receipt remains", expense.receipt_storage_path, fileError);
+        toast.warning("Expense removed, but its receipt file could not be cleaned up.");
+        const partial = expenses.filter((e) => e.id !== expense.id);
+        setExpenses(partial);
+        onUpdate(partial);
+        return;
+      }
+    }
+
     const updated = expenses.filter((e) => e.id !== expense.id);
     setExpenses(updated);
     onUpdate(updated);

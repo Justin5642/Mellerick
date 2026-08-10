@@ -32,7 +32,6 @@ const norm = (s: string) => s.replace(/\s+/g, " ").trim();
 
 /** Chainable + thenable stand-in for a PostgREST builder. */
 function chainResolving(data: unknown[] | null = null, count = 0) {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const chain: any = {};
   for (const m of ["select", "eq", "in", "gte", "lte", "not", "or", "order", "is", "limit", "range"]) {
     chain[m] = jest.fn(() => chain);
