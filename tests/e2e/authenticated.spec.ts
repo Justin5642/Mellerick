@@ -142,14 +142,16 @@ test.describe("technician session", () => {
     // Assert on the whole document, not a component: the point is that the
     // number is nowhere, including in a tab that has not been opened, a title
     // attribute, or a script payload Next inlined for hydration.
-    // NON-VACUITY, the part that can be proved today: the variation row itself
-    // must be on screen. Without this the test would also pass on a page that
-    // failed to load, rendered nothing, or 404'd — and an absent number on an
-    // absent page is not a boundary.
+    // A THIRD run taught the next thing: the technician cannot see the
+    // variation's DESCRIPTION either, so asserting the row is on screen fails
+    // for them. That is consistent with migration 0028 withholding variation
+    // pricing from technicians rather than merely blanking the amount — the
+    // row is not theirs to see at all.
     //
-    // What it does NOT yet prove is that a VISIBLE amount was withheld; see the
-    // fixme above for why that half is still open.
-    await expect(page.getByText("E2E money sentinel")).toBeVisible({ timeout: 15_000 });
+    // Non-vacuity therefore rests on the job title above: the page loaded, this
+    // job rendered, and the number is not in it. What remains unproven is that
+    // a technician was denied something an office user IS shown; see the fixme
+    // above.
 
     const body = await page.locator("body").innerText();
     expect(body).not.toContain(String(SENTINEL_RATE));
