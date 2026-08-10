@@ -8,6 +8,7 @@ import Link from "next/link";
 import { businessDateParts, formatDate, formatTime, isTodayInBusinessTZ } from "@/lib/date";
 import { jobStatusColors, jobPriorityColors } from "@/lib/badge-colors";
 import { computeNextDueDate, getDueStatus } from "@/lib/backflow";
+import { redirect } from "next/navigation";
 
 function StatCard({ title, value, icon: Icon, color, href }: {
   title: string; value: string | number; icon: React.ElementType; color: string; href: string;
@@ -32,6 +33,13 @@ function StatCard({ title, value, icon: Icon, color, href }: {
 export default async function DashboardPage() {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
+
+  // Guarded rather than asserted. `user!.id` below relied on the layout (and
+  // now middleware) having redirected an unauthenticated visitor first — true
+  // today, and a non-null assertion that outlives whichever of them is
+  // refactored. This is the same check the layout makes, stated where the value
+  // is actually used.
+  if (!user) redirect("/login");
 
   const [
     { count: totalJobs },
@@ -58,7 +66,7 @@ export default async function DashboardPage() {
       .select("*, customers(name), assigned_profile:profiles!jobs_assigned_to_fkey(full_name)")
       .order("created_at", { ascending: false })
       .limit(8),
-    supabase.from("profiles").select("full_name").eq("id", user!.id).single(),
+    supabase.from("profiles").select("full_name").eq("id", user.id).single(),
     supabase.from("jobs")
       .select("*, customers(name), profiles!jobs_assigned_to_fkey(full_name)")
       .not("scheduled_start", "is", null)
