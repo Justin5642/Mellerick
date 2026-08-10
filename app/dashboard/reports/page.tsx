@@ -5,6 +5,7 @@ import { ReportsDashboard } from "@/components/reports/reports-dashboard";
 import { computeLoadedCost } from "@/lib/staff-cost";
 import { computeEquipmentCost } from "@/lib/equipment-cost";
 import { businessDateParts, formatDate } from "@/lib/date";
+import { fetchAllRows } from "@/lib/fetch-all-rows";
 
 function monthKey(date: string) {
   const { year, month } = businessDateParts(date);
@@ -19,13 +20,46 @@ function monthLabel(key: string) {
 export default async function ReportsPage() {
   const supabase = await createClient();
 
-  const [{ data: invoices }, { data: quotes }, { data: jobs }, { data: profiles }, { data: { user } }] = await Promise.all([
-    supabase.from("invoices").select("id, total, status, created_at, customer_id, customers(name)"),
-    supabase.from("quotes").select("id, total, status, created_at"),
-    supabase.from("jobs").select("id, status, assigned_to, created_at"),
-    supabase.from("profiles").select("id, full_name").eq("is_active", true),
+  // PAGED, not unranged. PostgREST caps an unranged select at 1000 rows and
+  // returns no error and no flag — verified against production:
+  // `GET /rest/v1/job_photos?select=id` gives 1000 rows, content-range 0-999/*.
+  // Every select on this page used to be unranged, so once a table crossed the
+  // cap the revenue chart, outstanding total, top customers and utilisation
+  // would all start computing from a truncated set and present it as
+  // authoritative. `jobs` measured 827 of 1000 when this was written: correct
+  // today, silently wrong soon, with no deploy to blame.
+  //
+  // Aggregating in SQL is the right end state — pagination is the wrong tool
+  // for a sum — but that needs a migration, handed over rather than applied
+  // here. See lib/fetch-all-rows.ts.
+  const [invoicesResult, quotesResult, jobsResult, profilesResult, { data: { user } }] = await Promise.all([
+    fetchAllRows(supabase.from("invoices").select("id, total, status, created_at, customer_id, customers(name)")),
+    fetchAllRows(supabase.from("quotes").select("id, total, status, created_at")),
+    fetchAllRows(supabase.from("jobs").select("id, status, assigned_to, created_at")),
+    fetchAllRows(supabase.from("profiles").select("id, full_name").eq("is_active", true)),
     supabase.auth.getUser(),
   ]);
+
+  // A report that cannot read all its rows must say so rather than render a
+  // confident wrong number. This is the whole point of the change: the failure
+  // was never that the data was capped, it was that nothing said it had been.
+  const readFailure = [invoicesResult, quotesResult, jobsResult, profilesResult].find((r) => !r.ok);
+  if (readFailure && !readFailure.ok) {
+    return (
+      <div className="p-6">
+        <h1 className="text-2xl font-bold text-slate-900">Reports</h1>
+        <p className="mt-4 text-sm text-red-600">
+          These figures could not be calculated from complete data, so they are not shown:{" "}
+          {readFailure.error}
+        </p>
+      </div>
+    );
+  }
+
+  const invoices = invoicesResult.ok ? invoicesResult.rows : [];
+  const quotes = quotesResult.ok ? quotesResult.rows : [];
+  const jobs = jobsResult.ok ? jobsResult.rows : [];
+  const profiles = profilesResult.ok ? profilesResult.rows : [];
 
   // Staff cost/efficiency data is payroll-sensitive (wage, super, sick
   // leave), so it's only fetched and passed down at all when the viewer is
@@ -65,11 +99,20 @@ export default async function ReportsPage() {
     const cutoffIso = twelveMonthsAgo.toISOString();
     const cutoffDate = twelveMonthsAgo.toISOString().slice(0, 10);
 
-    const [{ data: costProfiles }, { data: leaveEntries }, { data: workEntries }] = await Promise.all([
-      supabase.from("staff_cost_profiles").select("*"),
-      supabase.from("staff_leave").select("staff_id, leave_type, hours, start_date").gte("start_date", cutoffDate),
-      supabase.from("time_entries").select("staff_id, hours").eq("entry_type", "work").gte("clock_in", cutoffIso).not("hours", "is", null),
+    // time_entries is the one here that grows without bound — twelve months of
+    // work entries across the whole team — so it is the first of these to cross
+    // the 1000-row cap and start under-reporting utilisation.
+    const [costProfilesResult, leaveResult, workResult] = await Promise.all([
+      fetchAllRows(supabase.from("staff_cost_profiles").select("*")),
+      fetchAllRows(supabase.from("staff_leave").select("staff_id, leave_type, hours, start_date").gte("start_date", cutoffDate)),
+      fetchAllRows(supabase.from("time_entries").select("staff_id, hours").eq("entry_type", "work").gte("clock_in", cutoffIso).not("hours", "is", null)),
     ]);
+
+    const costProfiles = costProfilesResult.ok ? costProfilesResult.rows : null;
+    const leaveEntries = leaveResult.ok ? leaveResult.rows : null;
+    // Utilisation divides by hours worked, so a truncated set inflates every
+    // percentage. Null it rather than show a flattering wrong figure.
+    const workEntries = workResult.ok ? workResult.rows : null;
 
     const profileNameMap = new Map((profiles ?? []).map((p: any) => [p.id, p.full_name]));
 
