@@ -111,4 +111,30 @@ describe("local SQL references only columns the device schema declares", () => {
       references: true,
     });
   });
+
+  // The count above proves the guard is working IN AGGREGATE. It cannot show
+  // that a PARTICULAR query is unchecked — and a multi-table query that
+  // qualifies nothing is exactly that: every column in it skipped, silently,
+  // while the total stays healthy because 45 other queries carry it.
+  //
+  // Skipping them is right (guessing which of two tables owns a bare column
+  // would invent failures); skipping them invisibly is not. Naming them makes a
+  // THIRD one a visible coverage loss that fails here, rather than being
+  // absorbed into an aggregate that never notices.
+  const UNATTRIBUTABLE = [
+    "backflow.SQL_LIST_BACKFLOW_TESTS",
+    "jobBilling.SQL_JOB_BILLING_PO_COST_CENTERS",
+  ];
+
+  it("has not quietly grown its own blind spot", () => {
+    const blind = statements
+      .filter(([, sql]) => {
+        const tables = [...sql.matchAll(/\b(?:from|join)\s+[a-z_][a-z0-9_]*/gi)].length;
+        return tables > 1 && lint(sql)[1] === 0;
+      })
+      .map(([name]) => name)
+      .sort();
+
+    expect(blind).toEqual([...UNATTRIBUTABLE].sort());
+  });
 });
