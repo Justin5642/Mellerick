@@ -3,6 +3,7 @@ import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 
 import { referencedColumns } from "../helpers/column-references";
+import { migrationTables } from "../helpers/migration-schema";
 
 // Drift guard born from a real production bug (2026-07-28): `jobs.ready_to_invoice`
 // was referenced by NINE call sites across web and mobile — including the web's
@@ -51,30 +52,16 @@ const EXEMPT = new Set<string>([
   "schema_migrations",
 ]);
 
-/** Parse `create table <name> ( … );` blocks into a column-name set. */
+/**
+ * Table -> column names, from the migration history.
+ *
+ * The parse itself lives in tests/helpers/migration-schema.ts, shared with the
+ * device-schema guard (item 2.24). Two independent parsers of the same SQL is
+ * the very shape of defect these guards exist to catch — they would agree until
+ * one of them was fixed.
+ */
 function columnsFromSchema(sql: string): Map<string, Set<string>> {
-  const out = new Map<string, Set<string>>();
-  const tableRe = /create table (?:if not exists )?(\w+)\s*\(([\s\S]*?)\n\);/gi;
-  for (const [, table, body] of sql.matchAll(tableRe)) {
-    const cols = new Set<string>();
-    for (const line of body.split("\n")) {
-      const t = line.trim();
-      // Skip constraints and table-level clauses; a column line starts with its name.
-      if (!t || /^(primary key|foreign key|unique|check|constraint|references)\b/i.test(t)) continue;
-      const m = t.match(/^"?(\w+)"?\s+/);
-      if (m) cols.add(m[1]);
-    }
-    out.set(table, cols);
-  }
-  // Later migrations may add columns; fold in every `alter table … add column`.
-  // `[^;]*?` matters: without it the gap spans whole files and pairs an early
-  // `alter table` with a much later `add column`, silently losing real columns.
-  const alterRe = /alter table (?:only )?(\w+)[^;]*?add column (?:if not exists )?"?(\w+)"?/gi;
-  for (const [, table, col] of sql.matchAll(alterRe)) {
-    if (!out.has(table)) out.set(table, new Set());
-    out.get(table)!.add(col);
-  }
-  return out;
+  return new Map([...migrationTables(sql)].map(([table, cols]) => [table, new Set(cols.keys())]));
 }
 
 /**
