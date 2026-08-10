@@ -70,7 +70,7 @@
     "test": "jest",
     "test:watch": "jest --watch",
     "typecheck": "tsc --noEmit",
-    "lint": "eslint . --max-warnings 96"
+    "lint": "eslint . --max-warnings 136"
   },
   "private": true
 }

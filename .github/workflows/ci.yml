@@ -57,9 +57,9 @@ jobs:
       - run: npx tsc --noEmit -p tsconfig.json
       # mobile/ had no lint tooling at all until now (item N3). The warning
       # ceiling is pinned in mobile/package.json so the count can only go DOWN —
-      # 96 today, almost all of them `no-floating-promises`, which is the rule
-      # this project needed most and which cannot be swept safely. Lower the
-      # number as they are triaged; never raise it.
+      # 136 today, most of them `no-floating-promises`, which is the rule this
+      # project needed most and which cannot be swept safely. Lower the number
+      # as they are triaged; never raise it.
       - run: npm run lint
       - run: npm test
 

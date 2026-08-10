@@ -1,7 +1,6 @@
 // Guards the two pieces of schema generation that can silently produce a wrong
 // device schema: which columns a stream is understood to sync, and how a
 // Postgres type is narrowed to one of SQLite's three.
-// eslint-disable-next-line @typescript-eslint/no-var-requires
 const { parseStreams, sqliteType, render } = require("./powersync-schema-lib.js");
 
 describe("parseStreams", () => {

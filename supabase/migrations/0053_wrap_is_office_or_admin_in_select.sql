@@ -56,6 +56,18 @@
 -- every bare occurrence. Trying to match "bare but not already wrapped" needs a
 -- lookbehind Postgres regexes do not have, and getting that wrong would double-
 -- wrap into `(select (select …))` on a second run.
+--
+-- THE ALIAS MATTERS, and cost a CI round to find. Postgres does not store the
+-- text you write; it stores a parse tree and re-renders it. A scalar subquery
+-- comes back with a column alias attached:
+--
+--     written:  (select is_office_or_admin(auth.uid()))
+--     rendered: ( SELECT is_office_or_admin(auth.uid()) AS is_office_or_admin)
+--
+-- Every pattern below therefore has to tolerate an optional ` AS <name>` before
+-- the closing paren. Without it the unwrap step matches nothing, so a re-run
+-- double-wraps, and the assertion reports 28 freshly-rewritten policies as
+-- "still unwrapped" — which is exactly what the first CI run said.
 -- ============================================================================
 
 -- Snapshot every policy BEFORE touching anything, so the assertions afterwards
@@ -104,11 +116,11 @@ begin
     -- Unwrap, then wrap. Idempotent, and safe to re-run.
     new_qual := regexp_replace(
                   regexp_replace(coalesce(pol.qual, ''),
-                    '\(\s*SELECT\s+is_office_or_admin\(auth\.uid\(\)\)\s*\)', 'is_office_or_admin(auth.uid())', 'gi'),
+                    '\(\s*SELECT\s+is_office_or_admin\(auth\.uid\(\)\)(\s+AS\s+[a-z_]+)?\s*\)', 'is_office_or_admin(auth.uid())', 'gi'),
                   'is_office_or_admin\(auth\.uid\(\)\)', '(select is_office_or_admin(auth.uid()))', 'gi');
     new_check := regexp_replace(
                   regexp_replace(coalesce(pol.chk, ''),
-                    '\(\s*SELECT\s+is_office_or_admin\(auth\.uid\(\)\)\s*\)', 'is_office_or_admin(auth.uid())', 'gi'),
+                    '\(\s*SELECT\s+is_office_or_admin\(auth\.uid\(\)\)(\s+AS\s+[a-z_]+)?\s*\)', 'is_office_or_admin(auth.uid())', 'gi'),
                   'is_office_or_admin\(auth\.uid\(\)\)', '(select is_office_or_admin(auth.uid()))', 'gi');
 
     -- Nothing to do if it was already wrapped.
@@ -161,7 +173,7 @@ begin
   where polrelid::regclass::text not in ('xero_tokens', 'google_tokens')
     and regexp_replace(
           coalesce(pg_get_expr(polqual, polrelid), '') || coalesce(pg_get_expr(polwithcheck, polrelid), ''),
-          '\(\s*SELECT\s+is_office_or_admin\(auth\.uid\(\)\)\s*\)', '', 'gi'
+          '\(\s*SELECT\s+is_office_or_admin\(auth\.uid\(\)\)(\s+AS\s+[a-z_]+)?\s*\)', '', 'gi'
         ) ilike '%is_office_or_admin%';
   if leftover is not null then
     raise exception 'ASSERTION FAILED: still unwrapped in: %', leftover;
