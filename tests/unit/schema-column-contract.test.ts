@@ -2,6 +2,8 @@ import { describe, it, expect } from "vitest";
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 
+import { referencedColumns } from "../helpers/column-references";
+
 // Drift guard born from a real production bug (2026-07-28): `jobs.ready_to_invoice`
 // was referenced by NINE call sites across web and mobile — including the web's
 // Ready-to-Invoice queue and job sign-off — and existed in no migration and in no
@@ -122,33 +124,15 @@ function sourceFiles(dirs: string[]): string[] {
   return files;
 }
 
-/** Column references tied to a table, e.g. `.from("jobs")…update({ ready_to_invoice: … })`. */
-function referencedColumns(src: string, table: string): Set<string> {
-  const found = new Set<string>();
-  // Each `.from("<table>")` starts a chain; inspect the following ~600 chars.
-  const fromRe = new RegExp(`\\.from\\(\\s*["'\`]${table}["'\`]\\s*\\)`, "g");
-  for (const m of src.matchAll(fromRe)) {
-    // Stop at the next `.from(` so a neighbouring chain's columns are not
-    // attributed to this table (a real source of false positives).
-    const rest = src.slice(m.index! + m[0].length);
-    const nextFrom = rest.search(/\.from\(/);
-    const chunk = rest.slice(0, nextFrom === -1 ? 400 : Math.min(nextFrom, 400));
-    for (const [, col] of chunk.matchAll(/\.(?:eq|neq|gt|gte|lt|lte|is|in|order)\(\s*["'`](\w+)["'`]/g)) {
-      found.add(col);
-    }
-    // `.update({ a: 1, b: 2 })` / `.insert({ … })` object keys
-    for (const om of chunk.matchAll(/\.(?:update|insert|upsert)\(\s*\{([^}]*)\}/g)) {
-      const body = om[1];
-      for (const [, key] of body.matchAll(/(?:^|,)\s*(\w+)\s*:/g)) found.add(key);
-      // SHORTHAND properties — `{ hours, entry_type: "travel" }`. This is not a
-      // hypothetical: the geofence auto-clock wrote `hours` exactly this way, and
-      // the colon-only pattern above walked straight past it for months. A guard
-      // that misses the idiomatic spelling of a write is barely a guard.
-      for (const [, key] of body.matchAll(/(?:^|,)\s*(\w+)\s*(?=[,}]|$)/g)) found.add(key);
-    }
-  }
-  return found;
-}
+// The extraction lives in tests/helpers/column-references.ts so it can be
+// tested in its own right (column-references.test.ts) — items N13 and N14.
+//
+// It had two defects, and both made this guard see LESS than it claimed while
+// staying green. The payload regex `\{([^}]*)\}` stopped at the first `}`, so
+// every key after a nested object was invisible; and the scan window was 400
+// chars while the comment beside it said ~600, which truncated 17 of the 383
+// chains in this tree. Neither failed anything. That is the whole hazard with
+// a guard: it does not break, it just quietly stops looking.
 
 describe("schema column contract", () => {
   const schema = columnsFromSchema(migrationSql());
