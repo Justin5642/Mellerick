@@ -69,7 +69,15 @@ export type ReadOriginReason =
 
 type OriginListener = (origin: ReadOrigin, reason?: ReadOriginReason) => void;
 const originListeners = new Set<OriginListener>();
-/** Observability: the sync status UI subscribes to see where reads are served from. */
+/**
+ * Observability seam for where a read was served from. NOTHING IN THE APP
+ * SUBSCRIBES — the only caller is source.test.ts. An earlier version of this
+ * comment claimed the sync status UI did, which made the fallback path look
+ * observed when it is not: the `local-threw` emit below goes nowhere, and its
+ * console.warn is __DEV__-only, so in production a local query that dies (say,
+ * on a column the generated schema is missing) degrades to Supabase in total
+ * silence. Wire a subscriber up before relying on this for anything.
+ */
 export function onReadOrigin(cb: OriginListener): () => void {
   originListeners.add(cb);
   return () => originListeners.delete(cb);
