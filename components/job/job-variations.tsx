@@ -208,8 +208,17 @@ export function JobVariations({
   }
 
   async function remove(id: string) {
-    await supabase.from("job_variations").delete().eq("id", id);
+    // A variation is billable work. Removing it from the list on a response
+    // that deleted nothing hides a charge that is still in the database and
+    // will still reach the invoice. PostgREST does not error on a zero-row
+    // DELETE, so `count` is the only thing that distinguishes the two.
+    const { error, count } = await supabase.from("job_variations").delete({ count: "exact" }).eq("id", id);
+    if (error || count === 0) {
+      toast.error(error?.message ?? "Could not remove this variation.");
+      return;
+    }
     set(variations.filter((v) => v.id !== id));
+    toast.success("Variation removed");
   }
 
   const approvedVariations = variations.filter((v) => v.status === "auto_approved" || v.status === "approved");

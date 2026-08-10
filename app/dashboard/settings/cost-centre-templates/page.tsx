@@ -66,13 +66,31 @@ export default function CostCentreTemplatesPage() {
     load();
   }
 
+  // `count` as well as `error`: PostgREST reports no error for an UPDATE or
+  // DELETE matching zero rows, so a refusal is indistinguishable from a
+  // success. Updating local state on that response shows the change until the
+  // next load and then quietly loses it.
   async function toggleActive(item: TemplateItem) {
-    await supabase.from("cost_center_templates").update({ is_active: !item.is_active }).eq("id", item.id);
+    const { error, count } = await supabase
+      .from("cost_center_templates")
+      .update({ is_active: !item.is_active }, { count: "exact" })
+      .eq("id", item.id);
+    if (error || count === 0) {
+      toast.error(error?.message ?? "Could not change this stage.");
+      return;
+    }
     setItems((prev) => prev.map((x) => (x.id === item.id ? { ...x, is_active: !x.is_active } : x)));
   }
 
   async function remove(id: string) {
-    await supabase.from("cost_center_templates").delete().eq("id", id);
+    const { error, count } = await supabase
+      .from("cost_center_templates")
+      .delete({ count: "exact" })
+      .eq("id", id);
+    if (error || count === 0) {
+      toast.error(error?.message ?? "Could not remove this stage.");
+      return;
+    }
     setItems((prev) => prev.filter((x) => x.id !== id));
     toast.success("Removed");
   }

@@ -168,7 +168,7 @@ export function JobPO({ jobId, pos: initialPos, totalHoursLogged, onUpdate, over
 
     const validCenters = costCenters.filter(c => c.name.trim());
     if (validCenters.length > 0) {
-      await supabase.from("po_cost_centers").insert(
+      const { error: centersError } = await supabase.from("po_cost_centers").insert(
         validCenters.map((c, i) => ({
           po_id: po.id,
           name: c.name,
@@ -178,6 +178,14 @@ export function JobPO({ jobId, pos: initialPos, totalHoursLogged, onUpdate, over
           sort_order: i,
         }))
       );
+
+      // Cost centres carry the allocated dollars and hours this PO is measured
+      // against, so a PO saved without them reports zero allocation and every
+      // budget figure derived from it is wrong. The PO itself is real, so the
+      // message says so rather than pretending nothing was written.
+      if (centersError) {
+        toast.error(`Purchase order saved, but its cost centres did not: ${centersError.message}`);
+      }
     }
 
     const { data: freshPO } = await supabase
@@ -198,7 +206,17 @@ export function JobPO({ jobId, pos: initialPos, totalHoursLogged, onUpdate, over
   }
 
   async function deletePO(poId: string) {
-    await supabase.from("purchase_orders").delete().eq("id", poId);
+    // No error for a DELETE that matches nothing, so `count` is what
+    // distinguishes "removed" from "refused" — and this row is what the job's
+    // budget is measured against.
+    const { error, count } = await supabase
+      .from("purchase_orders")
+      .delete({ count: "exact" })
+      .eq("id", poId);
+    if (error || count === 0) {
+      toast.error(error?.message ?? "Could not remove this purchase order.");
+      return;
+    }
     const updated = pos.filter(p => p.id !== poId);
     setPos(updated);
     onUpdate(updated);

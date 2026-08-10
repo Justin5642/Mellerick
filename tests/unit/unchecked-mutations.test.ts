@@ -21,11 +21,22 @@ import { join, relative } from "node:path";
 // verbatim port will not work: it relies on a shared read seam that does not
 // exist here.
 //
-// So this is deliberately a RATCHET. The existing offenders are listed and
-// allowed; the test fails only when a NEW one appears. Fixing the list down is
-// ordinary work, and every name removed from it is permanent. Sweeping all of
-// them in one change would be a large untested diff across pages with no
-// coverage — which is how this class got here.
+// It began as a RATCHET: eighteen existing offenders across eleven files were
+// listed and allowed, and only a NEW one failed the build. That list is now
+// EMPTY — every one of the eighteen has been checked, and the guard has stopped
+// being a ratchet and become an absolute rule.
+//
+// Which means the note that used to live here — "numbers may go DOWN, never
+// up" — no longer applies. There is no number to lower. Adding a file back to
+// the allowlist is not maintenance, it is a decision to ship the defect this
+// file exists to prevent, and it should be argued for in a PR rather than
+// typed into a constant.
+//
+// The deletes are the part worth understanding before editing any of them:
+// checking `error` alone is NOT enough. PostgREST returns no error for an
+// UPDATE or DELETE that matches zero rows, so an RLS refusal and a success are
+// byte-identical responses. Those sites check `count` as well, which is the
+// only thing that tells them apart.
 
 const REPO = process.cwd();
 const ROOTS = ["app", "components"];
@@ -86,9 +97,8 @@ describe("unchecked supabase mutations", () => {
       if (hits.length) found[relative(REPO, file).replace(/\\/g, "/")] = hits.length;
     }
 
-    // The allowlist is generated from the tree as it stands. To fix one: check
-    // its { error }, then lower or delete its entry here. Never raise a number
-    // to make this pass — that is the ratchet slipping.
+    // Empty, and meant to stay that way. See the note at the top before adding
+    // anything back.
     const ALLOWED: Record<string, number> = ALLOWLIST;
 
     const regressions: string[] = [];
@@ -101,18 +111,20 @@ describe("unchecked supabase mutations", () => {
   });
 });
 
-// Generated from the tree on 2026-08-10, then committed. See the note above
-// before editing: numbers may go DOWN, never up.
-const ALLOWLIST: Record<string, number> = {
-  "app/api/google/disconnect/route.ts": 1,
-  "app/dashboard/approvals/page.tsx": 2,
-  "app/dashboard/fleet/page.tsx": 1,
-  "app/dashboard/quotes/new/page.tsx": 1,
-  "app/dashboard/settings/cost-centre-templates/page.tsx": 2,
-  "app/dashboard/settings/variation-types/page.tsx": 4,
-  "components/job/job-equipment.tsx": 1,
-  "components/job/job-line-items.tsx": 1,
-  "components/job/job-po.tsx": 2,
-  "components/job/job-variations.tsx": 1,
-  "components/quote/quote-detail.tsx": 2,
-};
+// Empty as of 2026-08-11. It held eighteen entries across eleven files:
+//
+//   app/api/google/disconnect/route.ts                        1
+//   app/dashboard/approvals/page.tsx                          2
+//   app/dashboard/fleet/page.tsx                              1
+//   app/dashboard/quotes/new/page.tsx                         1
+//   app/dashboard/settings/cost-centre-templates/page.tsx     2
+//   app/dashboard/settings/variation-types/page.tsx           4
+//   components/job/job-equipment.tsx                          1
+//   components/job/job-line-items.tsx                         1
+//   components/job/job-po.tsx                                 2
+//   components/job/job-variations.tsx                         1
+//   components/quote/quote-detail.tsx                         2
+//
+// Kept as a comment rather than deleted, because the list is the evidence that
+// this guard was worth writing.
+const ALLOWLIST: Record<string, number> = {};

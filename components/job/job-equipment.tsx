@@ -88,7 +88,19 @@ export function JobEquipment({ jobId, usage: initialUsage, equipmentOptions, onU
   }
 
   async function deleteUsage(entry: UsageEntry) {
-    await supabase.from("equipment_usage_log").delete().eq("id", entry.id);
+    // A refused DELETE is not an error in PostgREST — it is a success that
+    // removed nothing. Dropping the row from local state on that response
+    // makes it look gone until the next load, and this row is billable
+    // equipment time.
+    const { error, count } = await supabase
+      .from("equipment_usage_log")
+      .delete({ count: "exact" })
+      .eq("id", entry.id);
+
+    if (error || count === 0) {
+      toast.error(error?.message ?? "Could not remove this usage entry.");
+      return;
+    }
     const updated = usage.filter((u) => u.id !== entry.id);
     setUsage(updated);
     onUpdate(updated);
