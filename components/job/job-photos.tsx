@@ -40,21 +40,36 @@ export function JobPhotos({ jobId, photos, onUpdate, currentUserId }: Props) {
     if (!files || files.length === 0) return;
     setUploading(true);
 
+    // The upload was checked and the ROW INSERT was not — the same asymmetry as
+    // the delete below. A refused insert leaves the file in the bucket with
+    // nothing referencing it: the photo never appears, and "Photos uploaded"
+    // says otherwise. On a job where photos are the evidence of what was done,
+    // the technician has no reason to look again.
+    const failed: string[] = [];
     for (const file of Array.from(files)) {
       const path = `${jobId}/${Date.now()}_${file.name.replace(/[^a-zA-Z0-9._-]/g, "_")}`;
       const { error: uploadError } = await supabase.storage.from("job-photos").upload(path, file);
-      if (uploadError) { toast.error(`Failed to upload ${file.name}`); continue; }
-      await supabase.from("job_photos").insert({
+      if (uploadError) { failed.push(file.name); continue; }
+
+      const { error: rowError } = await supabase.from("job_photos").insert({
         job_id: jobId,
         uploaded_by: currentUserId,
         storage_path: path,
         photo_type: photoType,
       });
+      if (rowError) {
+        console.error("job-photos: file uploaded but row not recorded", path, rowError);
+        failed.push(file.name);
+      }
     }
 
     const { data } = await supabase.from("job_photos").select("*, profiles(full_name)").eq("job_id", jobId).order("created_at", { ascending: false });
     onUpdate(data ?? []);
-    toast.success("Photos uploaded");
+    if (failed.length) {
+      toast.error(`${failed.length} photo(s) did not save: ${failed.join(", ")}. Please try again.`);
+    } else {
+      toast.success("Photos uploaded");
+    }
     setUploading(false);
     if (inputRef.current) inputRef.current.value = "";
   }
