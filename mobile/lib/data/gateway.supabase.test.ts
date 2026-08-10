@@ -142,7 +142,6 @@ describe("callSideEffect — a request that hangs must not stall the drain", () 
         })
     ) as never;
 
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
     const { apiBridge: freshBridge } = require("./gateway.supabase");
     const pending = freshBridge.callSideEffect("sync-billing", { entryId: "te-1" });
     // The assertion is attached BEFORE the clock moves. The rejection fires
