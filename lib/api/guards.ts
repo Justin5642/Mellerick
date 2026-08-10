@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient as createServerClient } from "@/lib/supabase/server";
 import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { timingSafeEquals } from "@/lib/constant-time";
 
 // Shared server-side authentication/authorization for API route handlers.
 // Centralizes the two things every mutating route needs: (1) resolve the
@@ -87,7 +88,9 @@ export function requireCronSecret(request: NextRequest): { ok: true } | GuardFai
   if (!cronSecret) {
     return { ok: false, response: NextResponse.json({ error: "Server misconfigured" }, { status: 500 }) };
   }
-  if (request.headers.get("authorization") !== `Bearer ${cronSecret}`) {
+  // Constant-time: `!==` on a secret short-circuits at the first differing
+  // byte, so the time taken leaks how much of it the caller got right.
+  if (!timingSafeEquals(request.headers.get("authorization"), `Bearer ${cronSecret}`)) {
     return { ok: false, response: NextResponse.json({ error: "Unauthorized" }, { status: 401 }) };
   }
   return { ok: true };

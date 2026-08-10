@@ -219,7 +219,9 @@ renders as a full-screen red box over a working app**. They route errors to an
 ## 4. Database
 
 Migrations in `supabase/migrations/`, applied in filename order.
-`supabase/schema.sql` is the baseline.
+`supabase/migrations/0000_baseline.sql` is the baseline. (`supabase/schema.sql` was
+deleted — it had drifted to 15 tables against the migrations' 33 and still
+carried the infinitely-recursive profiles policy that 0010 exists to fix.)
 
 **Migrations 0039, 0040 and 0041 are already applied to production.** Merging
 does not apply them. They were applied and verified against live data (825 jobs,
