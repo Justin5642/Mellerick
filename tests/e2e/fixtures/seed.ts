@@ -209,6 +209,11 @@ export async function seed(office: SeedUser, tech: SeedUser): Promise<SeedResult
       description: "E2E money sentinel",
       quantity: 1,
       rate: SENTINEL_RATE,
+      // Both, because the list renders the total for an approved variation and
+      // the rate for a pending one, and the office control has to find the
+      // number whichever shape this row ends up in.
+      total_amount: SENTINEL_RATE,
+      status: "approved",
     });
     if (error) throw new Error(`could not seed job_variations: ${error.message}`);
   }

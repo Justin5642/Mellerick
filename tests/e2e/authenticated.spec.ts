@@ -87,7 +87,14 @@ test.describe("office session", () => {
     // The other half of the boundary test below, and the reason it is not
     // vacuous: if this fails, the sentinel is simply not rendered anywhere and
     // "the technician cannot see it" proves nothing at all.
-    await page.goto(`/dashboard/jobs/${seeded().jobId}`);
+    //
+    // IT DID FAIL, on the suite's first real run, and that is the whole point
+    // of having it. The variation's rate lives on the Variations TAB, which
+    // the job page does not render until it is selected — so both money tests
+    // were looking at a page the number was never on, and the technician half
+    // was passing for the wrong reason. `?tab=` is the page's own deep-link
+    // (job-detail-client.tsx:53).
+    await page.goto(`/dashboard/jobs/${seeded().jobId}?tab=variations`);
     await expect(page.getByText(String(SENTINEL_RATE), { exact: false })).toBeVisible({ timeout: 15_000 });
   });
 });
@@ -115,7 +122,9 @@ test.describe("technician session", () => {
     // was never checked through a browser. The first three are RLS policies,
     // the rate-stripped views, and the sync-stream column lists — all verified
     // in SQL. None of them can prove the RENDERED page is clean.
-    await page.goto(`/dashboard/jobs/${seeded().jobId}`);
+    // Same tab the office test asserts the number IS on. Checking the
+    // technician against a page that never renders money would prove nothing.
+    await page.goto(`/dashboard/jobs/${seeded().jobId}?tab=variations`);
     await expect(page.getByText(seeded().jobTitle).first()).toBeVisible({ timeout: 15_000 });
 
     // Assert on the whole document, not a component: the point is that the
