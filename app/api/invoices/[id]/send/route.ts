@@ -89,7 +89,22 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
 
     if (sendError) throw new Error(sendError.message);
 
-    await supabase.from("invoices").update({ status: "sent" }).eq("id", id);
+    // The email is already gone. This write only records that, and it used to
+    // be discarded — so a refused update left the invoice showing "draft", and
+    // the obvious next action is to send it again. The customer gets it twice.
+    const { error: statusError } = await supabase.from("invoices").update({ status: "sent" }).eq("id", id);
+
+    if (statusError) {
+      console.error("invoice send: email delivered but status not updated:", statusError.message);
+      return NextResponse.json({
+        success: true,
+        sentTo: to,
+        statusUpdated: false,
+        warning:
+          `The invoice WAS emailed to ${to}, but its status could not be updated ` +
+          `(${statusError.message}). It will still show as draft — do NOT send it again.`,
+      });
+    }
 
     return NextResponse.json({ success: true, sentTo: to });
   } catch (err: any) {

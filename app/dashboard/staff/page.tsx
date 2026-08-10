@@ -117,7 +117,26 @@ export default function StaffPage() {
   }
 
   async function toggleActive(id: string, current: boolean) {
-    await supabase.from("profiles").update({ is_active: !current }).eq("id", id);
+    // `count: "exact"` because PostgREST returns no error for an UPDATE that
+    // matched nothing — RLS simply filters the row out and the statement
+    // succeeds against zero rows. profiles is exactly where that matters:
+    // migration 0044 tightened who may write it, so a refusal here is
+    // reachable, and this used to report "Staff member deactivated" for someone
+    // who still had access.
+    const { error, count } = await supabase
+      .from("profiles")
+      .update({ is_active: !current }, { count: "exact" })
+      .eq("id", id);
+
+    if (error || count === 0) {
+      toast.error(
+        current
+          ? `Could not deactivate this person — they still have access. ${error?.message ?? "The change was refused."}`
+          : `Could not reactivate this person. ${error?.message ?? "The change was refused."}`
+      );
+      return;
+    }
+
     setStaff(s => s.map(m => m.id === id ? { ...m, is_active: !current } : m));
     toast.success(current ? "Staff member deactivated" : "Staff member reactivated");
   }

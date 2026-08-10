@@ -105,15 +105,11 @@ describe("unchecked supabase mutations", () => {
 // before editing: numbers may go DOWN, never up.
 const ALLOWLIST: Record<string, number> = {
   "app/api/google/disconnect/route.ts": 1,
-  "app/api/invoices/[id]/send/route.ts": 1,
-  "app/api/jobs/[id]/sync-calendar/route.ts": 2,
-  "app/api/quotes/[id]/send/route.ts": 1,
   "app/dashboard/approvals/page.tsx": 2,
   "app/dashboard/fleet/page.tsx": 1,
   "app/dashboard/quotes/new/page.tsx": 1,
   "app/dashboard/settings/cost-centre-templates/page.tsx": 2,
   "app/dashboard/settings/variation-types/page.tsx": 4,
-  "app/dashboard/staff/page.tsx": 1,
   "components/job/job-equipment.tsx": 1,
   "components/job/job-line-items.tsx": 1,
   "components/job/job-po.tsx": 2,
