@@ -13,6 +13,10 @@ const BASE_URL = process.env.E2E_BASE_URL ?? "http://127.0.0.1:3000";
 
 export default defineConfig({
   testDir: "./tests/e2e",
+  // Seeds the local stack and signs in as each role through the real login
+  // form, leaving a storageState per role (item 3.18). It refuses to run
+  // against anything but a loopback Supabase URL — see fixtures/seed.ts.
+  globalSetup: "./tests/e2e/global-setup.ts",
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 1 : 0,
