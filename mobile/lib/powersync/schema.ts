@@ -289,6 +289,7 @@ const jobs = new Table({
   voice_report_transcript: column.text,
   voice_report_recorded_by: column.text,
   voice_report_recorded_at: column.text,
+  ready_to_invoice: column.integer,
 });
 
 const po_cost_centers = new Table({
