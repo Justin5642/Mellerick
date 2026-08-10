@@ -1,174 +1,114 @@
-// Every column the offline read layer names must exist on the device.
+// The guard finance.ts:119 has been promising since the local reads landed:
+// every qualified column in the hand-written local SQL must exist in the
+// generated device schema.
 //
-// THE DEFECT THIS EXISTS FOR, which shipped and was found by inspection rather
-// than by any test:
+// WHY IT IS NEEDED: PowerSync device tables are SQLite views built from
+// AppSchema, so a column the schema does not declare is simply absent from the
+// view and the query dies with "no such column". source.ts catches that and
+// falls back to Supabase — silently in production (the console.warn is __DEV__
+// only). Online everything looks right; OFFLINE the screen is broken, which is
+// the one case the mirror exists for. That is exactly how jobs.ready_to_invoice
+// (migration 0040) shipped: the generator was never re-run.
 //
-//   migration 0040 added jobs.ready_to_invoice
-//   office_jobs syncs `SELECT jobs.*`, so it replicates
-//   lib/data/reads/finance.ts:169 runs `WHERE j.ready_to_invoice = 1` LOCALLY
-//   lib/powersync/schema.ts did not declare it — the generator was never re-run
+// The per-module *.local.test.ts files cannot catch it — they assert the SQL
+// string against a fake LocalReads Map, which accepts any column name.
 //
-// PowerSync builds the device view from the DECLARED columns, so that query
-// raised "no such column". reads/source.ts:129-134 catches every local failure
-// and falls back to Supabase — deliberately, so a bad read cannot take a screen
-// down — and the warning is __DEV__-gated. So in production the screen worked
-// online, was permanently broken offline, and reported nothing either way. In
-// an offline-first app for technicians in basements, that is the failure that
-// matters.
+// SCOPE, honestly stated: only QUALIFIED references (`alias.column`) are
+// checked, because those are the ones a table can be resolved for without a
+// real SQL parser. Bare columns in single-table queries are not covered, and
+// neither is anything built at runtime rather than in a module-level const.
 //
-// WHY NOTHING CAUGHT IT. schema.test.ts compares the device schema against the
-// streams file, but skips wildcard tables outright — `if (cols === "ALL")
-// continue;` — and all 18 office_* streams are `SELECT <table>.*`. So the only
-// test comparing device schema to streams exempts exactly the tables where the
-// column list is not written down. schema-column-contract.test.ts parses
-// PostgREST chains against the migrations and never sees raw SQL run against
-// AppSchema.
-//
-// This closes it from the other end. It does not care what the streams say: it
-// asks whether the columns the app READS are columns the device HAS. That
-// question is answerable with no database, no network and no stack, so it runs
-// in the ordinary mobile CI job.
-import { readFileSync, readdirSync } from "fs";
+// It reads the exported consts rather than the source text on purpose: fleet.ts
+// composes SQL by interpolating EQUIPMENT_PROJECTION, so a source-text scan
+// never sees its FROM clause.
+jest.mock("../../supabase", () => {
+  const chain: Record<string, unknown> = {};
+  for (const m of ["from", "select", "eq", "in", "is", "not", "or", "gte", "lte", "order", "range", "limit", "single"]) {
+    chain[m] = jest.fn(() => chain);
+  }
+  chain.then = (onFulfilled: (v: { data: null }) => unknown, onRejected?: (e: unknown) => unknown) =>
+    Promise.resolve({ data: null }).then(onFulfilled, onRejected);
+  return { supabase: chain };
+});
+
+import { readdirSync } from "fs";
 import { join } from "path";
 import { AppSchema } from "../../powersync/schema";
 
-const READS_DIR = __dirname;
-
-// PowerSync declares `id` implicitly on every table — schema.ts does not list
-// it (see its "// id (text) is implicit" comment), but the device view has it.
-const IMPLICIT = new Set(["id"]);
-
-const deviceColumns = new Map(
-  AppSchema.tables.map((t) => [t.name, new Set([...t.columns.map((c) => c.name), ...IMPLICIT])])
+/** table -> declared columns. `id` is implicit in PowerSync, not in `columns`. */
+const SCHEMA = new Map(
+  AppSchema.tables.map((t) => [t.name, new Set<string>(["id", ...t.columns.map((c) => c.name)])])
 );
 
-/**
- * Words that can follow FROM/JOIN but are not an alias. Without this, `FROM
- * jobs LEFT JOIN ...` would bind the alias "LEFT" to the table "jobs" and then
- * silently resolve nothing, which is the failure mode where a guard looks green
- * because it checked nothing.
- */
-const NOT_AN_ALIAS = new Set([
-  "on", "where", "left", "right", "inner", "outer", "full", "cross", "join",
-  "group", "order", "limit", "having", "union", "and", "or", "as", "using",
-]);
-
-/** alias -> table, for every FROM/JOIN in one query (subqueries included). */
-function aliasMap(sql: string): Map<string, string> {
-  const map = new Map<string, string>();
-  for (const m of sql.matchAll(/\b(?:from|join)\s+([a-z_][a-z0-9_]*)\s*(?:as\s+)?([a-z][a-z0-9_]*)?/gi)) {
-    const table = m[1].toLowerCase();
-    const maybeAlias = m[2]?.toLowerCase();
-    const alias = maybeAlias && !NOT_AN_ALIAS.has(maybeAlias) ? maybeAlias : table;
-    map.set(alias, table);
-    // `FROM jobs j` — the bare table name is still usable as a qualifier.
-    map.set(table, table);
-  }
-  return map;
-}
-
-/** Every `alias.column` reference in one query. */
-function dottedRefs(sql: string): Array<{ alias: string; column: string }> {
-  return [...sql.matchAll(/\b([a-z][a-z0-9_]*)\.([a-z_][a-z0-9_]*)\b/gi)].map((m) => ({
-    alias: m[1].toLowerCase(),
-    column: m[2].toLowerCase(),
-  }));
-}
-
-/**
- * The exported `SQL_*` template literals — the queries that run on-device.
- *
- * Some are composed from a shared fragment, e.g. fleet.ts builds
- * SQL_LIST_EQUIPMENT as `${EQUIPMENT_PROJECTION} WHERE …`, and the FROM clause
- * lives in that fragment. Interpolations are inlined from constants in the same
- * file, or the query would appear to reference tables it never declares — and
- * every column in it would be skipped as unresolvable, silently.
- */
-function localQueries(): Array<{ file: string; name: string; sql: string }> {
-  const out: Array<{ file: string; name: string; sql: string }> = [];
-  for (const file of readdirSync(READS_DIR).filter((f) => f.endsWith(".ts") && !f.includes(".test."))) {
-    const src = readFileSync(join(READS_DIR, file), "utf8");
-
-    const fragments = new Map<string, string>();
-    for (const m of src.matchAll(/(?:export )?const ([A-Z][A-Z0-9_]*)\s*=\s*`([^`]*)`/g)) {
-      fragments.set(m[1], m[2]);
-    }
-
-    const inline = (sql: string, depth = 0): string =>
-      depth > 4
-        ? sql
-        : sql.replace(/\$\{([A-Z][A-Z0-9_]*)\}/g, (whole, ref) =>
-            fragments.has(ref) ? inline(fragments.get(ref)!, depth + 1) : whole
-          );
-
-    for (const m of src.matchAll(/export const (SQL_[A-Z0-9_]+)\s*=\s*`([^`]*)`/g)) {
-      out.push({ file, name: m[1], sql: inline(m[2]) });
+/** Every `SQL_*` string exported by a read module, keyed `module.CONST`. */
+function exportedSql(): Array<[string, string]> {
+  const out: Array<[string, string]> = [];
+  for (const file of readdirSync(__dirname).sort()) {
+    if (!file.endsWith(".ts") || file.includes(".test.")) continue;
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const mod = require(join(__dirname, file)) as Record<string, unknown>;
+    for (const [name, value] of Object.entries(mod)) {
+      if (name.startsWith("SQL_") && typeof value === "string") out.push([`${file.replace(/\.ts$/, "")}.${name}`, value]);
     }
   }
   return out;
 }
 
-describe("offline reads only name columns the device actually has", () => {
-  const queries = localQueries();
+// Words that can follow a table name where an alias would sit; without this the
+// `t` in `FROM jobs WHERE …` would be read as an alias called "where".
+const NOT_AN_ALIAS = new Set([
+  "as", "on", "where", "order", "group", "having", "limit", "offset", "union",
+  "join", "left", "right", "inner", "outer", "cross", "natural", "using", "and", "or",
+]);
 
-  it("finds the local queries at all", () => {
-    // A parser that silently matches nothing would make every assertion below
-    // pass while checking nothing — the shape .github/workflows/ci.yml:179-185
-    // added a migration-count assertion to prevent, for the same reason.
-    expect(queries.length).toBeGreaterThan(20);
-    expect(new Set(queries.map((q) => q.file)).size).toBeGreaterThan(5);
-  });
+/** qualifier (alias or bare table name) -> table, for one statement. */
+function qualifiers(sql: string): Map<string, string> {
+  const map = new Map<string, string>();
+  for (const [, table, alias] of sql.matchAll(
+    /\b(?:FROM|JOIN)\s+([a-z_][a-z0-9_]*)(?:\s+(?:AS\s+)?([a-z_][a-z0-9_]*))?/gi
+  )) {
+    map.set(table, table); // correlated subqueries qualify by table name
+    if (alias && !NOT_AN_ALIAS.has(alias.toLowerCase())) map.set(alias, table);
+  }
+  return map;
+}
 
-  it("resolves table aliases rather than skipping them", () => {
-    // Same guard, one level down: if aliasMap stopped resolving, every dotted
-    // reference would become "unknown alias" and be skipped as unresolvable.
-    const resolved = queries.filter((q) => aliasMap(q.sql).size > 0);
-    expect(resolved.length).toBe(queries.length);
-  });
-
-  // A multi-table query that qualifies NOTHING cannot be attributed to a table,
-  // so every column in it is skipped — silently, and by design, since guessing
-  // which of two tables owns a bare column name would produce false failures.
-  //
-  // That skip is the guard's blind spot, so the two queries in it are named
-  // here rather than filtered by a rule. A committed literal means a THIRD one
-  // appearing is a visible coverage loss that fails this test, instead of being
-  // quietly absorbed into an exemption nobody re-reads.
-  const UNATTRIBUTABLE = [
-    "backflow.ts::SQL_LIST_BACKFLOW_TESTS",
-    "jobBilling.ts::SQL_JOB_BILLING_PO_COST_CENTERS",
-  ];
-
-  it("has not quietly grown its own blind spot", () => {
-    const unattributable = queries
-      .filter((q) => {
-        const tables = [...q.sql.matchAll(/\b(?:from|join)\s+[a-z_][a-z0-9_]*/gi)];
-        return tables.length > 1 && dottedRefs(q.sql).length === 0;
-      })
-      .map((q) => `${q.file}::${q.name}`)
-      .sort();
-
-    expect(unattributable).toEqual([...UNATTRIBUTABLE].sort());
-  });
-
-  it("names no column the device schema lacks", () => {
-    const missing: string[] = [];
-
-    for (const { file, name, sql } of queries) {
-      const aliases = aliasMap(sql);
-      for (const { alias, column } of dottedRefs(sql)) {
-        const table = aliases.get(alias);
-        if (!table) continue; // not a table qualifier (a function call, a cast)
-        const cols = deviceColumns.get(table);
-        if (!cols) continue; // table isn't synced at all — a different test's job
-        if (!cols.has(column)) {
-          missing.push(`${file} ${name}: ${table}.${column} (via "${alias}")`);
-        }
-      }
+/** Returns [complaints, number of qualified refs actually resolved]. */
+function lint(sql: string): [string[], number] {
+  const byQualifier = qualifiers(sql);
+  const bad: string[] = [];
+  let checked = 0;
+  for (const [, qualifier, col] of sql.matchAll(/\b([a-z_][a-z0-9_]*)\.([a-z_][a-z0-9_]*)/gi)) {
+    const table = byQualifier.get(qualifier);
+    if (!table) {
+      bad.push(`${qualifier}.${col} — no FROM/JOIN introduces "${qualifier}"`);
+      continue;
     }
+    const cols = SCHEMA.get(table);
+    if (!cols) {
+      bad.push(`${qualifier}.${col} — table "${table}" is not in AppSchema`);
+      continue;
+    }
+    checked++;
+    if (!cols.has(col)) bad.push(`${qualifier}.${col} — "${table}" has no column "${col}"`);
+  }
+  return [bad, checked];
+}
 
-    // Deliberately reported as a list rather than one at a time: a regenerate
-    // that misses several columns should show all of them, not the first.
-    expect(missing).toEqual([]);
+describe("local SQL references only columns the device schema declares", () => {
+  const statements = exportedSql();
+
+  it.each(statements)("%s", (_name, sql) => {
+    expect(lint(sql)[0]).toEqual([]);
+  });
+
+  // Without this the suite passes vacuously if the const scan or the reference
+  // regex ever stops matching. 231 qualified references at the time of writing.
+  it("actually resolved a meaningful number of references", () => {
+    const total = statements.reduce((n, [, sql]) => n + lint(sql)[1], 0);
+    expect({ statements: statements.length >= 45, references: total >= 200 }).toEqual({
+      statements: true,
+      references: true,
+    });
   });
 });
