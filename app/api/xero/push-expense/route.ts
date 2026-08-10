@@ -67,10 +67,53 @@ export async function POST(request: NextRequest) {
     const response = await xero.accountingApi.createInvoices(tenantId, { invoices: [xeroBill] });
     const created = response.body.invoices?.[0];
 
-    await supabase
-      .from("job_expenses")
-      .update({ xero_bill_id: created?.invoiceID, xero_synced_at: new Date().toISOString() })
-      .eq("id", expenseId);
+    // Record the Xero link. This is the ONLY thing stopping a retry from
+    // creating a second bill — the guard at the top of this route is
+    // `if (expense.xero_bill_id) return 400`, and nothing else dedupes.
+    //
+    // THE RESULT USED TO BE DISCARDED, and the route returned success
+    // regardless. When this update failed, the next push saw a null
+    // xero_bill_id, sailed past that guard, and created the bill AGAIN. The
+    // sibling push-invoice route documents this exact sequence as having
+    // already shipped a duplicate CUSTOMER invoice; here the document is an
+    // authorised creditor bill, so a duplicate is money leaving the business
+    // twice.
+    //
+    // Erroring plainly is not enough either, for the same reason given there:
+    // by the time we detect it the bill ALREADY EXISTS in Xero, so failing the
+    // request invites precisely the retry that duplicates it. Retry the link a
+    // few times, and if it still will not land, refuse in terms that stop a
+    // human pressing the button again.
+    let linkError: { message: string } | null = null;
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      const { error } = await supabase
+        .from("job_expenses")
+        .update({ xero_bill_id: created?.invoiceID, xero_synced_at: new Date().toISOString() })
+        .eq("id", expenseId);
+      linkError = error;
+      if (!error) break;
+      // A serialization conflict or a blip clears on a retry; a permission
+      // failure will not, but three quick attempts cost nothing next to a
+      // duplicated payable.
+      if (attempt < 3) await new Promise((r) => setTimeout(r, 150 * attempt));
+    }
+
+    if (linkError) {
+      console.error("Xero bill link write failed after 3 attempts:", linkError.message);
+      return NextResponse.json(
+        {
+          error:
+            `The bill WAS created in Xero as ${created?.invoiceNumber ?? created?.invoiceID} ` +
+            `but could not be linked to this expense (${linkError.message}). ` +
+            `DO NOT RETRY — pushing again would create a duplicate bill in Xero. ` +
+            `Set this expense's Xero bill ID to ${created?.invoiceID} manually, or void the Xero bill first.`,
+          xeroBillId: created?.invoiceID,
+          xeroBillNumber: created?.invoiceNumber,
+          requiresManualReconciliation: true,
+        },
+        { status: 409 }
+      );
+    }
 
     return NextResponse.json({ success: true, xeroBillId: created?.invoiceID });
   } catch (err: any) {

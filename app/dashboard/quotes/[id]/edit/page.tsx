@@ -13,6 +13,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ArrowLeft, Plus, Trash2 } from "lucide-react";
 import Link from "next/link";
 import { FormSkeleton } from "@/components/ui/loading-skeletons";
+import { replaceLineItems, moneyTotals } from "@/lib/replace-line-items";
 
 interface LineItem { id?: string; name: string; description: string; quantity: string; unit_price: string; }
 
@@ -78,9 +79,11 @@ export default function EditQuotePage() {
     setLineItems(prev => prev.filter((_, i) => i !== index));
   }
 
-  const subtotal = lineItems.reduce((sum, i) => sum + (parseFloat(i.quantity) || 0) * (parseFloat(i.unit_price) || 0), 0);
-  const gst = subtotal * 0.1;
-  const total = subtotal + gst;
+  // Displayed figures come from the same rounding the save uses, so the screen
+  // cannot show a total a cent away from the one that gets stored.
+  const { subtotal, tax: gst, total } = moneyTotals(
+    lineItems.map(i => ({ quantity: parseFloat(i.quantity) || 0, unit_price: parseFloat(i.unit_price) || 0 }))
+  );
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -90,24 +93,38 @@ export default function EditQuotePage() {
     if (Object.keys(newErrors).length > 0) { setErrors(newErrors); return; }
     setLoading(true);
 
-    await supabase.from("quotes").update({
-      title: form.title,
-      valid_until: form.valid_until || null,
-      notes: form.notes || null,
-      subtotal, tax_amount: gst, total,
-    }).eq("id", id);
-
-    // Replace all line items
-    await supabase.from("quote_items").delete().eq("quote_id", id);
-    const validItems = lineItems.filter(i => i.name && i.unit_price);
-    if (validItems.length > 0) {
-      await supabase.from("quote_items").insert(validItems.map(i => ({
-        quote_id: id,
+    // Line items first, and BEFORE the totals — see the twin in
+    // invoices/[id]/edit and the reasoning in lib/replace-line-items.ts. This
+    // used to delete every line and re-insert with all three results discarded,
+    // so a refused insert emptied the quote and reported success.
+    const validItems = lineItems
+      .filter(i => i.name && i.unit_price)
+      .map(i => ({
         name: i.name,
         description: i.description || null,
         quantity: parseFloat(i.quantity) || 1,
         unit_price: parseFloat(i.unit_price),
-      })));
+      }));
+
+    const replaced = await replaceLineItems(supabase, "quote_items", "quote_id", id, validItems);
+    if (!replaced.ok) {
+      toast.error(replaced.error);
+      setLoading(false);
+      return;
+    }
+
+    const totals = moneyTotals(validItems);
+    const { error: headerError } = await supabase.from("quotes").update({
+      title: form.title,
+      valid_until: form.valid_until || null,
+      notes: form.notes || null,
+      subtotal: totals.subtotal, tax_amount: totals.tax, total: totals.total,
+    }).eq("id", id);
+
+    if (headerError) {
+      toast.error(`Line items saved, but the quote totals did not update: ${headerError.message}`);
+      setLoading(false);
+      return;
     }
 
     toast.success("Quote updated");

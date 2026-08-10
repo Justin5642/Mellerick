@@ -13,6 +13,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ArrowLeft, Plus, Trash2 } from "lucide-react";
 import Link from "next/link";
 import { FormSkeleton } from "@/components/ui/loading-skeletons";
+import { replaceLineItems, moneyTotals } from "@/lib/replace-line-items";
 
 interface LineItem { id?: string; name: string; description: string; quantity: string; unit_price: string; }
 
@@ -79,9 +80,11 @@ export default function EditInvoicePage() {
     setLineItems(prev => prev.filter((_, i) => i !== index));
   }
 
-  const subtotal = lineItems.reduce((sum, i) => sum + (parseFloat(i.quantity) || 0) * (parseFloat(i.unit_price) || 0), 0);
-  const gst = subtotal * 0.1;
-  const total = subtotal + gst;
+  // Displayed figures come from the same rounding the save uses, so the screen
+  // cannot show a total a cent away from the one that gets stored.
+  const { subtotal, tax: gst, total } = moneyTotals(
+    lineItems.map(i => ({ quantity: parseFloat(i.quantity) || 0, unit_price: parseFloat(i.unit_price) || 0 }))
+  );
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -91,25 +94,44 @@ export default function EditInvoicePage() {
     if (Object.keys(newErrors).length > 0) { setErrors(newErrors); return; }
     setLoading(true);
 
-    await supabase.from("invoices").update({
-      title: form.title,
-      due_date: form.due_date || null,
-      notes: form.notes || null,
-      work_description: form.work_description || null,
-      subtotal, tax_amount: gst, total,
-    }).eq("id", id);
-
-    // Replace all line items
-    await supabase.from("invoice_items").delete().eq("invoice_id", id);
-    const validItems = lineItems.filter(i => i.name && i.unit_price);
-    if (validItems.length > 0) {
-      await supabase.from("invoice_items").insert(validItems.map(i => ({
-        invoice_id: id,
+    // Line items first, and BEFORE the totals. This used to delete every line
+    // and re-insert, with all three results discarded and an unconditional
+    // "Invoice updated" — so a refused insert destroyed the lines of an invoice
+    // a customer may already have received, then navigated away from the only
+    // remaining copy. See lib/replace-line-items.ts.
+    const validItems = lineItems
+      .filter(i => i.name && i.unit_price)
+      .map(i => ({
         name: i.name,
         description: i.description || null,
         quantity: parseFloat(i.quantity) || 1,
         unit_price: parseFloat(i.unit_price),
-      })));
+      }));
+
+    const replaced = await replaceLineItems(supabase, "invoice_items", "invoice_id", id, validItems);
+    if (!replaced.ok) {
+      toast.error(replaced.error);
+      setLoading(false);
+      return;
+    }
+
+    // Totals second, derived from the items that actually landed and rounded to
+    // cents so subtotal + GST equals total on the printed invoice.
+    const totals = moneyTotals(validItems);
+    const { error: headerError } = await supabase.from("invoices").update({
+      title: form.title,
+      due_date: form.due_date || null,
+      notes: form.notes || null,
+      work_description: form.work_description || null,
+      subtotal: totals.subtotal, tax_amount: totals.tax, total: totals.total,
+    }).eq("id", id);
+
+    if (headerError) {
+      // The lines are correct; only the header failed. Say which, because
+      // "saved" here would leave totals that disagree with the lines below them.
+      toast.error(`Line items saved, but the invoice totals did not update: ${headerError.message}`);
+      setLoading(false);
+      return;
     }
 
     toast.success("Invoice updated");

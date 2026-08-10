@@ -13,6 +13,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ArrowLeft, Plus, Trash2 } from "lucide-react";
 import Link from "next/link";
 import { CustomerPicker } from "@/components/customer-picker";
+import { moneyTotals } from "@/lib/replace-line-items";
 
 interface LineItem { name: string; description: string; quantity: string; unit_price: string; }
 
@@ -73,9 +74,14 @@ export default function NewQuotePage() {
     setLineItems(prev => prev.filter((_, i) => i !== index));
   }
 
-  const subtotal = lineItems.reduce((sum, i) => sum + (parseFloat(i.quantity) || 0) * (parseFloat(i.unit_price) || 0), 0);
-  const gst = subtotal * 0.1;
-  const total = subtotal + gst;
+  // Rounded to cents once, in one place — see lib/replace-line-items.ts. Raw
+  // float arithmetic stored straight into decimal(10,2) produced a tax invoice
+  // whose subtotal plus GST did not equal its total, because invoice_items.total
+  // is a generated column computed in exact numeric while the header carried the
+  // JS artifact, and the three rounded independently on the PDF.
+  const { subtotal, tax: gst, total } = moneyTotals(
+    lineItems.map(i => ({ quantity: parseFloat(i.quantity) || 0, unit_price: parseFloat(i.unit_price) || 0 }))
+  );
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();

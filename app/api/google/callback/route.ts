@@ -4,6 +4,7 @@ import { getGoogleOAuthClient } from "@/lib/google";
 import { createClient } from "@/lib/supabase/server";
 import { requireAdmin } from "@/lib/api/guards";
 import { isValidOAuthState, GOOGLE_STATE_COOKIE } from "@/lib/oauth-state";
+import { replaceSingletonToken } from "@/lib/oauth-token-store";
 
 export async function GET(request: NextRequest) {
   // Re-check admin at the callback (see xero/callback for the rationale): this
@@ -42,13 +43,22 @@ export async function GET(request: NextRequest) {
     const { data: userinfo } = await oauth2.userinfo.get();
 
     const supabase = await createClient();
-    await supabase.from("google_tokens").delete().neq("id", "00000000-0000-0000-0000-000000000000");
-    await supabase.from("google_tokens").insert({
+
+    // Insert-then-retire, and both results checked — see the twin in
+    // xero/callback and the reasoning in lib/oauth-token-store.ts. The previous
+    // order deleted the working row first and never looked at either result, so
+    // a failed insert left no calendar connection while reporting success.
+    const stored = await replaceSingletonToken(supabase, "google_tokens", {
       access_token: tokens.access_token!,
       refresh_token: tokens.refresh_token!,
       token_expiry: new Date(tokens.expiry_date!).toISOString(),
       google_email: userinfo.email,
     });
+
+    if (!stored.ok) {
+      console.error("Google callback: token storage failed —", stored.error);
+      return NextResponse.redirect(new URL("/dashboard/settings?google=error", request.url));
+    }
 
     return NextResponse.redirect(new URL("/dashboard/settings?google=connected", request.url));
   } catch (err) {
