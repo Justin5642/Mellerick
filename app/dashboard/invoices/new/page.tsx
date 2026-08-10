@@ -13,6 +13,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ArrowLeft, Plus, Trash2, GitPullRequestArrow } from "lucide-react";
 import Link from "next/link";
 import { CustomerPicker } from "@/components/customer-picker";
+import { moneyTotals } from "@/lib/replace-line-items";
 
 interface LineItem { name: string; description: string; quantity: string; unit_price: string; variationId?: string; }
 interface JobOption {
@@ -299,9 +300,14 @@ function NewInvoiceForm() {
     setLineItems(prev => prev.filter((_, i) => i !== index));
   }
 
-  const subtotal = lineItems.reduce((sum, i) => sum + (parseFloat(i.quantity) || 0) * (parseFloat(i.unit_price) || 0), 0);
-  const gst = subtotal * 0.1;
-  const total = subtotal + gst;
+  // Rounded to cents once, in one place — see lib/replace-line-items.ts. Raw
+  // float arithmetic stored straight into decimal(10,2) produced a tax invoice
+  // whose subtotal plus GST did not equal its total, because invoice_items.total
+  // is a generated column computed in exact numeric while the header carried the
+  // JS artifact, and the three rounded independently on the PDF.
+  const { subtotal, tax: gst, total } = moneyTotals(
+    lineItems.map(i => ({ quantity: parseFloat(i.quantity) || 0, unit_price: parseFloat(i.unit_price) || 0 }))
+  );
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -321,26 +327,71 @@ function NewInvoiceForm() {
 
     if (error || !invoice) { toast.error(error?.message ?? "Failed to create invoice"); setLoading(false); return; }
 
+    // The parent insert was checked; these three were not, and the ORDER of
+    // that mattered more than the missing checks. `ready_to_invoice = false`
+    // removes the job from the office's queue, so if it succeeded while an
+    // earlier write had failed, nothing ever prompted anyone to look again —
+    // the invoice sat empty or the variations sat unbilled, invisibly.
+    //
+    // Each is now checked, and the queue flag is cleared LAST, so a failure
+    // above it leaves the job exactly where the office will see it.
     const validItems = lineItems.filter(i => i.name && i.unit_price);
     if (validItems.length > 0) {
-      await supabase.from("invoice_items").insert(validItems.map(i => ({
+      const { error: itemsError } = await supabase.from("invoice_items").insert(validItems.map(i => ({
         invoice_id: invoice.id,
         name: i.name,
         description: i.description || null,
         quantity: parseFloat(i.quantity) || 1,
         unit_price: parseFloat(i.unit_price),
       })));
+
+      if (itemsError) {
+        // The invoice exists but has no lines. Both send routes and the Xero
+        // push refuse a line-item-less invoice, so it cannot reach a customer —
+        // but it must not be reported as created either.
+        toast.error(
+          `Invoice ${invoice.invoice_number ?? ""} was created but its line items were not saved ` +
+            `(${itemsError.message}). Open it and add them before sending.`
+        );
+        setLoading(false);
+        router.push(`/dashboard/invoices/${invoice.id}`);
+        return;
+      }
     }
 
     // Mark any variations that were pulled onto this invoice as billed, so
     // they drop off the "unbilled" warning and can't be double-invoiced.
     const includedVariationIds = validItems.filter(i => i.variationId).map(i => i.variationId as string);
     if (includedVariationIds.length > 0) {
-      await supabase.from("job_variations").update({ invoice_id: invoice.id }).in("id", includedVariationIds);
+      const { error: variationsError } = await supabase
+        .from("job_variations")
+        .update({ invoice_id: invoice.id })
+        .in("id", includedVariationIds);
+
+      if (variationsError) {
+        // This is the double-invoice path: the work is billed on this invoice,
+        // but the variations still look unbilled, so the next invoice offers
+        // them again.
+        toast.error(
+          `Invoice created, but ${includedVariationIds.length} variation(s) were not marked as billed ` +
+            `(${variationsError.message}). They will still show as unbilled — do NOT add them to another invoice.`
+        );
+        setLoading(false);
+        router.push(`/dashboard/invoices/${invoice.id}`);
+        return;
+      }
     }
 
     if (form.job_id) {
-      await supabase.from("jobs").update({ ready_to_invoice: false }).eq("id", form.job_id);
+      const { error: jobError } = await supabase.from("jobs").update({ ready_to_invoice: false }).eq("id", form.job_id);
+      if (jobError) {
+        // Harmless direction: the job stays in Ready to Invoice. Say so rather
+        // than leaving someone to wonder why it is still listed.
+        toast.warning(`Invoice created, but this job is still flagged Ready to Invoice (${jobError.message}).`);
+        setLoading(false);
+        router.push(`/dashboard/invoices/${invoice.id}`);
+        return;
+      }
     }
 
     toast.success("Invoice created");

@@ -107,7 +107,12 @@ export function JobSignature({ jobId, currentUserId, existingSignature, voiceRep
     const { error: uploadError } = await supabase.storage.from("job-photos").upload(path, blob, { contentType: "image/png" });
     if (uploadError) { toast.error("Failed to save signature"); setSaving(false); return; }
 
-    await supabase.from("job_photos").insert({
+    // The upload was checked; these two were not, and they are the writes that
+    // make the sign-off real. Without the row the signature is an orphaned PNG
+    // nothing references; without the job update the work is never marked
+    // complete and never reaches the office's Ready-to-Invoice queue — while
+    // the technician is told "Job complete", packs up and drives away.
+    const { error: photoError } = await supabase.from("job_photos").insert({
       job_id: jobId,
       uploaded_by: currentUserId,
       storage_path: path,
@@ -115,12 +120,30 @@ export function JobSignature({ jobId, currentUserId, existingSignature, voiceRep
       caption: signerName || "Customer signature",
     });
 
-    await supabase.from("jobs").update({
+    if (photoError) {
+      toast.error(`The signature image was uploaded but not recorded: ${photoError.message}. Please sign again.`);
+      setSaving(false);
+      return;
+    }
+
+    const { error: jobError } = await supabase.from("jobs").update({
       completion_notes: `Signed off by: ${signerName || "Customer"} on ${new Date().toLocaleDateString("en-AU")}`,
       status: "completed",
       actual_end: new Date().toISOString(),
       ready_to_invoice: true,
     }).eq("id", jobId);
+
+    if (jobError) {
+      // The signature IS saved against the job, so do not ask for it again —
+      // that would stack duplicate signature rows. Only the completion flags
+      // failed, and the office needs to know they are missing.
+      toast.error(
+        `Signature saved, but this job was not marked complete: ${jobError.message}. ` +
+          `Tell the office — it will not appear in Ready to Invoice.`
+      );
+      setSaving(false);
+      return;
+    }
 
     fetch(`/api/jobs/${jobId}/sync-calendar`, { method: "POST" }).catch(() => {});
 
