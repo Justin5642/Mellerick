@@ -228,7 +228,7 @@ function TimeEntryModal({
         <TouchableOpacity activeOpacity={1} style={styles.editSheet} onPress={() => {}}>
           <Text style={styles.modalTitle}>{editing.mode === "add" ? "Add Manual Entry" : "Edit Time Entry"}</Text>
           <Text style={styles.editHint}>
-            Use this when auto clock-in/out didn't work — set the real start/end time yourself.
+            Use this when auto clock-in/out didn&apos;t work — set the real start/end time yourself.
           </Text>
 
           <DateTimeField label="Start" value={editing.clockIn} onChange={(d) => onChange({ ...editing, clockIn: d })} />
@@ -512,10 +512,10 @@ export function JobTimeTab({ jobId, currentUserId }: { jobId: string; currentUse
         <Ionicons name="add-circle-outline" size={16} color={colors.blue600} />
         <Text style={styles.addManualButtonText}>Add manual entry</Text>
       </TouchableOpacity>
-      <Text style={styles.addManualHint}>Use this if auto clock-in/out didn't fire correctly — tap an entry below to correct it.</Text>
+      <Text style={styles.addManualHint}>Use this if auto clock-in/out didn&apos;t fire correctly — tap an entry below to correct it.</Text>
       {costCentersFailed && (
         <TouchableOpacity onPress={loadCostCenters}>
-          <Text style={styles.errorText}>Couldn't load PO stages — time still logs without one. Tap to retry.</Text>
+          <Text style={styles.errorText}>Couldn&apos;t load PO stages — time still logs without one. Tap to retry.</Text>
         </TouchableOpacity>
       )}
 

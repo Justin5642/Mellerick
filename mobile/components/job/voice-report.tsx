@@ -18,12 +18,10 @@ export function VoiceReportRecorder({
   jobId,
   currentUserId,
   existingTranscript,
-  onSaved,
 }: {
   jobId: string;
   currentUserId: string;
   existingTranscript?: string | null;
-  onSaved?: (transcript: string) => void;
 }) {
   const audioRecorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
   const recorderState = useAudioRecorderState(audioRecorder);
