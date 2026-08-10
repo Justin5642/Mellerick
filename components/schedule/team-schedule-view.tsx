@@ -16,6 +16,10 @@ import {
 } from "@dnd-kit/core";
 import { toast } from "sonner";
 import { createClient } from "@/lib/supabase/client";
+// Both drag handlers go through this: it writes the row AND pushes the job to
+// Google Calendar. Writing the table directly here is what left the calendar
+// stale, which the poll in lib/google.ts then "corrected" by undoing the drag.
+import { applyScheduleChange } from "@/lib/schedule-dispatch";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -412,18 +416,16 @@ export function TeamScheduleView({
       )
     );
 
-    supabase
-      .from("jobs")
-      .update({ assigned_to: newAssignedTo })
-      .eq("id", jobId)
-      .then(({ error }: { error: { message: string } | null }) => {
-        if (error) {
-          setJobs(previousJobs);
-          toast.error(error.message);
-        } else {
-          toast.success(targetStaff ? `Assigned to ${targetStaff.full_name}` : "Job unassigned");
-        }
-      });
+    void applyScheduleChange(supabase, jobId, { assigned_to: newAssignedTo }).then((result) => {
+      if (!result.ok) {
+        setJobs(previousJobs);
+        toast.error(result.error);
+        return;
+      }
+      const what = targetStaff ? `Assigned to ${targetStaff.full_name}` : "Job unassigned";
+      if (result.calendarSynced) toast.success(what);
+      else toast.warning(`${what} — Google Calendar not updated`);
+    });
   }
 
   // Week grid drop target ids are "<base>::<dayKey>" (see weekCellId) so a
@@ -476,21 +478,26 @@ export function TeamScheduleView({
       )
     );
 
-    supabase
-      .from("jobs")
-      .update({ assigned_to: newAssignedTo, scheduled_start: newStart, scheduled_end: newEnd })
-      .eq("id", jobId)
-      .then(({ error }: { error: { message: string } | null }) => {
-        if (error) {
-          setJobs(previousJobs);
-          toast.error(error.message);
-          return;
-        }
-        const changes: string[] = [];
-        if (assignedChanged) changes.push(targetStaff ? `assigned to ${targetStaff.full_name}` : "unassigned");
-        if (dayChanged) changes.push(`moved to ${formatDate(anchorForDateKey(targetDayKey))}`);
-        toast.success(`Job ${changes.join(" and ")}`);
-      });
+    void applyScheduleChange(supabase, jobId, {
+      assigned_to: newAssignedTo,
+      scheduled_start: newStart,
+      scheduled_end: newEnd,
+    }).then((result) => {
+      if (!result.ok) {
+        setJobs(previousJobs);
+        toast.error(result.error);
+        return;
+      }
+      const changes: string[] = [];
+      if (assignedChanged) changes.push(targetStaff ? `assigned to ${targetStaff.full_name}` : "unassigned");
+      if (dayChanged) changes.push(`moved to ${formatDate(anchorForDateKey(targetDayKey))}`);
+      const what = `Job ${changes.join(" and ")}`;
+      // A re-date the calendar never heard about is the state that used to let
+      // the poll write the old time back. Saying so is the difference between
+      // a user retrying now and finding the job moved back tomorrow.
+      if (result.calendarSynced) toast.success(what);
+      else toast.warning(`${what} — Google Calendar not updated`);
+    });
   }
 
   return (
