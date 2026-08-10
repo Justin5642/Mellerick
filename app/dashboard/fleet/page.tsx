@@ -107,7 +107,20 @@ export default function FleetPage() {
   }
 
   async function toggleActive(id: string, current: boolean) {
-    await supabase.from("equipment").update({ is_active: !current }).eq("id", id);
+    // `count` and not just `error`: PostgREST returns no error for an UPDATE
+    // that matches zero rows, so an RLS refusal and a success are the same
+    // response. Retiring a vehicle that stays active — and says it did not —
+    // is the same defect that reported a deactivated staff member still able
+    // to log in.
+    const { error, count } = await supabase
+      .from("equipment")
+      .update({ is_active: !current }, { count: "exact" })
+      .eq("id", id);
+
+    if (error || count === 0) {
+      toast.error(error?.message ?? "Could not update this equipment — it may no longer exist.");
+      return;
+    }
     setEquipment((eq) => eq.map((e) => (e.id === id ? { ...e, is_active: !current } : e)));
     toast.success(current ? "Marked inactive" : "Marked active");
   }

@@ -7,9 +7,8 @@ import { colors } from "../../lib/theme";
 import { useJobEdit } from "../../lib/data/hooks/useJobEdit";
 import { useWriteOutcome } from "../../lib/data/hooks/useWriteOutcome";
 import { CustomerPicker } from "../../components/finance/customer-picker";
-import { getCustomer, type Site } from "../../lib/data/reads/customers";
+import { getCustomer, type Site, type CustomerListRow } from "../../lib/data/reads/customers";
 import { listAssignableStaff, type AssignableStaff } from "../../lib/data/reads/schedule";
-import type { CustomerListRow } from "../../lib/data/reads/customers";
 
 const JOB_TYPES = ["service", "installation", "maintenance", "emergency", "quote"] as const;
 const PRIORITIES = ["low", "normal", "high", "urgent"] as const;

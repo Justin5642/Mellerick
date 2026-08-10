@@ -89,7 +89,15 @@ export function JobLineItems({ jobId, lineItems, pricingItems, onUpdate }: Props
   }
 
   async function handleDelete(id: string) {
-    await supabase.from("job_items").delete().eq("id", id);
+    // Line items are what the customer is billed for, so "removed" that did
+    // not remove is a number that reappears on the invoice. PostgREST reports
+    // no error for a DELETE matching zero rows, hence the count.
+    const { error, count } = await supabase.from("job_items").delete({ count: "exact" }).eq("id", id);
+
+    if (error || count === 0) {
+      toast.error(error?.message ?? "Could not remove this item.");
+      return;
+    }
     onUpdate(lineItems.filter((i) => i.id !== id));
     toast.success("Item removed");
   }

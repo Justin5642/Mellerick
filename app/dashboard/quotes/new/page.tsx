@@ -108,13 +108,23 @@ export default function NewQuotePage() {
 
     const validItems = lineItems.filter(i => i.name && i.unit_price);
     if (validItems.length > 0) {
-      await supabase.from("quote_items").insert(validItems.map(i => ({
+      const { error: itemsError } = await supabase.from("quote_items").insert(validItems.map(i => ({
         quote_id: quote.id,
         name: i.name,
         description: i.description || null,
         quantity: parseFloat(i.quantity) || 1,
         unit_price: parseFloat(i.unit_price),
       })));
+
+      // Discarded, this produced a quote header with no lines and a "Quote
+      // created" toast — a $0 quote sent to a customer. The header is kept
+      // (the user is navigated to it and can finish it) but the message has to
+      // say what actually happened.
+      if (itemsError) {
+        toast.error(`Quote created, but its line items did not save: ${itemsError.message}`);
+        router.push(`/dashboard/quotes/${quote.id}`);
+        return;
+      }
     }
 
     toast.success("Quote created");

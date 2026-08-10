@@ -63,22 +63,50 @@ export default function VariationTypesPage() {
     load();
   }
 
+  // Every write on this page reports through `settled`, which fails closed on
+  // both an error AND a zero-row result — PostgREST returns no error for an
+  // UPDATE or DELETE that matches nothing, so a refusal and a success are the
+  // same response. These rows set what customers are charged, so a silent
+  // no-op here is a price the office believes it changed and did not.
+  async function settled(
+    result: { error: { message: string } | null; count: number | null },
+    failure: string
+  ): Promise<boolean> {
+    if (result.error || result.count === 0) {
+      toast.error(result.error?.message ?? failure);
+      return false;
+    }
+    return true;
+  }
+
   async function updateRate(id: string, rate: number) {
-    await supabase.from("variation_types").update({ rate }).eq("id", id);
+    // This one had no feedback of any kind: it wrote a RATE and said nothing
+    // either way, so a refused edit looked identical to a saved one.
+    const res = await supabase.from("variation_types").update({ rate }, { count: "exact" }).eq("id", id);
+    if (await settled(res, "The rate was not saved.")) toast.success("Rate updated");
   }
 
   async function toggleAutoApprove(t: VariationType) {
-    await supabase.from("variation_types").update({ auto_approve: !t.auto_approve }).eq("id", t.id);
+    const res = await supabase
+      .from("variation_types")
+      .update({ auto_approve: !t.auto_approve }, { count: "exact" })
+      .eq("id", t.id);
+    if (!(await settled(res, "Could not change auto-approve."))) return;
     setTypes((prev) => prev.map((x) => (x.id === t.id ? { ...x, auto_approve: !x.auto_approve } : x)));
   }
 
   async function toggleActive(t: VariationType) {
-    await supabase.from("variation_types").update({ is_active: !t.is_active }).eq("id", t.id);
+    const res = await supabase
+      .from("variation_types")
+      .update({ is_active: !t.is_active }, { count: "exact" })
+      .eq("id", t.id);
+    if (!(await settled(res, "Could not change this variation type."))) return;
     setTypes((prev) => prev.map((x) => (x.id === t.id ? { ...x, is_active: !x.is_active } : x)));
   }
 
   async function remove(id: string) {
-    await supabase.from("variation_types").delete().eq("id", id);
+    const res = await supabase.from("variation_types").delete({ count: "exact" }).eq("id", id);
+    if (!(await settled(res, "Could not remove this variation type."))) return;
     setTypes((prev) => prev.filter((t) => t.id !== id));
     toast.success("Removed");
   }

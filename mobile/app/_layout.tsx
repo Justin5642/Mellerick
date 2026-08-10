@@ -8,14 +8,21 @@ import "../lib/backgroundClockTask";
 import { useEffect } from "react";
 import { Stack, useRouter, useSegments } from "expo-router";
 import { StatusBar } from "expo-status-bar";
-import { ActivityIndicator, View, StyleSheet, Platform, StatusBar as RNStatusBar } from "react-native";
+import {
+  ActivityIndicator,
+  View,
+  StyleSheet,
+  Platform,
+  StatusBar as RNStatusBar,
+  TouchableOpacity,
+  Text,
+} from "react-native";
 import { AuthProvider, useAuth } from "../lib/auth-context";
 import { usePushRegistration } from "../lib/push/usePushRegistration";
 import { LocationTrackingProvider } from "../lib/location-tracking";
 import { DataProvider } from "../lib/data/DataProvider";
 import { PowerSyncProvider } from "../lib/data/PowerSyncProvider";
 import { SyncStatusPill } from "../design/components/SyncStatusPill";
-import { TouchableOpacity, Text } from "react-native";
 import { colors } from "../lib/theme";
 
 // Floating, app-wide sync indicator: invisible when synced, "Syncing N…" while

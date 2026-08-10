@@ -101,7 +101,7 @@ export function QuoteDetail({ quote }: Props) {
 
     const items = quote.quote_items ?? [];
     if (items.length > 0) {
-      await supabase.from("job_items").insert(
+      const { error: itemsError } = await supabase.from("job_items").insert(
         items.map((i: any) => ({
           job_id: job.id,
           name: i.name,
@@ -110,9 +110,33 @@ export function QuoteDetail({ quote }: Props) {
           unit_price: i.unit_price,
         }))
       );
+
+      // Without its line items the new job carries no scope and no money, and
+      // "Job created from quote" is then a claim about work nobody can bill.
+      if (itemsError) {
+        toast.error(`Job created, but the quote's line items did not copy across: ${itemsError.message}`);
+      }
     }
 
-    await supabase.from("quotes").update({ job_id: job.id }).eq("id", quote.id);
+    // The link back is what stops this quote being converted a SECOND time —
+    // `setConverted` only affects this render, so a discarded result here means
+    // the next person to open the quote can create a duplicate job for the
+    // same work. Same dedupe-write shape as the Xero and calendar link writes.
+    const { error: linkError, count: linkCount } = await supabase
+      .from("quotes")
+      .update({ job_id: job.id }, { count: "exact" })
+      .eq("id", quote.id);
+
+    if (linkError || linkCount === 0) {
+      toast.error(
+        `Job ${job.job_number ?? job.id} was created, but this quote could not be linked to it ` +
+          `(${linkError?.message ?? "no rows updated"}). DO NOT convert again — that would create a ` +
+          `second job for the same work. Link it manually.`
+      );
+      setConverting(false);
+      router.push(`/dashboard/jobs/${job.id}`);
+      return;
+    }
 
     toast.success("Job created from quote");
     setConverted(true);

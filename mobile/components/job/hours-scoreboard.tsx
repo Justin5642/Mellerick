@@ -161,7 +161,7 @@ export function JobHoursScoreboard({ job, currentUserId }: { job: JobLite; curre
             </>
           ) : (
             <>
-              <Text style={styles.overtimeTitle}>You've used all the allocated hours for this job.</Text>
+              <Text style={styles.overtimeTitle}>You&apos;ve used all the allocated hours for this job.</Text>
               <TouchableOpacity style={styles.submitButton} onPress={() => setShowForm(true)}>
                 <Text style={styles.submitButtonText}>Log a reason</Text>
               </TouchableOpacity>

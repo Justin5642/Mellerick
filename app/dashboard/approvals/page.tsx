@@ -113,7 +113,7 @@ export default function ApprovalsPage() {
           .single();
 
         if (!invErr && newInvoice) {
-          await supabase.from("invoice_items").insert(
+          const { error: itemsErr } = await supabase.from("invoice_items").insert(
             items.map((i: any) => ({
               invoice_id: newInvoice.id,
               pricing_item_id: i.pricing_item_id ?? null,
@@ -123,22 +123,45 @@ export default function ApprovalsPage() {
               unit_price: i.unit_price,
             }))
           );
-          invoiceId = newInvoice.id;
-          invoiceCreated = true;
+          // A discarded result here produces an invoice header with NO lines,
+          // reported as "invoice created" — a zero-dollar bill for work that
+          // was done. The header is left in place deliberately (deleting it
+          // could race the Xero push below) but it is NOT counted as created,
+          // so the job stays in the manual-invoicing queue where a human sees
+          // it rather than disappearing as handled.
+          if (itemsErr) {
+            toast.error(`Invoice created but its lines did not save (${itemsErr.message}). Complete it manually.`);
+          } else {
+            invoiceId = newInvoice.id;
+            invoiceCreated = true;
+          }
         }
       }
     }
 
-    await supabase
+    // This write is the approval. Without it the job is not approved, no
+    // matter what the invoice did or what the toast below says — and the row
+    // is removed from the list immediately after, so a refusal would look
+    // exactly like a success until the next reload.
+    const { error: approveErr, count: approveCount } = await supabase
       .from("jobs")
-      .update({
-        admin_status: "approved",
-        admin_notes: notes[jobId] || null,
-        // Still flagged "ready to invoice" if we couldn't auto-create one
-        // (no line items yet) so it shows up for manual invoicing.
-        ready_to_invoice: !invoiceId,
-      })
+      .update(
+        {
+          admin_status: "approved",
+          admin_notes: notes[jobId] || null,
+          // Still flagged "ready to invoice" if we couldn't auto-create one
+          // (no line items yet) so it shows up for manual invoicing.
+          ready_to_invoice: !invoiceId,
+        },
+        { count: "exact" }
+      )
       .eq("id", jobId);
+
+    if (approveErr || approveCount === 0) {
+      toast.error(approveErr?.message ?? "The job could not be approved — it may have changed since this page loaded.");
+      setSaving(null);
+      return;
+    }
 
     setJobs((j) => j.filter((job) => job.id !== jobId));
 
@@ -175,12 +198,28 @@ export default function ApprovalsPage() {
       return;
     }
     setSaving(jobId);
-    await supabase.from("jobs").update({
-      admin_status: "rejected",
-      admin_notes: notes[jobId],
-      status: "in_progress",
-      ready_to_invoice: false,
-    }).eq("id", jobId);
+    const { error: rejectErr, count: rejectCount } = await supabase
+      .from("jobs")
+      .update(
+        {
+          admin_status: "rejected",
+          admin_notes: notes[jobId],
+          status: "in_progress",
+          ready_to_invoice: false,
+        },
+        { count: "exact" }
+      )
+      .eq("id", jobId);
+
+    // "Technician will be notified" is a promise about a row that may not have
+    // changed. If it did not, the job stays approved-pending and the note the
+    // admin just wrote is gone.
+    if (rejectErr || rejectCount === 0) {
+      toast.error(rejectErr?.message ?? "The job could not be sent back — it may have changed since this page loaded.");
+      setSaving(null);
+      return;
+    }
+
     fetch(`/api/jobs/${jobId}/sync-calendar`, { method: "POST" }).catch(() => {});
     setJobs(j => j.filter(job => job.id !== jobId));
     toast.success("Job sent back — technician will be notified");

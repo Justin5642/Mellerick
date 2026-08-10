@@ -64,6 +64,34 @@ export async function getGoogleCalendarClient(supabaseClient?: any) {
 }
 
 /**
+ * Which side wrote last?
+ *
+ * The poll below used to decide purely on "do the times differ", which cannot
+ * tell a Google-side edit from an app-side edit the calendar has not caught up
+ * with. Both systems stamp their own modification time — Google sets
+ * `event.updated`, Postgres maintains `jobs.updated_at` via the
+ * update_updated_at trigger (0000_baseline.sql:295) — so comparing them
+ * distinguishes the two directions with no schema change, which matters
+ * because migrations here are drafted and handed over, never applied.
+ *
+ * Ties go to the JOB. So does an unparseable or absent `event.updated`: when
+ * it is genuinely impossible to say who wrote last, the side a user is looking
+ * at in the app is the side to keep.
+ */
+export function calendarEventIsNewer(
+  eventUpdated: string | null | undefined,
+  jobUpdatedAt: string | null | undefined
+): boolean {
+  if (!eventUpdated) return false;
+  const event = Date.parse(eventUpdated);
+  if (Number.isNaN(event)) return false;
+  if (!jobUpdatedAt) return true; // no stamp on the row — the event is all we have
+  const job = Date.parse(jobUpdatedAt);
+  if (Number.isNaN(job)) return true;
+  return event > job;
+}
+
+/**
  * Pulls changes made *directly in Google Calendar* (drag to reschedule,
  * resize, or delete an event) back onto the matching job — the other half
  * of the one-way (app -> calendar) push in /api/jobs/[id]/sync-calendar.
@@ -72,6 +100,18 @@ export async function getGoogleCalendarClient(supabaseClient?: any) {
  * "Sync now" button, so both take the exact same code path. Callers pass
  * whichever Supabase client they have (service-role for cron, cookie-based
  * for the logged-in manual trigger).
+ *
+ * DIRECTION MATTERS (item 1.8). This function writes to the jobs table, so it
+ * can destroy work the office just did: before the guard below, an event the
+ * calendar had not caught up with — because the push failed, was never made,
+ * or a 410 forced a re-seed that re-listed every future event — was copied
+ * straight back onto the job, silently undoing a drag with no user involved.
+ *
+ * It now only writes when the event is demonstrably the newer writer. When the
+ * JOB is newer it pushes the job's times onto the event instead, so the two
+ * converge in a single round rather than disagreeing forever. That patch bumps
+ * `event.updated`, so the next poll sees the event as newer — and by then the
+ * times match, so nothing is written and it does not oscillate.
  */
 export async function pollGoogleCalendarChanges(supabase: any) {
   const { data: tokenRow } = await supabase.from("google_tokens").select("*").single();
@@ -86,6 +126,12 @@ export async function pollGoogleCalendarChanges(supabase: any) {
   let updated = 0;
   let clearedByDeletion = 0;
   let skipped = 0;
+  // Times the app's own edit won and was pushed back to Google instead.
+  let pushedToCalendar = 0;
+  // Pushes that failed. Counted and returned rather than swallowed: a job whose
+  // event could not be corrected is still diverged, and the caller is the only
+  // one able to say so.
+  let pushFailed = 0;
 
   // If we don't have a sync token yet, scope the initial listing to "from
   // now on" so we don't walk years of calendar history on the first run.
@@ -115,9 +161,12 @@ export async function pollGoogleCalendarChanges(supabase: any) {
 
     for (const event of res.data.items ?? []) {
       if (!event.id) continue;
+      // `updated_at` is what makes the direction of a change knowable; without
+      // it every comparison below degrades to "the times differ", which is the
+      // bug this guard exists to close.
       const { data: job } = await supabase
         .from("jobs")
-        .select("id, scheduled_start, scheduled_end, status")
+        .select("id, scheduled_start, scheduled_end, status, updated_at")
         .eq("google_event_id", event.id)
         .maybeSingle();
       if (!job) {
@@ -125,7 +174,20 @@ export async function pollGoogleCalendarChanges(supabase: any) {
         continue;
       }
 
+      const eventWins = calendarEventIsNewer(event.updated, job.updated_at);
+
       if (event.status === "cancelled") {
+        if (!eventWins) {
+          // Someone deleted the event in Google, but the app touched this job
+          // AFTER that. The event genuinely no longer exists, so the link has
+          // to go — but clearing the schedule too would throw away the newer
+          // edit, which is the whole failure this guard exists to prevent.
+          // Re-creating the event needs the job number, title, customer and
+          // site that only /sync-calendar assembles, so that stays its job.
+          await supabase.from("jobs").update({ google_event_id: null }).eq("id", job.id);
+          skipped++;
+          continue;
+        }
         // Event was deleted directly in Google Calendar — clear the
         // schedule so office staff notice the job needs re-booking, rather
         // than silently leaving a stale schedule in place.
@@ -144,7 +206,9 @@ export async function pollGoogleCalendarChanges(supabase: any) {
       const endChanged =
         newEnd && new Date(newEnd).toISOString() !== (job.scheduled_end ? new Date(job.scheduled_end).toISOString() : null);
 
-      if (startChanged || endChanged) {
+      if (!startChanged && !endChanged) continue;
+
+      if (eventWins) {
         await supabase
           .from("jobs")
           .update({
@@ -153,6 +217,47 @@ export async function pollGoogleCalendarChanges(supabase: any) {
           })
           .eq("id", job.id);
         updated++;
+        continue;
+      }
+
+      // The JOB is the newer writer, so the event is stale. Correct the event
+      // rather than the job — writing the job here is precisely the data loss
+      // this guard exists to stop.
+      if (!job.scheduled_start) {
+        // The app cleared the schedule. Deleting the event is the right answer
+        // but it is a destructive call, and /sync-calendar already owns that
+        // decision (its `shouldRemove` branch). Leave it be and say so.
+        skipped++;
+        continue;
+      }
+
+      const pushStart = new Date(job.scheduled_start);
+      // Same default as /sync-calendar (route.ts): a job with no end is an hour.
+      const pushEnd = job.scheduled_end ? new Date(job.scheduled_end) : new Date(pushStart.getTime() + 60 * 60 * 1000);
+
+      try {
+        await calendar.events.patch({
+          calendarId: "primary",
+          eventId: event.id,
+          requestBody: {
+            start: { dateTime: pushStart.toISOString() },
+            end: { dateTime: pushEnd.toISOString() },
+          },
+        });
+        pushedToCalendar++;
+      } catch (e: unknown) {
+        const code = (e as { code?: number })?.code;
+        if (code === 404 || code === 410) {
+          // The event vanished between the list and the patch. Drop the dead
+          // link; the schedule stays, and /sync-calendar recreates the event.
+          await supabase.from("jobs").update({ google_event_id: null }).eq("id", job.id);
+          skipped++;
+          continue;
+        }
+        // One uncooperative event must not abort the reconciliation of every
+        // other job, but nor may it vanish: it is counted and returned.
+        console.error(`Calendar poll: could not push job ${job.id} onto event ${event.id}:`, e);
+        pushFailed++;
       }
     }
 
@@ -168,5 +273,5 @@ export async function pollGoogleCalendarChanges(supabase: any) {
     })
     .eq("id", tokenRow.id);
 
-  return { updated, clearedByDeletion, skipped, initialSync: isInitialSync };
+  return { updated, clearedByDeletion, skipped, pushedToCalendar, pushFailed, initialSync: isInitialSync };
 }

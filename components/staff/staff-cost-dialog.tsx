@@ -100,9 +100,17 @@ export function StaffCostDialog({ staffId, staffName, open, onOpenChange }: Prop
     const {
       data: { user },
     } = await supabase.auth.getUser();
+    // `vehicle_cost_per_hour` is DERIVED (lib/staff-cost.ts:14-19) — summed from
+    // the equipment assigned to this person — and is deliberately not a column
+    // on staff_cost_profiles. Spreading costForm wholesale made the payload's
+    // TYPE permit it, which the generated database types flagged the moment they
+    // were wired in. It is not set today, so nothing is broken; splitting it out
+    // means it cannot start being set by a later edit and fail the save at
+    // runtime, which is the failure PostgREST gives for an unknown column.
+    const { vehicle_cost_per_hour: _derived, ...storedCosts } = costForm;
     const { error } = await supabase.from("staff_cost_profiles").upsert({
       staff_id: staffId,
-      ...costForm,
+      ...storedCosts,
       charge_out_rate: chargeOutRate === "" ? null : parseFloat(chargeOutRate),
       updated_at: new Date().toISOString(),
       updated_by: user?.id ?? null,

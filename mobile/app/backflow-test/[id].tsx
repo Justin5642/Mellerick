@@ -474,7 +474,7 @@ export default function NewBackflowTestScreen() {
           </View>
           <DateField label="Test Kit Calibration Date *" value={testKitCalibrationDate ?? new Date()} onChange={setTestKitCalibrationDate} />
           <View style={styles.fieldGroup}>
-            <Text style={styles.fieldLabel}>Authorised Tester's Name *</Text>
+            <Text style={styles.fieldLabel}>Authorised Tester&apos;s Name *</Text>
             <TextInput style={styles.input} value={testerName} onChangeText={setTesterName} />
           </View>
           <View style={styles.fieldGroup}>
