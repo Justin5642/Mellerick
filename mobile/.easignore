@@ -6,10 +6,18 @@
 #
 # for an app whose source is a few megabytes. eas-cli takes a shallow COPY of
 # the working tree (cli.requireCommit is unset — see SHIPPING.md) and filters
-# it, and the filtering was not excluding `android/`, which after a local
-# `expo run:android` holds Gradle caches, merged manifests and intermediate
-# build outputs. That is half a gigabyte uploaded on every build, and it is
-# what stalled the rebuild.
+# it, and the filtering was not excluding `android/`.
+#
+# Measured rather than assumed:
+#
+#     android/       1.9 GB    Gradle caches, merged manifests, intermediates
+#     node_modules/  912 MB    (already excluded)
+#     assets/        572 KB
+#     .expo/         633 KB
+#
+# 1.9 GB of local Android build output is the entire story — it compresses to
+# the 524 MB that was being uploaded on every build, and it is what stalled two
+# rebuilds mid-upload.
 #
 # ─────────────────────────────────────────────────────────────────────────────
 # READ THIS BEFORE ADDING OR REMOVING A LINE.
