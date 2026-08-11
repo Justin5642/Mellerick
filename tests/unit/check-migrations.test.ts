@@ -125,14 +125,17 @@ describe("parseLedger", () => {
     // box-drawing TABLE when attached to an interactive terminal and JSON when
     // piped. So the script parsed correctly under a pipe and failed in a real
     // terminal — an environment-dependent bug invisible to the way it was
-    // developed. Fixed by passing `--output json`, which makes the format
-    // independent of how the process is attached.
+    // developed.
     //
-    // The parser's behaviour on the table form still matters, because a future
-    // CLI could change again. It must THROW. Quietly returning [] would report
-    // "0 migrations applied", and compare() would then call every applied
-    // migration pending — a confident, wrong answer, which is worse than the
-    // failure it replaced.
+    // NOTE: the format cannot be "forced" to one shape. `--output-format json`
+    // (the correct flag; `--output` sets an unrelated status-variable format)
+    // stops the interactive TABLE, but the CLI STILL switches between an agent
+    // envelope and a bare array by process attachment — see the measured matrix
+    // in scripts/supabase-cli-json.mjs. parseLedger delegates to parseCliRows,
+    // which accepts both JSON shapes and refuses the table, which is what this
+    // pins: it must THROW. Quietly returning [] would report "0 migrations
+    // applied", and compare() would then call every applied migration pending —
+    // a confident, wrong answer, worse than the failure it replaced.
     const table = `┌───────────┐
 │ versions  │
 ├───────────┤

@@ -75,8 +75,31 @@ function readEnvFile() {
   }
 }
 
+/**
+ * The live schema came back with zero tables. Under BOTH sources this means the
+ * read format changed under us — a PostgREST spec with no definitions, or a
+ * `gen types` output the regex no longer matches — not that production is empty.
+ * Proceeding would make every drift assertion trivially true and print "No
+ * drift": the exact vacuous pass this whole script exists to stop being bitten by.
+ */
+function refuseEmptySchema(out, source) {
+  if (out.size === 0) {
+    console.error(`The live schema came back with zero tables via ${source}. Refusing to report 'no drift'.`);
+    console.error("The read succeeded but produced nothing to compare — treat this as a broken check, not a pass.");
+    process.exit(2);
+  }
+}
+
 /** Live columns per table, as Map<table, Set<column>>. */
 async function liveColumns() {
+  // Load .env for BOTH sources, not just PostgREST. The storage-bucket half of
+  // this check (further down) reads NEXT_PUBLIC_SUPABASE_URL / SERVICE_ROLE_KEY
+  // straight from process.env; when this was only called on the PostgREST path,
+  // `node check-schema-drift.mjs --linked` (the documented invocation) skipped
+  // the bucket check entirely and still printed that every bucket was accounted
+  // for — a second vacuous pass hidden behind the first.
+  readEnvFile();
+
   if (process.argv.includes("--linked")) {
     let types;
     try {
@@ -95,10 +118,12 @@ async function liveColumns() {
     for (const m of types.matchAll(/^ {6}(\w+): \{\n {8}Row: \{([\s\S]*?)\n {8}\}/gm)) {
       out.set(m[1], new Set([...m[2].matchAll(/^\s+(\w+)\??:/gm)].map((x) => x[1])));
     }
+    // Same guard the PostgREST branch has always had — the `--linked` branch
+    // never did, so a `gen types` format change would report clean here.
+    refuseEmptySchema(out, "the Supabase CLI (gen types)");
     return out;
   }
 
-  readEnvFile();
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!url || !key) {
@@ -121,13 +146,7 @@ async function liveColumns() {
   for (const [table, def] of Object.entries(defs)) {
     if (def?.properties) out.set(table, new Set(Object.keys(def.properties)));
   }
-  // A source that returns nothing would make every assertion below trivially
-  // true and print "No drift" — the exact vacuous pass this repo keeps getting
-  // bitten by.
-  if (out.size === 0) {
-    console.error("The live schema came back with zero tables. Refusing to report 'no drift'.");
-    process.exit(2);
-  }
+  refuseEmptySchema(out, "PostgREST");
   return out;
 }
 
@@ -194,6 +213,7 @@ for (const [table, liveCols] of live) {
 // perfectly happily. It took an INSERT, in CI, to surface it.
 // ---------------------------------------------------------------------------
 const bucketDrift = [];
+let bucketsChecked = false;
 {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -202,6 +222,7 @@ const bucketDrift = [];
       headers: { apikey: key, Authorization: `Bearer ${key}` },
     });
     if (res.ok) {
+      bucketsChecked = true;
       const liveBuckets = await res.json();
       const declared = new Set(
         [...sql.matchAll(/insert into storage\.buckets[\s\S]*?values\s*([\s\S]*?);/gi)]
@@ -219,12 +240,29 @@ const bucketDrift = [];
     } else {
       bucketDrift.push(`(could not read buckets: ${res.status} — bucket drift NOT checked)`);
     }
+  } else {
+    // Reachable when .env has no service-role key. Before readEnvFile() ran for
+    // both sources this was the SILENT state of every `--linked` run: no creds,
+    // no bucket read, and the summary below still said "every bucket accounted
+    // for". Say it was skipped instead.
+    bucketDrift.push(
+      "(no NEXT_PUBLIC_SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY in env — bucket drift NOT checked)"
+    );
   }
 }
 
 const problems = [...drift.map((d) => ["column", d]), ...bucketDrift.map((d) => ["bucket", d])];
 
 if (problems.length === 0) {
+  // Only claim the buckets are clean if they were actually read. bucketsChecked
+  // is false only when the block above pushed a "NOT checked" note, so this
+  // branch means every bucket genuinely reconciled — but guard it anyway, so a
+  // future edit cannot make "no problems" silently mean "did not look".
+  if (!bucketsChecked) {
+    console.error("Columns show no drift, but the storage buckets were NOT checked (see note below).");
+    for (const [, d] of bucketDrift) console.error(`  ${d}`);
+    process.exit(2);
+  }
   console.log(
     `No drift: ${live.size} live relations and every storage bucket are accounted for in the\n` +
       `migration history. (Checked columns AND buckets — see the header for what is still\n` +
