@@ -76,8 +76,10 @@
 -- PUBLIC one. Revoking from a role that holds a privilege by inheritance is a
 -- no-op that reads exactly like a fix.
 --
--- service_role and postgres hold their own explicit grants (visible above), so
--- revoking PUBLIC does not touch them.
+-- service_role's grant is re-stated explicitly after the revokes below — see
+-- the note there. Production's ACL shows it holding one; a database built only
+-- from these migrations does not, so relying on it would have been a grant no
+-- migration makes.
 --
 -- Triggers do not check EXECUTE on their function — the trigger fires as part
 -- of the table's own machinery — so revoking here removes the RPC endpoint
@@ -86,9 +88,32 @@ revoke execute on function public.handle_new_user() from public, anon, authentic
 revoke execute on function public.apply_variation_pricing() from public, anon, authenticated;
 revoke execute on function public.prevent_unauthorised_role_change() from public, anon, authenticated;
 
--- An operations helper, called by CI and by hand. service_role keeps its
--- explicit grant.
+-- An operations helper, called by CI and by hand.
 revoke execute on function public.reapply_time_entries_grants() from public, anon, authenticated;
+
+-- ---------------------------------------------------------------------------
+-- THEN GRANT service_role BACK, EXPLICITLY. Found the same way as the PUBLIC
+-- default above: assertion (c) failed in CI.
+-- ---------------------------------------------------------------------------
+-- The header claimed "service_role and postgres hold their own explicit grants
+-- (visible above), so revoking PUBLIC does not touch them." That is true of
+-- PRODUCTION, whose ACL shows `service_role=X/postgres`. It is NOT true of a
+-- database built purely from these migrations: there, service_role held EXECUTE
+-- only THROUGH PUBLIC, so revoking PUBLIC took it away too.
+--
+-- This is the same divergence the repo already records as N19 for table
+-- privileges — production's grants come from Supabase's default privileges on
+-- the hosted project, and a migrations-only database never receives them. The
+-- lesson generalises: a migration must not depend on a grant no migration
+-- makes.
+--
+-- Granting explicitly is correct in both environments. In production it
+-- re-states a grant that already exists (a no-op); in CI and in any future
+-- `supabase db reset` it creates the one that was missing.
+grant execute on function public.handle_new_user() to service_role;
+grant execute on function public.apply_variation_pricing() to service_role;
+grant execute on function public.prevent_unauthorised_role_change() to service_role;
+grant execute on function public.reapply_time_entries_grants() to service_role;
 
 -- ---------------------------------------------------------------------------
 -- Assert the outcome, including the part that must NOT have changed.
