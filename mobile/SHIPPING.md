@@ -9,7 +9,7 @@ This file is the exact sequence, with the reasons a step exists.
 | | |
 |---|---|
 | Bundle ID (iOS) / package (Android) | `au.com.mellerick.field` |
-| EAS project | `2a14a6a0-9d24-493b-97c1-5a72273e20b4` (owner `justin5642`) |
+| EAS project | `b45be6c7-c041-42c8-b420-bc3c75ce8778` (owner `avi-bendetsky`) |
 | Slug | `mellerick-field` |
 | Version | `1.0.0` (build numbers auto-increment via `appVersionSource: remote`) |
 
