@@ -35,7 +35,7 @@ export default function InvoiceDetailScreen() {
   }, [id]);
 
   useEffect(() => {
-    load();
+    void load();
   }, [load]);
 
   if (loading) {
@@ -56,7 +56,7 @@ export default function InvoiceDetailScreen() {
           error={error}
           onRetry={() => {
             setLoading(true);
-            load();
+            void load();
           }}
         />
       </View>

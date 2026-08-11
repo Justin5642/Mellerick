@@ -7,9 +7,11 @@ import DateTimePicker, { type DateTimePickerEvent } from "@react-native-communit
 import { supabase } from "../../lib/supabase";
 import { colors } from "../../lib/theme";
 import { JobListRow } from "../../design/components/JobListRow";
+import { ScreenError } from "../../design/components/ScreenError";
 import { businessDayLabel, formatBusinessTime, computeReschedule, localDateKey } from "../../lib/date";
 import { useSchedule } from "../../lib/data/hooks/useSchedule";
 import { listAssignableStaff, type AssignableStaff } from "../../lib/data/reads/schedule";
+import { unwrapRows } from "../../lib/data/reads/unwrap";
 
 interface SchedJob {
   id: string;
@@ -33,21 +35,41 @@ export default function ScheduleScreen() {
   const [reassignJob, setReassignJob] = useState<SchedJob | null>(null);
   const [datePickerFor, setDatePickerFor] = useState<SchedJob | null>(null);
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<unknown>(null);
+  const [staffError, setStaffError] = useState<unknown>(null);
 
+  // Unwrapped rather than defaulted to []: this list's empty state is "Nothing
+  // scheduled.", which an office user reads as the day being clear. A failed
+  // read that renders it sends nobody to site.
   const load = useCallback(async () => {
-    const { data } = await supabase
-      .from("jobs")
-      .select("*, customers(name), profiles!jobs_assigned_to_fkey(full_name)")
-      .not("scheduled_start", "is", null)
-      .not("status", "in", '("completed","cancelled")')
-      .order("scheduled_start");
-    setJobs((data as unknown as SchedJob[]) ?? []);
+    try {
+      setError(null);
+      const res = await supabase
+        .from("jobs")
+        .select("*, customers(name), profiles!jobs_assigned_to_fkey(full_name)")
+        .not("scheduled_start", "is", null)
+        .not("status", "in", '("completed","cancelled")')
+        .order("scheduled_start");
+      setJobs(unwrapRows(res as never, "ScheduleScreen.load") as unknown as SchedJob[]);
+    } catch (e) {
+      setError(e);
+    }
+  }, []);
+
+  // The staff read is kept OUT of `error` on purpose: it only feeds the reassign
+  // picker, and taking the whole schedule down because the technician list
+  // failed would remove the working half of the screen. It was previously
+  // `.catch(() => {})`, which left the picker looking like a business with no
+  // technicians, so it now reports itself where those names are missing.
+  const loadStaff = useCallback(() => {
+    setStaffError(null);
+    listAssignableStaff().then(setStaff, (e) => setStaffError(e));
   }, []);
 
   useEffect(() => {
-    load();
-    listAssignableStaff().then(setStaff).catch(() => {});
-  }, [load]);
+    void load();
+    loadStaff();
+  }, [load, loadStaff]);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -108,6 +130,16 @@ export default function ScheduleScreen() {
     }
   }
 
+  // Checked BEFORE the list, so a failed read can never render as "Nothing
+  // scheduled." — the two look the same and mean opposite things.
+  if (error) {
+    return (
+      <SafeAreaView style={styles.safe} edges={["top"]}>
+        <ScreenError error={error} onRetry={() => { void load(); }} />
+      </SafeAreaView>
+    );
+  }
+
   return (
     <SafeAreaView style={styles.safe} edges={["top"]}>
       <View style={styles.header}>
@@ -164,6 +196,12 @@ export default function ScheduleScreen() {
               <Text style={styles.sheetTitle}>Assign to</Text>
               {busy ? <ActivityIndicator color={colors.blue600} /> : null}
             </View>
+            {staffError ? (
+              <TouchableOpacity style={styles.staffErrorRow} onPress={loadStaff}>
+                <Ionicons name="alert-circle-outline" size={18} color={colors.orange700} />
+                <Text style={styles.staffErrorText}>Couldn&apos;t load the technician list. Tap to retry.</Text>
+              </TouchableOpacity>
+            ) : null}
             <ScrollView style={{ maxHeight: 360 }}>
               <TouchableOpacity style={styles.staffRow} onPress={() => onReassign(null)} disabled={busy}>
                 <Ionicons name="close-circle-outline" size={18} color={colors.slate500} />
@@ -225,6 +263,8 @@ const styles = StyleSheet.create({
   pickerSheet: { backgroundColor: colors.card, borderTopLeftRadius: 16, borderTopRightRadius: 16, padding: 16, paddingBottom: 28 },
   pickerHead: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 8 },
   staffRow: { flexDirection: "row", alignItems: "center", gap: 12, paddingVertical: 12, borderTopWidth: 1, borderTopColor: colors.border },
+  staffErrorRow: { flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: colors.orange100, borderRadius: 10, padding: 10 },
+  staffErrorText: { flex: 1, fontSize: 12, color: colors.orange700, lineHeight: 16 },
   staffName: { fontSize: 15, fontWeight: "600", color: colors.slate900 },
   staffRole: { fontSize: 12, color: colors.slate400, textTransform: "capitalize", marginTop: 1 },
   cancelBtn: { marginTop: 12, paddingVertical: 12, borderRadius: 10, backgroundColor: colors.bg, alignItems: "center", borderWidth: 1, borderColor: colors.border },

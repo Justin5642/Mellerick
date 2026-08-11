@@ -1,7 +1,9 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { View, Text, StyleSheet, TouchableOpacity, TextInput, Alert } from "react-native";
+import { Ionicons } from "@expo/vector-icons";
 import { supabase } from "../../lib/supabase";
 import { colors } from "../../lib/theme";
+import { describeReadFailure } from "../../design/components/ScreenError";
 
 // Mirrors the web "Hours Scoreboard" in components/job/job-po.tsx — shows
 // technicians how many hours have been allocated to this job (set manually
@@ -29,6 +31,17 @@ interface JobLite {
   overtime_category?: string | null;
 }
 
+// The supabase client is untyped, so these name the two row shapes this
+// component reads rather than leaving the reducers on `any`.
+interface PurchaseOrderHoursRow {
+  total_hours: number | string | null;
+}
+interface TimeEntryRow {
+  hours: number | string | null;
+  clock_in: string | null;
+  clock_out: string | null;
+}
+
 export function JobHoursScoreboard({ job, currentUserId }: { job: JobLite; currentUserId: string | null }) {
   const jobId = job.id;
   const [allocatedHours, setAllocatedHours] = useState(0);
@@ -36,6 +49,7 @@ export function JobHoursScoreboard({ job, currentUserId }: { job: JobLite; curre
   const [openClockIn, setOpenClockIn] = useState<string | null>(null);
   const [now, setNow] = useState(Date.now());
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<unknown>(null);
 
   const [overtimeReason, setOvertimeReason] = useState(job.overtime_reason ?? null);
   const [overtimeCategory, setOvertimeCategory] = useState(job.overtime_category ?? null);
@@ -44,26 +58,40 @@ export function JobHoursScoreboard({ job, currentUserId }: { job: JobLite; curre
   const [reasonText, setReasonText] = useState("");
   const [saving, setSaving] = useState(false);
 
-  async function load() {
-    const [{ data: pos }, { data: entries }] = await Promise.all([
-      supabase.from("purchase_orders_public").select("total_hours").eq("job_id", jobId),
-      // Only "work" entries count against the allocated-hours budget — travel
-      // time between jobs is tracked separately and shouldn't eat into it.
-      supabase.from("time_entries").select("hours, clock_in, clock_out").eq("job_id", jobId).eq("entry_type", "work"),
-    ]);
-    const totalAllocated = (pos ?? []).reduce((sum: number, p: any) => sum + (Number(p.total_hours) || 0), 0);
-    const closed = (entries ?? []).filter((e: any) => e.clock_out).reduce((sum: number, e: any) => sum + (e.hours ? Number(e.hours) : 0), 0);
-    const open = (entries ?? []).find((e: any) => !e.clock_out);
-    setAllocatedHours(totalAllocated);
-    setClosedHours(closed);
-    setOpenClockIn(open?.clock_in ?? null);
-    setLoading(false);
-  }
+  // Both queries are checked for `error` before their rows are used. supabase
+  // resolves with an error rather than rejecting, so `data ?? []` quietly turned
+  // a failed read into zero allocated hours — and zero allocated hours is the
+  // condition that renders this whole card as nothing. A technician half a day
+  // over budget saw an empty space either way.
+  const load = useCallback(async () => {
+    try {
+      setError(null);
+      const [{ data: pos, error: poError }, { data: entries, error: entryError }] = await Promise.all([
+        supabase.from("purchase_orders_public").select("total_hours").eq("job_id", jobId),
+        // Only "work" entries count against the allocated-hours budget — travel
+        // time between jobs is tracked separately and shouldn't eat into it.
+        supabase.from("time_entries").select("hours, clock_in, clock_out").eq("job_id", jobId).eq("entry_type", "work"),
+      ]);
+      if (poError) throw new Error(`purchase_orders_public: ${poError.message}`);
+      if (entryError) throw new Error(`time_entries: ${entryError.message}`);
+      const poRows: PurchaseOrderHoursRow[] = pos ?? [];
+      const timeRows: TimeEntryRow[] = entries ?? [];
+      const totalAllocated = poRows.reduce((sum, p) => sum + (Number(p.total_hours) || 0), 0);
+      const closed = timeRows.filter((e) => e.clock_out).reduce((sum, e) => sum + (e.hours ? Number(e.hours) : 0), 0);
+      const open = timeRows.find((e) => !e.clock_out);
+      setAllocatedHours(totalAllocated);
+      setClosedHours(closed);
+      setOpenClockIn(open?.clock_in ?? null);
+    } catch (e) {
+      setError(e);
+    } finally {
+      setLoading(false);
+    }
+  }, [jobId]);
 
   useEffect(() => {
-    load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [jobId]);
+    void load();
+  }, [load]);
 
   // Tick every second while someone is clocked in on this job, so the
   // countdown is genuinely live rather than only updating on clock-out.
@@ -73,6 +101,44 @@ export function JobHoursScoreboard({ job, currentUserId }: { job: JobLite; curre
     return () => clearInterval(interval);
   }, [openClockIn]);
 
+  // Checked BEFORE the `allocatedHours <= 0` branch, which is this component's
+  // "nothing to show" and renders null. A failed read leaves allocated at 0, so
+  // without this the two are the same blank space — and the blank space is the
+  // one that matters, because it hides that the job is over its budgeted hours.
+  //
+  // An inline banner rather than ScreenError: this card sits inside the job
+  // screen's ScrollView (ScreenError brings its own), and the rest of the job
+  // screen is still fine — only this card's numbers are missing.
+  if (error) {
+    const failure = describeReadFailure(error);
+    return (
+      <View style={styles.card}>
+        <Text style={styles.title}>Hours Scoreboard</Text>
+        <View style={styles.loadError}>
+          <Ionicons name="warning-outline" size={15} color={colors.orange700} />
+          <View style={{ flex: 1 }}>
+            <Text style={styles.loadErrorTitle}>{failure.title}</Text>
+            <Text style={styles.loadErrorText}>
+              {failure.isOffline
+                ? "The allocated and logged hours for this job couldn't be loaded, so this isn't a sign that no hours were allocated."
+                : "The allocated and logged hours for this job couldn't be loaded — this is not the same as no hours being allocated."}
+            </Text>
+            <Text style={styles.loadErrorDetail} selectable>{failure.detail}</Text>
+          </View>
+          <TouchableOpacity
+            onPress={() => {
+              setLoading(true);
+              void load();
+            }}
+            accessibilityRole="button"
+            hitSlop={8}
+          >
+            <Text style={styles.loadErrorRetry}>Retry</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    );
+  }
   if (loading || allocatedHours <= 0) return null;
 
   const liveOpenHours = openClockIn ? (now - new Date(openClockIn).getTime()) / 3600000 : 0;
@@ -189,6 +255,13 @@ const styles = StyleSheet.create({
   track: { width: "100%", backgroundColor: colors.slate100, borderRadius: 999, height: 10, marginTop: 6, marginBottom: 6, overflow: "hidden" },
   fill: { height: 10, borderRadius: 999 },
   meta: { fontSize: 11, color: colors.slate400 },
+  loadError: { flexDirection: "row", gap: 8, alignItems: "flex-start", backgroundColor: colors.orange100, borderRadius: 10, padding: 10 },
+  loadErrorTitle: { fontSize: 13, fontWeight: "700", color: colors.orange700 },
+  loadErrorText: { fontSize: 12, color: colors.orange700, lineHeight: 16, marginTop: 2 },
+  // Selectable and monospace, like ScreenError: this string is what gets read
+  // down a phone line or pasted into a message.
+  loadErrorDetail: { fontSize: 11, color: colors.slate500, fontFamily: "monospace", marginTop: 6 },
+  loadErrorRetry: { fontSize: 13, fontWeight: "700", color: colors.blue600, paddingHorizontal: 4, paddingVertical: 2 },
   overtimeBox: { marginTop: 12, paddingTop: 12, borderTopWidth: 1, borderTopColor: "#bfdbfe" },
   overtimeTitle: { fontSize: 13, fontWeight: "600", color: colors.red600, marginBottom: 8 },
   overtimeLoggedTitle: { fontSize: 11, fontWeight: "700", color: colors.slate500, textTransform: "uppercase" },

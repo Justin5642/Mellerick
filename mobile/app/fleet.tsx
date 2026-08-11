@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { View, Text, SectionList, StyleSheet, RefreshControl, TouchableOpacity, Modal, TextInput, Alert, ScrollView } from "react-native";
+import { View, Text, SectionList, StyleSheet, RefreshControl, TouchableOpacity, Modal, TextInput, Alert, ScrollView, ActivityIndicator } from "react-native";
 import { Stack, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { colors } from "../lib/theme";
 import { MoneyText } from "../design/components/MoneyText";
+import { ScreenError } from "../design/components/ScreenError";
 import { listEquipment, listInactiveEquipment, hourlyRate, type Equipment } from "../lib/data/reads/fleet";
 import { listAssignableStaff, type AssignableStaff } from "../lib/data/reads/schedule";
 import { useFleet } from "../lib/data/hooks/useFleet";
@@ -57,10 +58,27 @@ export default function FleetScreen() {
   const [staff, setStaff] = useState<AssignableStaff[]>([]);
   const [showInactive, setShowInactive] = useState(false);
   const [inactive, setInactive] = useState<Equipment[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<unknown>(null);
 
-  const load = useCallback(async () => setItems(await listEquipment()), []);
+  // listEquipment now THROWS on a failed query instead of returning []. This
+  // screen had no loading or error state at all, so both the first render and a
+  // failed read landed on the list's own empty state — "No equipment. Tap + to
+  // add." — which is an invitation to re-create machinery that is already on
+  // file. The spinner and the error branch below exist to stop that.
+  const load = useCallback(async () => {
+    try {
+      setError(null);
+      setItems(await listEquipment());
+    } catch (e) {
+      setError(e);
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  }, []);
   const loadInactive = useCallback(async () => setInactive(await listInactiveEquipment()), []);
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => { void load(); }, [load]);
 
   async function toggleInactive() {
     const next = !showInactive;
@@ -170,6 +188,11 @@ export default function FleetScreen() {
   }
 
   const set = (k: keyof Draft) => (v: string) => setDraft((d) => d && { ...d, [k]: v });
+
+  if (loading) return <View style={styles.center}><Stack.Screen options={{ title: "Fleet & Equipment" }} /><ActivityIndicator size="large" color={colors.blue600} /></View>;
+  // No "+" in the header here on purpose: adding equipment against a list that
+  // failed to load is how you end up with the same vehicle twice.
+  if (error) return <View style={styles.container}><Stack.Screen options={{ title: "Fleet & Equipment" }} /><ScreenError error={error} onRetry={() => { setLoading(true); void load(); }} /></View>;
 
   return (
     <View style={styles.container}>
@@ -308,6 +331,7 @@ function Field({ label, value, onChange, num, multiline }: { label: string; valu
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.bg },
+  center: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: colors.bg },
   catHead: { fontSize: 13, fontWeight: "700", color: colors.slate500, paddingHorizontal: 16, paddingTop: 16, paddingBottom: 4, textTransform: "capitalize" },
   row: { flexDirection: "row", alignItems: "center", gap: 12, paddingHorizontal: 16, paddingVertical: 12, backgroundColor: colors.card, borderTopWidth: 1, borderTopColor: colors.border },
   body: { flex: 1, minWidth: 0 },

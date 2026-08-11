@@ -5,6 +5,8 @@ import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { supabase } from "../../lib/supabase";
 import { colors } from "../../lib/theme";
+import { ScreenError } from "../../design/components/ScreenError";
+import { unwrap, unwrapRows } from "../../lib/data/reads/unwrap";
 import {
   computeNextDueDate,
   getDueStatus,
@@ -23,24 +25,35 @@ export default function BackflowDeviceScreen() {
   const [tests, setTests] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [openingId, setOpeningId] = useState<string | null>(null);
+  const [error, setError] = useState<unknown>(null);
 
+  // setLoading(false) lives in `finally` for a specific reason: it used to be the
+  // last statement of the happy path, so a thrown read never reached it and the
+  // screen sat on its spinner forever. A device this screen can't read is also
+  // the one a tester is standing in front of, so the failure has to say so.
   const load = useCallback(async () => {
-    const [{ data: deviceData }, { data: testsData }] = await Promise.all([
-      supabase.from("backflow_devices").select("*, customers(name), sites(name, address_line1, suburb, state, postcode)").eq("id", id).single(),
-      supabase
-        .from("backflow_tests")
-        .select("*, profiles!backflow_tests_tested_by_fkey(full_name)")
-        .eq("device_id", id)
-        .order("test_date", { ascending: false }),
-    ]);
-    setDevice(deviceData);
-    setTests(testsData ?? []);
-    setLoading(false);
+    try {
+      setError(null);
+      const [deviceRes, testsRes] = await Promise.all([
+        supabase.from("backflow_devices").select("*, customers(name), sites(name, address_line1, suburb, state, postcode)").eq("id", id).single(),
+        supabase
+          .from("backflow_tests")
+          .select("*, profiles!backflow_tests_tested_by_fkey(full_name)")
+          .eq("device_id", id)
+          .order("test_date", { ascending: false }),
+      ]);
+      setDevice(unwrap(deviceRes as never, "BackflowDeviceScreen.device"));
+      setTests(unwrapRows(testsRes as never, "BackflowDeviceScreen.tests"));
+    } catch (e) {
+      setError(e);
+    } finally {
+      setLoading(false);
+    }
   }, [id]);
 
   useFocusEffect(
     useCallback(() => {
-      load();
+      void load();
     }, [load])
   );
 
@@ -70,10 +83,28 @@ export default function BackflowDeviceScreen() {
     return new Date(d).toLocaleDateString("en-AU", { day: "numeric", month: "short", year: "numeric" });
   }
 
-  if (loading || !device) {
+  if (loading) {
     return (
       <SafeAreaView style={styles.center} edges={["bottom", "left", "right"]}>
         <ActivityIndicator size="large" color={colors.blue600} />
+      </SafeAreaView>
+    );
+  }
+  // Ordered BEFORE the not-found branch, so a read that broke is never reported
+  // as a device that doesn't exist — the two need different actions from the
+  // tester, and only one of them is worth driving back to the office over.
+  if (error) {
+    return (
+      <SafeAreaView style={styles.container} edges={["bottom", "left", "right"]}>
+        <ScreenError error={error} onRetry={() => { setLoading(true); void load(); }} />
+      </SafeAreaView>
+    );
+  }
+  // Previously this fell into the spinner branch above and stayed there.
+  if (!device) {
+    return (
+      <SafeAreaView style={styles.center} edges={["bottom", "left", "right"]}>
+        <Text style={styles.emptyText}>Device not found.</Text>
       </SafeAreaView>
     );
   }

@@ -148,15 +148,15 @@
     "extra": {
       "router": {},
       "eas": {
-        "projectId": "2a14a6a0-9d24-493b-97c1-5a72273e20b4"
+        "projectId": "cf2715d8-b2fc-420f-b5e3-61eb266bc49d"
       }
     },
-    "owner": "justin5642",
+    "owner": "avi770",
     "runtimeVersion": {
       "policy": "appVersion"
     },
     "updates": {
-      "url": "https://u.expo.dev/2a14a6a0-9d24-493b-97c1-5a72273e20b4"
+      "url": "https://u.expo.dev/cf2715d8-b2fc-420f-b5e3-61eb266bc49d"
     }
   }
 }

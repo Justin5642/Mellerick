@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useState } from "react";
-import { View, Text, ScrollView, StyleSheet, ActivityIndicator, TouchableOpacity, Modal, TextInput, Alert, RefreshControl, Linking } from "react-native";
+import { View, Text, ScrollView, StyleSheet, ActivityIndicator, TouchableOpacity, Modal, TextInput, Alert, RefreshControl } from "react-native";
 import { Stack, useLocalSearchParams, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import * as ImagePicker from "expo-image-picker";
 import { colors } from "../../../lib/theme";
 import { MoneyText } from "../../../design/components/MoneyText";
+import { ScreenError } from "../../../design/components/ScreenError";
+import { openExternalUrl } from "../../../lib/open-external-url";
 import { getJobBilling, getJobEquipment, getJobCostCentres, getReceiptSignedUrl, type JobBilling, type JobEquipment, type JobExpense, type JobCostCentre } from "../../../lib/data/reads/jobBilling";
 import { useJobBilling } from "../../../lib/data/hooks/useJobBilling";
 import { useFleet } from "../../../lib/data/hooks/useFleet";
@@ -56,15 +58,27 @@ export default function JobBillingScreen() {
   const [savingExpense, setSavingExpense] = useState(false);
   const [equipDraft, setEquipDraft] = useState<EquipDraft | null>(null);
   const [savingEquip, setSavingEquip] = useState(false);
+  const [error, setError] = useState<unknown>(null);
 
+  // These three reads now THROW on a failed query, and Promise.all means any one
+  // of them rejecting skips setLoading(false) entirely — a permanent spinner on
+  // the screen where the money is entered. The finally also clears the refresh
+  // control, which a pull-to-refresh failure would otherwise leave spinning.
   const load = useCallback(async () => {
-    const [b, e, cc] = await Promise.all([getJobBilling(id), getJobEquipment(id), getJobCostCentres(id)]);
-    setCostCentres(cc);
-    setData(b);
-    setEquipment(e);
-    setLoading(false);
+    try {
+      setError(null);
+      const [b, e, cc] = await Promise.all([getJobBilling(id), getJobEquipment(id), getJobCostCentres(id)]);
+      setCostCentres(cc);
+      setData(b);
+      setEquipment(e);
+    } catch (e) {
+      setError(e);
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
   }, [id]);
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => { void load(); }, [load]);
   const onRefresh = useCallback(async () => { setRefreshing(true); await load(); setRefreshing(false); }, [load]);
 
   const lineTotal = data ? data.lineItems.reduce((s, i) => s + Number(i.total ?? 0), 0) : 0;
@@ -173,12 +187,27 @@ export default function JobBillingScreen() {
 
   async function viewReceipt(e: JobExpense) {
     if (!e.receipt_storage_path) return;
-    const url = await getReceiptSignedUrl(e.receipt_storage_path);
-    if (url) Linking.openURL(url);
-    else Alert.alert("Receipt unavailable", "The receipt can't be opened right now (it may still be uploading, or you're offline).");
+    // getReceiptSignedUrl runs its result through unwrap(), so a Storage or RLS
+    // failure THROWS. This function's only caller is an onPress arrow, which
+    // returns the promise into a handler that discards it — so the throw
+    // escaped as an unhandled rejection and the tap did nothing at all. ESLint
+    // cannot see it: the arrow returns the promise rather than floating it as a
+    // statement, and the `void` on the line below made the function read as
+    // handled while the failure one line above still escaped.
+    try {
+      const url = await getReceiptSignedUrl(e.receipt_storage_path);
+      if (url) void openExternalUrl(url, "the receipt");
+      else Alert.alert("Receipt unavailable", "The receipt can't be opened right now (it may still be uploading, or you're offline).");
+    } catch (err) {
+      Alert.alert("Receipt unavailable", err instanceof Error && err.message ? err.message : "Please try again.");
+    }
   }
 
   if (loading) return <View style={styles.center}><Stack.Screen options={{ title: "Billing" }} /><ActivityIndicator size="large" color={colors.blue600} /></View>;
+  // Checked BEFORE the !data branch: a read that failed must never be reported
+  // as "Job not found." on the billing screen, where believing the job is gone
+  // is how the same line items get entered twice.
+  if (error) return <View style={styles.container}><Stack.Screen options={{ title: "Billing" }} /><ScreenError error={error} onRetry={() => { setLoading(true); void load(); }} /></View>;
   if (!data) return <View style={styles.center}><Stack.Screen options={{ title: "Billing" }} /><Text style={styles.muted}>Job not found.</Text></View>;
 
   return (

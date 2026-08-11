@@ -10,6 +10,8 @@ import { computeNextDueDate, getDueStatus } from "../../lib/backflow";
 import { isTodayInBusinessTZ, formatBusinessTime, businessHour } from "../../lib/date";
 import { StatCard } from "../../design/components/StatCard";
 import { JobListRow } from "../../design/components/JobListRow";
+import { ScreenError } from "../../design/components/ScreenError";
+import { unwrapRows, unwrapCount } from "../../lib/data/reads/unwrap";
 
 interface DashJob {
   id: string;
@@ -42,51 +44,63 @@ export default function DashboardScreen() {
   const [recent, setRecent] = useState<DashJob[]>([]);
   const [today, setToday] = useState<DashJob[]>([]);
   const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState<unknown>(null);
 
+  // Every read here is unwrapped rather than defaulted, because a dashboard is
+  // read as a statement of fact. A count that fails and renders "0" under
+  // "Overdue Invoices", or a list that fails and renders "No jobs scheduled for
+  // today", is not a gap the reader notices — it is a number they believe and
+  // act on. The screen fails as a whole because these arrive in one Promise.all:
+  // one honest error is worth more than five figures with a lie among them.
   const load = useCallback(async () => {
-    const [totalRes, activeRes, custRes, overdueRes, recentRes, scheduledRes, devicesRes] = await Promise.all([
-      supabase.from("jobs").select("*", { count: "exact", head: true }),
-      supabase.from("jobs").select("*", { count: "exact", head: true }).in("status", ["pending", "scheduled", "in_progress"]),
-      supabase.from("customers").select("*", { count: "exact", head: true }).eq("is_active", true),
-      supabase.from("invoices").select("*", { count: "exact", head: true }).eq("status", "overdue"),
-      supabase
-        .from("jobs")
-        // jobs has multiple FKs to profiles — the FK hint + alias are required.
-        .select("*, customers(name), assigned_profile:profiles!jobs_assigned_to_fkey(full_name)")
-        .order("created_at", { ascending: false })
-        .limit(8),
-      supabase
-        .from("jobs")
-        .select("*, customers(name), profiles!jobs_assigned_to_fkey(full_name)")
-        .not("scheduled_start", "is", null)
-        .not("status", "in", '("completed","cancelled")')
-        .order("scheduled_start"),
-      supabase.from("backflow_devices").select("test_frequency_months, backflow_tests(test_date, result)").eq("is_active", true),
-    ]);
+    try {
+      setError(null);
+      const [totalRes, activeRes, custRes, overdueRes, recentRes, scheduledRes, devicesRes] = await Promise.all([
+        supabase.from("jobs").select("*", { count: "exact", head: true }),
+        supabase.from("jobs").select("*", { count: "exact", head: true }).in("status", ["pending", "scheduled", "in_progress"]),
+        supabase.from("customers").select("*", { count: "exact", head: true }).eq("is_active", true),
+        supabase.from("invoices").select("*", { count: "exact", head: true }).eq("status", "overdue"),
+        supabase
+          .from("jobs")
+          // jobs has multiple FKs to profiles — the FK hint + alias are required.
+          .select("*, customers(name), assigned_profile:profiles!jobs_assigned_to_fkey(full_name)")
+          .order("created_at", { ascending: false })
+          .limit(8),
+        supabase
+          .from("jobs")
+          .select("*, customers(name), profiles!jobs_assigned_to_fkey(full_name)")
+          .not("scheduled_start", "is", null)
+          .not("status", "in", '("completed","cancelled")')
+          .order("scheduled_start"),
+        supabase.from("backflow_devices").select("test_frequency_months, backflow_tests(test_date, result)").eq("is_active", true),
+      ]);
 
-    const devices = (devicesRes.data as unknown as DashDevice[]) ?? [];
-    const backflowDue = devices.filter((device) => {
-      const passing = (device.backflow_tests ?? []).filter((t) => t.result === "pass");
-      const lastPass = passing.sort((a, b) => (a.test_date < b.test_date ? 1 : -1))[0];
-      const next = computeNextDueDate(lastPass?.test_date, Number(device.test_frequency_months));
-      const status = getDueStatus(next);
-      return status === "overdue" || status === "due_soon";
-    }).length;
+      const devices = unwrapRows(devicesRes as never, "DashboardScreen.devices") as unknown as DashDevice[];
+      const backflowDue = devices.filter((device) => {
+        const passing = (device.backflow_tests ?? []).filter((t) => t.result === "pass");
+        const lastPass = passing.sort((a, b) => (a.test_date < b.test_date ? 1 : -1))[0];
+        const next = computeNextDueDate(lastPass?.test_date, Number(device.test_frequency_months));
+        const status = getDueStatus(next);
+        return status === "overdue" || status === "due_soon";
+      }).length;
 
-    setCounts({
-      total: totalRes.count ?? 0,
-      active: activeRes.count ?? 0,
-      customers: custRes.count ?? 0,
-      overdue: overdueRes.count ?? 0,
-      backflowDue,
-    });
-    setRecent((recentRes.data as unknown as DashJob[]) ?? []);
-    const scheduled = (scheduledRes.data as unknown as DashJob[]) ?? [];
-    setToday(scheduled.filter((j) => j.scheduled_start != null && isTodayInBusinessTZ(j.scheduled_start)));
+      setCounts({
+        total: unwrapCount(totalRes, "DashboardScreen.totalJobs"),
+        active: unwrapCount(activeRes, "DashboardScreen.activeJobs"),
+        customers: unwrapCount(custRes, "DashboardScreen.customers"),
+        overdue: unwrapCount(overdueRes, "DashboardScreen.overdueInvoices"),
+        backflowDue,
+      });
+      setRecent(unwrapRows(recentRes as never, "DashboardScreen.recentJobs") as unknown as DashJob[]);
+      const scheduled = unwrapRows(scheduledRes as never, "DashboardScreen.scheduledJobs") as unknown as DashJob[];
+      setToday(scheduled.filter((j) => j.scheduled_start != null && isTodayInBusinessTZ(j.scheduled_start)));
+    } catch (e) {
+      setError(e);
+    }
   }, []);
 
   useEffect(() => {
-    load();
+    void load();
   }, [load]);
 
   const onRefresh = useCallback(async () => {
@@ -99,6 +113,17 @@ export default function DashboardScreen() {
   const greeting = hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening";
   const firstName = profile?.full_name?.split(" ")[0] ?? "there";
   const dateLabel = new Date().toLocaleDateString("en-AU", { weekday: "long", day: "numeric", month: "long", year: "numeric" });
+
+  // Checked before the grid and both lists, so a failed load is never dressed up
+  // as a quiet day: zeroed stat cards and "No jobs scheduled for today" are the
+  // shapes this screen would otherwise take on failure, and both read as facts.
+  if (error) {
+    return (
+      <SafeAreaView style={styles.safe} edges={["top"]}>
+        <ScreenError error={error} onRetry={() => { void load(); }} />
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView style={styles.safe} edges={["top"]}>

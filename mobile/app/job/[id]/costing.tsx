@@ -33,14 +33,14 @@ export default function JobCostingScreen() {
       setRefreshing(false);
     }
   }, [id]);
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => { void load(); }, [load]);
   const onRefresh = useCallback(async () => { setRefreshing(true); await load(); setRefreshing(false); }, [load]);
 
   if (loading) return <View style={styles.center}><Stack.Screen options={{ title: "Costing" }} /><ActivityIndicator size="large" color={colors.blue600} /></View>;
   // Checked BEFORE the !data branch, so a failed query can never be reported as
   // "Job not found." — telling an admin the job is gone when the read broke is
   // exactly the confusion this change exists to remove.
-  if (error) return <View style={styles.container}><Stack.Screen options={{ title: "Costing" }} /><ScreenError error={error} onRetry={() => { setLoading(true); load(); }} /></View>;
+  if (error) return <View style={styles.container}><Stack.Screen options={{ title: "Costing" }} /><ScreenError error={error} onRetry={() => { setLoading(true); void load(); }} /></View>;
   if (!data) return <View style={styles.center}><Stack.Screen options={{ title: "Costing" }} /><Text style={styles.muted}>Job not found.</Text></View>;
 
   const marginPositive = data.margin >= 0;

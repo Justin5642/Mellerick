@@ -125,7 +125,7 @@ export function JobVariationsTab({ jobId, currentUserId }: { jobId: string; curr
   }, [loadInner]);
 
   useEffect(() => {
-    load();
+    void load();
   }, [load]);
 
   const selectedType = types.find((t) => t.id === typeId);
@@ -195,7 +195,10 @@ export function JobVariationsTab({ jobId, currentUserId }: { jobId: string; curr
             : "Office will price and approve this."
           : "Saved offline — it'll sync automatically when you're back online."
       );
-      load();
+      // Not awaited: the variation is already saved (or queued in the outbox) and
+      // the alert above has said so. A refresh that then fails must not be
+      // reported as a failed submission — `load` puts that in the retry box.
+      void load();
     } catch (e) {
       Alert.alert("Error", e instanceof Error ? e.message : "Please try again.");
     } finally {

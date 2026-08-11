@@ -36,7 +36,7 @@ export default function QuotesScreen() {
   }, []);
 
   useEffect(() => {
-    loadFirst();
+    void loadFirst();
   }, [loadFirst]);
 
   const onRefresh = useCallback(async () => {
@@ -75,7 +75,7 @@ export default function QuotesScreen() {
         <ScreenError
           error={error}
           onRetry={() => {
-            loadFirst();
+            void loadFirst();
           }}
         />
       </View>

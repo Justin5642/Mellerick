@@ -10,6 +10,7 @@ import { CustomerPicker } from "../../components/finance/customer-picker";
 import { localDateKey } from "../../lib/date";
 import { LineItemsEditor, newItem, type EditableItem } from "../../components/finance/line-items-editor";
 import { MoneyText } from "../../design/components/MoneyText";
+import { describeReadFailure } from "../../design/components/ScreenError";
 import { getInvoiceJobPrefill } from "../../lib/data/reads/finance";
 import { getCustomer } from "../../lib/data/reads/customers";
 import type { CustomerListRow } from "../../lib/data/reads/customers";
@@ -32,26 +33,47 @@ export default function NewInvoiceScreen() {
   const [unbilled, setUnbilled] = useState<UnbilledVariation[]>([]);
   const [saving, setSaving] = useState(false);
   const [prefilling, setPrefilling] = useState(!!jobId);
+  const [prefillError, setPrefillError] = useState<unknown>(null);
+  const [prefillAttempt, setPrefillAttempt] = useState(0);
 
   // Create-from-job: prefill customer, title, work description, line items, and
   // load the job's unbilled approved variations to optionally add.
+  //
+  // getInvoiceJobPrefill throws on a failed query. Uncaught, the rejection never
+  // cleared `prefilling`, so the screen sat on "Loading job details…" forever.
+  // Clearing the flag alone would be worse: the form would then claim it was
+  // prefilled from the job while holding none of the job's line items or
+  // approved variations, and an invoice sent from that form under-bills the
+  // customer with nothing on screen to suggest anything went wrong.
   useEffect(() => {
     if (!jobId) return;
     let cancelled = false;
-    (async () => {
-      const p = await getInvoiceJobPrefill(jobId);
-      if (cancelled || !p) { setPrefilling(false); return; }
-      setCustomer({ id: p.customerId, name: p.customerName ?? "Customer" } as CustomerListRow);
-      setTitle(p.title);
-      setWorkDescription(p.workDescription ?? "");
-      if (p.items.length > 0) {
-        setItems(p.items.map((i) => newItem({ name: i.name, description: i.description ?? "", quantity: String(i.quantity), unit_price: String(i.unitPrice) })));
+    void (async () => {
+      try {
+        const p = await getInvoiceJobPrefill(jobId);
+        if (cancelled || !p) { setPrefilling(false); return; }
+        setCustomer({ id: p.customerId, name: p.customerName ?? "Customer" } as CustomerListRow);
+        setTitle(p.title);
+        setWorkDescription(p.workDescription ?? "");
+        if (p.items.length > 0) {
+          setItems(p.items.map((i) => newItem({ name: i.name, description: i.description ?? "", quantity: String(i.quantity), unit_price: String(i.unitPrice) })));
+        }
+        setUnbilled(p.unbilledVariations);
+        setPrefilling(false);
+      } catch (e) {
+        if (cancelled) return;
+        setPrefillError(e);
+        setPrefilling(false);
       }
-      setUnbilled(p.unbilledVariations);
-      setPrefilling(false);
     })();
     return () => { cancelled = true; };
-  }, [jobId]);
+  }, [jobId, prefillAttempt]);
+
+  function retryPrefill() {
+    setPrefillError(null);
+    setPrefilling(true);
+    setPrefillAttempt((n) => n + 1);
+  }
 
   // Pre-select the customer when launched from a customer's "New Invoice"
   // shortcut (only when not already prefilling from a job).
@@ -77,6 +99,7 @@ export default function NewInvoiceScreen() {
 
   const addedVariationIds = new Set(items.map((i) => i.variationId).filter(Boolean));
   const availableVariations = unbilled.filter((v) => !addedVariationIds.has(v.id));
+  const prefillFailure = prefillError ? describeReadFailure(prefillError) : null;
 
   async function save() {
     if (saving || !finance.ready) return;
@@ -123,7 +146,27 @@ export default function NewInvoiceScreen() {
       <Stack.Screen options={{ title: jobId ? "Invoice from Job" : "New Invoice" }} />
 
       {prefilling && <Text style={styles.prefill}>Loading job details…</Text>}
-      {jobId && !prefilling && <Text style={styles.prefill}>Prefilled from the job — review before creating.</Text>}
+      {jobId && !prefilling && !prefillFailure && <Text style={styles.prefill}>Prefilled from the job — review before creating.</Text>}
+
+      {/* Stays on the form rather than replacing it: the invoice can still be
+          written by hand, but only if the reader knows nothing was filled in. */}
+      {prefillFailure && (
+        <View style={styles.prefillFail}>
+          <Ionicons name="warning-outline" size={15} color={colors.orange700} />
+          <View style={styles.prefillFailBody}>
+            <Text style={styles.prefillFailText}>
+              {prefillFailure.isOffline
+                ? "You're offline, so this job's details couldn't be loaded."
+                : "This job's details couldn't be loaded."}{" "}
+              Nothing was prefilled — the job&apos;s line items and any approved variations are not on this invoice yet.
+            </Text>
+            <Text style={styles.prefillFailDetail} selectable>{prefillFailure.detail}</Text>
+            <TouchableOpacity onPress={retryPrefill} accessibilityRole="button" hitSlop={8}>
+              <Text style={styles.prefillFailRetry}>Try again</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      )}
 
       <Text style={styles.label}>Customer</Text>
       <TouchableOpacity style={styles.selector} onPress={() => setPickCustomer(true)}>
@@ -183,6 +226,11 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.bg },
   content: { padding: 16, paddingBottom: 40 },
   prefill: { fontSize: 12, color: colors.blue600, fontWeight: "600", marginBottom: 6 },
+  prefillFail: { flexDirection: "row", gap: 8, alignItems: "flex-start", backgroundColor: colors.orange100, borderRadius: 10, padding: 10, marginBottom: 6 },
+  prefillFailBody: { flex: 1 },
+  prefillFailText: { fontSize: 12, color: colors.orange700, lineHeight: 16 },
+  prefillFailDetail: { fontSize: 11, color: colors.orange700, fontFamily: "monospace", marginTop: 6 },
+  prefillFailRetry: { fontSize: 13, fontWeight: "700", color: colors.blue600, marginTop: 8 },
   label: { fontSize: 12, fontWeight: "700", color: colors.slate500, textTransform: "uppercase", marginBottom: 6, marginTop: 10 },
   selector: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", borderWidth: 1, borderColor: colors.border, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 12, backgroundColor: colors.card },
   selectorText: { fontSize: 14, color: colors.slate900, fontWeight: "500" },

@@ -6,6 +6,7 @@ import { colors } from "../../lib/theme";
 import { formatQuoteNumber } from "../../lib/finance";
 import { MoneyText } from "../../design/components/MoneyText";
 import { StatusPill } from "../../design/components/StatusPill";
+import { ScreenError } from "../../design/components/ScreenError";
 import { getQuote, type QuoteDetail } from "../../lib/data/reads/finance";
 import { useFinance } from "../../lib/data/hooks/useFinance";
 import { useJobEdit } from "../../lib/data/hooks/useJobEdit";
@@ -26,10 +27,22 @@ export default function QuoteDetailScreen() {
   const [quote, setQuote] = useState<QuoteDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [updating, setUpdating] = useState(false);
+  const [error, setError] = useState<unknown>(null);
 
+  // getQuote THROWS on a failed query and returns null only for a quote that
+  // genuinely isn't there. Uncaught, the throw skipped setLoading(false) and the
+  // screen sat on its spinner for ever; the two outcomes also must not be allowed
+  // to look the same, since "Quote not found." about a quote that exists is how
+  // someone ends up re-quoting a job they already priced.
   const load = useCallback(async () => {
-    setQuote(await getQuote(id));
-    setLoading(false);
+    try {
+      setError(null);
+      setQuote(await getQuote(id));
+    } catch (e) {
+      setError(e);
+    } finally {
+      setLoading(false);
+    }
   }, [id]);
 
   const setStatus = useCallback(async (status: "accepted" | "declined") => {
@@ -75,7 +88,7 @@ export default function QuoteDetailScreen() {
   }, [quote, updating, jobEdit, profile, router, writeOutcome]);
 
   useEffect(() => {
-    load();
+    void load();
   }, [load]);
 
   if (loading) {
@@ -83,6 +96,16 @@ export default function QuoteDetailScreen() {
       <View style={styles.center}>
         <Stack.Screen options={{ title: "Quote" }} />
         <ActivityIndicator size="large" color={colors.blue600} />
+      </View>
+    );
+  }
+  // Checked BEFORE the !quote branch, so a read that broke can never be reported
+  // as a quote that doesn't exist.
+  if (error) {
+    return (
+      <View style={styles.container}>
+        <Stack.Screen options={{ title: "Quote" }} />
+        <ScreenError error={error} onRetry={() => { setLoading(true); void load(); }} />
       </View>
     );
   }

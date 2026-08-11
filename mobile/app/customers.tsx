@@ -6,6 +6,7 @@ import { colors } from "../lib/theme";
 import { listCustomers, type CustomerListRow } from "../lib/data/reads/customers";
 import { useCustomers } from "../lib/data/hooks/useCustomers";
 import { CustomerFormSheet } from "../components/customer/customer-form";
+import { ScreenError } from "../design/components/ScreenError";
 
 const PAGE = 50;
 
@@ -18,14 +19,29 @@ export default function CustomersScreen() {
   const [hasMore, setHasMore] = useState(true);
   const [query, setQuery] = useState("");
   const [creating, setCreating] = useState(false);
+  const [error, setError] = useState<unknown>(null);
   const reqId = useRef(0);
 
+  // listCustomers THROWS on a failed query rather than returning [], and this
+  // screen had nowhere to put that: uncaught, the rejection skipped every setter
+  // below and left the last-known list (or "No customers found.") on screen, so
+  // a broken read and an empty address book looked identical.
+  //
+  // The error is cleared on success rather than on entry so a retry keeps the
+  // failure on screen until the new read actually lands — clearing first would
+  // flash the empty state in the gap.
   const search = useCallback(async (q: string) => {
     const id = ++reqId.current;
-    const rows = await listCustomers(0, PAGE, q);
-    if (id !== reqId.current) return;
-    setCustomers(rows);
-    setHasMore(!q.trim() && rows.length === PAGE);
+    try {
+      const rows = await listCustomers(0, PAGE, q);
+      if (id !== reqId.current) return;
+      setCustomers(rows);
+      setHasMore(!q.trim() && rows.length === PAGE);
+      setError(null);
+    } catch (e) {
+      if (id !== reqId.current) return; // a superseded query's failure isn't the screen's state
+      setError(e);
+    }
   }, []);
 
   useEffect(() => {
@@ -42,10 +58,17 @@ export default function CustomersScreen() {
   const loadMore = useCallback(async () => {
     if (loadingMore || !hasMore || query.trim()) return;
     setLoadingMore(true);
-    const next = await listCustomers(customers.length, PAGE);
-    setCustomers((prev) => [...prev, ...next]);
-    setHasMore(next.length === PAGE);
-    setLoadingMore(false);
+    try {
+      const next = await listCustomers(customers.length, PAGE);
+      setCustomers((prev) => [...prev, ...next]);
+      setHasMore(next.length === PAGE);
+    } catch (e) {
+      setError(e);
+    } finally {
+      // Without this, a thrown page leaves loadingMore stuck true — a permanent
+      // footer spinner, and the guard above then blocks every later page.
+      setLoadingMore(false);
+    }
   }, [loadingMore, hasMore, query, customers.length]);
 
   // Toggle favourite: optimistically flip + re-pin (favourites first, then name),
@@ -73,6 +96,23 @@ export default function CustomersScreen() {
     },
     [writes]
   );
+
+  // Checked BEFORE the list renders, so a failed read can never fall through to
+  // the "No customers found." empty state — the reads are served from the local
+  // DB, so a failure here is a real fault and not just being off the network.
+  if (error) {
+    return (
+      <View style={styles.container}>
+        <Stack.Screen options={{ title: "Customers" }} />
+        <ScreenError
+          error={error}
+          onRetry={() => {
+            void search(query);
+          }}
+        />
+      </View>
+    );
+  }
 
   return (
     <View style={styles.container}>
@@ -139,7 +179,7 @@ export default function CustomersScreen() {
             // Offline: the detail read can't see the queued row yet (D10). Confirm
             // + refresh the list rather than land on a "not found" screen.
             Alert.alert("Saved offline", "The customer is queued and will appear once you're back online.");
-            search(query);
+            void search(query);
           }
         }}
       />

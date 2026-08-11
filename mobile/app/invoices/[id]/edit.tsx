@@ -48,7 +48,7 @@ export default function EditInvoiceScreen() {
     }
   }, [id]);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => { void load(); }, [load]);
 
   function onDateChange(event: DateTimePickerEvent, selected?: Date) {
     setShowDate(Platform.OS === "ios");
@@ -82,7 +82,7 @@ export default function EditInvoiceScreen() {
           error={error}
           onRetry={() => {
             setLoading(true);
-            load();
+            void load();
           }}
         />
       </View>

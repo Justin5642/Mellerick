@@ -4,6 +4,7 @@ import { Stack } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { colors } from "../lib/theme";
 import { MoneyText } from "../design/components/MoneyText";
+import { ScreenError } from "../design/components/ScreenError";
 import { listPricing, listInactivePricing, type PricingItem } from "../lib/data/reads/finance";
 import { useFinance } from "../lib/data/hooks/useFinance";
 import { useWriteOutcome } from "../lib/data/hooks/useWriteOutcome";
@@ -47,13 +48,25 @@ export default function PricingScreen() {
   const [saving, setSaving] = useState(false);
   const [showInactive, setShowInactive] = useState(false);
   const [inactive, setInactive] = useState<PricingItem[]>([]);
+  const [error, setError] = useState<unknown>(null);
 
+  // listPricing throws when the catalogue read fails. Uncaught, the rejection
+  // left `items` empty and the list drew "No pricing items. Tap + to add one." —
+  // an office user then rebuilds a price book that already exists, or quotes off
+  // a catalogue they believe is empty.
   const load = useCallback(async () => {
-    setItems(await listPricing());
+    try {
+      setError(null);
+      setItems(await listPricing());
+    } catch (e) {
+      setError(e);
+    } finally {
+      setRefreshing(false);
+    }
   }, []);
 
   useEffect(() => {
-    load();
+    void load();
   }, [load]);
 
   const onRefresh = useCallback(async () => {
@@ -174,6 +187,18 @@ export default function PricingScreen() {
         ))}
     </View>
   );
+
+  // Checked BEFORE the SectionList, so a broken read can never be drawn as an
+  // empty catalogue. The + button goes with it on purpose: adding items to a
+  // price book we failed to read is how duplicates get created.
+  if (error) {
+    return (
+      <View style={styles.container}>
+        <Stack.Screen options={{ title: "Pricing" }} />
+        <ScreenError error={error} onRetry={() => { void load(); }} />
+      </View>
+    );
+  }
 
   return (
     <View style={styles.container}>

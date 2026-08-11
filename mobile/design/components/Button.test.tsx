@@ -2,7 +2,11 @@ import { render, screen, fireEvent } from "@testing-library/react-native";
 import { Button } from "./Button";
 
 // Mock the haptics seam (London school — assert the collaboration).
-jest.mock("expo-haptics", () => ({ selectionAsync: jest.fn() }));
+// Resolves, because the real selectionAsync returns Promise<void> and the
+// component now attaches a .catch to it — a mock returning undefined made the
+// test fail on a component that is correct, which is the mock lying about the
+// API rather than the code being wrong.
+jest.mock("expo-haptics", () => ({ selectionAsync: jest.fn(() => Promise.resolve()) }));
 import * as Haptics from "expo-haptics";
 
 describe("Button", () => {

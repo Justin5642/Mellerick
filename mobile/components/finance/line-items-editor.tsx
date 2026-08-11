@@ -112,7 +112,7 @@ function CataloguePicker({ visible, onClose, onSelect }: { visible: boolean; onC
   }, []);
 
   useEffect(() => {
-    if (visible) load();
+    if (visible) void load();
   }, [visible, load]);
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>

@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useState } from "react";
-import { View, Text, ScrollView, StyleSheet, ActivityIndicator, TouchableOpacity, Modal, TextInput, Alert, RefreshControl, Linking } from "react-native";
+import { View, Text, ScrollView, StyleSheet, ActivityIndicator, TouchableOpacity, Modal, TextInput, Alert, RefreshControl } from "react-native";
 import { Stack, useLocalSearchParams } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import * as ImagePicker from "expo-image-picker";
 import { colors } from "../../lib/theme";
 import { MoneyText } from "../../design/components/MoneyText";
+import { ScreenError } from "../../design/components/ScreenError";
+import { openExternalUrl } from "../../lib/open-external-url";
 import { computeEquipmentCost } from "../../lib/costing";
 import { getEquipment, listEquipmentExpenses, listEquipmentUsage, listEquipmentDocuments, getEquipmentReceiptSignedUrl, getEquipmentDocumentSignedUrl, type Equipment, type EquipmentExpense, type EquipmentUsage, type EquipmentDocument } from "../../lib/data/reads/fleet";
 import { useFleet } from "../../lib/data/hooks/useFleet";
@@ -36,26 +38,46 @@ export default function EquipmentDetailScreen() {
   const [openingDocId, setOpeningDocId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState<unknown>(null);
   const [draft, setDraft] = useState<Draft | null>(null);
   const [saving, setSaving] = useState(false);
   const [usageDraft, setUsageDraft] = useState<{ usageDate: string; hours: string; notes: string } | null>(null);
   const [usageSaving, setUsageSaving] = useState(false);
 
+  // Four reads in one Promise.all, and these read modules throw now: a single
+  // rejection took the whole load down before setLoading(false), so the screen
+  // sat on its spinner permanently. The catch is what turns that into something
+  // the reader can see and retry.
   const load = useCallback(async () => {
-    const [e, ex, us, docs] = await Promise.all([getEquipment(id), listEquipmentExpenses(id), listEquipmentUsage(id), listEquipmentDocuments(id)]);
-    setEquipment(e);
-    setExpenses(ex);
-    setUsage(us);
-    setDocuments(docs);
-    setLoading(false);
+    try {
+      setError(null);
+      const [e, ex, us, docs] = await Promise.all([getEquipment(id), listEquipmentExpenses(id), listEquipmentUsage(id), listEquipmentDocuments(id)]);
+      setEquipment(e);
+      setExpenses(ex);
+      setUsage(us);
+      setDocuments(docs);
+    } catch (err) {
+      setError(err);
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
   }, [id]);
 
+  // getEquipmentDocumentSignedUrl throws on a Storage error rather than posing
+  // as "no URL", so without this catch the row's spinner never cleared and the
+  // tap looked like it simply did nothing.
   async function openDocument(doc: EquipmentDocument) {
     setOpeningDocId(doc.id);
-    const url = await getEquipmentDocumentSignedUrl(doc.storage_path);
-    setOpeningDocId(null);
-    if (url) Linking.openURL(url);
-    else Alert.alert("Couldn't open document", "It may still be uploading, or you're offline.");
+    try {
+      const url = await getEquipmentDocumentSignedUrl(doc.storage_path);
+      if (url) void openExternalUrl(url, "this document");
+      else Alert.alert("Couldn't open document", "It may still be uploading, or you're offline.");
+    } catch (e) {
+      Alert.alert("Couldn't open document", e instanceof Error ? e.message : "Please try again.");
+    } finally {
+      setOpeningDocId(null);
+    }
   }
 
   async function addUsage() {
@@ -80,7 +102,7 @@ export default function EquipmentDetailScreen() {
       { text: "Remove", style: "destructive", onPress: async () => { await fleet.removeEquipmentUsage(u.id); await load(); } },
     ]);
   }
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => { void load(); }, [load]);
   const onRefresh = useCallback(async () => { setRefreshing(true); await load(); setRefreshing(false); }, [load]);
 
   async function pickReceipt(fromCamera: boolean) {
@@ -125,14 +147,24 @@ export default function EquipmentDetailScreen() {
       { text: "Remove", style: "destructive", onPress: async () => { await fleet.removeEquipmentExpense({ id: ex.id, receiptStoragePath: ex.receipt_storage_path }); await load(); } },
     ]);
   }
+  // Same reasoning as openDocument: the signed-URL read throws, and this one has
+  // no spinner to strand — it would just have failed in silence.
   async function viewReceipt(ex: EquipmentExpense) {
     if (!ex.receipt_storage_path) return;
-    const url = await getEquipmentReceiptSignedUrl(ex.receipt_storage_path);
-    if (url) Linking.openURL(url);
-    else Alert.alert("Receipt unavailable", "It may still be uploading, or you're offline.");
+    try {
+      const url = await getEquipmentReceiptSignedUrl(ex.receipt_storage_path);
+      if (url) void openExternalUrl(url, "the receipt");
+      else Alert.alert("Receipt unavailable", "It may still be uploading, or you're offline.");
+    } catch (e) {
+      Alert.alert("Receipt unavailable", e instanceof Error ? e.message : "Please try again.");
+    }
   }
 
   if (loading) return <View style={styles.center}><Stack.Screen options={{ title: "Equipment" }} /><ActivityIndicator size="large" color={colors.blue600} /></View>;
+  // Checked BEFORE the !equipment branch, so a read that broke can never be
+  // reported as "Equipment not found." — a deleted asset and an unreachable
+  // server call for different actions.
+  if (error) return <View style={styles.container}><Stack.Screen options={{ title: "Equipment" }} /><ScreenError error={error} onRetry={() => { setLoading(true); void load(); }} /></View>;
   if (!equipment) return <View style={styles.center}><Stack.Screen options={{ title: "Equipment" }} /><Text style={styles.muted}>Equipment not found.</Text></View>;
 
   const cost = computeEquipmentCost(equipment);

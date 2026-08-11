@@ -342,8 +342,8 @@ export function JobTimeTab({ jobId, currentUserId }: { jobId: string; currentUse
   }, [jobId]);
 
   useEffect(() => {
-    loadEntries();
-    loadCostCenters();
+    void loadEntries();
+    void loadCostCenters();
   }, [loadEntries, loadCostCenters]);
 
   const myOpenEntry = entries.find((e) => e.staff_id === currentUserId && e.entry_type !== "travel" && !e.clock_out);
@@ -474,8 +474,8 @@ export function JobTimeTab({ jobId, currentUserId }: { jobId: string; currentUse
         <ScreenError
           error={error}
           onRetry={() => {
-            loadEntries();
-            loadCostCenters();
+            void loadEntries();
+            void loadCostCenters();
           }}
         />
       </View>

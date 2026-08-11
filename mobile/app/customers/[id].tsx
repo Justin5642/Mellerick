@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useState } from "react";
-import { View, Text, ScrollView, StyleSheet, ActivityIndicator, TouchableOpacity, Linking } from "react-native";
+import { View, Text, ScrollView, StyleSheet, ActivityIndicator, TouchableOpacity } from "react-native";
 import { Stack, useLocalSearchParams, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { colors } from "../../lib/theme";
 import { MoneyText } from "../../design/components/MoneyText";
+import { ScreenError } from "../../design/components/ScreenError";
+import { openExternalUrl } from "../../lib/open-external-url";
 import { getCustomer, getCustomerOverview, type CustomerDetail, type CustomerOverview, type Site } from "../../lib/data/reads/customers";
 import { useCustomers } from "../../lib/data/hooks/useCustomers";
 import { CustomerFormSheet } from "../../components/customer/customer-form";
@@ -16,14 +18,26 @@ export default function CustomerDetailScreen() {
   const [customer, setCustomer] = useState<CustomerDetail | null>(null);
   const [overview, setOverview] = useState<CustomerOverview | null>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<unknown>(null);
   const [editing, setEditing] = useState(false);
   const [siteDraft, setSiteDraft] = useState<Site | "new" | null>(null);
 
+  // These reads throw when a query fails and return null only when the customer
+  // genuinely isn't there. Without this catch the throw would skip
+  // setLoading(false) and leave a spinner forever; with it the two causes stay
+  // distinguishable, which is the whole point — an unreachable customer is not a
+  // deleted one.
   const load = useCallback(async () => {
-    const [c, o] = await Promise.all([getCustomer(id), getCustomerOverview(id)]);
-    setCustomer(c);
-    setOverview(o);
-    setLoading(false);
+    try {
+      setError(null);
+      const [c, o] = await Promise.all([getCustomer(id), getCustomerOverview(id)]);
+      setCustomer(c);
+      setOverview(o);
+    } catch (e) {
+      setError(e);
+    } finally {
+      setLoading(false);
+    }
   }, [id]);
 
   // Optimistically flip the star, persist through the outbox, revert on failure.
@@ -39,7 +53,7 @@ export default function CustomerDetailScreen() {
   }, [writes, customer]);
 
   useEffect(() => {
-    load();
+    void load();
   }, [load]);
 
   if (loading) {
@@ -47,6 +61,17 @@ export default function CustomerDetailScreen() {
       <View style={styles.center}>
         <Stack.Screen options={{ title: "Customer" }} />
         <ActivityIndicator size="large" color={colors.blue600} />
+      </View>
+    );
+  }
+  // Checked BEFORE the !customer branch, so a read that failed can never be
+  // reported as "Customer not found." — telling office staff a customer is gone
+  // when the query broke sends them looking for a deletion that never happened.
+  if (error) {
+    return (
+      <View style={styles.container}>
+        <Stack.Screen options={{ title: "Customer" }} />
+        <ScreenError error={error} onRetry={() => { setLoading(true); void load(); }} />
       </View>
     );
   }
@@ -96,9 +121,9 @@ export default function CustomerDetailScreen() {
       </View>
 
       <Card title="Contact">
-        {customer.email ? <Contact icon="mail-outline" value={customer.email} onPress={() => Linking.openURL(`mailto:${customer.email}`)} /> : null}
-        {customer.phone ? <Contact icon="call-outline" value={customer.phone} onPress={() => Linking.openURL(`tel:${customer.phone}`)} /> : null}
-        {customer.mobile ? <Contact icon="phone-portrait-outline" value={customer.mobile} onPress={() => Linking.openURL(`tel:${customer.mobile}`)} /> : null}
+        {customer.email ? <Contact icon="mail-outline" value={customer.email} onPress={() => { void openExternalUrl(`mailto:${customer.email}`, "an email"); }} /> : null}
+        {customer.phone ? <Contact icon="call-outline" value={customer.phone} onPress={() => { void openExternalUrl(`tel:${customer.phone}`, "the dialler"); }} /> : null}
+        {customer.mobile ? <Contact icon="phone-portrait-outline" value={customer.mobile} onPress={() => { void openExternalUrl(`tel:${customer.mobile}`, "the dialler"); }} /> : null}
         {customer.abn ? <Row label="ABN" value={customer.abn} /> : null}
         {!customer.email && !customer.phone && !customer.mobile && !customer.abn ? <Text style={styles.muted}>No contact details.</Text> : null}
       </Card>
@@ -167,7 +192,7 @@ export default function CustomerDetailScreen() {
         </Card>
       )}
 
-      <CustomerFormSheet visible={editing} existing={customer} onClose={() => setEditing(false)} onSaved={() => { setEditing(false); load(); }} />
+      <CustomerFormSheet visible={editing} existing={customer} onClose={() => setEditing(false)} onSaved={() => { setEditing(false); void load(); }} />
       {/* No onRemoved: sites can't be hard-deleted (jobs/quotes FK RESTRICT) and
           have no is_active column for a soft-delete — see Q17. Edit only. */}
       <SiteFormSheet
@@ -175,7 +200,7 @@ export default function CustomerDetailScreen() {
         customerId={customer.id}
         existing={siteDraft === "new" ? null : siteDraft}
         onClose={() => setSiteDraft(null)}
-        onSaved={() => { setSiteDraft(null); load(); }}
+        onSaved={() => { setSiteDraft(null); void load(); }}
       />
     </ScrollView>
   );

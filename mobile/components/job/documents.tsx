@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useState } from "react";
-import { View, Text, StyleSheet, TouchableOpacity, FlatList, Linking, Alert, ActivityIndicator } from "react-native";
+import { View, Text, StyleSheet, TouchableOpacity, FlatList, Alert, ActivityIndicator } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { supabase } from "../../lib/supabase";
 import { colors } from "../../lib/theme";
+import { ScreenError } from "../../design/components/ScreenError";
+import { openExternalUrl } from "../../lib/open-external-url";
 
 interface Document {
   id: string;
@@ -30,36 +32,67 @@ export function JobDocumentsTab({ jobId }: { jobId: string }) {
   const [documents, setDocuments] = useState<Document[]>([]);
   const [loading, setLoading] = useState(true);
   const [openingId, setOpeningId] = useState<string | null>(null);
+  const [error, setError] = useState<unknown>(null);
 
+  // The query error was being destructured away, so a failed read fell through
+  // to "No documents uploaded for this job yet." A technician who reads that on
+  // site concludes there are no plans or permits and works without them, which
+  // is worse than being told the read broke. Raised here, caught below, shown.
   const loadDocuments = useCallback(async () => {
-    const { data } = await supabase
-      .from("job_documents")
-      .select("*, profiles(full_name)")
-      .eq("job_id", jobId)
-      .order("created_at", { ascending: false });
-    setDocuments((data as any) ?? []);
-    setLoading(false);
+    try {
+      setError(null);
+      const { data, error: queryError } = await supabase
+        .from("job_documents")
+        .select("*, profiles(full_name)")
+        .eq("job_id", jobId)
+        .order("created_at", { ascending: false });
+      if (queryError) throw queryError;
+      setDocuments((data as unknown as Document[]) ?? []);
+    } catch (e) {
+      setError(e);
+    } finally {
+      setLoading(false);
+    }
   }, [jobId]);
 
   useEffect(() => {
-    loadDocuments();
+    void loadDocuments();
   }, [loadDocuments]);
 
+  // Clearing the spinner in `finally` rather than on the line after the await:
+  // a throw on the way to the signed URL used to leave this row turning forever
+  // with nothing said. The storage error keeps its own name now that the
+  // component has an `error` of its own.
   async function handleOpen(doc: Document) {
     setOpeningId(doc.id);
-    const { data, error } = await supabase.storage.from("job-documents").createSignedUrl(doc.storage_path, 300);
-    setOpeningId(null);
-    if (error || !data?.signedUrl) {
-      Alert.alert("Couldn't open document", error?.message ?? "Please try again.");
-      return;
+    try {
+      const { data, error: urlError } = await supabase.storage.from("job-documents").createSignedUrl(doc.storage_path, 300);
+      if (urlError || !data?.signedUrl) {
+        Alert.alert("Couldn't open document", urlError?.message ?? "Please try again.");
+        return;
+      }
+      void openExternalUrl(data.signedUrl, "this document");
+    } catch (e) {
+      Alert.alert("Couldn't open document", e instanceof Error ? e.message : "Please try again.");
+    } finally {
+      setOpeningId(null);
     }
-    Linking.openURL(data.signedUrl);
   }
 
   if (loading) {
     return (
       <View style={styles.center}>
         <ActivityIndicator color={colors.blue600} />
+      </View>
+    );
+  }
+
+  // Checked BEFORE the list, so a broken read can never render as an empty
+  // document set.
+  if (error) {
+    return (
+      <View style={styles.container}>
+        <ScreenError error={error} onRetry={() => { setLoading(true); void loadDocuments(); }} />
       </View>
     );
   }

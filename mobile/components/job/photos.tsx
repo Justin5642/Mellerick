@@ -19,6 +19,7 @@ import { Ionicons } from "@expo/vector-icons";
 import ViewShot from "react-native-view-shot";
 import { supabase } from "../../lib/supabase";
 import { colors, photoTagColors } from "../../lib/theme";
+import { describeReadFailure } from "../../design/components/ScreenError";
 import { usePhotoLibrary } from "../../lib/data/hooks/usePhotoLibrary";
 import { netInfoConnectivity } from "../../lib/data/net/connectivity";
 import { useDataLayer } from "../../lib/data/DataProvider";
@@ -76,33 +77,55 @@ export function JobPhotosTab({
   const [pendingType, setPendingType] = useState<(typeof PHOTO_TYPES)[number]>("general");
   const [saving, setSaving] = useState(false);
   const [viewingPhoto, setViewingPhoto] = useState<Photo | null>(null);
+  const [loadError, setLoadError] = useState<unknown>(null);
+  const [urlFailed, setUrlFailed] = useState<Record<string, true>>({});
   const shotRef = useRef<ViewShot>(null);
   const photoLibrary = usePhotoLibrary();
   const layer = useDataLayer();
+
+  // A photo whose signed URL never arrives renders as an anonymous grey square
+  // for ever, and spins for ever in the viewer — indistinguishable from one still
+  // loading. Mark it so the cell can say the image didn't load.
+  const markUrlFailed = useCallback((path: string) => {
+    setUrlFailed((prev) => ({ ...prev, [path]: true }));
+  }, []);
 
   // Reads refresh from the server only when online; offline, local state (incl.
   // optimistic photos shown from their local file) is authoritative. Even online
   // we MERGE, so a queued photo still uploading isn't wiped by a racing reload
   // (which would also blank its cell once the local file is cleaned up).
   const loadPhotos = useCallback(async () => {
-    if (!(await netInfoConnectivity.isOnline())) return;
-    const { data } = await supabase
-      .from("job_photos")
-      .select("*")
-      .eq("job_id", jobId)
-      .order("created_at", { ascending: false });
-    const rows = (data as unknown as Photo[]) ?? [];
-    const pendingIds = layer ? await layer.outbox.pendingRowIds() : new Set<string>();
-    setPhotos((prev) => reconcileRows(prev, rows, pendingIds));
-    for (const p of rows) {
-      supabase.storage
-        .from("job-photos")
-        .createSignedUrl(p.storage_path, 3600)
-        .then(({ data: signed }) => {
-          if (signed?.signedUrl) setUrls((prev) => ({ ...prev, [p.storage_path]: signed.signedUrl }));
-        });
+    try {
+      if (!(await netInfoConnectivity.isOnline())) return;
+      const { data, error } = await supabase
+        .from("job_photos")
+        .select("*")
+        .eq("job_id", jobId)
+        .order("created_at", { ascending: false });
+      // A failed query hands back data: null, which would reconcile the grid down
+      // to "No photos yet" — a job's photo evidence apparently deleted itself.
+      // Throw so the catch can say the read broke instead.
+      if (error) throw error;
+      const rows = (data as unknown as Photo[]) ?? [];
+      const pendingIds = layer ? await layer.outbox.pendingRowIds() : new Set<string>();
+      setPhotos((prev) => reconcileRows(prev, rows, pendingIds));
+      setLoadError(null);
+      for (const p of rows) {
+        supabase.storage
+          .from("job-photos")
+          .createSignedUrl(p.storage_path, 3600)
+          .then(
+            ({ data: signed }) => {
+              if (signed?.signedUrl) setUrls((prev) => ({ ...prev, [p.storage_path]: signed.signedUrl }));
+              else markUrlFailed(p.storage_path);
+            },
+            () => markUrlFailed(p.storage_path)
+          );
+      }
+    } catch (e) {
+      setLoadError(e);
     }
-  }, [jobId, layer]);
+  }, [jobId, layer, markUrlFailed]);
 
   // Queue a photo through the offline outbox and show it immediately: the local
   // file renders under its Storage key until the real signed URL replaces it on
@@ -122,7 +145,7 @@ export function JobPhotosTab({
   );
 
   useEffect(() => {
-    loadPhotos();
+    void loadPhotos();
   }, [loadPhotos]);
 
   // Reconcile after each sync drain: offline photos get their real signed URL
@@ -230,6 +253,7 @@ export function JobPhotosTab({
   }
 
   const jobRefLine = [jobNumber ? `Job #${jobNumber}` : null, siteLabel].filter(Boolean).join(" — ");
+  const loadFailure = loadError ? describeReadFailure(loadError) : null;
 
   return (
     <View style={styles.container}>
@@ -256,6 +280,27 @@ export function JobPhotosTab({
         </TouchableOpacity>
       </View>
 
+      {/* An inline banner rather than ScreenError: this tab renders inside the job
+          screen's ScrollView (so ScreenError's own ScrollView can't nest), and
+          replacing the grid would hide photos already held on the device, which
+          offline-first treats as authoritative. The grid stays, the banner says
+          the server list is the part we couldn't get. */}
+      {loadFailure && (
+        <View style={styles.loadError}>
+          <Ionicons name="warning-outline" size={15} color={colors.orange700} />
+          <View style={{ flex: 1 }}>
+            <Text style={styles.loadErrorTitle}>{loadFailure.title}</Text>
+            <Text style={styles.loadErrorText}>
+              Couldn&apos;t refresh photos from the server — anything below is what&apos;s on this device, and the list may be incomplete.
+            </Text>
+            <Text style={styles.loadErrorDetail} selectable>{loadFailure.detail}</Text>
+          </View>
+          <TouchableOpacity onPress={() => void loadPhotos()} accessibilityRole="button">
+            <Text style={styles.loadErrorRetry}>Retry</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+
       <FlatList
         data={photos}
         keyExtractor={(p) => p.id}
@@ -263,7 +308,9 @@ export function JobPhotosTab({
         scrollEnabled={false}
         columnWrapperStyle={{ gap: 8 }}
         contentContainerStyle={{ gap: 8, marginTop: 12 }}
-        ListEmptyComponent={<Text style={styles.emptyText}>No photos yet</Text>}
+        // Suppressed while the read is broken: "No photos yet" about a job whose
+        // photos simply didn't load is the exact lie the banner exists to stop.
+        ListEmptyComponent={loadFailure ? null : <Text style={styles.emptyText}>No photos yet</Text>}
         renderItem={({ item }) => {
           const tag = photoTagColors[item.photo_type] ?? photoTagColors.general;
           return (
@@ -274,6 +321,11 @@ export function JobPhotosTab({
             >
               {urls[item.storage_path] ? (
                 <Image source={{ uri: urls[item.storage_path] }} style={styles.photoImage} />
+              ) : urlFailed[item.storage_path] ? (
+                <View style={[styles.photoImage, styles.photoFailed]}>
+                  <Ionicons name="cloud-offline-outline" size={16} color={colors.slate400} />
+                  <Text style={styles.photoFailedText}>Didn&apos;t load</Text>
+                </View>
               ) : (
                 <View style={[styles.photoImage, styles.photoLoading]} />
               )}
@@ -369,6 +421,12 @@ export function JobPhotosTab({
                   style={styles.viewerImage}
                   resizeMode="contain"
                 />
+              ) : urlFailed[viewingPhoto.storage_path] ? (
+                <View style={[styles.viewerImage, styles.viewerFailed]}>
+                  <Text style={styles.viewerFailedText}>
+                    This photo couldn&apos;t be loaded. It&apos;s still stored — try again on a better connection.
+                  </Text>
+                </View>
               ) : (
                 <ActivityIndicator color="#fff" style={styles.viewerImage} />
               )}
@@ -410,9 +468,18 @@ const styles = StyleSheet.create({
   photoCell: { flex: 1 / 3, aspectRatio: 1, borderRadius: 8, overflow: "hidden", backgroundColor: colors.slate100, position: "relative" },
   photoImage: { width: "100%", height: "100%" },
   photoLoading: { backgroundColor: colors.slate100 },
+  photoFailed: { backgroundColor: colors.slate100, alignItems: "center", justifyContent: "center", gap: 2, paddingHorizontal: 4 },
+  photoFailedText: { fontSize: 9, color: colors.slate400, textAlign: "center" },
   photoTag: { position: "absolute", top: 4, left: 4, paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6 },
   photoTagText: { fontSize: 9, fontWeight: "700", textTransform: "capitalize" },
   emptyText: { textAlign: "center", color: colors.slate400, marginTop: 20, fontSize: 13 },
+  loadError: { flexDirection: "row", gap: 8, alignItems: "flex-start", backgroundColor: colors.orange100, borderRadius: 10, padding: 10, marginTop: 12 },
+  loadErrorTitle: { fontSize: 13, fontWeight: "700", color: colors.orange700 },
+  loadErrorText: { fontSize: 12, color: colors.orange700, lineHeight: 16, marginTop: 2 },
+  // Selectable and monospace, like ScreenError: this string is what gets read
+  // down a phone line or pasted into a message.
+  loadErrorDetail: { fontSize: 11, color: colors.slate500, fontFamily: "monospace", marginTop: 6 },
+  loadErrorRetry: { fontSize: 13, fontWeight: "700", color: colors.blue600, paddingHorizontal: 4, paddingVertical: 2 },
 
   previewScreen: { flex: 1, backgroundColor: colors.black },
   shotWrap: { flex: 1, position: "relative" },
@@ -449,6 +516,8 @@ const styles = StyleSheet.create({
   viewerScreen: { flex: 1, backgroundColor: "rgba(0,0,0,0.92)", alignItems: "center", justifyContent: "center" },
   viewerBackdrop: { ...StyleSheet.absoluteFillObject },
   viewerImage: { width: "100%", height: "80%" },
+  viewerFailed: { alignItems: "center", justifyContent: "center", paddingHorizontal: 32 },
+  viewerFailedText: { color: "#e2e8f0", fontSize: 14, textAlign: "center", lineHeight: 20 },
   viewerTopBar: {
     position: "absolute",
     top: 50,

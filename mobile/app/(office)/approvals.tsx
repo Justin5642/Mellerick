@@ -8,6 +8,8 @@ import { colors } from "../../lib/theme";
 import { useIsAdmin } from "../../design/guards/useRole";
 import { useApprovals } from "../../lib/data/hooks/useApprovals";
 import { getApprovalPlan } from "../../lib/data/reads/approvals";
+import { ScreenError } from "../../design/components/ScreenError";
+import { unwrapRows } from "../../lib/data/reads/unwrap";
 
 interface ApprovalJob {
   id: string;
@@ -44,30 +46,40 @@ export default function ApprovalsScreen() {
   const [expanded, setExpanded] = useState<string | null>(null);
   const [notes, setNotes] = useState<Record<string, string>>({});
   const [savingId, setSavingId] = useState<string | null>(null);
+  const [error, setError] = useState<unknown>(null);
 
+  // Both results are unwrapped rather than defaulted to []. This screen's empty
+  // state reads "Nothing awaiting approval." — a sentence an admin acts on by
+  // closing the app. A failed queue read that renders it leaves finished jobs
+  // unapproved and uninvoiced, and nobody learns why.
   const load = useCallback(async () => {
     // Mirrors the web Approvals queue exactly: completed jobs awaiting admin
     // review, plus variations pending approval. (Distinct from the Invoices
     // "ready to invoice" queue keyed off ready_to_invoice.)
-    const [jobsRes, varsRes] = await Promise.all([
-      supabase
-        .from("jobs")
-        .select("id, job_number, title, status, updated_at, completion_notes, overtime_category, overtime_reason, customers(name), sites(suburb)")
-        .eq("status", "completed")
-        .eq("admin_status", "pending")
-        .order("updated_at", { ascending: false }),
-      supabase
-        .from("job_variations")
-        .select("id, variation_types(name), jobs(id, job_number, title, customers(name))")
-        .eq("status", "pending_approval")
-        .order("created_at", { ascending: false }),
-    ]);
-    setJobs((jobsRes.data as unknown as ApprovalJob[]) ?? []);
-    setVariations((varsRes.data as unknown as PendingVariation[]) ?? []);
+    try {
+      setError(null);
+      const [jobsRes, varsRes] = await Promise.all([
+        supabase
+          .from("jobs")
+          .select("id, job_number, title, status, updated_at, completion_notes, overtime_category, overtime_reason, customers(name), sites(suburb)")
+          .eq("status", "completed")
+          .eq("admin_status", "pending")
+          .order("updated_at", { ascending: false }),
+        supabase
+          .from("job_variations")
+          .select("id, variation_types(name), jobs(id, job_number, title, customers(name))")
+          .eq("status", "pending_approval")
+          .order("created_at", { ascending: false }),
+      ]);
+      setJobs(unwrapRows(jobsRes as never, "ApprovalsScreen.jobs") as unknown as ApprovalJob[]);
+      setVariations(unwrapRows(varsRes as never, "ApprovalsScreen.variations") as unknown as PendingVariation[]);
+    } catch (e) {
+      setError(e);
+    }
   }, []);
 
   useEffect(() => {
-    load();
+    void load();
   }, [load]);
 
   const onRefresh = useCallback(async () => {
@@ -119,6 +131,16 @@ export default function ApprovalsScreen() {
     } finally {
       setSavingId(null);
     }
+  }
+
+  // Checked BEFORE `nothing`, so a failed read can never be reported as an empty
+  // queue. The two look identical on screen and mean opposite things.
+  if (error) {
+    return (
+      <SafeAreaView style={styles.safe} edges={["top"]}>
+        <ScreenError error={error} onRetry={() => { void load(); }} />
+      </SafeAreaView>
+    );
   }
 
   const nothing = jobs.length === 0 && variations.length === 0;
