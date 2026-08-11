@@ -98,7 +98,15 @@ test.describe("office session", () => {
     // control is what makes that one mean something, and it is the reason it
     // was written even though it is the office half of a technician test.
     await page.goto(`/dashboard/jobs/${seeded().jobId}?tab=variations`);
-    await expect(page.getByText(String(SENTINEL_RATE), { exact: false })).toBeVisible({ timeout: 15_000 });
+
+    // `.first()` because the office page shows the amount in FOUR places —
+    // "1 unbilled variation · $987.65", the header total, the line total, and
+    // "1 hour × $987.65 = $987.65" — and Playwright's strict mode refuses an
+    // ambiguous locator. That ambiguity is the result being asserted: four
+    // renderings of a number the technician must not see even once.
+    await expect(page.getByText(String(SENTINEL_RATE), { exact: false }).first()).toBeVisible({
+      timeout: 15_000,
+    });
   });
 });
 
