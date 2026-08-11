@@ -164,10 +164,13 @@ describe("callSideEffect — a request that hangs must not stall the drain", () 
 //   RLS refused it             the row is still there and the user was told it
 //                              was deleted. Loss.
 //
-// PostgREST reports both identically: no error, zero rows. Until migration 0049
-// only office/admin and the assigned technician may delete a job photo, so the
-// second case did not arise and treating every zero as success was safe. It is
-// not safe now, and the failure is silent at every layer above — the processor
+// PostgREST reports both identically: no error, zero rows. Migration 0049 would
+// restrict job-photo deletes to office/admin and the assigned technician, which
+// is what makes the second case arise — and it is DRAFTED, NOT APPLIED, so that
+// restriction is not in force today. Treating every zero as success is
+// therefore not yet wrong in production, and will be the moment 0049 lands. The
+// distinction is worth drawing now because the failure is silent at every layer
+// above — the processor
 // marks the op done, the outbox drops it, the badge clears.
 //
 // So the count is not the question. Whether the row SURVIVED is the question.

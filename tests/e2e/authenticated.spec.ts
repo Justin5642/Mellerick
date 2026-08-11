@@ -75,12 +75,28 @@ test.describe("office session", () => {
     await page.getByRole("button", { name: /E2E Customer/ }).first().click();
 
     await page.getByRole("button", { name: "Create Job" }).click();
-    await page.waitForURL(/\/dashboard\/jobs(\/|$)/, { timeout: 20_000 });
+
+    // ANCHORED, and that `$` is the whole fix for a flake.
+    //
+    // This waited on /\/dashboard\/jobs(\/|$)/ — which the page it starts on,
+    // /dashboard/jobs/new, ALREADY MATCHES. So waitForURL resolved immediately,
+    // before the form had submitted, and the read below raced the insert. It
+    // usually won and occasionally did not; CI recorded it as "flaky, passed on
+    // retry", which is the least useful thing a test can be.
+    //
+    // The page navigates with window.location.href AFTER the insert resolves
+    // (app/dashboard/jobs/new/page.tsx:96), so arriving at the list is genuine
+    // evidence the row was written — but only if the wait cannot be satisfied
+    // by the page we were already on.
+    await page.waitForURL(/\/dashboard\/jobs$/, { timeout: 20_000 });
 
     const admin = adminClient();
-    const { data, error } = await admin.from("jobs").select("id, title").eq("title", title).maybeSingle();
-    expect(error).toBeNull();
-    expect(data?.title).toBe(title);
+    await expect
+      .poll(
+        async () => (await admin.from("jobs").select("title").eq("title", title).maybeSingle()).data?.title,
+        { timeout: 10_000, message: `no jobs row with title ${title}` }
+      )
+      .toBe(title);
   });
 
   test("office CAN see the money the technician must not", async ({ page }) => {
