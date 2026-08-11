@@ -50,6 +50,17 @@ jest.mock("../../lib/data/reads/finance", () => ({
 import EditInvoiceScreen from "../../app/invoices/[id]/edit";
 import EditQuoteScreen from "../../app/quotes/[id]/edit";
 
+// Full-screen renders on a shared CI runner are slower than jest's 5s default
+// allows. Locally this whole file finishes in under three seconds; on GitHub's
+// ubuntu-latest a SINGLE test exceeded 5s, because each one mounts a real
+// screen through jest-expo's transform and then polls findBy/waitFor.
+//
+// Raised deliberately, and only here: the component tests under design/ render
+// one small component and are nowhere near the limit. A timeout tight enough
+// to flip on machine speed is a flaky test, and a flaky test in a suite that
+// exists to prove writes are not silently lost is worse than a slow one.
+jest.setTimeout(30_000);
+
 const ITEM = { id: "li-1", name: "Backflow retest", description: null, quantity: 1, unit_price: 250 };
 
 beforeEach(() => {
