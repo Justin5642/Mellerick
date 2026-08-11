@@ -119,6 +119,29 @@ describe("parseLedger", () => {
     expect(parseLedger(envelope('["0000","0001"]'))).toEqual(["0000", "0001"]);
   });
 
+  it("REFUSES the Supabase CLI's table output instead of mis-reading it", () => {
+    // The bug this pins, found by a human running the script in PowerShell
+    // while it had worked every time I ran it: the Supabase CLI renders a
+    // box-drawing TABLE when attached to an interactive terminal and JSON when
+    // piped. So the script parsed correctly under a pipe and failed in a real
+    // terminal — an environment-dependent bug invisible to the way it was
+    // developed. Fixed by passing `--output json`, which makes the format
+    // independent of how the process is attached.
+    //
+    // The parser's behaviour on the table form still matters, because a future
+    // CLI could change again. It must THROW. Quietly returning [] would report
+    // "0 migrations applied", and compare() would then call every applied
+    // migration pending — a confident, wrong answer, which is worse than the
+    // failure it replaced.
+    const table = `┌───────────┐
+│ versions  │
+├───────────┤
+│ ["0000", "0001", "0002"] │
+└───────────┘`;
+
+    expect(() => parseLedger(table)).toThrow();
+  });
+
   it("throws rather than returning nothing when the output is not what it expects", () => {
     // Returning [] here would present as "the ledger is empty", and an empty
     // ledger compared against a repo of drafts reports no stale headers at all.

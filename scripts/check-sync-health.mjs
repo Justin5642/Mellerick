@@ -66,7 +66,14 @@ function runSql(sql) {
   const file = join(tmpdir(), `mellerick-sync-health-${process.pid}.sql`);
   writeFileSync(file, sql, "utf8");
   try {
-    return execFileSync("npx", ["supabase", "db", "query", "--linked", "--file", file], {
+    // `--output json` is NOT optional, and the bug it fixes is invisible when
+    // you develop this script by piping its output. The Supabase CLI renders a
+    // box-drawing TABLE when attached to an interactive terminal and JSON when
+    // piped — so this parsed fine every time I ran it and failed the moment a
+    // human ran it in PowerShell. Forcing the format removes the dependence on
+    // how the process happens to be attached.
+    const argv = ["supabase", "db", "query", "--linked", "--output", "json", "--file", file];
+    return execFileSync("npx", argv, {
       encoding: "utf8",
       stdio: ["ignore", "pipe", "pipe"],
       shell: process.platform === "win32",
