@@ -38,6 +38,7 @@ import { writeFileSync, unlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { parseCliRows, singleJsonColumn } from "./supabase-cli-json.mjs";
 
 // `active` is the load-bearing column: a slot with no reader attached is a
 // dead feed regardless of how healthy everything else looks. `wal_status` of
@@ -66,13 +67,12 @@ function runSql(sql) {
   const file = join(tmpdir(), `mellerick-sync-health-${process.pid}.sql`);
   writeFileSync(file, sql, "utf8");
   try {
-    // `--output json` is NOT optional, and the bug it fixes is invisible when
-    // you develop this script by piping its output. The Supabase CLI renders a
-    // box-drawing TABLE when attached to an interactive terminal and JSON when
-    // piped — so this parsed fine every time I ran it and failed the moment a
-    // human ran it in PowerShell. Forcing the format removes the dependence on
-    // how the process happens to be attached.
-    const argv = ["supabase", "db", "query", "--linked", "--output", "json", "--file", file];
+    // `--output-format json` is what stops the CLI printing a box-drawing
+    // TABLE when a person runs this in a terminal. It does NOT make the output
+    // shape constant — the CLI still switches between an agent envelope and a
+    // bare array depending on how the process is attached — so the parser
+    // handles both. See scripts/supabase-cli-json.mjs for the measured matrix.
+    const argv = ["supabase", "db", "query", "--linked", "--output-format", "json", "--file", file];
     return execFileSync("npx", argv, {
       encoding: "utf8",
       stdio: ["ignore", "pipe", "pipe"],
@@ -88,26 +88,16 @@ function runSql(sql) {
 }
 
 function query(sql) {
-  const out = runSql(sql);
+  // Both the shape-handling and the refusal live in supabase-cli-json.mjs,
+  // shared with check-migrations.mjs. This script had its own copy of that
+  // parse, check-migrations had another, and both copies carried the same bug —
+  // so fixing one would have left the other broken. It did.
+  const rows = parseCliRows(runSql(sql));
 
-  // The CLI prints a status line ("Initialising login role...") and then a JSON
-  // ENVELOPE: { boundary, rows: [ { <col>: <value> } ], warning }. Naively
-  // grabbing the first [...] finds the envelope's `rows` array, not the query
-  // result, and yields a row of undefined fields that reads as "unhealthy" —
-  // a false alarm, which is the one thing a health check must never produce.
-  const start = out.indexOf("{");
-  if (start === -1) throw new Error(`no JSON in Supabase CLI output:\n${out}`);
-
-  const envelope = JSON.parse(out.slice(start));
-  const rows = envelope.rows;
-  if (!Array.isArray(rows) || rows.length === 0) return [];
-
-  // The query selects exactly one aggregate column; take it whatever it is named.
-  const values = Object.values(rows[0]);
-  if (values.length === 0 || typeof values[0] !== "string") {
-    throw new Error(`unexpected result shape from the Supabase CLI: ${JSON.stringify(rows[0])}`);
-  }
-  return JSON.parse(values[0]);
+  // No rows means no replication slot, which main() reports as an outage. That
+  // reading is only safe because parseCliRows THROWS on anything it does not
+  // recognise: an unreadable output can never arrive here disguised as "empty".
+  return singleJsonColumn(rows) ?? [];
 }
 
 /**

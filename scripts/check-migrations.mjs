@@ -52,6 +52,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { claimsNotApplied, claimsApplied } from "./migration-header-claim.mjs";
+import { parseCliRows, singleJsonColumn } from "./supabase-cli-json.mjs";
 
 const MIGRATIONS = join(process.cwd(), "supabase", "migrations");
 
@@ -70,32 +71,25 @@ export function versionOf(file) {
 /**
  * Read the version list out of the Supabase CLI's output.
  *
- * The CLI prints a status line and then a JSON ENVELOPE:
- * { boundary, rows: [ { <col>: <value> } ], warning }. Naively grabbing the
- * first bracket finds the envelope's own `rows` array rather than the query
- * result — see check-sync-health.mjs, which learned this the same way.
+ * The CLI emits a different shape depending on how the process is attached —
+ * an agent envelope when piped, a bare array in a terminal, a box-drawing table
+ * with no format flag at all. parseCliRows owns that; the measured matrix is in
+ * scripts/supabase-cli-json.mjs.
  *
  * Throws rather than returning [] on anything unexpected. An empty list would
  * present as "production has applied nothing", against which no header can be
  * caught lying: every draft would look honest and the script would exit 0.
  */
 export function parseLedger(out) {
-  const start = String(out).indexOf("{");
-  if (start === -1) throw new Error(`no JSON in the Supabase CLI output:\n${out}`);
-
-  const envelope = JSON.parse(String(out).slice(start));
-  const rows = envelope.rows;
-  if (!Array.isArray(rows) || rows.length === 0) {
+  const rows = parseCliRows(out);
+  if (rows.length === 0) {
     throw new Error("the migration ledger query returned no rows at all");
   }
 
-  const values = Object.values(rows[0]);
-  if (values.length === 0 || typeof values[0] !== "string") {
-    throw new Error(`unexpected result shape from the Supabase CLI: ${JSON.stringify(rows[0])}`);
+  const versions = singleJsonColumn(rows);
+  if (!Array.isArray(versions)) {
+    throw new Error(`expected an array of versions, got: ${JSON.stringify(versions)}`);
   }
-
-  const versions = JSON.parse(values[0]);
-  if (!Array.isArray(versions)) throw new Error(`expected an array of versions, got: ${values[0]}`);
   if (versions.length === 0) {
     // 0000_baseline is in production by definition — this database exists. An
     // empty ledger means the query reached the wrong place, not that nothing is
@@ -186,13 +180,12 @@ function readLedger() {
   const file = join(tmpdir(), `mellerick-check-migrations-${process.pid}.sql`);
   writeFileSync(file, SQL, "utf8");
   try {
-    // `--output json` is NOT optional, and the bug it fixes is invisible when
-    // you develop this script by piping its output. The Supabase CLI renders a
-    // box-drawing TABLE when attached to an interactive terminal and JSON when
-    // piped — so this parsed fine every time I ran it and failed the moment a
-    // human ran it in PowerShell. Forcing the format removes the dependence on
-    // how the process happens to be attached.
-    const argv = ["supabase", "db", "query", "--linked", "--output", "json", "--file", file];
+    // `--output-format json` is what stops the CLI printing a box-drawing
+    // TABLE when a person runs this in a terminal. It does NOT make the output
+    // shape constant — the CLI still switches between an agent envelope and a
+    // bare array depending on how the process is attached — so the parser
+    // handles both. See scripts/supabase-cli-json.mjs for the measured matrix.
+    const argv = ["supabase", "db", "query", "--linked", "--output-format", "json", "--file", file];
     return execFileSync("npx", argv, {
       encoding: "utf8",
       stdio: ["ignore", "pipe", "pipe"],

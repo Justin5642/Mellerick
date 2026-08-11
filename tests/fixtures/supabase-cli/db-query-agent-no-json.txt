@@ -1,0 +1,6 @@
+Initialising login role...
+[
+  {
+    "coalesce": "[{\"slot_name\":\"powersync_6a5f0bf6367771958b496c5e_3_a1dc\",\"active\":true,\"wal_status\":\"reserved\"}]"
+  }
+]
