@@ -148,15 +148,15 @@
     "extra": {
       "router": {},
       "eas": {
-        "projectId": "b45be6c7-c041-42c8-b420-bc3c75ce8778"
+        "projectId": "cf2715d8-b2fc-420f-b5e3-61eb266bc49d"
       }
     },
-    "owner": "avi-bendetsky",
+    "owner": "avi770",
     "runtimeVersion": {
       "policy": "appVersion"
     },
     "updates": {
-      "url": "https://u.expo.dev/b45be6c7-c041-42c8-b420-bc3c75ce8778"
+      "url": "https://u.expo.dev/cf2715d8-b2fc-420f-b5e3-61eb266bc49d"
     }
   }
 }
