@@ -240,6 +240,29 @@ export async function seed(office: SeedUser, tech: SeedUser): Promise<SeedResult
     if (error) throw new Error(`could not seed job_variations: ${error.message}`);
   }
 
+  // READ IT BACK. A seed that does not verify what it seeded is the same defect
+  // as a write that reports success while doing nothing — and this one already
+  // bit: the trigger silently zeroed the sentinel and the money-boundary test
+  // passed for three CI rounds because the number existed nowhere.
+  //
+  // This also ends the guessing. If the sentinel is absent, THIS throws and
+  // names the data as the problem. If it is present and the office test still
+  // cannot find 987.65 on the page, the problem is the rendering, not the seed —
+  // which is the question four CI rounds could not answer.
+  const check = await admin
+    .from("job_variations")
+    .select("rate, total_amount, status")
+    .eq("job_id", jobId)
+    .maybeSingle();
+  if (check.error) throw new Error(`could not verify the seeded variation: ${check.error.message}`);
+  if (Number(check.data?.rate) !== SENTINEL_RATE) {
+    throw new Error(
+      `SEED FAILED: job_variations.rate is ${check.data?.rate ?? "missing"}, expected ${SENTINEL_RATE}. ` +
+        `apply_variation_pricing (migration 0028) re-prices this row from variation_types, so the rate must ` +
+        `be set on the TYPE. status=${check.data?.status}, total_amount=${check.data?.total_amount}.`
+    );
+  }
+
   return { officeId, techId, customerId, siteId, jobId, jobTitle };
 }
 
