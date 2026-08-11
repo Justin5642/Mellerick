@@ -21,6 +21,7 @@
     "test:rls": "vitest run --project rls",
     "test:e2e": "playwright test",
     "check:drift": "node scripts/check-schema-drift.mjs",
+    "check:migrations": "node scripts/check-migrations.mjs",
     "check:sync": "node scripts/check-sync-health.mjs",
     "gen:types": "node scripts/gen-types.mjs"
   },

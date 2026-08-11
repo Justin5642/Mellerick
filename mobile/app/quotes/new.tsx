@@ -5,6 +5,7 @@ import DateTimePicker, { type DateTimePickerEvent } from "@react-native-communit
 import { Ionicons } from "@expo/vector-icons";
 import { colors } from "../../lib/theme";
 import { useFinance } from "../../lib/data/hooks/useFinance";
+import { useWriteOutcome } from "../../lib/data/hooks/useWriteOutcome";
 import { CustomerPicker } from "../../components/finance/customer-picker";
 import { getCustomer } from "../../lib/data/reads/customers";
 import { localDateKey } from "../../lib/date";
@@ -15,6 +16,7 @@ export default function NewQuoteScreen() {
   const router = useRouter();
   const { customerId } = useLocalSearchParams<{ customerId?: string }>();
   const finance = useFinance();
+  const writeOutcome = useWriteOutcome();
   const [customer, setCustomer] = useState<CustomerListRow | null>(null);
   const [pickCustomer, setPickCustomer] = useState(false);
   const [title, setTitle] = useState("");
@@ -54,12 +56,19 @@ export default function NewQuoteScreen() {
         notes: notes.trim() || null,
         items: lineItems,
       });
-      if (synced) {
-        router.replace(`/quotes/${result}`);
-      } else {
+      if (!synced) {
         Alert.alert("Saved offline", "The draft quote is queued and will sync when you're back online.");
         router.back();
+      } else if ((await writeOutcome(result)) === "failed") {
+        // Online but the server rejected the write — don't navigate to a detail
+        // for a quote that never persisted; it's queued and will retry.
+        Alert.alert("Couldn't save the quote", "The server rejected it — it's queued and will retry. Check the sync status for details.");
+        router.back();
+      } else {
+        router.replace(`/quotes/${result}`);
       }
+    } catch (e) {
+      Alert.alert("Couldn't create quote", e instanceof Error ? e.message : "Please try again.");
     } finally {
       setSaving(false);
     }

@@ -83,31 +83,30 @@ test.describe("office session", () => {
     expect(data?.title).toBe(title);
   });
 
-  test.fixme("office CAN see the money the technician must not", async ({ page }) => {
-    // MARKED FIXME DELIBERATELY, and it is a finding rather than a nuisance.
+  test("office CAN see the money the technician must not", async ({ page }) => {
+    // Un-fixme'd, with the cause understood rather than guessed at.
     //
-    // This is the control for the technician money test. It failed on the
-    // suite's first two real runs: the seeded variation carries rate 987.65
-    // and total_amount 987.65, the Variations tab is opened by deep-link, and
-    // the office user still does not see that number anywhere on the page.
+    // This failed three times and the fixme blamed an unknown selector. It was
+    // not a selector. job_variations has a BEFORE INSERT trigger
+    // (apply_variation_pricing, migration 0028) that re-prices every row from
+    // the variation TYPE and discards whatever the client sent — so seeding the
+    // variation with the sentinel while the type carried the default 0 meant
+    // 987.65 never reached the database at all.
     //
-    // Which means the technician assertion below CANNOT yet prove what it
-    // claims. "The number is absent" is only evidence if someone with
-    // permission can see it, and right now nobody can. Leaving this passing —
-    // or deleting it — would leave a green money-boundary test that proves
-    // nothing, which is the exact failure this branch has spent its time
-    // removing.
-    //
-    // What is unresolved is where the variations list renders an amount and in
-    // what format, which needs the app running rather than another CI round of
-    // guessing at a selector. Until then the technician test keeps the weaker
-    // but honest assertion below.
-    //
-    // The boundary itself is NOT unverified: the four SQL layers are covered by
-    // supabase/tests/money_boundary_sweep.sql and the RLS impersonation suite,
-    // both green. This is the browser layer only.
+    // Which also means the technician assertion below was passing for the
+    // emptiest possible reason: the string existed nowhere in the system. This
+    // control is what makes that one mean something, and it is the reason it
+    // was written even though it is the office half of a technician test.
     await page.goto(`/dashboard/jobs/${seeded().jobId}?tab=variations`);
-    await expect(page.getByText(String(SENTINEL_RATE), { exact: false })).toBeVisible({ timeout: 15_000 });
+
+    // `.first()` because the office page shows the amount in FOUR places —
+    // "1 unbilled variation · $987.65", the header total, the line total, and
+    // "1 hour × $987.65 = $987.65" — and Playwright's strict mode refuses an
+    // ambiguous locator. That ambiguity is the result being asserted: four
+    // renderings of a number the technician must not see even once.
+    await expect(page.getByText(String(SENTINEL_RATE), { exact: false }).first()).toBeVisible({
+      timeout: 15_000,
+    });
   });
 });
 

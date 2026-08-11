@@ -193,12 +193,37 @@ export async function seed(office: SeedUser, tech: SeedUser): Promise<SeedResult
 
   // A money row on that job. The technician must never see SENTINEL_RATE; the
   // office must. Both halves are asserted, so neither can pass vacuously.
+  // THE RATE HAS TO LIVE ON THE TYPE, not on the variation.
+  //
+  // job_variations has a BEFORE INSERT trigger, apply_variation_pricing
+  // (migration 0028:59-98), which for an auto_approve preset DISCARDS whatever
+  // rate the client sent and re-prices the row from the variation TYPE:
+  //
+  //     new.rate         := vt_rate;
+  //     new.total_amount := round(quantity * vt_rate, 2);
+  //
+  // Triggers fire for service_role — only RLS is bypassed. So seeding the
+  // variation with rate 987.65 while the type had the default 0 meant the
+  // sentinel was overwritten with 0.00 before it ever landed, and the number
+  // existed NOWHERE in the database. The technician assertion
+  // `expect(body).not.toContain("987.65")` therefore passed for the emptiest
+  // possible reason, and the office control could not find it because there
+  // was nothing to find. That is what the fixme on the office test was really
+  // about; it was not a selector problem.
   const variationTypeId = await upsertRow(
     admin,
     "variation_types",
     { name: "E2E Variation" },
-    { name: "E2E Variation", unit: "hour" }
+    { name: "E2E Variation", unit: "hour", rate: SENTINEL_RATE, auto_approve: true }
   );
+
+  // upsertRow returns early when the row already exists, so a stack that ran an
+  // earlier version of this file still holds the 0.00 type. Force the rate.
+  const rateFix = await admin
+    .from("variation_types")
+    .update({ rate: SENTINEL_RATE, auto_approve: true })
+    .eq("id", variationTypeId);
+  if (rateFix.error) throw new Error(`could not set the sentinel rate: ${rateFix.error.message}`);
 
   const existing = await admin.from("job_variations").select("id").eq("job_id", jobId).maybeSingle();
   if (existing.error) throw new Error(`could not read job_variations: ${existing.error.message}`);
@@ -208,14 +233,34 @@ export async function seed(office: SeedUser, tech: SeedUser): Promise<SeedResult
       variation_type_id: variationTypeId,
       description: "E2E money sentinel",
       quantity: 1,
-      rate: SENTINEL_RATE,
-      // Both, because the list renders the total for an approved variation and
-      // the rate for a pending one, and the office control has to find the
-      // number whichever shape this row ends up in.
-      total_amount: SENTINEL_RATE,
-      status: "approved",
+      // rate, total_amount and status are NOT set here on purpose: the trigger
+      // overwrites all three from the variation type. Setting them is what made
+      // this look seeded when it was not.
     });
     if (error) throw new Error(`could not seed job_variations: ${error.message}`);
+  }
+
+  // READ IT BACK. A seed that does not verify what it seeded is the same defect
+  // as a write that reports success while doing nothing — and this one already
+  // bit: the trigger silently zeroed the sentinel and the money-boundary test
+  // passed for three CI rounds because the number existed nowhere.
+  //
+  // This also ends the guessing. If the sentinel is absent, THIS throws and
+  // names the data as the problem. If it is present and the office test still
+  // cannot find 987.65 on the page, the problem is the rendering, not the seed —
+  // which is the question four CI rounds could not answer.
+  const check = await admin
+    .from("job_variations")
+    .select("rate, total_amount, status")
+    .eq("job_id", jobId)
+    .maybeSingle();
+  if (check.error) throw new Error(`could not verify the seeded variation: ${check.error.message}`);
+  if (Number(check.data?.rate) !== SENTINEL_RATE) {
+    throw new Error(
+      `SEED FAILED: job_variations.rate is ${check.data?.rate ?? "missing"}, expected ${SENTINEL_RATE}. ` +
+        `apply_variation_pricing (migration 0028) re-prices this row from variation_types, so the rate must ` +
+        `be set on the TYPE. status=${check.data?.status}, total_amount=${check.data?.total_amount}.`
+    );
   }
 
   return { officeId, techId, customerId, siteId, jobId, jobTitle };

@@ -13,10 +13,12 @@
 // The per-module *.local.test.ts files cannot catch it — they assert the SQL
 // string against a fake LocalReads Map, which accepts any column name.
 //
-// SCOPE, honestly stated: only QUALIFIED references (`alias.column`) are
-// checked, because those are the ones a table can be resolved for without a
-// real SQL parser. Bare columns in single-table queries are not covered, and
-// neither is anything built at runtime rather than in a module-level const.
+// SCOPE, honestly stated: QUALIFIED references (`alias.column`) are checked
+// everywhere, and BARE columns are checked in statements with a single table,
+// where there is nothing to resolve them against but that one table. Bare
+// columns in a multi-table statement are not covered — guessing which of two
+// tables owns one would invent failures — and neither is anything built at
+// runtime rather than in a module-level const.
 //
 // It reads the exported consts rather than the source text on purpose: fleet.ts
 // composes SQL by interpolating EQUIPMENT_PROJECTION, so a source-text scan
@@ -72,27 +74,100 @@ function qualifiers(sql: string): Map<string, string> {
   return map;
 }
 
-/** Returns [complaints, number of qualified refs actually resolved]. */
+// Only FROM/JOIN introduce a table here, so `FROM a, b` would read as one table
+// and b's columns would be blamed on a. Refusing to attribute such a statement
+// turns that into a visible coverage gap below, which is the safe direction —
+// an invented "has no column" failure sends someone hunting a schema bug that
+// is not there.
+const COMMA_JOIN = /\bFROM\s+[a-z_][a-z0-9_]*(?:\s+(?:AS\s+)?[a-z_][a-z0-9_]*)?\s*,/i;
+
+/** The one table a bare column can only belong to, or null if it is ambiguous. */
+function soleTable(sql: string): string | null {
+  const tables = [...sql.matchAll(/\b(?:FROM|JOIN)\s+([a-z_][a-z0-9_]*)/gi)].map((m) => m[1]);
+  return tables.length === 1 && !COMMA_JOIN.test(sql) ? tables[0] : null;
+}
+
+// Words that stand where a bare column would but name no column. Function names
+// are not listed: they are removed by the `ident(` rule in bareColumns, so a
+// column that happens to share a name with a SQL function still gets checked.
+const NOT_A_COLUMN = new Set([
+  "select", "from", "where", "group", "having", "order", "by", "limit", "offset",
+  "and", "or", "not", "is", "null", "like", "in", "between", "exists", "escape",
+  "collate", "nocase", "binary", "rtrim", "as", "distinct", "all", "union",
+  "case", "when", "then", "else", "end", "asc", "desc", "nulls", "first", "last",
+  "join", "on", "left", "right", "inner", "outer", "cross", "natural", "using",
+  "with", "recursive", "over", "partition", "window", "cast", "true", "false",
+]);
+
+/** Bare (unqualified) column references in a statement. */
+function bareColumns(sql: string): string[] {
+  const stripped = sql
+    .replace(/'(?:[^']|'')*'/g, " ") // literals: 'paid' is a value, not a column
+    .replace(/\b[a-z_][a-z0-9_]*\s*\(/gi, " (") // ROUND(, COUNT(
+    .replace(/\b[a-z_][a-z0-9_]*\.[a-z_][a-z0-9_]*/gi, " ") // already checked as qualified
+    .replace(/\bAS\s+[a-z_][a-z0-9_]*/gi, " ") // result aliases name no column
+    .replace(/\b(?:FROM|JOIN)\s+[a-z_][a-z0-9_]*/gi, " ");
+  return [...stripped.matchAll(/[a-z_][a-z0-9_]*/gi)]
+    .map(([w]) => w)
+    .filter((w) => !NOT_A_COLUMN.has(w.toLowerCase()));
+}
+
+/** Returns [complaints, number of references actually resolved]. */
 function lint(sql: string): [string[], number] {
   const byQualifier = qualifiers(sql);
   const bad: string[] = [];
   let checked = 0;
+
+  const check = (ref: string, table: string, col: string) => {
+    const cols = SCHEMA.get(table);
+    if (!cols) {
+      bad.push(`${ref} — table "${table}" is not in AppSchema`);
+      return;
+    }
+    checked++;
+    if (!cols.has(col)) bad.push(`${ref} — "${table}" has no column "${col}"`);
+  };
+
   for (const [, qualifier, col] of sql.matchAll(/\b([a-z_][a-z0-9_]*)\.([a-z_][a-z0-9_]*)/gi)) {
     const table = byQualifier.get(qualifier);
     if (!table) {
       bad.push(`${qualifier}.${col} — no FROM/JOIN introduces "${qualifier}"`);
       continue;
     }
-    const cols = SCHEMA.get(table);
-    if (!cols) {
-      bad.push(`${qualifier}.${col} — table "${table}" is not in AppSchema`);
-      continue;
-    }
-    checked++;
-    if (!cols.has(col)) bad.push(`${qualifier}.${col} — "${table}" has no column "${col}"`);
+    check(`${qualifier}.${col}`, table, col);
   }
+
+  const sole = soleTable(sql);
+  if (sole) for (const col of bareColumns(sql)) check(col, sole, col);
+
   return [bad, checked];
 }
+
+// The lint is the guard, so it needs its own guard: these synthetic statements
+// pin the behaviours the real ones depend on but cannot demonstrate — they are
+// all currently clean, so a lint that quietly stopped resolving anything would
+// still pass the suite below.
+describe("the lint itself", () => {
+  it("catches a bare column the sole table does not declare", () => {
+    expect(lint("SELECT id, nope FROM inventory")[0]).toEqual([
+      `nope — "inventory" has no column "nope"`,
+    ]);
+  });
+
+  it("counts bare columns of the sole table as resolved", () => {
+    expect(lint("SELECT id, sku FROM inventory")).toEqual([[], 2]);
+  });
+
+  it("does not attribute bare columns when two tables could own them", () => {
+    expect(
+      lint("SELECT nope FROM jobs j JOIN customers c ON j.customer_id = c.id")
+    ).toEqual([[], 2]);
+  });
+
+  it("does not mistake a result alias or a string literal for a column", () => {
+    expect(lint("SELECT COUNT(*) AS nope FROM jobs WHERE status = 'nope'")).toEqual([[], 1]);
+  });
+});
 
 describe("local SQL references only columns the device schema declares", () => {
   const statements = exportedSql();
@@ -102,10 +177,11 @@ describe("local SQL references only columns the device schema declares", () => {
   });
 
   // Without this the suite passes vacuously if the const scan or the reference
-  // regex ever stops matching. 231 qualified references at the time of writing.
+  // regex ever stops matching. 471 references at the time of writing — 271
+  // qualified plus 200 bare columns in single-table statements.
   it("actually resolved a meaningful number of references", () => {
     const total = statements.reduce((n, [, sql]) => n + lint(sql)[1], 0);
-    expect({ statements: statements.length >= 45, references: total >= 200 }).toEqual({
+    expect({ statements: statements.length >= 45, references: total >= 410 }).toEqual({
       statements: true,
       references: true,
     });
@@ -127,10 +203,7 @@ describe("local SQL references only columns the device schema declares", () => {
 
   it("has not quietly grown its own blind spot", () => {
     const blind = statements
-      .filter(([, sql]) => {
-        const tables = [...sql.matchAll(/\b(?:from|join)\s+[a-z_][a-z0-9_]*/gi)].length;
-        return tables > 1 && lint(sql)[1] === 0;
-      })
+      .filter(([, sql]) => lint(sql)[1] === 0)
       .map(([name]) => name)
       .sort();
 

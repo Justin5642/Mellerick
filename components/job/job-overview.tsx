@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
+import { applyScheduleChange, type ScheduleWriteClient } from "@/lib/schedule-dispatch";
 import { toast } from "sonner";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -94,19 +95,26 @@ export function JobOverview({ job, staff }: Props) {
       return;
     }
     setSaving(true);
-    const { error } = await supabase.from("jobs").update({
+    // This form changes the schedule and the technician, so it goes through the
+    // same seam the board does: the write and the Google push are one act with
+    // two outcomes. It used to fire the push after `toast.success` and drop the
+    // result, so a job could sit with a time the calendar had never heard of —
+    // which the poll in lib/google.ts then "corrected" by undoing the edit.
+    const result = await applyScheduleChange(supabase as unknown as ScheduleWriteClient, job.id, {
       ...form,
       title: form.title.trim(),
       site_id: form.site_id || null,
       assigned_to: form.assigned_to || null,
       scheduled_start: form.scheduled_start ? fromBusinessInputValue(form.scheduled_start) : null,
       scheduled_end: form.scheduled_end ? fromBusinessInputValue(form.scheduled_end) : null,
-    }).eq("id", job.id);
-    if (error) {
-      toast.error(error.message);
+    });
+    if (!result.ok) {
+      toast.error(result.error);
     } else {
-      toast.success("Job updated");
-      fetch(`/api/jobs/${job.id}/sync-calendar`, { method: "POST" }).catch(() => {});
+      // Saved is saved — but "Job updated" alone would let someone leave
+      // believing the technician's calendar shows the new time.
+      if (result.calendarSynced) toast.success("Job updated");
+      else toast.warning("Job updated — Google Calendar not updated");
       // customer/site changed => the header and the read-only customer/site
       // cards below (which come from the server-fetched `job` prop, not this
       // form's local state) need a re-fetch to reflect the change.

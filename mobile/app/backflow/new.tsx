@@ -19,6 +19,7 @@ import { supabase } from "../../lib/supabase";
 import { colors } from "../../lib/theme";
 import { WATER_AUTHORITIES, DEVICE_TYPES, PROTECTION_TYPES } from "../../lib/backflow";
 import { useBackflow } from "../../lib/data/hooks/useBackflow";
+import { useWriteOutcome } from "../../lib/data/hooks/useWriteOutcome";
 
 const API_BASE_URL = process.env.EXPO_PUBLIC_API_BASE_URL;
 const NO_SITE_VALUE = "__no_site__";
@@ -86,6 +87,7 @@ function ModalPicker({
 export default function NewBackflowDeviceScreen() {
   const router = useRouter();
   const backflow = useBackflow();
+  const writeOutcome = useWriteOutcome();
   const [saving, setSaving] = useState(false);
   const [scanning, setScanning] = useState(false);
   const [customers, setCustomers] = useState<{ id: string; name: string }[]>([]);
@@ -228,11 +230,16 @@ export default function NewBackflowDeviceScreen() {
         notes: notes || null,
         createdBy: userData.user?.id ?? null,
       });
-      if (synced) {
-        router.replace(`/backflow/${id}`);
-      } else {
+      if (!synced) {
         Alert.alert("Saved offline", "The device is queued and will sync when you're back online.");
         router.back();
+      } else if ((await writeOutcome(id)) === "failed") {
+        // Online but the server rejected the insert — don't navigate to a device
+        // detail that would 404; it's queued and will retry.
+        Alert.alert("Couldn't register the device", "The server rejected it — it's queued and will retry. Check the sync status for details.");
+        router.back();
+      } else {
+        router.replace(`/backflow/${id}`);
       }
     } catch (e) {
       Alert.alert("Error", e instanceof Error ? e.message : "Failed to register device");

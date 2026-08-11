@@ -115,8 +115,14 @@ begin
   end if;
 
   -- The exact columns the tech screens depend on must be present and correct.
-  select total_hours into v_hours from purchase_orders_public limit 1;
-  select name into v_name from po_cost_centers_public limit 1;
+  -- SCOPED BY ID, not `limit 1`. The CI fixture (supabase/ci/seed-roles.sql) now
+  -- seeds its own PO into the same database, so an unordered `limit 1` reads
+  -- whichever row the heap offers and this assertion becomes a coin toss —
+  -- passing on a row the test never wrote.
+  select total_hours into v_hours from purchase_orders_public
+   where id = 'eeeeeeee-0000-0000-0000-000000000005';
+  select name into v_name from po_cost_centers_public
+   where id = 'ffffffff-0000-0000-0000-000000000006';
   if v_hours is distinct from 40 then
     raise exception 'FAIL: purchase_orders_public.total_hours wrong (got %)', v_hours;
   end if;
@@ -147,8 +153,12 @@ set local request.jwt.claims = '{"sub":"bbbbbbbb-0000-0000-0000-000000000002","r
 do $$
 declare v_total numeric; v_alloc numeric;
 begin
-  select total_value into v_total from purchase_orders limit 1;
-  select allocated_amount into v_alloc from po_cost_centers limit 1;
+  -- Scoped by id for the same reason as step 4: the fixture's own PO is in this
+  -- table too, and reading an arbitrary row would assert nothing about this one.
+  select total_value into v_total from purchase_orders
+   where id = 'eeeeeeee-0000-0000-0000-000000000005';
+  select allocated_amount into v_alloc from po_cost_centers
+   where id = 'ffffffff-0000-0000-0000-000000000006';
   if v_total is distinct from 12345.67 then
     raise exception 'FAIL: office cannot read purchase_orders.total_value (got %)', v_total;
   end if;

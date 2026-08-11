@@ -105,7 +105,8 @@ function query(sql) {
 
 /**
  * The verdict, as a pure function of the slot rows — exported and unit-tested in
- * check-sync-health.test.mjs.
+ * tests/unit/sync-health-verdict.test.ts, over in the web project because that
+ * is where the runner lives.
  *
  * This is deliberately separate from the I/O. A health check whose ALARM path
  * has never run is the failure mode that makes monitoring worse than useless:

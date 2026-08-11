@@ -55,11 +55,14 @@ jobs:
           cache-dependency-path: mobile/package-lock.json
       - run: npm ci
       - run: npx tsc --noEmit -p tsconfig.json
-      # mobile/ had no lint tooling at all until now (item N3). The warning
+      # mobile/ had no lint tooling at all until item N3 closed it. The warning
       # ceiling is pinned in mobile/package.json so the count can only go DOWN —
-      # 136 today, most of them `no-floating-promises`, which is the rule this
-      # project needed most and which cannot be swept safely. Lower the number
-      # as they are triaged; never raise it.
+      # 7 today, down from 136 when the tooling landed; the bulk of the
+      # difference was `no-floating-promises`, which is the rule this project
+      # needed most. Lower the number as the rest are triaged; never raise it.
+      # tests/unit/cited-tests-exist.test.ts fails the build if this comment and
+      # that pin ever disagree again — the number here read 136 for a while
+      # after the pin reached 7, which is a licence to ignore CI.
       - run: npm run lint
       - run: npm test
 

@@ -6,6 +6,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { colors } from "../../../lib/theme";
 import { formatInvoiceNumber } from "../../../lib/finance";
 import { useFinance } from "../../../lib/data/hooks/useFinance";
+import { useWriteOutcome } from "../../../lib/data/hooks/useWriteOutcome";
 import { LineItemsEditor, type EditableItem } from "../../../components/finance/line-items-editor";
 import { getInvoice, type InvoiceDetail } from "../../../lib/data/reads/finance";
 import { ScreenError } from "../../../design/components/ScreenError";
@@ -15,6 +16,7 @@ export default function EditInvoiceScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
   const finance = useFinance();
+  const writeOutcome = useWriteOutcome();
   const [invoice, setInvoice] = useState<InvoiceDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [title, setTitle] = useState("");
@@ -62,8 +64,25 @@ export default function EditInvoiceScreen() {
     if (lineItems.length === 0) { Alert.alert("Line items required", "Add at least one named line item."); return; }
     setSaving(true);
     try {
-      await finance.editInvoice({ invoiceId: id, title: title.trim(), dueDateIso: dueDate ? localDateKey(dueDate) : null, notes: notes.trim() || null, existingItemIds, items: lineItems });
-      router.replace(`/invoices/${id}`);
+      const { synced } = await finance.editInvoice({ invoiceId: id, title: title.trim(), dueDateIso: dueDate ? localDateKey(dueDate) : null, notes: notes.trim() || null, existingItemIds, items: lineItems });
+      if (!synced) {
+        // The detail is read from the local DB, which the outbox does not touch
+        // until the write reaches the server — so it will still show the OLD
+        // figures. Say so rather than let that read like a saved edit.
+        Alert.alert("Saved offline", "The changes are queued and will sync when you're back online.");
+        router.replace(`/invoices/${id}`);
+      } else if ((await writeOutcome(id)) === "failed") {
+        // Online but the server rejected the update. Stay on the form with the
+        // edits still in it: leaving for the detail would show the pre-edit
+        // invoice as though it were what was just saved.
+        Alert.alert("Couldn't save the changes", "The server rejected them — they're queued and will retry. Check the sync status for details.");
+      } else {
+        router.replace(`/invoices/${id}`);
+      }
+    } catch (e) {
+      // A rejected save used to be discarded here: the button went back to
+      // "Save changes" and the user stayed on a form they believed had saved.
+      Alert.alert("Couldn't save the invoice", e instanceof Error ? e.message : "Please try again.");
     } finally {
       setSaving(false);
     }

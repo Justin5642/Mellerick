@@ -10,6 +10,14 @@
 // utilisation all begin computing from a truncated set and presenting the
 // result as authoritative.
 //
+// "Every select" describes the problem, not the sweep that followed it: the
+// first pass converted seven of the nine multi-row reads and left `equipment`
+// and `equipment_usage_log` behind — the two the utilisation section and true
+// cost per hour are computed from. All nine go through this now (the tenth
+// select on the page, the viewer's own role, is a .single()). Anything added
+// there must too: a comment claiming coverage is not coverage, which is how
+// these two survived a change that named them.
+//
 // Measured when this was written: the largest table any report reads is `jobs`
 // at 827 of 1000. The reports are correct today and will silently stop being
 // correct, with no deploy and nothing to notice.

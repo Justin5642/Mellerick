@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { resolveExistingInvoice } from "@/lib/approval-invoice-guard";
+import { pushJobToCalendar } from "@/lib/schedule-dispatch";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -11,6 +12,7 @@ import { CheckCircle2, XCircle, ClipboardList, Clock, User, MapPin, ChevronDown,
 import Link from "next/link";
 import { ListPageSkeleton } from "@/components/ui/loading-skeletons";
 import { formatDate } from "@/lib/date";
+import { moneyTotals } from "@/lib/replace-line-items";
 
 const OVERTIME_LABELS: Record<string, string> = {
   unexpected_issue: "Unexpected issue",
@@ -92,9 +94,16 @@ export default function ApprovalsPage() {
     if (!invoiceId && job) {
       const { data: items } = await supabase.from("job_items").select("*").eq("job_id", jobId);
       if (items && items.length > 0) {
-        const subtotal = items.reduce((sum: number, i: any) => sum + Number(i.total ?? Number(i.quantity) * Number(i.unit_price)), 0);
-        const gst = subtotal * 0.1;
-        const total = subtotal + gst;
+        // moneyTotals, not raw floats. The three columns are decimal(10,2) and
+        // round INDEPENDENTLY, so summing unrounded and deriving GST from the
+        // unrounded subtotal produces a tax invoice whose subtotal plus GST
+        // does not equal its total. Four other sites were converted when that
+        // was found; this one was missed, and it is the only one where the
+        // invoice is pushed to Xero automatically below, with no human
+        // reviewing the figures first.
+        const { subtotal, tax: gst, total } = moneyTotals(
+          items.map((i: any) => ({ quantity: Number(i.quantity), unit_price: Number(i.unit_price) }))
+        );
         const { data: { user } } = await supabase.auth.getUser();
 
         const { data: newInvoice, error: invErr } = await supabase
@@ -220,9 +229,13 @@ export default function ApprovalsPage() {
       return;
     }
 
-    fetch(`/api/jobs/${jobId}/sync-calendar`, { method: "POST" }).catch(() => {});
+    // Sending a job back reopens it, so its calendar event is wrong until this
+    // lands. It is not worth failing the send-back over, but it is worth
+    // saying — `.catch(() => {})` said nothing.
+    const calendarSynced = await pushJobToCalendar(jobId);
     setJobs(j => j.filter(job => job.id !== jobId));
-    toast.success("Job sent back — technician will be notified");
+    if (calendarSynced) toast.success("Job sent back — technician will be notified");
+    else toast.warning("Job sent back — technician will be notified, but Google Calendar was not updated");
     setSaving(null);
   }
 

@@ -2,8 +2,9 @@
 -- Any authenticated user can destroy any job's photos, customer signatures and
 -- voice recordings. This closes that — and the three ways round it.
 --
--- STATUS: DRAFT — NOT APPLIED. (tests/unit/migration-header-truth.test.ts fails
--- the build if this line is still here once it IS applied.)
+-- STATUS: DRAFT — NOT APPLIED. (`npm run check:migrations` fails once this
+-- line is still here and the ledger HAS this migration;
+-- tests/unit/migration-header-truth.test.ts keeps that check able to see it.)
 --
 -- ---------------------------------------------------------------------------
 -- THE HOLE

@@ -14,13 +14,28 @@ export interface LineItemInput {
   unitPrice: number;
 }
 
-// Pure totals math — identical to the web (subtotal = Σ qty*unit; gst = 10%).
+/** Round to cents. invoices.subtotal/tax_amount/total are all decimal(10,2). */
+const cents = (n: number) => (Number.isFinite(n) ? Math.round(n * 100) / 100 : 0);
+
+// Pure totals math, matching the web's moneyTotals (lib/replace-line-items.ts).
 // The DB computes invoice_items.total as a GENERATED column, so we never send
 // per-line totals; the client value is display-only until the row round-trips.
+//
+// THE ROUNDING IS THE POINT, and this comment used to claim parity it did not
+// have. Summing raw floats and deriving GST from an unrounded subtotal writes
+// three columns that each round INDEPENDENTLY on the way into decimal(10,2) —
+// producing a tax invoice whose subtotal plus GST does not equal its total.
+// The web fixed that; the phone kept writing it at four call sites.
+//
+// Each line is rounded BEFORE summing, because the per-line figure is what the
+// customer sees and can add up themselves. Summing raw and rounding once would
+// disagree with the lines printed above it.
 export function computeTotals(items: LineItemInput[]): { subtotal: number; gst: number; total: number } {
-  const subtotal = items.reduce((s, i) => s + (Number(i.quantity) || 0) * (Number(i.unitPrice) || 0), 0);
-  const gst = subtotal * GST_RATE;
-  return { subtotal, gst, total: subtotal + gst };
+  const subtotal = cents(
+    items.reduce((s, i) => s + cents((Number(i.quantity) || 0) * (Number(i.unitPrice) || 0)), 0)
+  );
+  const gst = cents(subtotal * GST_RATE);
+  return { subtotal, gst, total: cents(subtotal + gst) };
 }
 
 export interface CreateInvoiceInput {
