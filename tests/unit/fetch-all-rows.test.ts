@@ -7,10 +7,17 @@ import { fetchAllRows } from "../../lib/fetch-all-rows";
 //   GET /rest/v1/job_photos?select=id   ->  1000 rows, content-range: 0-999/*
 //
 // No error, no flag on the response — just fewer rows than exist. Every one of
-// the nine selects in app/dashboard/reports/page.tsx is unranged, so once a
-// table crosses the cap the revenue-by-month chart, outstanding total, top
-// customers and staff utilisation all start computing from a truncated set and
-// presenting the answer as authoritative.
+// the nine selects in app/dashboard/reports/page.tsx WAS unranged, so once a
+// table crossed the cap the revenue-by-month chart, outstanding total, top
+// customers and staff utilisation all computed from a truncated set and
+// presented the answer as authoritative.
+//
+// All nine now page through fetchAllRows. The past tense is deliberate: this
+// comment said "is unranged" long after they were converted, and two of them
+// (equipment, equipment_usage_log) were genuinely still unranged for a while
+// after the claim became false everywhere else — so a reader checking the
+// sentence would have found it true, checked no further, and missed the two
+// that mattered.
 //
 // Measured today: the largest table any report reads is `jobs` at 827 of 1000.
 // So the reports are correct right now and will silently stop being correct,

@@ -17,6 +17,8 @@
 // types only, never values.
 
 import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 for (const file of [".env.local", ".env"]) {
   try {
@@ -34,25 +36,38 @@ if (!url || !key) {
   process.exit(1);
 }
 
-// The tables the office_* streams replicate wholesale, in file order.
+// The tables the office_* streams replicate wholesale — DERIVED from the YAML,
+// not listed here.
+//
+// It used to be a hardcoded array of sixteen, and the file has eighteen
+// office_* streams. The two it never checked were `job_photos` and
+// `time_entries` — and time_entries carries `rate_override`, the column
+// migration 0045 exists to hide from technicians. A guard over the money
+// boundary that silently omits the money column is worse than no guard,
+// because the green tick is read as coverage.
+//
+// Deriving it means adding a stream to the YAML adds it to this check, with
+// nobody having to remember.
+const streamsYaml = readFileSync(
+  join(dirname(fileURLToPath(import.meta.url)), "..", "mobile", "powersync", "sync-streams.yaml"),
+  "utf8"
+);
+
 const OFFICE_TABLES = [
-  "jobs",
-  "job_items",
-  "job_variations",
-  "job_expenses",
-  "job_notes",
-  "invoices",
-  "invoice_items",
-  "quotes",
-  "quote_items",
-  "pricing_items",
-  "inventory",
-  "equipment",
-  "equipment_expenses",
-  "equipment_usage_log",
-  "purchase_orders",
-  "po_cost_centers",
+  ...new Set(
+    [...streamsYaml.matchAll(/^\s{2}office_\w+:[\s\S]*?FROM\s+([a-z_][a-z0-9_]*)/gim)].map((m) => m[1])
+  ),
 ];
+
+if (OFFICE_TABLES.length < 15) {
+  // A parser that stops matching would leave this loop iterating nothing and
+  // the script exiting 0 — the vacuous pass this whole family of checks keeps
+  // producing. Fail loudly instead.
+  console.error(
+    `Parsed only ${OFFICE_TABLES.length} office_* stream tables from sync-streams.yaml — the parser has stopped matching.`
+  );
+  process.exit(1);
+}
 
 const res = await fetch(`${url}/rest/v1/`, {
   headers: { apikey: key, Authorization: `Bearer ${key}` },
