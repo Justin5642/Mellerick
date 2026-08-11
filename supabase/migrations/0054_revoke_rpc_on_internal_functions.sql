@@ -57,15 +57,38 @@
 -- so nothing evaluates them on behalf of a user.
 -- ============================================================================
 
+-- ---------------------------------------------------------------------------
+-- FROM PUBLIC FIRST, and that is the whole reason the obvious version failed.
+-- ---------------------------------------------------------------------------
+-- The first draft of this migration revoked from `anon, authenticated` only.
+-- All four REVOKEs succeeded and the assertion below then reported all four
+-- STILL callable — which is how this was found, in CI, before it reached
+-- anyone.
+--
+-- `CREATE FUNCTION` grants EXECUTE to PUBLIC by default. It is right there in
+-- the ACL, as the entry with no grantee:
+--
+--     =X/postgres | postgres=X/postgres | anon=X/postgres | ...
+--     ^^^^^^^^^^ PUBLIC
+--
+-- anon and authenticated are members of PUBLIC, so removing their EXPLICIT
+-- grants changes nothing: has_function_privilege still returns true through the
+-- PUBLIC one. Revoking from a role that holds a privilege by inheritance is a
+-- no-op that reads exactly like a fix.
+--
+-- service_role and postgres hold their own explicit grants (visible above), so
+-- revoking PUBLIC does not touch them.
+--
 -- Triggers do not check EXECUTE on their function — the trigger fires as part
 -- of the table's own machinery — so revoking here removes the RPC endpoint
 -- without affecting inserts or updates in any way.
-revoke execute on function public.handle_new_user() from anon, authenticated;
-revoke execute on function public.apply_variation_pricing() from anon, authenticated;
-revoke execute on function public.prevent_unauthorised_role_change() from anon, authenticated;
+revoke execute on function public.handle_new_user() from public, anon, authenticated;
+revoke execute on function public.apply_variation_pricing() from public, anon, authenticated;
+revoke execute on function public.prevent_unauthorised_role_change() from public, anon, authenticated;
 
--- An operations helper, called by CI and by hand. service_role keeps it.
-revoke execute on function public.reapply_time_entries_grants() from anon, authenticated;
+-- An operations helper, called by CI and by hand. service_role keeps its
+-- explicit grant.
+revoke execute on function public.reapply_time_entries_grants() from public, anon, authenticated;
 
 -- ---------------------------------------------------------------------------
 -- Assert the outcome, including the part that must NOT have changed.
@@ -104,6 +127,23 @@ begin
     raise exception
       'ASSERTION FAILED: authenticated lost EXECUTE on %, which 37 RLS policies call. Every signed-in user is locked out.', lost;
   end if;
+
+  -- (c) Revoking from PUBLIC is broader than revoking from two roles, so check
+  --     the role that still needs these. service_role runs the CI bootstrap and
+  --     calls reapply_time_entries_grants() directly; it holds an explicit
+  --     grant, but "holds one now" is worth proving rather than assuming.
+  select string_agg(p.proname, ', ') into lost
+  from pg_proc p
+  join pg_namespace n on n.oid = p.pronamespace
+  where n.nspname = 'public'
+    and p.proname in ('handle_new_user', 'apply_variation_pricing',
+                      'prevent_unauthorised_role_change', 'reapply_time_entries_grants')
+    and not has_function_privilege('service_role', p.oid, 'EXECUTE');
+
+  if lost is not null then
+    raise exception
+      'ASSERTION FAILED: service_role lost EXECUTE on %. The CI bootstrap calls these.', lost;
+  end if;
 end;
 $$;
 
@@ -117,9 +157,9 @@ $$;
 -- assertion above proves the grant still exists; only a real session proves the
 -- policies still evaluate.
 --
--- Rollback:
---   grant execute on function public.handle_new_user() to anon, authenticated;
---   grant execute on function public.apply_variation_pricing() to anon, authenticated;
---   grant execute on function public.prevent_unauthorised_role_change() to anon, authenticated;
---   grant execute on function public.reapply_time_entries_grants() to anon, authenticated;
+-- Rollback (restores the PUBLIC grant these were created with):
+--   grant execute on function public.handle_new_user() to public;
+--   grant execute on function public.apply_variation_pricing() to public;
+--   grant execute on function public.prevent_unauthorised_role_change() to public;
+--   grant execute on function public.reapply_time_entries_grants() to public;
 -- ============================================================================
