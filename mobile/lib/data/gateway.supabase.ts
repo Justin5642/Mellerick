@@ -65,9 +65,11 @@ export const supabaseGateway: SupabaseGateway = {
     // Counting is not enough to tell them apart, so ask whether the row
     // SURVIVED. That is one extra round trip, and only on the zero-row path.
     //
-    // This matters as of migration 0049: job_photos rows are now deletable only
-    // by office/admin or the assigned technician, so the second case is
-    // reachable — and everything above here treats a resolved promise as done
+    // Migration 0049 would make job_photos deletable only by office/admin or
+    // the assigned technician, which makes the second case reachable. It is
+    // DRAFTED AND NOT APPLIED, so today the zero-row case means the row was
+    // already gone — but asking is correct under both policies, and everything
+    // above here treats a resolved promise as done
     // (the processor marks the op complete, the outbox drops it, the badge
     // clears). Same reasoning as updateRow's `count: "exact"` above.
     const { error, count } = await supabase.from(table).delete({ count: "exact" }).eq("id", id);
@@ -103,11 +105,12 @@ export const supabaseGateway: SupabaseGateway = {
     if (error) throw new Error(`storage ${bucket}/${path}: ${error.message}`);
   },
   async removeObject(bucket, path) {
-    // Best-effort, never throws — and that stays correct after migration 0049
-    // only because the ROW delete is now the gate. deleteRow throws when RLS
-    // refuses, so an unauthorized photo delete fails there, loudly, before this
-    // ever runs; both are scoped by the same predicate, so an authorized caller
-    // cannot be refused here. What remains is genuine best-effort: a storage
+    // Best-effort, never throws — and that stays correct if migration 0049 is
+    // applied (it is drafted, not applied) only because the ROW delete is the
+    // gate. deleteRow throws when RLS refuses, so an unauthorized photo delete
+    // fails there, loudly, before this ever runs; both would be scoped by the
+    // same predicate, so an authorized caller cannot be refused here. What
+    // remains is genuine best-effort: a storage
     // hiccup must never dead-letter the row delete behind it, and "not found"
     // is success on an idempotent replay.
     //

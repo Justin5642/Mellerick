@@ -78,10 +78,17 @@ export function JobPhotos({ jobId, photos, onUpdate, currentUserId }: Props) {
     // The ROW goes first, and its result is checked before the object is
     // touched. Both were previously fired and ignored, with an unconditional
     // success toast — which was harmless only while everyone could delete
-    // everything. Migration 0049 scopes both to office/admin or the job's
-    // assigned technician, so a refusal is now reachable, and neither call
-    // throws on one: storage.remove() returns { data, error }, and a
-    // PostgREST delete that RLS filters out succeeds against zero rows.
+    // everything. Migration 0049 WOULD scope both to office/admin or the job's
+    // assigned technician — it is DRAFTED AND NOT APPLIED, so production's only
+    // job_photos policy is still 0000_baseline.sql:165,
+    // `for all using (auth.role() = 'authenticated')`.
+    //
+    // The checking below is right either way, and that is the point: neither
+    // call throws on a refusal — storage.remove() returns { data, error }, and
+    // a PostgREST delete that RLS filters out succeeds against zero rows — so
+    // the handling does not depend on which policy is in force. Today a
+    // zero-row result means the row was already gone; once 0049 is applied it
+    // can also mean refused. Both are handled.
     //
     // Row first because it is the authoritative record and it fails closed: if
     // it is refused, nothing has been destroyed and nothing is orphaned. The
