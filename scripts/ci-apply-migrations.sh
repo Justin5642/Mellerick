@@ -44,21 +44,60 @@ grant_public() {
     -c "grant all on all sequences in schema public to anon, authenticated, service_role;"
 }
 
+# DRAFTS ARE APPLIED SEPARATELY, AND THAT SEPARATION IS THE POINT.
+#
+# This script applied every file in the directory, including the five that say
+# "STATUS: DRAFT — NOT APPLIED" because they are handed over rather than run
+# against production. The result was circular: ci.yml has a step titled "Prove
+# the security migrations are actually in force", and one of the suites it runs
+# (supabase/tests/0049_storage_delete_scoping_test.sql) calls
+# user_can_manage_job(), a function that exists ONLY in draft 0049. So the step
+# could only ever pass, and what it proved was that CI had just applied the
+# draft — not that production has it.
+#
+# Production's only job_photos policy is still 0000_baseline.sql:165,
+# `for all using (auth.role() = 'authenticated')`. Meanwhile app code states
+# 0049's scoping as present fact (components/job/job-photos.tsx tells a user
+# "You can only delete photos on jobs assigned to you"). A green CI run was the
+# reason nobody noticed the gap.
+#
+# APPLIED holds what production has. DRAFTS are applied afterwards, into the
+# same database, so their own test suites can still run — but the split is
+# visible in the log, and PROD_ONLY=1 skips them entirely so a job can assert
+# against the real production schema.
 applied=0
+drafts=0
 for f in $(ls supabase/migrations/*.sql | sort); do
+  if grep -q "STATUS: DRAFT" "$f"; then
+    drafts=$((drafts + 1))
+    continue
+  fi
   echo "::group::$f"
   grant_public
   psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -f "$f"
   echo "::endgroup::"
   applied=$((applied + 1))
 done
-echo "Applied $applied migrations."
+echo "Applied $applied migrations (production schema). Held back $drafts draft(s)."
+
+if [ "${PROD_ONLY:-0}" = "1" ]; then
+  echo "PROD_ONLY=1 — drafts NOT applied. The database now matches production."
+else
+  for f in $(ls supabase/migrations/*.sql | sort); do
+    grep -q "STATUS: DRAFT" "$f" || continue
+    echo "::group::DRAFT $f"
+    grant_public
+    psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -f "$f"
+    echo "::endgroup::"
+  done
+  echo "Applied $drafts draft migration(s) — anything asserted below covers a schema PRODUCTION DOES NOT HAVE."
+fi
 
 # A loop that silently matched nothing would leave an empty database and every
 # assertion downstream trivially true — the exact failure mode this bootstrap
 # was rebuilt to remove, and the one that let the e2e job run against no schema.
 if [ "$applied" -lt 40 ]; then
-  echo "::error::Only $applied migrations applied — expected the full chain."
+  echo "::error::Only $applied production migrations applied — expected the full chain."
   exit 1
 fi
 

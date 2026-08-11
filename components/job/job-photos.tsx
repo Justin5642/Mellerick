@@ -97,7 +97,16 @@ export function JobPhotos({ jobId, photos, onUpdate, currentUserId }: Props) {
       return;
     }
     if (count === 0) {
-      toast.error("You can only delete photos on jobs assigned to you.");
+      // Deliberately does NOT name the reason. Migration 0049, which scopes
+      // this delete to office/admin or the job's assigned technician, is
+      // DRAFTED AND NOT APPLIED — production's only job_photos policy is still
+      // 0000_baseline.sql:165, `for all using (auth.role() = 'authenticated')`.
+      // So today a zero-row result means the row is already gone, not that
+      // permission was refused, and the old wording stated a rule that is not
+      // in force. Once 0049 is applied both readings are true and this stays
+      // correct; asserting the stricter one now would be telling the user
+      // something false about the system.
+      toast.error("That photo could not be removed — it may already have been deleted. Refresh and try again.");
       return;
     }
 
