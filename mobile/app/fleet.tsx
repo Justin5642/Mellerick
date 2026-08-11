@@ -8,6 +8,7 @@ import { ScreenError } from "../design/components/ScreenError";
 import { listEquipment, listInactiveEquipment, hourlyRate, type Equipment } from "../lib/data/reads/fleet";
 import { listAssignableStaff, type AssignableStaff } from "../lib/data/reads/schedule";
 import { useFleet } from "../lib/data/hooks/useFleet";
+import { useWriteOutcome } from "../lib/data/hooks/useWriteOutcome";
 import { useIsAdmin } from "../design/guards/useRole";
 
 const CATEGORIES = ["vehicle", "machinery", "tool", "other"] as const;
@@ -48,6 +49,7 @@ function toDraft(e: Equipment | null): Draft {
 
 export default function FleetScreen() {
   const fleet = useFleet();
+  const writeOutcome = useWriteOutcome();
   const router = useRouter();
   const isAdmin = useIsAdmin(); // equipment writes are admin-only (RLS + web)
   const [items, setItems] = useState<Equipment[]>([]);
@@ -166,7 +168,19 @@ export default function FleetScreen() {
       // Editing cost fields must not wipe the current assignee optimistically.
       setItems((prev) => (editingId ? prev.map((it) => (it.id === editingId ? { ...optimistic, assigned_to: it.assigned_to, assigned_profile: it.assigned_profile } : it)) : [...prev, optimistic]));
       setDraft(null);
+      // `synced` means "we were online", NOT "the server accepted it" — the
+      // distinction useWriteOutcome exists to draw. Without it a rejected save
+      // reloaded the list, which quietly restored the PRE-write state and read
+      // as success.
+      if (synced && (await writeOutcome(rowId)) === "failed") {
+        Alert.alert(
+          "Couldn't save the equipment",
+          "The server rejected it — it's queued and will retry. Check the sync status for details."
+        );
+      }
       if (synced) await load();
+    } catch (e) {
+      Alert.alert("Couldn't save the equipment", e instanceof Error && e.message ? e.message : "Please try again.");
     } finally {
       setSaving(false);
     }
@@ -180,8 +194,16 @@ export default function FleetScreen() {
       const { synced } = await fleet.deactivateEquipment(id);
       setItems((prev) => prev.filter((it) => it.id !== id));
       setDraft(null);
+      if (synced && (await writeOutcome(id)) === "failed") {
+        Alert.alert(
+          "Couldn't retire the equipment",
+          "The server rejected it — it's queued and will retry. Check the sync status for details."
+        );
+      }
       if (synced) await load();
       if (showInactive) await loadInactive();
+    } catch (e) {
+      Alert.alert("Couldn't retire the equipment", e instanceof Error && e.message ? e.message : "Please try again.");
     } finally {
       setSaving(false);
     }

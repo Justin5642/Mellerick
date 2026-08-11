@@ -81,6 +81,16 @@ export function CustomerFormSheet({
         const { result, synced } = await customers.createCustomer(input);
         onSaved(result as string, synced);
       }
+    } catch (e) {
+      // try/finally with no catch left a thrown write silently discarded: the
+      // button came back to "Save", the sheet stayed open, and the technician
+      // was told nothing — indistinguishable from not having pressed it.
+      // onSaved is deliberately NOT called here; the caller closes the sheet
+      // and reloads on it, and neither should happen for a write that failed.
+      Alert.alert(
+        existing ? "Couldn't save the customer" : "Couldn't create the customer",
+        e instanceof Error && e.message ? e.message : "Please try again."
+      );
     } finally {
       setSaving(false);
     }
