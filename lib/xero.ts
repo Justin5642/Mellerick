@@ -93,7 +93,13 @@ export async function getRefreshedXero(supabaseClient?: any) {
     // by reproducing it directly against the live Xero connection.
     await xero.initialize();
     const newTokenSet = await xero.refreshToken();
-    await supabase
+    // XERO ROTATES THE REFRESH TOKEN ON EVERY REFRESH, and the previous one is
+    // dead the moment this call returns. Discarding the result meant a refused
+    // write left the database holding a refresh token Xero has already
+    // invalidated — the integration is then permanently broken and the only fix
+    // is reconnecting by hand. Same shape as the OAuth token-swap defect this
+    // campaign opened on, one layer down.
+    const { error: persistError } = await supabase
       .from("xero_tokens")
       .update({
         access_token: newTokenSet.access_token!,
@@ -101,6 +107,12 @@ export async function getRefreshedXero(supabaseClient?: any) {
         token_expiry: new Date(Date.now() + (newTokenSet.expires_in as number) * 1000).toISOString(),
       })
       .eq("id", tokenRow.id);
+    if (persistError) {
+      throw new Error(
+        `Xero token refreshed but could not be saved (${persistError.message}). ` +
+          `The stored refresh token is now the invalidated one — reconnect Xero.`
+      );
+    }
   }
 
   return {

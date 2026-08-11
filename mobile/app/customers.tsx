@@ -5,6 +5,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { colors } from "../lib/theme";
 import { listCustomers, type CustomerListRow } from "../lib/data/reads/customers";
 import { useCustomers } from "../lib/data/hooks/useCustomers";
+import { useWriteOutcome } from "../lib/data/hooks/useWriteOutcome";
 import { CustomerFormSheet } from "../components/customer/customer-form";
 import { ScreenError } from "../design/components/ScreenError";
 
@@ -13,6 +14,7 @@ const PAGE = 50;
 export default function CustomersScreen() {
   const router = useRouter();
   const writes = useCustomers();
+  const writeOutcome = useWriteOutcome();
   const [customers, setCustomers] = useState<CustomerListRow[]>([]);
   const [refreshing, setRefreshing] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -97,6 +99,30 @@ export default function CustomersScreen() {
     [writes]
   );
 
+  // `synced` only reports that the outbox flushed while we were online — it is
+  // NOT the server's answer. Pushing the detail for a rejected insert lands the
+  // office on a customer that does not exist, so ask the outbox first.
+  const handleSaved = useCallback(
+    async (id: string, synced: boolean) => {
+      setCreating(false);
+      try {
+        if (!synced) {
+          // Offline: the detail read can't see the queued row yet (D10). Confirm
+          // + refresh the list rather than land on a "not found" screen.
+          Alert.alert("Saved offline", "The customer is queued and will appear once you're back online.");
+          await search(query);
+        } else if ((await writeOutcome(id)) === "failed") {
+          Alert.alert("Couldn't save the customer", "The server rejected it — it's queued and will retry. Check the sync status for details.");
+        } else {
+          router.push(`/customers/${id}`);
+        }
+      } catch (e) {
+        Alert.alert("Couldn't save the customer", e instanceof Error ? e.message : "Please try again.");
+      }
+    },
+    [query, search, writeOutcome, router]
+  );
+
   // Checked BEFORE the list renders, so a failed read can never fall through to
   // the "No customers found." empty state — the reads are served from the local
   // DB, so a failure here is a real fault and not just being off the network.
@@ -171,17 +197,8 @@ export default function CustomersScreen() {
       <CustomerFormSheet
         visible={creating}
         onClose={() => setCreating(false)}
-        onSaved={(id, synced) => {
-          setCreating(false);
-          if (synced) {
-            router.push(`/customers/${id}`);
-          } else {
-            // Offline: the detail read can't see the queued row yet (D10). Confirm
-            // + refresh the list rather than land on a "not found" screen.
-            Alert.alert("Saved offline", "The customer is queued and will appear once you're back online.");
-            void search(query);
-          }
-        }}
+        // handleSaved catches its own failures, so it cannot reject.
+        onSaved={(id, synced) => void handleSaved(id, synced)}
       />
     </View>
   );

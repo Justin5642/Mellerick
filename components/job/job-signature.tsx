@@ -2,6 +2,7 @@
 
 import { useRef, useState, useEffect } from "react";
 import { createClient } from "@/lib/supabase/client";
+import { pushJobToCalendar } from "@/lib/schedule-dispatch";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -145,9 +146,12 @@ export function JobSignature({ jobId, currentUserId, existingSignature, voiceRep
       return;
     }
 
-    fetch(`/api/jobs/${jobId}/sync-calendar`, { method: "POST" }).catch(() => {});
-
-    toast.success("Job complete — flagged for office review");
+    // The job is complete either way, so this is not an error — but the
+    // technician's calendar still showing it as booked is worth one sentence
+    // rather than the silence `.catch(() => {})` used to give it.
+    const calendarSynced = await pushJobToCalendar(jobId);
+    if (calendarSynced) toast.success("Job complete — flagged for office review");
+    else toast.warning("Job complete — flagged for office review, but Google Calendar was not updated");
     setSaved(true);
     setSaving(false);
   }

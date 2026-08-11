@@ -27,17 +27,42 @@
 /** The narrow slice of the Supabase client this module needs. */
 export type ScheduleWriteClient = {
   from(table: string): {
-    update(patch: Record<string, unknown>): {
-      eq(column: string, value: string): PromiseLike<{ error: { message: string } | null }>;
+    update(patch: Record<string, unknown>, options?: { count: "exact" }): {
+      eq(
+        column: string,
+        value: string
+      ): PromiseLike<{ error: { message: string } | null; count?: number | null }>;
     };
   };
 };
 
-/** Only the columns a drag can change. */
+/**
+ * The columns a schedule change can touch.
+ *
+ * The other job columns are open because the job overview saves its whole form
+ * — title, status, priority and the schedule — in one statement. Forcing the
+ * schedule out into a second write to keep this type closed would make a
+ * half-saved job reachable: one of the two writes can fail on its own.
+ */
 export type ScheduleChange = {
   assigned_to?: string | null;
   scheduled_start?: string | null;
   scheduled_end?: string | null;
+  // The other job columns an editable form saves in the same statement.
+  //
+  // NAMED, not an open `[column: string]: unknown` index signature. That was
+  // the first attempt, and it accepts `{ scheduled_strt: … }` — a typo'd column
+  // silently sent to PostgREST, which is the class of defect this file exists
+  // to stop. Listing them costs one line each and keeps the compiler useful.
+  title?: string;
+  description?: string | null;
+  status?: string;
+  priority?: string;
+  job_type?: string;
+  notes?: string | null;
+  completion_notes?: string | null;
+  customer_id?: string | null;
+  site_id?: string | null;
 };
 
 export type ScheduleDispatchResult =
@@ -67,14 +92,40 @@ export async function applyScheduleChange(
   patch: ScheduleChange,
   fetchImpl: typeof fetch = fetch
 ): Promise<ScheduleDispatchResult> {
-  const { error } = await supabase.from("jobs").update(patch).eq("id", jobId);
+  // `count: "exact"` because PostgREST returns no error for an UPDATE that
+  // matched nothing — RLS filters the row out and the statement succeeds
+  // against zero rows. Taken as success, the caller keeps its optimistic move
+  // on screen and Google is handed a time the database does not hold.
+  const { error, count } = await supabase
+    .from("jobs")
+    .update(patch, { count: "exact" })
+    .eq("id", jobId);
   if (error) return { ok: false, error: error.message };
+  if (count === 0) {
+    return { ok: false, error: "That job could not be changed — it may have been deleted or reassigned." };
+  }
 
+  return { ok: true, calendarSynced: await pushJobToCalendar(jobId, fetchImpl) };
+}
+
+/**
+ * Tell Google about a job, and say whether it listened.
+ *
+ * Separate from applyScheduleChange for the screens that change a job in a way
+ * this module cannot express — sign-off completes it, an approval sends it back
+ * — but that still have to push. The boolean exists so those callers stop
+ * writing `.catch(() => {})`: a push that failed has to change what the user is
+ * told, or a job quietly keeps an event nobody will look at again.
+ */
+export async function pushJobToCalendar(
+  jobId: string,
+  fetchImpl: typeof fetch = fetch
+): Promise<boolean> {
   try {
     const res = await fetchImpl(`/api/jobs/${jobId}/sync-calendar`, { method: "POST" });
-    return { ok: true, calendarSynced: res.ok };
+    return res.ok;
   } catch {
-    // Offline, or the request never left. The row still changed.
-    return { ok: true, calendarSynced: false };
+    // Offline, or the request never left. Whatever the caller wrote still stands.
+    return false;
   }
 }

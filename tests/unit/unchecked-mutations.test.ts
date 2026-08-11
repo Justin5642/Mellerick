@@ -79,12 +79,35 @@ function uncheckedMutations(src: string): string[] {
   const lines = src.split("\n");
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
-    // Statement starts with `await` (no `const … =` before it) and reaches a
-    // mutation on the same line or the next few.
-    if (!/^\s*await\s+\w+[\s\S]*?\.from\(/.test(line)) continue;
-    const window = lines.slice(i, i + 8).join("\n");
-    const m = window.match(/\.(insert|update|upsert|delete)\s*\(/);
-    if (m) hits.push(`${i + 1}: ${line.trim().slice(0, 90)}`);
+    // The statement must START with `await` — `const { error } = await …` is
+    // the checked form and is not a hit.
+    if (!/^\s*await\s+\w/.test(line)) continue;
+
+    // ONE STATEMENT, NOT ONE LINE, and that distinction was a real hole.
+    //
+    // This used to require `await` and `.from(` on the SAME line, so the
+    // idiomatic multi-line form
+    //
+    //     await supabase
+    //       .from("jobs")
+    //       .update({ … })
+    //       .eq("id", id);
+    //
+    // was invisible to it. Two writes in lib/google.ts — added by the very
+    // change that extended this guard to `lib` — were exactly that shape. A
+    // guard that only sees code formatted one way is a guard against
+    // formatting, and it was described in the handover as an absolute rule.
+    //
+    // Cut at the first `;` so the window cannot run past the end of this
+    // statement and borrow a `.from(` from the one below it.
+    const rest = lines.slice(i, i + 12).join("\n");
+    const semicolon = rest.indexOf(";");
+    const statement = semicolon === -1 ? rest : rest.slice(0, semicolon);
+
+    if (!/\.from\(/.test(statement)) continue;
+    if (/\.(insert|update|upsert|delete)\s*\(/.test(statement)) {
+      hits.push(`${i + 1}: ${line.trim().slice(0, 90)}`);
+    }
   }
   return hits;
 }

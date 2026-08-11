@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { resolveExistingInvoice } from "@/lib/approval-invoice-guard";
+import { pushJobToCalendar } from "@/lib/schedule-dispatch";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -228,9 +229,13 @@ export default function ApprovalsPage() {
       return;
     }
 
-    fetch(`/api/jobs/${jobId}/sync-calendar`, { method: "POST" }).catch(() => {});
+    // Sending a job back reopens it, so its calendar event is wrong until this
+    // lands. It is not worth failing the send-back over, but it is worth
+    // saying — `.catch(() => {})` said nothing.
+    const calendarSynced = await pushJobToCalendar(jobId);
     setJobs(j => j.filter(job => job.id !== jobId));
-    toast.success("Job sent back — technician will be notified");
+    if (calendarSynced) toast.success("Job sent back — technician will be notified");
+    else toast.warning("Job sent back — technician will be notified, but Google Calendar was not updated");
     setSaving(null);
   }
 

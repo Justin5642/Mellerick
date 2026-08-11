@@ -1,8 +1,9 @@
 -- ============================================================================
 -- Two replace-a-set operations that application code cannot make atomic.
 --
--- STATUS: DRAFT — NOT APPLIED. (tests/unit/migration-header-truth.test.ts fails
--- the build if this line is still here once it IS applied.)
+-- STATUS: DRAFT — NOT APPLIED. (`npm run check:migrations` fails once this
+-- line is still here and the ledger HAS this migration;
+-- tests/unit/migration-header-truth.test.ts keeps that check able to see it.)
 --
 -- ---------------------------------------------------------------------------
 -- WHY THIS EXISTS

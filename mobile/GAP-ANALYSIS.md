@@ -16,8 +16,14 @@ notes / signature / voice / variations / backflow register) is uniformly
 outbox-backed (D68); every P1 office workflow is done; Reports has all 5 analytics
 tables; and the money math is ported verbatim + TDD-locked + verified byte-for-byte
 against the web (D55, re-verified D66). The true blockers to a **shippable build**
-remain **external**: backend Bearer refactor, RLS migration 0035 apply, store/push
-accounts, PowerSync password, on-device QA.
+remain **external** — corrected 11 Aug 2026, because two of the five listed here were
+already closed: **store/push accounts, PowerSync password, on-device QA.**
+
+Struck from that list: the **backend Bearer refactor** (merged — `lib/api/caller-client.ts`,
+used by eight route files) and the **RLS migration 0035 apply** (applied and verified in
+production 2026-08-05). Both are left visible because a list of five external blockers
+where two are phantom is how a genuinely blocked project looks indistinguishable from a
+project waiting on one purchase order.
 
 ## Status by area
 
@@ -71,10 +77,16 @@ out of in-repo scope:
 
 ## External gates (NOT closable in-repo)
 
-- **Invoice/Quote Send-email, PDF view/download, Xero push** — the web API routes are cookie-only and reject a mobile Bearer token → **backend refactor (Justin)**.
+**Three gates remain, all listed below.** (An earlier edit put "this is the whole
+list now" on the first bullet with two live gates directly beneath it — which is
+the same defect this document was being corrected for, introduced while
+correcting it. A reader who trusts that sentence stops reading at the first
+line.)
+
+- **On-device QA, store accounts, push credentials, PowerSync password** — hardware/accounts.
 - **Staff invite / resend / edit-login-email** — Supabase auth-admin onboarding.
 - **Integration OAuth connect/reconnect** (Xero, Google) — browser redirect flow.
-- **On-device QA, store accounts, push credentials, PowerSync password** — hardware/accounts.
+- ~~**Invoice/Quote Send-email, PDF view/download, Xero push** — the web API routes are cookie-only and reject a mobile Bearer token → backend refactor (Justin)~~ — **merged.** `lib/api/caller-client.ts` resolves either a mobile Bearer token or a web cookie into an RLS-scoped client, and the send/pdf/Xero/Google-sync routes use it. Wiring the mobile buttons is now in-repo work, not a gate.
 
 ## What IS at parity (done) — the vast majority
 

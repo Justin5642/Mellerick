@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { TIME_ENTRY_SELECT_WITH_STAFF } from "@/lib/time-entry-columns";
+import { checkManualClockedHours } from "@/lib/time-entry-hours";
 
 type RateOverride = "normal" | "time_and_half" | "double_time";
 
@@ -125,18 +126,20 @@ export function TimeEntryEditDialog({ open, onOpenChange, mode, jobId, currentUs
 
   const clockInDate = clockIn ? new Date(clockIn) : null;
   const clockOutDate = !stillOpen && clockOut ? new Date(clockOut) : null;
-  const invalid = !clockInDate || (clockOutDate ? clockOutDate.getTime() <= clockInDate.getTime() : false);
-  const hoursPreview =
-    clockInDate && clockOutDate && !invalid
-      ? Math.round(((clockOutDate.getTime() - clockInDate.getTime()) / 3600000) * 100) / 100
-      : null;
+  // The subtraction used to be inline here AND in handleSave, guarded only
+  // against <= 0. A mistyped year saved a ~200-hour shift, which
+  // labour-billing-sync then priced onto the customer's invoice; migration 0051
+  // would refuse it at the database but is still a draft. The shared check is
+  // the same one the clock-in/out buttons use, so a duration the automatic path
+  // would reject cannot be typed in through this dialog instead.
+  const check = checkManualClockedHours(clockInDate, clockOutDate);
+  const invalid = !check.ok;
+  const hoursPreview = check.ok ? check.hours : null;
 
   async function handleSave() {
-    if (invalid || !clockInDate) return;
+    if (!check.ok || !clockInDate) return;
     setSaving(true);
-    const hours = clockOutDate
-      ? Math.round(((clockOutDate.getTime() - clockInDate.getTime()) / 3600000) * 100) / 100
-      : null;
+    const hours = check.hours;
     const nowIso = new Date().toISOString();
     const payload = {
       clock_in: clockInDate.toISOString(),
@@ -277,7 +280,7 @@ export function TimeEntryEditDialog({ open, onOpenChange, mode, jobId, currentUs
             Still clocked in (no end time yet)
           </label>
 
-          {invalid && <p className="text-xs text-red-500">End time must be after start time</p>}
+          {!check.ok && <p className="text-xs text-red-500">{check.reason}</p>}
           {hoursPreview != null && <p className="text-lg font-semibold text-slate-800">{hoursPreview.toFixed(2)}h</p>}
 
           {entryType !== "travel" && costCenters.length > 0 && (

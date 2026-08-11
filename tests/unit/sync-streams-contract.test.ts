@@ -97,8 +97,41 @@ function selectedColumns(query: string): string[] {
   if (!match) return [];
   return match[1]
     .split(",")
-    .map((c) => c.trim().replace(/^\w+\./, "")) // strip a table qualifier
+    // Stripping the table qualifier also normalises `time_entries.*` to `*`,
+    // which is what lets usesWildcard below recognise a qualified star.
+    .map((c) => c.trim().replace(/^\w+\./, ""))
     .filter(Boolean);
+}
+
+// Does this query select whole rows rather than a named list?
+//
+// Asked of the PARSED column list, not of the raw query, so this and the money
+// check can never disagree about what a stream selects. The regex this replaced
+// matched a literal `select` followed by a bare star, which saw only a star in
+// first position: it did not match `SELECT time_entries.*` — the form every
+// office stream uses, and therefore the form a copy-pasted technician stream
+// arrives in — nor a star later in the list.
+function usesWildcard(query: string): boolean {
+  return selectedColumns(query).includes("*");
+}
+
+/** Technician-visible streams that select whole rows. */
+function wildcardOffenders(streams: Record<string, StreamDef>): string[] {
+  return Object.entries(streams)
+    .filter(([, def]) => def.query && isTechnicianVisible(def.query))
+    .filter(([, def]) => usesWildcard(def.query!))
+    .map(([name]) => name);
+}
+
+/** `stream.column` for every money column a technician-visible stream names. */
+function moneyOffenders(streams: Record<string, StreamDef>): string[] {
+  return Object.entries(streams)
+    .filter(([, def]) => def.query && isTechnicianVisible(def.query))
+    .flatMap(([name, def]) =>
+      selectedColumns(def.query!)
+        .filter(isMoneyColumn)
+        .map((column) => `${name}.${column}`)
+    );
 }
 
 // There must be exactly ONE deployable sync config. A second, superseded YAML
@@ -165,6 +198,70 @@ describe("MONEY_COLUMN detector", () => {
   }
 });
 
+// THE GUARD HAS TO CATCH THE EDIT THAT HAS NOT HAPPENED YET.
+//
+// Every stream in the YAML is correctly gated today, so asserting over the YAML
+// alone proves only that nobody has made the mistake — not that this file would
+// notice if they did. The realistic mistake has a known shape: every office
+// stream is written `SELECT <table>.*`, so a technician stream arrives by
+// copying one and dropping the `JOIN profiles` gate. A qualified star is not the
+// bare `SELECT *` an unqualified regex looks for, and stripping the qualifier
+// leaves `*`, which is not a money column name — so all four assertions above
+// stayed green while whole rows of time_entries reached the device.
+describe("the guard catches a qualified wildcard", () => {
+  // office_time_entries (sync-streams.yaml:219) with its role gate replaced by
+  // the technician job scope. time_entries carries rate_override, the column
+  // migration 0045 exists to keep off technician devices.
+  const leakedQuery =
+    "SELECT time_entries.* FROM time_entries WHERE job_id IN (SELECT id FROM jobs WHERE assigned_to = auth.user_id())";
+  const leaked = { tech_time_entries: { auto_subscribe: true, query: leakedQuery } };
+
+  it("sees the stream as technician-visible", () => {
+    expect(isTechnicianVisible(leakedQuery)).toBe(true);
+  });
+
+  it("rejects `SELECT time_entries.*` as a wildcard", () => {
+    expect(wildcardOffenders(leaked)).toEqual(["tech_time_entries"]);
+  });
+
+  it("rejects a qualified star anywhere in the column list", () => {
+    // `SELECT id, time_entries.* FROM …` is the same leak with a decoy column in
+    // front of it, and it satisfies the anti-vacuity check honestly.
+    const mixed = {
+      tech_time_entries: {
+        auto_subscribe: true,
+        query: "SELECT id, time_entries.* FROM time_entries WHERE job_id = auth.user_id()",
+      },
+    };
+    expect(wildcardOffenders(mixed)).toEqual(["tech_time_entries"]);
+  });
+
+  it("still rejects a bare `SELECT *`", () => {
+    const bare = {
+      tech_time_entries: {
+        auto_subscribe: true,
+        query: "SELECT * FROM time_entries WHERE job_id = auth.user_id()",
+      },
+    };
+    expect(wildcardOffenders(bare)).toEqual(["tech_time_entries"]);
+  });
+
+  it("does not mistake `time_entries.*` for a column list the money check can read", () => {
+    // Naming what the money assertion actually receives: one entry, `*`, which
+    // no money term matches. That is why the wildcard rule — not the money rule
+    // — has to be the one that rejects this stream.
+    expect(selectedColumns(leakedQuery)).toEqual(["*"]);
+    expect(moneyOffenders(leaked)).toEqual([]);
+  });
+
+  it("does not count a wildcard stream as one whose columns it can see", () => {
+    // The anti-vacuity check excludes wildcard streams by design. If the
+    // wildcard test cannot see a qualified star, this exclusion stops applying
+    // and `["*"]` is accepted as a genuine, non-empty column list.
+    expect(usesWildcard(leakedQuery)).toBe(true);
+  });
+});
+
 describe("PowerSync sync rules — technician streams", () => {
   const streams = loadStreams();
 
@@ -173,15 +270,10 @@ describe("PowerSync sync rules — technician streams", () => {
   });
 
   it("never uses SELECT * in a technician-visible stream", () => {
-    const offenders = Object.entries(streams)
-      .filter(([, def]) => def.query && isTechnicianVisible(def.query))
-      .filter(([, def]) => /select\s+\*/i.test(def.query!))
-      .map(([name]) => name);
-
     // A wildcard means "whatever columns this table has, now and forever". A
     // future migration adding a fee or price column to one of these tables would
     // replicate it to every technician device with no code change and no review.
-    expect(offenders).toEqual([]);
+    expect(wildcardOffenders(streams)).toEqual([]);
   });
 
   it("names no money column in any technician-visible stream", () => {
@@ -190,15 +282,7 @@ describe("PowerSync sync rules — technician streams", () => {
     // lands in plaintext SQLite on that technician's phone whatever the policies
     // say. This list is the only thing standing between a money column and the
     // device.
-    const offenders = Object.entries(streams)
-      .filter(([, def]) => def.query && isTechnicianVisible(def.query))
-      .flatMap(([name, def]) =>
-        selectedColumns(def.query!)
-          .filter(isMoneyColumn)
-          .map((column) => `${name}.${column}`)
-      );
-
-    expect(offenders).toEqual([]);
+    expect(moneyOffenders(streams)).toEqual([]);
   });
 
   it("can actually see the columns it is checking (guards against a parse returning nothing)", () => {
@@ -206,7 +290,7 @@ describe("PowerSync sync rules — technician streams", () => {
     // silently checks an empty list and passes forever. That is the failure mode
     // this whole file exists to prevent, so it gets its own check.
     const technicianStreams = Object.entries(streams).filter(
-      ([, def]) => def.query && isTechnicianVisible(def.query) && !/select\s+\*/i.test(def.query)
+      ([, def]) => def.query && isTechnicianVisible(def.query) && !usesWildcard(def.query)
     );
     expect(technicianStreams.length).toBeGreaterThan(5);
     for (const [name, def] of technicianStreams) {

@@ -50,7 +50,13 @@ export async function getGoogleCalendarClient(supabaseClient?: any) {
   if (new Date(tokenRow.token_expiry).getTime() < Date.now() + 60_000) {
     const { credentials } = await oauth2Client.refreshAccessToken();
     oauth2Client.setCredentials(credentials);
-    await supabase
+    // Discarded, a refused write here means the refreshed token is never
+    // stored, so EVERY later call refreshes again — and Google may rotate the
+    // refresh token while doing so, in which case the one still in the database
+    // is already dead and the connection is gone until someone reconnects by
+    // hand. Throwing is right: the caller otherwise holds a token that works
+    // for this call and nothing after it, which is worse than a clear failure.
+    const { error: persistError } = await supabase
       .from("google_tokens")
       .update({
         access_token: credentials.access_token!,
@@ -58,6 +64,12 @@ export async function getGoogleCalendarClient(supabaseClient?: any) {
         updated_at: new Date().toISOString(),
       })
       .eq("id", tokenRow.id);
+    if (persistError) {
+      throw new Error(
+        `Google token refreshed but could not be saved (${persistError.message}). ` +
+          `Calendar sync would keep re-refreshing and may lose the connection.`
+      );
+    }
   }
 
   return google.calendar({ version: "v3", auth: oauth2Client });
@@ -134,6 +146,10 @@ export async function pollGoogleCalendarChanges(supabase: any) {
   let pushFailed = 0;
   // Dead google_event_id links that could not be cleared.
   let linkClearFailed = 0;
+  // Job or token writes the database refused. Returned rather than swallowed:
+  // every other count here describes what the poll INTENDED, and only this says
+  // what actually landed.
+  let writeFailed = 0;
 
   // If we don't have a sync token yet, scope the initial listing to "from
   // now on" so we don't walk years of calendar history on the first run.
@@ -212,11 +228,16 @@ export async function pollGoogleCalendarChanges(supabase: any) {
         // Event was deleted directly in Google Calendar — clear the
         // schedule so office staff notice the job needs re-booking, rather
         // than silently leaving a stale schedule in place.
-        await supabase
+        const cleared = await supabase
           .from("jobs")
           .update({ scheduled_start: null, scheduled_end: null, google_event_id: null })
           .eq("id", job.id);
-        clearedByDeletion++;
+        // Counting this regardless would report a re-booking prompt the office
+        // never actually gets.
+        if (cleared.error) {
+          console.error(`Calendar poll: could not clear job ${job.id}:`, cleared.error.message);
+          writeFailed++;
+        } else clearedByDeletion++;
         continue;
       }
 
@@ -230,13 +251,21 @@ export async function pollGoogleCalendarChanges(supabase: any) {
       if (!startChanged && !endChanged) continue;
 
       if (eventWins) {
-        await supabase
+        // THE write this whole function exists to make — and `updated++` ran
+        // whether or not it landed, so the poll could report "3 jobs updated"
+        // having changed none of them.
+        const applied = await supabase
           .from("jobs")
           .update({
             scheduled_start: newStart ? new Date(newStart).toISOString() : job.scheduled_start,
             scheduled_end: newEnd ? new Date(newEnd).toISOString() : job.scheduled_end,
           })
           .eq("id", job.id);
+        if (applied.error) {
+          console.error(`Calendar poll: could not apply event to job ${job.id}:`, applied.error.message);
+          writeFailed++;
+          continue;
+        }
         updated++;
         continue;
       }
@@ -293,13 +322,30 @@ export async function pollGoogleCalendarChanges(supabase: any) {
     if (res.data.nextSyncToken) nextSyncToken = res.data.nextSyncToken;
   } while (pageToken);
 
-  await supabase
+  // The same watermark rule as the Xero reconciler. This token is what stops
+  // the next run re-reading the same window, so a refused write means every
+  // later poll re-processes from the same point — forever, while reporting
+  // success each time.
+  const { error: tokenError } = await supabase
     .from("google_tokens")
     .update({
       calendar_sync_token: nextSyncToken ?? syncToken ?? null,
       calendar_last_synced_at: new Date().toISOString(),
     })
     .eq("id", tokenRow.id);
+  if (tokenError) {
+    console.error("Calendar poll: could not store the sync token:", tokenError.message);
+    writeFailed++;
+  }
 
-  return { updated, clearedByDeletion, skipped, pushedToCalendar, pushFailed, linkClearFailed, initialSync: isInitialSync };
+  return {
+    updated,
+    clearedByDeletion,
+    skipped,
+    pushedToCalendar,
+    pushFailed,
+    linkClearFailed,
+    writeFailed,
+    initialSync: isInitialSync,
+  };
 }

@@ -146,9 +146,21 @@ streams:
   #
   # lib/powersync/schema.test.ts could not catch it: it skips wildcard tables
   # (`if (cols === "ALL") continue;`), which is every stream below.
-  # lib/powersync/readColumns.test.ts now closes that from the other end — it
-  # asserts every column the offline read layer names exists on the device,
-  # wildcard or not. If you add a column here, regenerate:
+  # lib/data/reads/sqlLint.test.ts closes that from the other end — it asserts
+  # every column the offline read layer names exists in AppSchema, wildcard or
+  # not. Read its header before relying on it: qualified `alias.column`
+  # references are checked everywhere, bare columns only where the statement has
+  # a single table, and nothing built at runtime is covered.
+  #
+  # It is also only one axis of two. sqlLint checks the reads against
+  # lib/powersync/schema.ts, which is GENERATED — if nobody re-runs the
+  # generator, the schema and the reads go stale together and sqlLint stays
+  # green. The other axis, schema.ts against the migration history, is
+  # tests/unit/device-schema-vs-migrations.test.ts, over in the web project
+  # because only that side can read supabase/migrations.
+  #
+  # So: if you add a column here, regenerate, or both guards will agree with
+  # each other and with nothing else:
   #   node mobile/scripts/generate-powersync-schema.mjs
   office_jobs:
     auto_subscribe: true

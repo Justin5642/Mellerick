@@ -32,18 +32,34 @@ export default async function ReportsPage() {
   // Aggregating in SQL is the right end state — pagination is the wrong tool
   // for a sum — but that needs a migration, handed over rather than applied
   // here. See lib/fetch-all-rows.ts.
-  const [invoicesResult, quotesResult, jobsResult, profilesResult, { data: { user } }] = await Promise.all([
+  // The equipment cutoff is computed up here so equipment_usage_log can join
+  // this batch and be covered by the same failure check. It holds one row per
+  // equipment use across the whole fleet for twelve months — the fastest-
+  // growing table this page reads, and one of the two selects the first paging
+  // pass left behind.
+  const equipmentTwelveMonthsAgo = new Date();
+  equipmentTwelveMonthsAgo.setFullYear(equipmentTwelveMonthsAgo.getFullYear() - 1);
+  const equipmentCutoffDate = equipmentTwelveMonthsAgo.toISOString().slice(0, 10);
+
+  const [invoicesResult, quotesResult, jobsResult, profilesResult, equipmentResult, equipmentUsageResult, { data: { user } }] = await Promise.all([
     fetchAllRows(supabase.from("invoices").select("id, total, status, created_at, customer_id, customers(name)")),
     fetchAllRows(supabase.from("quotes").select("id, total, status, created_at")),
     fetchAllRows(supabase.from("jobs").select("id, status, assigned_to, created_at")),
     fetchAllRows(supabase.from("profiles").select("id, full_name").eq("is_active", true)),
+    fetchAllRows(supabase.from("equipment").select("*").eq("is_active", true)),
+    fetchAllRows(
+      supabase
+        .from("equipment_usage_log")
+        .select("equipment_id, hours, usage_date")
+        .gte("usage_date", equipmentCutoffDate)
+    ),
     supabase.auth.getUser(),
   ]);
 
   // A report that cannot read all its rows must say so rather than render a
   // confident wrong number. This is the whole point of the change: the failure
   // was never that the data was capped, it was that nothing said it had been.
-  const readFailure = [invoicesResult, quotesResult, jobsResult, profilesResult].find((r) => !r.ok);
+  const readFailure = [invoicesResult, quotesResult, jobsResult, profilesResult, equipmentResult, equipmentUsageResult].find((r) => !r.ok);
   if (readFailure && !readFailure.ok) {
     return (
       <div className="p-6">
@@ -60,6 +76,8 @@ export default async function ReportsPage() {
   const quotes = quotesResult.ok ? quotesResult.rows : [];
   const jobs = jobsResult.ok ? jobsResult.rows : [];
   const profiles = profilesResult.ok ? profilesResult.rows : [];
+  const equipmentList = equipmentResult.ok ? equipmentResult.rows : [];
+  const equipmentUsage = equipmentUsageResult.ok ? equipmentUsageResult.rows : [];
 
   // Staff cost/efficiency data is payroll-sensitive (wage, super, sick
   // leave), so it's only fetched and passed down at all when the viewer is
@@ -71,11 +89,10 @@ export default async function ReportsPage() {
     isAdmin = viewerProfile?.role === "admin";
   }
 
-  // Fetched up-front (not payroll-sensitive, same as the Fleet page) so it
-  // can feed both the equipment utilization section below and each
-  // technician's loaded hourly rate in staffEfficiency -- a vehicle
-  // assigned to someone folds its $/hour cost into their true cost rate.
-  const { data: equipmentList } = await supabase.from("equipment").select("*").eq("is_active", true);
+  // Read up-front (not payroll-sensitive, same as the Fleet page) so it can
+  // feed both the equipment utilization section below and each technician's
+  // loaded hourly rate in staffEfficiency -- a vehicle assigned to someone
+  // folds its $/hour cost into their true cost rate.
   const vehicleCostPerHourByStaff = new Map<string, number>();
   (equipmentList ?? []).forEach((eq: any) => {
     if (!eq.assigned_to) return;
@@ -158,16 +175,9 @@ export default async function ReportsPage() {
   // used" idea as staff efficiency above: fixed costs (depreciation,
   // insurance, maintenance, rego) are incurred whether or not the item gets
   // used, so low utilization drives the true $/hr well above the budgeted
-  // rate -- the signal for "hire it instead of owning it."
-  const equipmentTwelveMonthsAgo = new Date();
-  equipmentTwelveMonthsAgo.setFullYear(equipmentTwelveMonthsAgo.getFullYear() - 1);
-  const equipmentCutoffDate = equipmentTwelveMonthsAgo.toISOString().slice(0, 10);
-
-  const { data: equipmentUsage } = await supabase
-    .from("equipment_usage_log")
-    .select("equipment_id, hours, usage_date")
-    .gte("usage_date", equipmentCutoffDate);
-
+  // rate -- the signal for "hire it instead of owning it." A truncated usage
+  // log divides that fixed cost by too-few hours, so the number the decision
+  // rests on comes out too HIGH: both reads are paged above.
   const hoursByEquipment = new Map<string, number>();
   (equipmentUsage ?? []).forEach((u: any) => {
     hoursByEquipment.set(u.equipment_id, (hoursByEquipment.get(u.equipment_id) ?? 0) + Number(u.hours ?? 0));

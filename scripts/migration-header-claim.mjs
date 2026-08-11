@@ -21,7 +21,7 @@
  * mention another migration's status, and the file's own claim is made at the
  * top or nowhere.
  */
-function headerOf(source) {
+export function headerOf(source) {
   const lines = String(source).split("\n");
   const header = [];
   for (const line of lines) {
@@ -47,4 +47,15 @@ export function claimsNotApplied(source) {
   const header = headerOf(source);
   if (APPLIED.some((re) => re.test(header))) return false;
   return CLAIMS.some((re) => re.test(header));
+}
+
+/**
+ * The opposite assertion, and NOT simply `!claimsNotApplied`. Most migrations
+ * state no status at all; those claim nothing, and a file that claims nothing
+ * cannot be caught lying. Only a header that positively says it is in
+ * production can be contradicted by the ledger, which is the comparison
+ * `npm run check:migrations` makes.
+ */
+export function claimsApplied(source) {
+  return APPLIED.some((re) => re.test(headerOf(source)));
 }

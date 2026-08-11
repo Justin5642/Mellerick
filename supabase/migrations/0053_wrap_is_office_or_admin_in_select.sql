@@ -1,8 +1,9 @@
 -- ============================================================================
 -- Make the role check evaluate once per query instead of once per row.
 --
--- STATUS: DRAFT — NOT APPLIED. (tests/unit/migration-header-truth.test.ts fails
--- the build if this line is still here once it IS applied.)
+-- STATUS: DRAFT — NOT APPLIED. (`npm run check:migrations` fails once this
+-- line is still here and the ledger HAS this migration;
+-- tests/unit/migration-header-truth.test.ts keeps that check able to see it.)
 --
 -- APPLY THIS ONE LAST, AND ON ITS OWN. It is the only migration in this batch
 -- that rewrites existing RLS policies, which is the operation this project has
