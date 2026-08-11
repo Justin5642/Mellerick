@@ -5,7 +5,9 @@ import { Ionicons } from "@expo/vector-icons";
 import { supabase } from "../lib/supabase";
 import { colors } from "../lib/theme";
 import { MoneyText } from "../design/components/MoneyText";
+import { ScreenError } from "../design/components/ScreenError";
 import { useSettings } from "../lib/data/hooks/useSettings";
+import { unwrap } from "../lib/data/reads/unwrap";
 import { listVariationTypes, listCostCentreTemplates, type VariationType, type CostCentreTemplate } from "../lib/data/reads/settings";
 
 interface Integrations {
@@ -18,9 +20,16 @@ async function readIntegrations(): Promise<Integrations> {
     supabase.from("xero_tokens").select("tenant_name").limit(1).maybeSingle(),
     supabase.from("google_tokens").select("id").limit(1).maybeSingle(),
   ]);
+  // Unwrapped rather than destructured: a failed read here was indistinguishable
+  // from "Not connected", and an admin who believes that goes to the web
+  // dashboard to reconnect an integration that was never disconnected.
+  // maybeSingle() reports a genuine absence as data:null with no error, so a real
+  // "not connected" still reads as one.
+  const xero = unwrap(xeroRes as never, "readIntegrations(xero)") as { tenant_name: string } | null;
+  const google = unwrap(googleRes as never, "readIntegrations(google)") as { id: string } | null;
   return {
-    xero: (xeroRes.data as { tenant_name: string } | null)?.tenant_name ?? null,
-    google: !!googleRes.data,
+    xero: xero?.tenant_name ?? null,
+    google: !!google,
   };
 }
 
@@ -36,19 +45,25 @@ export default function SettingsScreen() {
   const [draft, setDraft] = useState<VtDraft | null>(null);
   const [ccDraft, setCcDraft] = useState<CcDraft | null>(null);
   const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<unknown>(null);
 
+  // All three reads THROW on a failed query. The old catch turned that into
+  // `{ xero: null, google: false }` and left both lists empty, so every failure
+  // was rendered as "Not connected" plus "No variation types yet." — three
+  // confident statements about configuration that nobody had actually read.
   const load = useCallback(async () => {
     try {
+      setError(null);
       const [i, vt, cc] = await Promise.all([readIntegrations(), listVariationTypes(), listCostCentreTemplates()]);
       setState(i);
       setVTypes(vt);
       setCostCentres(cc);
-    } catch {
-      setState({ xero: null, google: false });
+    } catch (e) {
+      setError(e);
     }
   }, []);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => { void load(); }, [load]);
   const onRefresh = useCallback(async () => { setRefreshing(true); await load(); setRefreshing(false); }, [load]);
 
   async function saveVt() {
@@ -101,6 +116,19 @@ export default function SettingsScreen() {
     }
   }
   const ccGroups = Array.from(new Set(costCentres.map((c) => c.group_name)));
+
+  // Checked BEFORE the sections render, so a broken read can never be shown as
+  // an empty configuration. Re-creating a variation type that already exists is
+  // not a recoverable mistake — the duplicate prices future jobs. Retry drops
+  // back to the spinner by clearing `state`, this screen's loading flag.
+  if (error) {
+    return (
+      <View style={styles.container}>
+        <Stack.Screen options={{ title: "Settings" }} />
+        <ScreenError error={error} onRetry={() => { setState(null); void load(); }} />
+      </View>
+    );
+  }
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.blue600} />}>

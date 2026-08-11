@@ -47,7 +47,12 @@ export function Button({
   const isDisabled = disabled || loading;
 
   function handlePress() {
-    Haptics.selectionAsync();
+    // The haptic is decoration, and it rejects on hardware without a taptic
+    // engine or with system haptics switched off — there is nothing to tell the
+    // user, and the button's real action still runs on the next line. Swallowed
+    // rather than voided because `void` on a promise that genuinely rejects
+    // trades a dropped promise for an unhandled rejection on every tap.
+    Haptics.selectionAsync().catch(() => {});
     onPress?.();
   }
 

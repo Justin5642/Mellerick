@@ -4,6 +4,7 @@ import { Stack } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { colors } from "../lib/theme";
 import { MoneyText } from "../design/components/MoneyText";
+import { ScreenError } from "../design/components/ScreenError";
 import { listInventory, type InventoryItem } from "../lib/data/reads/inventory";
 import { lowStockItems } from "../lib/inventoryStock";
 import { useInventory } from "../lib/data/hooks/useInventory";
@@ -46,9 +47,23 @@ export default function InventoryScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [draft, setDraft] = useState<Draft | null>(null);
   const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<unknown>(null);
 
-  const load = useCallback(async () => setItems(await listInventory()), []);
-  useEffect(() => { load(); }, [load]);
+  // listInventory THROWS on a failed query instead of returning []. Unguarded,
+  // that throw escaped as a dropped promise and the list fell through to "No
+  // inventory. Tap + to add." — which tells the office their stock is gone when
+  // in fact the read broke. The refresh spinner never cleared either.
+  const load = useCallback(async () => {
+    try {
+      setError(null);
+      setItems(await listInventory());
+    } catch (e) {
+      setError(e);
+    } finally {
+      setRefreshing(false);
+    }
+  }, []);
+  useEffect(() => { void load(); }, [load]);
   const onRefresh = useCallback(async () => { setRefreshing(true); await load(); setRefreshing(false); }, [load]);
 
   const sections = useMemo(() => {
@@ -131,6 +146,18 @@ export default function InventoryScreen() {
       </Text>
     </View>
   );
+
+  // Checked BEFORE the SectionList, so a failed read can never be rendered as an
+  // empty stock list. The + button is left off this branch deliberately: adding
+  // an item against a list we could not load is how you get a duplicate SKU.
+  if (error) {
+    return (
+      <View style={styles.container}>
+        <Stack.Screen options={{ title: "Inventory" }} />
+        <ScreenError error={error} onRetry={() => { void load(); }} />
+      </View>
+    );
+  }
 
   return (
     <View style={styles.container}>

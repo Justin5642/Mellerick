@@ -1,9 +1,10 @@
 import { useState } from "react";
-import { View, Text, StyleSheet, TextInput, TouchableOpacity, Linking, Alert, Modal, FlatList } from "react-native";
+import { View, Text, StyleSheet, TextInput, TouchableOpacity, Alert, Modal, FlatList } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { supabase } from "../../lib/supabase";
 import { useJobEdit } from "../../lib/data/hooks/useJobEdit";
 import { colors } from "../../lib/theme";
+import { openExternalUrl, openNavigation } from "../../lib/open-external-url";
 import { JobHoursScoreboard } from "./hours-scoreboard";
 
 const API_BASE_URL = process.env.EXPO_PUBLIC_API_BASE_URL;
@@ -132,28 +133,36 @@ export function JobOverviewTab({ job, currentUserId }: { job: Job; currentUserId
     setSaving(false);
     // Best-effort calendar resync. MUST carry the Bearer token — React Native has
     // no cookie jar, so an unauthenticated POST just 401s silently (Q1).
+    //
+    // The trailing .catch is deliberate rather than lazy, and it is the one place
+    // in this file where a failure is NOT put in front of the user: offline is the
+    // normal case for this app, the edit itself is already durable in the outbox,
+    // and a "calendar didn't resync" warning on every save without signal would
+    // teach the technician to dismiss warnings. The durable answer is to enqueue
+    // "sync-calendar" through the outbox the way sign-off already does — that is a
+    // change to the write path, not to this screen.
     if (API_BASE_URL) {
-      supabase.auth.getSession().then(({ data }) => {
-        const token = data.session?.access_token;
-        if (!token) return;
-        fetch(`${API_BASE_URL}/api/jobs/${job.id}/sync-calendar`, {
-          method: "POST",
-          headers: { Authorization: `Bearer ${token}` },
-        }).catch(() => {});
-      });
+      supabase.auth.getSession()
+        .then(({ data }) => {
+          const token = data.session?.access_token;
+          if (!token) return;
+          fetch(`${API_BASE_URL}/api/jobs/${job.id}/sync-calendar`, {
+            method: "POST",
+            headers: { Authorization: `Bearer ${token}` },
+          }).catch(() => {});
+        })
+        .catch(() => {});
     }
     Alert.alert("Saved", "Job updated");
   }
 
   function openWaze() {
-    const site = job.sites;
-    if (!site) return;
-    if (site.site_lat && site.site_lng) {
-      Linking.openURL(`https://waze.com/ul?ll=${site.site_lat},${site.site_lng}&navigate=yes`);
-      return;
-    }
-    const query = encodeURIComponent(`${site.address_line1} ${site.suburb} ${site.state ?? ""}`);
-    Linking.openURL(`https://waze.com/ul?q=${query}&navigate=yes`);
+    // openNavigation owns the coordinates-then-address fallback this had, and
+    // tells the technician when nothing on the device can open either link —
+    // a bare Linking.openURL dropped that rejection, so a phone without Waze
+    // was indistinguishable from a missed tap. It resolves to a boolean instead
+    // of rejecting, so there is nothing left here to handle.
+    void openNavigation(job.sites);
   }
 
   return (
@@ -192,17 +201,17 @@ export function JobOverviewTab({ job, currentUserId }: { job: Job; currentUserId
       <View style={styles.card}>
         <Text style={styles.customerName}>{job.customers?.name ?? "—"}</Text>
         {job.customers?.phone && (
-          <TouchableOpacity onPress={() => Linking.openURL(`tel:${job.customers?.phone}`)}>
+          <TouchableOpacity onPress={() => { void openExternalUrl(`tel:${job.customers?.phone}`, "the dialler"); }}>
             <Text style={styles.link}>📞 {job.customers.phone}</Text>
           </TouchableOpacity>
         )}
         {job.customers?.mobile && (
-          <TouchableOpacity onPress={() => Linking.openURL(`tel:${job.customers?.mobile}`)}>
+          <TouchableOpacity onPress={() => { void openExternalUrl(`tel:${job.customers?.mobile}`, "the dialler"); }}>
             <Text style={styles.link}>📱 {job.customers.mobile} (mobile)</Text>
           </TouchableOpacity>
         )}
         {job.customers?.email && (
-          <TouchableOpacity onPress={() => Linking.openURL(`mailto:${job.customers?.email}`)}>
+          <TouchableOpacity onPress={() => { void openExternalUrl(`mailto:${job.customers?.email}`, "an email"); }}>
             <Text style={styles.link}>✉️ {job.customers.email}</Text>
           </TouchableOpacity>
         )}

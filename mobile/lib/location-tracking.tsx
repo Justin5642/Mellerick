@@ -1,4 +1,5 @@
 import { createContext, useContext, useEffect, useRef, type ReactNode } from "react";
+import { Alert } from "react-native";
 import * as Location from "expo-location";
 import { supabase } from "./supabase";
 import { useAuth } from "./auth-context";
@@ -68,6 +69,11 @@ export function LocationTrackingProvider({ children }: { children: ReactNode }) 
   const insideJobIdRef = useRef<string | null>(null);
   const departureRef = useRef<PendingDeparture | null>(null);
   const busyRef = useRef(false);
+  // This provider renders no UI, so a modal is the only surface it has. Once per
+  // session is the whole point of the ref: the site refresh retries every ten
+  // minutes, and an alert that reappears on a timer is one the technician learns
+  // to dismiss without reading.
+  const autoClockAlertedRef = useRef(false);
 
   // Keep the list of this tech's active job sites fresh.
   useEffect(() => {
@@ -109,8 +115,27 @@ export function LocationTrackingProvider({ children }: { children: ReactNode }) 
       );
     }
 
-    loadSites();
-    const interval = setInterval(loadSites, 10 * 60 * 1000);
+    // A refresh that THROWS rather than returning an error gets the same policy as
+    // the error branch above — keep the list we already have — with one exception
+    // that policy cannot cover. A FIRST load that fails leaves no list at all, and
+    // an empty list reads downstream as "not loaded yet", so the auto-clock never
+    // engages for the entire shift. There is no screen anywhere that would show
+    // that, which is precisely why it has to be said out loud.
+    function refreshSites() {
+      loadSites().catch((e) => {
+        if (cancelled) return;
+        console.warn("[geofence] job site refresh failed:", e);
+        if (sitesRef.current.length > 0 || autoClockAlertedRef.current) return;
+        autoClockAlertedRef.current = true;
+        Alert.alert(
+          "Automatic clock in/out isn't running",
+          "Your job sites couldn't be loaded, so arrivals and travel time won't be recorded on their own. Clock in and out by hand until this clears."
+        );
+      });
+    }
+
+    refreshSites();
+    const interval = setInterval(refreshSites, 10 * 60 * 1000);
     return () => {
       cancelled = true;
       clearInterval(interval);
@@ -123,34 +148,55 @@ export function LocationTrackingProvider({ children }: { children: ReactNode }) 
     let subscription: Location.LocationSubscription | null = null;
     let cancelled = false;
 
-    (async () => {
-      const { status } = await Location.requestForegroundPermissionsAsync();
-      if (status !== "granted" || cancelled) return;
-      subscription = await Location.watchPositionAsync(
-        { accuracy: Location.Accuracy.Balanced, timeInterval: 15000, distanceInterval: 25 },
-        (position) => handlePosition(position, userId)
-      );
+    // The whole body is guarded before the promise is voided. Declining the
+    // permission is a return, not a throw, so this catch only fires when the
+    // watcher genuinely could not start — and that is the total loss of the
+    // auto-clock, not the partial one the background gap causes below.
+    void (async () => {
+      try {
+        const { status } = await Location.requestForegroundPermissionsAsync();
+        if (status !== "granted" || cancelled) return;
+        subscription = await Location.watchPositionAsync(
+          { accuracy: Location.Accuracy.Balanced, timeInterval: 15000, distanceInterval: 25 },
+          (position) => handlePosition(position, userId)
+        );
 
-      // Ask for background tracking too. Declining is fine and expected — the
-      // foreground watcher above still works, so the app degrades to exactly
-      // the behaviour it had before. What it must never do is fail silently,
-      // hence the log: a technician who declined "Always" is not having their
-      // drive time recorded, and somebody should be able to find out why.
-      if (cancelled) return;
-      const started = await startBackgroundClock().catch((e) => {
-        console.warn("[geofence] background clock failed to start:", e);
-        return false;
-      });
-      if (!started) {
-        console.warn(
-          "[geofence] background tracking NOT active — travel time is only recorded while the app is open."
+        // Ask for background tracking too. Declining is fine and expected — the
+        // foreground watcher above still works, so the app degrades to exactly
+        // the behaviour it had before. What it must never do is fail silently,
+        // hence the log: a technician who declined "Always" is not having their
+        // drive time recorded, and somebody should be able to find out why.
+        if (cancelled) return;
+        const started = await startBackgroundClock().catch((e) => {
+          console.warn("[geofence] background clock failed to start:", e);
+          return false;
+        });
+        if (!started) {
+          console.warn(
+            "[geofence] background tracking NOT active — travel time is only recorded while the app is open."
+          );
+        }
+
+        // Separately from location: drain the outbox periodically while the app
+        // is CLOSED. Queued writes otherwise wait for someone to reopen the app,
+        // which after a late job may be the next morning.
+        startBackgroundSync(true).catch((e) => console.warn("[sync] background drain not registered:", e));
+      } catch (e) {
+        // Nothing on screen changes when this throws: no spinner, no empty state,
+        // just hours that quietly never get recorded and are missed a fortnight
+        // later on a payslip. A log line does not reach a technician in a
+        // basement, so the one available surface gets used instead.
+        if (cancelled) return;
+        console.warn("[geofence] foreground watcher failed to start:", e);
+        if (autoClockAlertedRef.current) return;
+        autoClockAlertedRef.current = true;
+        Alert.alert(
+          "Automatic clock in/out isn't running",
+          `Location tracking couldn't start, so arrivals and travel time won't be recorded on their own. Clock in and out by hand until this clears.${
+            e instanceof Error && e.message ? `\n\n${e.message}` : ""
+          }`
         );
       }
-
-      // Separately from location: drain the outbox periodically while the app
-      // is CLOSED. Queued writes otherwise wait for someone to reopen the app,
-      // which after a late job may be the next morning.
-      startBackgroundSync(true).catch((e) => console.warn("[sync] background drain not registered:", e));
     })();
 
     return () => {

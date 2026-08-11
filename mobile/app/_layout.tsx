@@ -23,6 +23,7 @@ import { LocationTrackingProvider } from "../lib/location-tracking";
 import { DataProvider } from "../lib/data/DataProvider";
 import { PowerSyncProvider } from "../lib/data/PowerSyncProvider";
 import { SyncStatusPill } from "../design/components/SyncStatusPill";
+import { ScreenError } from "../design/components/ScreenError";
 import { colors } from "../lib/theme";
 
 // Floating, app-wide sync indicator: invisible when synced, "Syncing N…" while
@@ -39,7 +40,7 @@ function SyncStatusOverlay() {
 }
 
 function RootNavigation() {
-  const { session, profile, loading, signOut } = useAuth();
+  const { session, profile, loading, profileError, reloadProfile, signOut } = useAuth();
   // Register for push once signed in (best-effort; no-op without a device /
   // permission / credentials / the device_tokens table — never blocks the UI).
   usePushRegistration();
@@ -65,6 +66,26 @@ function RootNavigation() {
     return (
       <View style={{ flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: colors.bg }}>
         <ActivityIndicator size="large" color={colors.blue600} />
+      </View>
+    );
+  }
+
+  // BEFORE the no-role branch, and that ordering is the whole point. A profile
+  // read that FAILED and an account that genuinely has no role are the same
+  // state downstream — `profile` is null either way — so without this the app
+  // told a technician "Your account has no access role yet. Please contact your
+  // administrator." because one request broke. They ring the office about
+  // permissions instead of pulling to retry, and the office has nothing to fix.
+  if (session && profileError) {
+    return (
+      <View style={{ flex: 1, backgroundColor: colors.bg, paddingTop: 64 }}>
+        <ScreenError error={profileError} onRetry={reloadProfile} />
+        <TouchableOpacity
+          onPress={signOut}
+          style={{ alignSelf: "center", marginTop: 8, paddingHorizontal: 20, paddingVertical: 10 }}
+        >
+          <Text style={{ color: colors.slate500, fontWeight: "600" }}>Sign out</Text>
+        </TouchableOpacity>
       </View>
     );
   }

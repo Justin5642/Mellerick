@@ -34,13 +34,13 @@ export default function BackflowListScreen() {
 
   useFocusEffect(
     useCallback(() => {
-      load();
+      void load();
     }, [load])
   );
 
   function onRefresh() {
     setRefreshing(true);
-    load();
+    void load();
   }
 
   const overdueCount = rows.filter((r) => r.status === "overdue").length;
@@ -66,7 +66,7 @@ export default function BackflowListScreen() {
           error={error}
           onRetry={() => {
             setLoading(true);
-            load();
+            void load();
           }}
         />
       </View>

@@ -45,8 +45,8 @@ export default function ReportsScreen() {
       setRefreshing(false);
     }
   }, [isAdmin]);
-  useEffect(() => { load(); }, [load]);
-  const onRefresh = useCallback(() => { setRefreshing(true); load(); }, [load]);
+  useEffect(() => { void load(); }, [load]);
+  const onRefresh = useCallback(() => { setRefreshing(true); void load(); }, [load]);
 
   const jobsTotal = summary ? summary.jobsByStatus.reduce((s, j) => s + j.count, 0) : 0;
   // Win rate = accepted / (accepted + declined), matching the web (decided
@@ -66,7 +66,7 @@ export default function ReportsScreen() {
           error={error}
           onRetry={() => {
             setSummary(null);
-            load();
+            void load();
           }}
         />
       </View>

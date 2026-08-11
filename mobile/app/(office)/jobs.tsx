@@ -64,6 +64,11 @@ export default function OfficeJobsScreen() {
     setRefreshing(true);
     try {
       await runSearch(query);
+    } catch (e) {
+      // runSearch handles its own failures, so this should never fire. It exists
+      // so onRefresh itself provably cannot reject, which is what makes the
+      // `void onRefresh()` in the retry handler a guard rather than a gag.
+      setError(e);
     } finally {
       // runSearch swallows its own failures, but this flag is owned here: if it
       // is ever left set the pull-to-refresh spinner never stops.
@@ -97,7 +102,7 @@ export default function OfficeJobsScreen() {
         <ScreenError
           error={error}
           onRetry={() => {
-            onRefresh();
+            void onRefresh();
           }}
         />
       </SafeAreaView>

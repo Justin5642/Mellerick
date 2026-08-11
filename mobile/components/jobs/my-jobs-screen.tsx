@@ -8,13 +8,13 @@ import {
   TouchableOpacity,
   RefreshControl,
   ActivityIndicator,
-  Linking,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useFocusEffect, useRouter } from "expo-router";
 import { supabase } from "../../lib/supabase";
 import { listMyJobs } from "../../lib/data/reads/jobs";
 import { ScreenError } from "../../design/components/ScreenError";
+import { openNavigation } from "../../lib/open-external-url";
 import { useAuth } from "../../lib/auth-context";
 import { colors, statusColors } from "../../lib/theme";
 
@@ -61,14 +61,17 @@ export function MyJobsScreen() {
   }, []);
 
   useFocusEffect(
+    // `void` is honest here only because loadJobs' whole body sits inside the
+    // try/catch above: it settles rather than rejects, so nothing is dropped.
+    // The same holds at the other two call sites below.
     useCallback(() => {
-      loadJobs();
+      void loadJobs();
     }, [loadJobs])
   );
 
   function onRefresh() {
     setRefreshing(true);
-    loadJobs();
+    void loadJobs();
   }
 
   function formatTime(iso: string) {
@@ -84,13 +87,12 @@ export function MyJobsScreen() {
   const upcomingJobs = jobs.filter((j) => !j.scheduled_start || new Date(j.scheduled_start).toDateString() !== today);
 
   function openWaze(job: Job) {
-    const site = job.sites;
-    if (!site) return;
-    const url =
-      site.site_lat && site.site_lng
-        ? `https://waze.com/ul?ll=${site.site_lat},${site.site_lng}&navigate=yes`
-        : `https://waze.com/ul?q=${encodeURIComponent(`${site.address_line1}, ${site.suburb}`)}&navigate=yes`;
-    Linking.openURL(url);
+    // openNavigation owns the coordinates-then-address fallback and tells the
+    // technician when nothing on the device can open the link — the silence
+    // after a bare Linking.openURL is indistinguishable from a missed tap when
+    // you are standing in a driveway. It resolves to a boolean instead of
+    // rejecting, so there is nothing left here to handle.
+    void openNavigation(job.sites);
   }
 
   function JobCard({ job }: { job: Job }) {
@@ -140,7 +142,7 @@ export function MyJobsScreen() {
           error={error}
           onRetry={() => {
             setLoading(true);
-            loadJobs();
+            void loadJobs();
           }}
         />
       </SafeAreaView>

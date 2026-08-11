@@ -70,7 +70,7 @@ export default function StaffScreen() {
       if (__DEV__) console.warn("[staff] load failed:", e);
     }
   }, []);
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => { void load(); }, [load]);
   const onRefresh = useCallback(async () => { setRefreshing(true); await load(); setRefreshing(false); }, [load]);
 
   // Load the leave log whenever the editor opens for a staff member.

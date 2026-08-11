@@ -4,6 +4,8 @@ import { Ionicons } from "@expo/vector-icons";
 import { supabase } from "../../lib/supabase";
 import { colors } from "../../lib/theme";
 import { useJobNotes } from "../../lib/data/hooks/useJobNotes";
+import { ScreenError } from "../../design/components/ScreenError";
+import { unwrapRows } from "../../lib/data/reads/unwrap";
 import { netInfoConnectivity } from "../../lib/data/net/connectivity";
 import { useDataLayer } from "../../lib/data/DataProvider";
 import { useSyncSettled } from "../../lib/data/hooks/useSyncSettled";
@@ -34,26 +36,40 @@ export function JobNotesTab({ jobId, currentUserId }: { jobId: string; currentUs
   const [content, setContent] = useState("");
   const [saving, setSaving] = useState(false);
   const [polishing, setPolishing] = useState(false);
+  const [error, setError] = useState<unknown>(null);
   const notesComposer = useJobNotes();
   const layer = useDataLayer();
 
   // Reads refresh from the server only when online; offline, local state (incl.
   // the optimistic note just queued) is authoritative. Even online we MERGE, so
   // an optimistic note whose write is still pending survives a racing reload.
+  //
+  // A failed load must NOT land here as an empty list: this tab renders "No
+  // notes yet", and a technician who reads that when the query actually broke
+  // concludes the job has no history — then re-dictates a note that already
+  // exists, or acts on a site with defects nobody told them about. So the query
+  // error is raised rather than destructured away, and every rejection on this
+  // path (the connectivity probe and the outbox scan included) is caught into
+  // `error`, which the render checks before it draws the list.
   const loadNotes = useCallback(async () => {
-    if (!(await netInfoConnectivity.isOnline())) return;
-    const { data } = await supabase
-      .from("job_notes")
-      .select("*, profiles(full_name)")
-      .eq("job_id", jobId)
-      .order("created_at", { ascending: false });
-    const rows = (data as unknown as Note[]) ?? [];
-    const pending = layer ? await layer.outbox.pendingRowIds() : new Set<string>();
-    setNotes((prev) => reconcileRows(prev, rows, pending));
+    try {
+      setError(null);
+      if (!(await netInfoConnectivity.isOnline())) return;
+      const res = await supabase
+        .from("job_notes")
+        .select("*, profiles(full_name)")
+        .eq("job_id", jobId)
+        .order("created_at", { ascending: false });
+      const rows = unwrapRows(res as never, "JobNotesTab.loadNotes") as unknown as Note[];
+      const pending = layer ? await layer.outbox.pendingRowIds() : new Set<string>();
+      setNotes((prev) => reconcileRows(prev, rows, pending));
+    } catch (e) {
+      setError(e);
+    }
   }, [jobId, layer]);
 
   useEffect(() => {
-    loadNotes();
+    void loadNotes();
   }, [loadNotes]);
 
   // Reconcile after each sync drain completes (the note has actually landed).
@@ -100,6 +116,19 @@ export function JobNotesTab({ jobId, currentUserId }: { jobId: string; currentUs
     } finally {
       setPolishing(false);
     }
+  }
+
+  // Checked BEFORE the list renders, so a failed load can never fall through to
+  // "No notes yet" — an empty history and a broken read must not look alike.
+  // This takes the composer down with it, matching the Time tab: a note written
+  // against a job whose state we failed to read is worth less than the tech
+  // knowing the read is broken.
+  if (error) {
+    return (
+      <View style={styles.container}>
+        <ScreenError error={error} onRetry={() => { void loadNotes(); }} />
+      </View>
+    );
   }
 
   return (

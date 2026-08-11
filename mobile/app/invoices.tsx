@@ -41,13 +41,15 @@ export default function InvoicesScreen() {
     }
   }, []);
 
+  // `void` is safe on every call of loadFirst below only because its whole body
+  // is inside the try/catch above — it settles, it never rejects.
   useEffect(() => {
-    loadFirst();
+    void loadFirst();
   }, [loadFirst]);
 
   const onRefresh = useCallback(() => {
     setRefreshing(true);
-    loadFirst();
+    void loadFirst();
   }, [loadFirst]);
 
   const loadMore = useCallback(async () => {
@@ -115,7 +117,7 @@ export default function InvoicesScreen() {
             // This screen's only busy flag is `refreshing`, so the retry reuses
             // it: the spinner it already has, rather than a blank list.
             setRefreshing(true);
-            loadFirst();
+            void loadFirst();
           }}
         />
       </View>

@@ -6,6 +6,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { supabase } from "../../lib/supabase";
 import { getJob } from "../../lib/data/reads/jobs";
 import { colors, statusColors } from "../../lib/theme";
+import { ScreenError } from "../../design/components/ScreenError";
 import { useIsOfficeOrAdmin } from "../../design/guards/useRole";
 import { useJobEdit } from "../../lib/data/hooks/useJobEdit";
 import { JobOverviewTab } from "../../components/job/overview";
@@ -40,24 +41,34 @@ export default function JobDetailScreen() {
   const [job, setJob] = useState<any>(null);
   const [userId, setUserId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<unknown>(null);
   const [tab, setTab] = useState<TabKey>("overview");
   const [editing, setEditing] = useState(false);
   const [savingEdit, setSavingEdit] = useState(false);
   const [details, setDetails] = useState<{ title: string; description: string } | null>(null);
 
+  // Both awaits can throw — the session lookup and the row read. Uncaught, the
+  // throw skipped setLoading(false) and the technician sat on a spinner that
+  // never resolved, on the one screen they spend the whole day in.
   const loadJob = useCallback(async () => {
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
-    setUserId(user?.id ?? null);
+    try {
+      setError(null);
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      setUserId(user?.id ?? null);
 
-    setJob(await getJob(id));
-    setLoading(false);
+      setJob(await getJob(id));
+    } catch (e) {
+      setError(e);
+    } finally {
+      setLoading(false);
+    }
   }, [id]);
 
   useFocusEffect(
     useCallback(() => {
-      loadJob();
+      void loadJob();
     }, [loadJob])
   );
 
@@ -117,13 +128,24 @@ export default function JobDetailScreen() {
       </SafeAreaView>
     );
   }
-  // Loaded but no job → not found / no access / offline (the row read failed).
-  // Show a clear message like every sibling detail screen, not an endless spinner.
+  // Checked BEFORE the !job branch. A read that threw is a failure, not an
+  // absence, and reporting it as "Job not found." would send a technician who is
+  // standing at the site looking for a job that was never gone.
+  if (error) {
+    return (
+      <SafeAreaView style={styles.container} edges={["bottom", "left", "right"]}>
+        <ScreenError error={error} onRetry={() => { setLoading(true); void loadJob(); }} />
+      </SafeAreaView>
+    );
+  }
+  // The read succeeded and still returned no row → genuinely removed, or not
+  // visible to this user. Offline no longer lands here: it throws, and the
+  // branch above says so.
   if (!job) {
     return (
       <SafeAreaView style={styles.center} edges={["bottom", "left", "right"]}>
         <Text style={styles.notFound}>Job not found.</Text>
-        <Text style={styles.notFoundHint}>It may have been removed, you may not have access, or you&apos;re offline.</Text>
+        <Text style={styles.notFoundHint}>It may have been removed, or you may not have access.</Text>
         <TouchableOpacity style={styles.notFoundBtn} onPress={() => router.back()}>
           <Text style={styles.notFoundBtnText}>Go back</Text>
         </TouchableOpacity>

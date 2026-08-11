@@ -25,10 +25,21 @@ export function usePushRegistration(): void {
     if (!projectId) return;
 
     let cancelled = false;
-    (async () => {
-      const result = await registerForPush(expoPushGateway, projectId);
-      if (!cancelled && result.status === "registered" && result.token) {
-        await upsertDeviceToken({ token: result.token, platform: Platform.OS, userId });
+    void (async () => {
+      try {
+        const result = await registerForPush(expoPushGateway, projectId);
+        if (!cancelled && result.status === "registered" && result.token) {
+          await upsertDeviceToken({ token: result.token, platform: Platform.OS, userId });
+        }
+      } catch {
+        // A deliberate swallow, and the only one here. Every expected outcome —
+        // simulator, permission declined, missing push credentials, un-migrated
+        // device_tokens — is already a return value that shows nothing by
+        // design, so a hard fault out of the notifications module lands in the
+        // same place: no push, and no screen to say so on, this hook being
+        // headless. Catching is what keeps it from becoming an unhandled
+        // rejection during sign-in. Note registerForPush only guards its token
+        // fetch — the permission calls above it can still throw.
       }
     })();
     return () => {

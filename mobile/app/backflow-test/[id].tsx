@@ -21,6 +21,7 @@ import { supabase } from "../../lib/supabase";
 import { colors } from "../../lib/theme";
 import { TEST_TYPES, FAILURE_REASONS } from "../../lib/backflow";
 import { useBackflow } from "../../lib/data/hooks/useBackflow";
+import { describeReadFailure } from "../../design/components/ScreenError";
 
 interface DeviceGroup {
   group_label: string;
@@ -179,6 +180,8 @@ export default function NewBackflowTestScreen() {
   const signatureRef = useRef<SignatureViewRef>(null);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [prefillError, setPrefillError] = useState<unknown>(null);
+  const [prefillAttempt, setPrefillAttempt] = useState(0);
 
   const [testType, setTestType] = useState("annual");
   const [testDate, setTestDate] = useState(new Date());
@@ -199,21 +202,48 @@ export default function NewBackflowTestScreen() {
   const [testerPhone, setTesterPhone] = useState("");
   const [remarks, setRemarks] = useState("");
 
+  // This prefill decides who the certificate is attributed to, so a silent
+  // failure is expensive: `currentUserId` is submitted as `testedBy`, and left
+  // null the test is filed against nobody. supabase reports failures in `error`
+  // rather than rejecting, so both paths are checked — an unread `error` is
+  // indistinguishable from "no profile" and was what made the loss invisible.
+  // The form deliberately stays usable: a tester with no signal must still be
+  // able to log the test, so the banner reports what wasn't filled in instead
+  // of replacing the screen.
   useEffect(() => {
-    supabase.auth.getUser().then(({ data }) => {
-      setCurrentUserId(data.user?.id ?? null);
-      if (data.user) {
-        supabase
+    let cancelled = false;
+    void (async () => {
+      try {
+        setPrefillError(null);
+        const { data: auth, error: authError } = await supabase.auth.getUser();
+        if (authError) throw new Error(`getUser: ${authError.message}`);
+        if (cancelled) return;
+        setCurrentUserId(auth.user?.id ?? null);
+        if (!auth.user) return;
+        // maybeSingle, not single: a tester with no profile row is an empty, not
+        // a failure, and must not raise the banner.
+        const { data: profile, error: profileError } = await supabase
           .from("profiles")
           .select("full_name")
-          .eq("id", data.user.id)
-          .single()
-          .then(({ data: profile }) => {
-            if (profile?.full_name) setTesterName(profile.full_name);
-          });
+          .eq("id", auth.user.id)
+          .maybeSingle();
+        if (profileError) throw new Error(`profiles.full_name: ${profileError.message}`);
+        if (cancelled) return;
+        if (profile?.full_name) setTesterName(profile.full_name);
+      } catch (e) {
+        if (!cancelled) setPrefillError(e);
       }
-    });
-  }, []);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [prefillAttempt]);
+
+  function retryPrefill() {
+    setPrefillAttempt((n) => n + 1);
+  }
+
+  const prefillFailure = prefillError ? describeReadFailure(prefillError) : null;
 
   function updateGroup(index: number, patch: Partial<DeviceGroup>) {
     setGroups((prev) => prev.map((g, i) => (i === index ? { ...g, ...patch } : g)));
@@ -324,6 +354,28 @@ export default function NewBackflowTestScreen() {
       </View>
 
       <ScrollView style={styles.content} contentContainerStyle={{ paddingBottom: 60 }}>
+        {/* At the top rather than beside the tester fields: it warns before the
+            form is filled in, and the unattributed-test half of the consequence
+            isn't tied to any one field. */}
+        {prefillFailure && (
+          <View style={styles.prefillFail}>
+            <Ionicons name="warning-outline" size={15} color={colors.orange700} />
+            <View style={styles.prefillFailBody}>
+              <Text style={styles.prefillFailText}>
+                {prefillFailure.isOffline
+                  ? "You're offline, so your tester details couldn't be loaded."
+                  : "Your tester details couldn't be loaded."}{" "}
+                Enter your name and licence number by hand — and this test will be recorded without being linked to your
+                user account.
+              </Text>
+              <Text style={styles.prefillFailDetail} selectable>{prefillFailure.detail}</Text>
+              <TouchableOpacity onPress={retryPrefill} accessibilityRole="button" hitSlop={8}>
+                <Text style={styles.prefillFailRetry}>Try again</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        )}
+
         <View style={styles.card}>
           <Text style={styles.cardTitle}>Test Details</Text>
           <ModalPicker label="Test Type" value={testType} options={TEST_TYPES} onChange={setTestType} />
@@ -545,6 +597,22 @@ const styles = StyleSheet.create({
     marginBottom: 14,
   },
   cardTitle: { fontSize: 14, fontWeight: "700", color: colors.slate700, marginBottom: 10 },
+  prefillFail: {
+    flexDirection: "row",
+    gap: 8,
+    alignItems: "flex-start",
+    backgroundColor: colors.orange100,
+    borderRadius: 10,
+    padding: 10,
+    marginHorizontal: 16,
+    marginBottom: 14,
+  },
+  prefillFailBody: { flex: 1 },
+  prefillFailText: { fontSize: 12, color: colors.orange700, lineHeight: 16 },
+  // Selectable and monospace, like ScreenError: this is the only diagnostic
+  // that reaches anyone downstream.
+  prefillFailDetail: { fontSize: 11, color: colors.orange700, fontFamily: "monospace", marginTop: 6 },
+  prefillFailRetry: { fontSize: 13, fontWeight: "700", color: colors.blue600, marginTop: 8 },
   cardHeaderRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 8 },
   fieldGroup: { marginBottom: 14 },
   fieldLabel: { fontSize: 12, fontWeight: "600", color: colors.slate700, marginBottom: 6 },

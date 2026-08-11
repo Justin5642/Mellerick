@@ -8,13 +8,13 @@ import {
   TouchableOpacity,
   TextInput,
   ActivityIndicator,
-  Linking,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect, useRouter } from "expo-router";
 import { searchJobs } from "../../lib/data/reads/jobs";
 import { ScreenError } from "../../design/components/ScreenError";
+import { openNavigation } from "../../lib/open-external-url";
 import { colors, statusColors } from "../../lib/theme";
 
 interface Job {
@@ -70,7 +70,7 @@ export default function SearchJobsScreen() {
   queryRef.current = query;
   useFocusEffect(
     useCallback(() => {
-      loadJobs(queryRef.current);
+      void loadJobs(queryRef.current);
     }, [loadJobs])
   );
 
@@ -101,14 +101,13 @@ export default function SearchJobsScreen() {
       .slice(0, 50);
   }, [allJobs, query]);
 
+  // openNavigation keeps the coordinates-then-address fallback this had, and
+  // tells the user when nothing on the device can open the link. Discarding the
+  // openURL promise meant a technician with no Waze installed tapped "Navigate"
+  // and got silence. `void` is safe here only because the helper catches its own
+  // failure and alerts — it never rejects.
   function openWaze(job: Job) {
-    const site = job.sites;
-    if (!site) return;
-    const url =
-      site.site_lat && site.site_lng
-        ? `https://waze.com/ul?ll=${site.site_lat},${site.site_lng}&navigate=yes`
-        : `https://waze.com/ul?q=${encodeURIComponent(`${site.address_line1}, ${site.suburb}`)}&navigate=yes`;
-    Linking.openURL(url);
+    void openNavigation(job.sites);
   }
 
   function JobRow({ job }: { job: Job }) {
@@ -145,7 +144,7 @@ export default function SearchJobsScreen() {
           error={error}
           onRetry={() => {
             setLoading(true);
-            loadJobs(query);
+            void loadJobs(query);
           }}
         />
       </SafeAreaView>
