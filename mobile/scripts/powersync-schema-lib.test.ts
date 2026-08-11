@@ -1,7 +1,7 @@
 // Guards the two pieces of schema generation that can silently produce a wrong
 // device schema: which columns a stream is understood to sync, and how a
 // Postgres type is narrowed to one of SQLite's three.
-const { parseStreams, sqliteType, render } = require("./powersync-schema-lib.js");
+const { parseStreams, sqliteType, render, columnsByTable } = require("./powersync-schema-lib.js");
 
 describe("parseStreams", () => {
   it("collects the union of explicitly selected columns for a table", () => {
@@ -111,5 +111,43 @@ describe("render", () => {
 
   it("fails loudly when a streamed table is missing from the database", () => {
     expect(() => render(new Map([["ghosts", "ALL"]]), byTable)).toThrow(/not in the database/);
+  });
+});
+
+describe("columnsByTable", () => {
+  // The map-building half of loadColumns, extracted so it can be tested. It used
+  // to live inline in generate-powersync-schema.mjs, in an unexported function,
+  // right next to the CLI-output parse that shipped a real bug (it sliced from
+  // the first `{`, which mis-read every output shape except the piped envelope).
+  // Splitting the pure grouping out from the I/O is what lets both be covered:
+  // the shape parse now goes through the shared, tested scripts/supabase-cli-json.mjs.
+  const ROWS = [
+    { table_name: "customers", column_name: "id", data_type: "uuid" },
+    { table_name: "customers", column_name: "name", data_type: "text" },
+    { table_name: "jobs", column_name: "id", data_type: "uuid" },
+    { table_name: "jobs", column_name: "total", data_type: "numeric" },
+  ];
+
+  it("groups columns under their table, preserving column order", () => {
+    const byTable = columnsByTable(ROWS);
+    expect([...byTable.keys()].sort()).toEqual(["customers", "jobs"]);
+    expect(byTable.get("jobs")).toEqual([
+      { name: "id", pg: "uuid" },
+      { name: "total", pg: "numeric" },
+    ]);
+  });
+
+  it("feeds render without translation — the shape is what render expects", () => {
+    // The whole point of the map is to drive render(). If the two ever drift,
+    // catch it here rather than in a generated file nobody reads until it breaks.
+    const out = render(new Map([["jobs", new Set(["id", "total"])]]), columnsByTable(ROWS));
+    expect(out).toContain("total: column.real,");
+  });
+
+  it("returns an empty map for no rows, rather than throwing", () => {
+    // Emptiness is the caller's to judge: parseCliRows already refuses an
+    // unreadable output upstream, so an empty array here means a genuinely empty
+    // result, and render() is the layer that decides a missing table is fatal.
+    expect(columnsByTable([]).size).toBe(0);
   });
 });

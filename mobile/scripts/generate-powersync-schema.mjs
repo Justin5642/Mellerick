@@ -17,13 +17,18 @@
 //
 // The pure logic lives in powersync-schema-lib.mjs so it can be unit-tested.
 import { execFileSync } from 'node:child_process';
-import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdirSync, unlinkSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 // CommonJS on purpose: jest transforms .js but not .mjs, so the pure logic
 // lives in a .js module both this ESM script and the test suite can load.
 import schemaLib from './powersync-schema-lib.js';
-const { parseStreams, render } = schemaLib;
+// The CLI-output parser is shared with the web check scripts. It used to be
+// duplicated inline here, and that copy carried a bug all three copies had —
+// see scripts/supabase-cli-json.mjs for the measured output-shape matrix.
+import { parseCliRows } from '../../scripts/supabase-cli-json.mjs';
+const { parseStreams, render, columnsByTable } = schemaLib;
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const MOBILE = join(HERE, '..');
@@ -31,24 +36,45 @@ const REPO = join(MOBILE, '..');
 const STREAMS = join(MOBILE, 'powersync', 'sync-streams.yaml');
 const OUT = join(MOBILE, 'lib', 'powersync', 'schema.ts');
 
-function loadColumns(offlineFile) {
-  const raw = offlineFile
-    ? readFileSync(offlineFile, 'utf8')
-    : execFileSync(
-        process.platform === 'win32' ? 'npx.cmd' : 'npx',
-        [
-          'supabase', 'db', 'query', '--linked',
-          "select table_name, column_name, data_type from information_schema.columns where table_schema = 'public' order by table_name, ordinal_position",
-        ],
-        { cwd: REPO, encoding: 'utf8', maxBuffer: 32 * 1024 * 1024 }
-      );
-  const json = JSON.parse(raw.slice(raw.indexOf('{')));
-  const byTable = new Map();
-  for (const r of json.rows) {
-    if (!byTable.has(r.table_name)) byTable.set(r.table_name, []);
-    byTable.get(r.table_name).push({ name: r.column_name, pg: r.data_type });
+const COLUMNS_SQL =
+  "select table_name, column_name, data_type from information_schema.columns " +
+  "where table_schema = 'public' order by table_name, ordinal_position";
+
+function queryColumnsViaCli() {
+  // Two things this has to get right, both learned the hard way elsewhere in the
+  // repo and neither of which the previous version did:
+  //
+  // 1. shell: true on Windows. Since Node 20, execFileSync of a bare `npx.cmd`
+  //    throws `spawnSync npx.cmd EINVAL` — the exact error a human got when they
+  //    followed this file's own "Regenerate: node mobile/scripts/..." instruction.
+  //    scripts/gen-types.mjs and the two check scripts all already know this.
+  //
+  // 2. The SQL travels by FILE, not as an inline argument. Under shell: true
+  //    cmd.exe re-parses the arguments and mangles the embedded quotes and `%`,
+  //    so an inline statement reaches the CLI broken. A temp file sidesteps it.
+  //
+  // --output-format json stops the CLI printing a box-drawing table to a
+  // terminal; parseCliRows handles the two JSON shapes that remain.
+  const file = join(tmpdir(), `mellerick-powersync-schema-${process.pid}.sql`);
+  writeFileSync(file, COLUMNS_SQL, 'utf8');
+  try {
+    return execFileSync(
+      'npx',
+      ['supabase', 'db', 'query', '--linked', '--output-format', 'json', '--file', file],
+      { cwd: REPO, encoding: 'utf8', maxBuffer: 32 * 1024 * 1024, shell: process.platform === 'win32' }
+    );
+  } finally {
+    try {
+      unlinkSync(file);
+    } catch {
+      /* best effort — a stray temp file is not worth failing regeneration over */
+    }
   }
-  return byTable;
+}
+
+function loadColumns(offlineFile) {
+  const raw = offlineFile ? readFileSync(offlineFile, 'utf8') : queryColumnsViaCli();
+  return columnsByTable(parseCliRows(raw));
 }
 
 const offlineFlag = process.argv.indexOf('--offline');

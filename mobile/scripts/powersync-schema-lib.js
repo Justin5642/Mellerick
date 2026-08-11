@@ -63,6 +63,19 @@ function sqliteType(pgType) {
   }
 }
 
+// Groups the flat `{ table_name, column_name, data_type }` rows the CLI returns
+// into the `table -> [{ name, pg }]` map render() consumes. Pure and exported so
+// it is testable: it used to live inline in generate-powersync-schema.mjs beside
+// a CLI-output parse that silently mis-read every shape but the piped one.
+function columnsByTable(rows) {
+  const byTable = new Map();
+  for (const r of rows) {
+    if (!byTable.has(r.table_name)) byTable.set(r.table_name, []);
+    byTable.get(r.table_name).push({ name: r.column_name, pg: r.data_type });
+  }
+  return byTable;
+}
+
 function render(synced, byTable) {
   const tables = [...synced.keys()].sort();
   const out = [];
@@ -113,4 +126,4 @@ function render(synced, byTable) {
   return out.join('\n');
 }
 
-module.exports = { parseStreams, sqliteType, render };
+module.exports = { parseStreams, sqliteType, render, columnsByTable };
