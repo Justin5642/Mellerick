@@ -33,6 +33,10 @@ yarn-error.log*
 # env files (can opt-in for committing if needed)
 .env*
 
+# powersync_role recovery password, written by scripts/set-powersync-password.ps1
+# so a clobbered clipboard can't lose it. Plaintext secret — delete after use.
+POWERSYNC_NEW_PASSWORD.local.txt
+
 # vercel
 .vercel
 
