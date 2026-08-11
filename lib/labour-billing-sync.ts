@@ -61,6 +61,28 @@ function requireRead(result: { error: { message?: string } | null }, table: stri
   }
 }
 
+/**
+ * The same rule for WRITES, which this function had for its reads and not for
+ * the six statements that actually change the bill.
+ *
+ * The reads above were hardened under a comment reading "A DISCARDED ERROR HERE
+ * CHANGES WHAT A CUSTOMER IS CHARGED". That is even more true ninety lines
+ * down: the return value below counts `billable.length` and `keptTimeEntryIds`,
+ * both derived from the INPUT arrays rather than from what landed, and
+ * /api/jobs/[id]/sync-billing wraps it as `{ ok: true, ...summary }`. So an RLS
+ * refusal produced HTTP 200, a labour total that never reached job_items, and a
+ * job that went to invoicing under-billed with nothing anywhere saying so.
+ *
+ * Throwing rather than returning: every caller of syncJobBilling already treats
+ * a throw as "the sync failed", and a partially-written bill must not be
+ * reported as a number.
+ */
+function requireWrite(result: { error: { message?: string } | null }, what: string): void {
+  if (result.error) {
+    throw new Error(`syncJobBilling: ${what} failed — ${result.error.message ?? "unknown error"}`);
+  }
+}
+
 // Recompute every auto billing item on a job from its current time entries.
 // Returns a small summary for the caller/UI.
 export async function syncJobBilling(admin: SupabaseClient, jobId: string) {
@@ -200,9 +222,9 @@ export async function syncJobBilling(admin: SupabaseClient, jobId: string) {
 
     const existing = (existingAutoItems ?? []).find((i) => i.source === "auto_labour" && i.time_entry_id === entry.id);
     if (existing) {
-      await admin.from("job_items").update(labourRow).eq("id", existing.id);
+      requireWrite(await admin.from("job_items").update(labourRow).eq("id", existing.id), "labour line update");
     } else {
-      await admin.from("job_items").insert(labourRow);
+      requireWrite(await admin.from("job_items").insert(labourRow), "labour line insert");
     }
     keptTimeEntryIds.add(entry.id);
   }
@@ -213,14 +235,15 @@ export async function syncJobBilling(admin: SupabaseClient, jobId: string) {
     (i) => i.source === "auto_labour" && (!i.time_entry_id || !keptTimeEntryIds.has(i.time_entry_id))
   );
   if (staleLabour.length > 0) {
-    await admin.from("job_items").delete().in("id", staleLabour.map((i) => i.id));
+    const staleDelete = await admin.from("job_items").delete().in("id", staleLabour.map((i) => i.id));
+    requireWrite(staleDelete, "stale labour cleanup");
   }
 
   // Exactly one call-out fee while there's any billable work; none otherwise.
   const existingCallouts = (existingAutoItems ?? []).filter((i) => i.source === "auto_callout");
   if (billable.length > 0) {
     if (existingCallouts.length === 0) {
-      await admin.from("job_items").insert({
+      const calloutInsert = await admin.from("job_items").insert({
         job_id: jobId,
         source: "auto_callout",
         name: "Call Out Fee",
@@ -228,12 +251,15 @@ export async function syncJobBilling(admin: SupabaseClient, jobId: string) {
         quantity: 1,
         unit_price: callOutFee,
       });
+      requireWrite(calloutInsert, "call-out fee insert");
     } else if (existingCallouts.length > 1) {
       // Collapse any accidental duplicates down to one.
-      await admin.from("job_items").delete().in("id", existingCallouts.slice(1).map((i) => i.id));
+      const dupDelete = await admin.from("job_items").delete().in("id", existingCallouts.slice(1).map((i) => i.id));
+      requireWrite(dupDelete, "duplicate call-out cleanup");
     }
   } else if (existingCallouts.length > 0) {
-    await admin.from("job_items").delete().in("id", existingCallouts.map((i) => i.id));
+    const calloutDelete = await admin.from("job_items").delete().in("id", existingCallouts.map((i) => i.id));
+    requireWrite(calloutDelete, "call-out removal");
   }
 
   return { billableEntries: billable.length, labourItems: keptTimeEntryIds.size };

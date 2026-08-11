@@ -17,6 +17,41 @@ function captureOutbox(): { outbox: Outbox; ops: WriteOperation[] } {
 }
 const byTable = (ops: WriteOperation[], table: string) => ops.filter((o) => o.table === table);
 
+// The web and the phone must produce the SAME invoice, and until this case
+// existed they did not. The only totals test used 120 / 12 / 132 — values that
+// round exactly — so raw float arithmetic and correctly rounded arithmetic gave
+// identical answers and the difference was invisible.
+//
+// A tax invoice whose subtotal plus GST does not equal its total is the defect
+// the web fixed with moneyTotals; the phone kept writing it, at four call
+// sites, under a comment claiming the maths was "identical to the web".
+describe("computeTotals rounds like the database does", () => {
+  it("produces a subtotal, GST and total that add up on values that do not round exactly", () => {
+    const { subtotal, gst, total } = computeTotals([
+      { name: "a", quantity: 3, unitPrice: 33.33 },
+      { name: "b", quantity: 1, unitPrice: 0.005 },
+    ]);
+
+    // Each is stored in a decimal(10,2) column and rounds independently, so the
+    // three have to agree AFTER rounding — not before.
+    expect(subtotal).toBe(Number(subtotal.toFixed(2)));
+    expect(gst).toBe(Number(gst.toFixed(2)));
+    expect(total).toBe(Number(total.toFixed(2)));
+    expect(Number((subtotal + gst).toFixed(2))).toBe(total);
+  });
+
+  it("rounds each line before summing, so the customer can add the lines themselves", () => {
+    // 0.005 * 3 = 0.015. Rounded per line first it is 0.02 * 3; summed raw it
+    // is 0.015 -> 0.02. The per-line figures are what appears on the invoice.
+    const { subtotal } = computeTotals([
+      { name: "b", quantity: 1, unitPrice: 0.005 },
+      { name: "b", quantity: 1, unitPrice: 0.005 },
+      { name: "b", quantity: 1, unitPrice: 0.005 },
+    ]);
+    expect(subtotal).toBe(0.03);
+  });
+});
+
 describe("computeTotals", () => {
   it("computes subtotal, 10% GST and total", () => {
     expect(computeTotals([{ name: "a", quantity: 2, unitPrice: 50 }, { name: "b", quantity: 1, unitPrice: 20 }])).toEqual({

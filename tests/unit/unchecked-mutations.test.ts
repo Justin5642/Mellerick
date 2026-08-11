@@ -39,7 +39,16 @@ import { join, relative } from "node:path";
 // only thing that tells them apart.
 
 const REPO = process.cwd();
-const ROOTS = ["app", "components"];
+// `lib` was missing, and its absence made the claim at the top of this file
+// false. "The allowlist is empty, so the guard is now an absolute rule" was
+// true of two directories out of three — and the third is where the billing
+// and integration code lives. Adding it surfaced thirteen unchecked writes,
+// six of them on the labour-billing path that decides what a customer is
+// charged.
+//
+// The sibling guard service-role-seam.test.ts already walked all three, so
+// this was an inconsistency rather than a considered scope.
+const ROOTS = ["app", "components", "lib"];
 
 /** Every .ts/.tsx file under the scanned roots. */
 function sourceFiles(): string[] {

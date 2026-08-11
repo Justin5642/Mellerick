@@ -138,8 +138,14 @@ export async function pollXeroInvoicePayments(supabase: any) {
     .not("xero_invoice_id", "is", null);
 
   if (!candidates || candidates.length === 0) {
-    await supabase.from("xero_tokens").update({ xero_invoice_last_synced_at: new Date().toISOString() }).eq("id", tokenRow.id);
-    return { markedPaid: 0, markedOverdue: 0, checked: 0 };
+    // Nothing to reconcile, so nothing is lost if this write is refused — but
+    // an unchecked one means the watermark silently stops advancing and every
+    // later run re-scans from the same point forever.
+    const { error } = await supabase
+      .from("xero_tokens")
+      .update({ xero_invoice_last_synced_at: new Date().toISOString() })
+      .eq("id", tokenRow.id);
+    return { markedPaid: 0, markedOverdue: 0, checked: 0, failed: error ? [`watermark: ${error.message}`] : [] };
   }
 
   const { xero, tenantId } = await getRefreshedXero(supabase);
@@ -149,6 +155,9 @@ export async function pollXeroInvoicePayments(supabase: any) {
 
   let markedPaid = 0;
   let markedOverdue = 0;
+  // Collected rather than thrown: one refused invoice must not abandon the rest
+  // of the page, but it must stop the watermark advancing past it.
+  const failed: string[] = [];
   const today = new Date().toISOString().slice(0, 10);
 
   // Xero's getInvoices accepts a batch of IDs per call -- chunk to stay well
@@ -170,7 +179,7 @@ export async function pollXeroInvoicePayments(supabase: any) {
       const fullyPaid = xInv.status === Invoice.StatusEnum.PAID || (xInv.amountDue !== undefined && Number(xInv.amountDue) <= 0);
 
       if (fullyPaid) {
-        await supabase
+        const { error } = await supabase
           .from("invoices")
           .update({
             status: "paid",
@@ -178,23 +187,42 @@ export async function pollXeroInvoicePayments(supabase: any) {
             paid_at: xInv.fullyPaidOnDate ?? new Date().toISOString(),
           })
           .eq("id", local.id);
-        markedPaid++;
+        if (error) failed.push(`${local.id}: ${error.message}`);
+        else markedPaid++;
         continue;
       }
 
       // Still unpaid in Xero -- keep local status current with due_date.
       const isOverdue = local.due_date && local.due_date < today;
       if (isOverdue && local.status !== "overdue") {
-        await supabase.from("invoices").update({ status: "overdue" }).eq("id", local.id);
-        markedOverdue++;
+        const { error } = await supabase.from("invoices").update({ status: "overdue" }).eq("id", local.id);
+        if (error) failed.push(`${local.id}: ${error.message}`);
+        else markedOverdue++;
       } else if (!isOverdue && local.status === "overdue") {
         // Due date was pushed out / corrected in Xero -- move back to "sent".
-        await supabase.from("invoices").update({ status: "sent" }).eq("id", local.id);
+        const { error } = await supabase.from("invoices").update({ status: "sent" }).eq("id", local.id);
+        if (error) failed.push(`${local.id}: ${error.message}`);
       }
     }
   }
 
-  await supabase.from("xero_tokens").update({ xero_invoice_last_synced_at: new Date().toISOString() }).eq("id", tokenRow.id);
+  // THE WATERMARK ONLY MOVES PAST WORK THAT ACTUALLY HAPPENED.
+  //
+  // This timestamp is what stops the next run re-examining these invoices. It
+  // used to be written unconditionally, while the status updates above were
+  // discarded — so an invoice whose "paid" write was refused was skipped from
+  // then on, permanently, and stayed "sent" in the app while Xero had it paid.
+  // Someone chases a customer who has already paid.
+  //
+  // Holding the watermark back re-checks a handful of already-correct invoices
+  // on the next run, which costs one extra API page. That is the cheaper error.
+  if (failed.length === 0) {
+    const { error } = await supabase
+      .from("xero_tokens")
+      .update({ xero_invoice_last_synced_at: new Date().toISOString() })
+      .eq("id", tokenRow.id);
+    if (error) failed.push(`watermark: ${error.message}`);
+  }
 
-  return { markedPaid, markedOverdue, checked: allIds.length };
+  return { markedPaid, markedOverdue, checked: allIds.length, failed };
 }

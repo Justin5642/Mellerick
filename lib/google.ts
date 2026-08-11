@@ -132,6 +132,8 @@ export async function pollGoogleCalendarChanges(supabase: any) {
   // event could not be corrected is still diverged, and the caller is the only
   // one able to say so.
   let pushFailed = 0;
+  // Dead google_event_id links that could not be cleared.
+  let linkClearFailed = 0;
 
   // If we don't have a sync token yet, scope the initial listing to "from
   // now on" so we don't walk years of calendar history on the first run.
@@ -153,7 +155,19 @@ export async function pollGoogleCalendarChanges(supabase: any) {
       // or calendar history was purged). Drop it so the next run re-seeds
       // from scratch instead of failing forever.
       if (e?.code === 410) {
-        await supabase.from("google_tokens").update({ calendar_sync_token: null }).eq("id", tokenRow.id);
+        // If THIS write is refused the stored token stays dead, every later
+        // run takes the same 410, and calendar sync stops permanently while
+        // reporting `resyncRequired` each time as though it were recovering.
+        const { error: clearError } = await supabase
+          .from("google_tokens")
+          .update({ calendar_sync_token: null })
+          .eq("id", tokenRow.id);
+        if (clearError) {
+          throw new Error(
+            `Google calendar sync token is stale and could not be cleared (${clearError.message}). ` +
+              `Sync will keep failing until it is reset.`
+          );
+        }
         return { resyncRequired: true };
       }
       throw e;
@@ -184,7 +198,14 @@ export async function pollGoogleCalendarChanges(supabase: any) {
           // edit, which is the whole failure this guard exists to prevent.
           // Re-creating the event needs the job number, title, customer and
           // site that only /sync-calendar assembles, so that stays its job.
-          await supabase.from("jobs").update({ google_event_id: null }).eq("id", job.id);
+          const { error: linkError } = await supabase
+            .from("jobs")
+            .update({ google_event_id: null })
+            .eq("id", job.id);
+          // Left set, the job keeps pointing at an event that no longer exists,
+          // so /sync-calendar takes its UPDATE branch, 404s, and recreates —
+          // producing a duplicate rather than repairing the link.
+          if (linkError) linkClearFailed++;
           skipped++;
           continue;
         }
@@ -250,7 +271,14 @@ export async function pollGoogleCalendarChanges(supabase: any) {
         if (code === 404 || code === 410) {
           // The event vanished between the list and the patch. Drop the dead
           // link; the schedule stays, and /sync-calendar recreates the event.
-          await supabase.from("jobs").update({ google_event_id: null }).eq("id", job.id);
+          const { error: linkError } = await supabase
+            .from("jobs")
+            .update({ google_event_id: null })
+            .eq("id", job.id);
+          // Left set, the job keeps pointing at an event that no longer exists,
+          // so /sync-calendar takes its UPDATE branch, 404s, and recreates —
+          // producing a duplicate rather than repairing the link.
+          if (linkError) linkClearFailed++;
           skipped++;
           continue;
         }
@@ -273,5 +301,5 @@ export async function pollGoogleCalendarChanges(supabase: any) {
     })
     .eq("id", tokenRow.id);
 
-  return { updated, clearedByDeletion, skipped, pushedToCalendar, pushFailed, initialSync: isInitialSync };
+  return { updated, clearedByDeletion, skipped, pushedToCalendar, pushFailed, linkClearFailed, initialSync: isInitialSync };
 }
