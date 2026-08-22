@@ -1,9 +1,8 @@
 -- ============================================================================
 -- Indexes on the foreign keys the app actually filters by.
 --
--- STATUS: DRAFT — NOT APPLIED. (`npm run check:migrations` fails once this
--- line is still here and the ledger HAS this migration;
--- tests/unit/migration-header-truth.test.ts keeps that check able to see it.)
+-- STATUS: ✅ APPLIED AND VERIFIED IN PRODUCTION (2026-08-22). All five indexes
+-- confirmed present by name. Recorded in supabase_migrations.schema_migrations.
 --
 -- ---------------------------------------------------------------------------
 -- MEASURED, NOT LISTED

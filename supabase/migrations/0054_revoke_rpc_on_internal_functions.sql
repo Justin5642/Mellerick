@@ -1,8 +1,10 @@
 -- ============================================================================
 -- Take four internal functions off the public API.
 --
--- STATUS: DRAFT — NOT APPLIED. (tests/unit/migration-header-truth.test.ts fails
--- the build if this line is still here once it IS applied.)
+-- STATUS: ✅ APPLIED AND VERIFIED IN PRODUCTION (2026-08-22). Gate tests
+-- (money_boundary_sweep.sql, 0035_rls_role_impersonation_test.sql) both passed;
+-- is_admin/is_office_or_admin EXECUTE grants for authenticated confirmed intact.
+-- Recorded in supabase_migrations.schema_migrations.
 --
 -- Found by Supabase's own security advisors against PRODUCTION, not by reading
 -- the repo — every SECURITY DEFINER function in `public` is exposed as a
