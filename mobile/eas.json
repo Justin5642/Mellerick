@@ -42,8 +42,8 @@
   "submit": {
     "production": {
       "ios": {
-        "appleId": "APPLE_ID_EMAIL_HERE",
-        "ascAppId": "APP_STORE_CONNECT_APP_ID_HERE",
+        "appleId": "justin@mellerick.com",
+        "ascAppId": "6796253847",
         "appleTeamId": "864FRPRM47"
       },
       "android": {
