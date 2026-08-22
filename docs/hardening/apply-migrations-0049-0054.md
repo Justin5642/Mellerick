@@ -197,6 +197,15 @@ fails the build while a file claims DRAFT after being applied, and
 `draft-migration-claims.test.ts` releases the code comments that currently hedge
 about 0049.
 
+**Progress (2026-08-22):** 0050, 0051, 0052, 0049 and 0054 applied to
+production and gate-tested, in that order, via `supabase db query --linked`
+(no `SUPABASE_DB_URL` on this machine, so the Management-API path was used
+instead of raw `psql`; each migration's ledger row was inserted by hand
+afterward, since that path does not update
+`supabase_migrations.schema_migrations` the way `db push` does). Ledger count
+is 54, not 55 — **0053 was deliberately skipped**, per its own "LAST, ALONE,
+DIFFERENT DAY" instruction above. Schedule it separately.
+
 ## If something goes wrong
 
 Each of these is a single `psql` invocation with `ON_ERROR_STOP=1`, and a failing

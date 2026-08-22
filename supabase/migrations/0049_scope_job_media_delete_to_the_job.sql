@@ -2,9 +2,9 @@
 -- Any authenticated user can destroy any job's photos, customer signatures and
 -- voice recordings. This closes that — and the three ways round it.
 --
--- STATUS: DRAFT — NOT APPLIED. (`npm run check:migrations` fails once this
--- line is still here and the ledger HAS this migration;
--- tests/unit/migration-header-truth.test.ts keeps that check able to see it.)
+-- STATUS: ✅ APPLIED AND VERIFIED IN PRODUCTION (2026-08-22). Gate tests
+-- (0049_storage_delete_scoping_test.sql, money_boundary_sweep.sql) both passed
+-- against production. Recorded in supabase_migrations.schema_migrations.
 --
 -- ---------------------------------------------------------------------------
 -- THE HOLE

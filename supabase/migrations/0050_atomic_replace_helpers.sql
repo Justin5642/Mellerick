@@ -1,9 +1,11 @@
 -- ============================================================================
 -- Two replace-a-set operations that application code cannot make atomic.
 --
--- STATUS: DRAFT — NOT APPLIED. (`npm run check:migrations` fails once this
--- line is still here and the ledger HAS this migration;
--- tests/unit/migration-header-truth.test.ts keeps that check able to see it.)
+-- STATUS: ✅ APPLIED AND VERIFIED IN PRODUCTION (2026-08-22). Both functions
+-- exist, neither is SECURITY DEFINER (self-asserted at apply time). Nothing
+-- calls them yet — repointing lib/replace-line-items.ts and
+-- lib/oauth-token-store.ts at .rpc() is a separate, follow-up change.
+-- Recorded in supabase_migrations.schema_migrations.
 --
 -- ---------------------------------------------------------------------------
 -- WHY THIS EXISTS
