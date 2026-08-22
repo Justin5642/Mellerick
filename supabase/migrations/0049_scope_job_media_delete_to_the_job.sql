@@ -132,7 +132,7 @@
 -- ---------------------------------------------------------------------------
 -- WHY A SECURITY DEFINER HELPER AND NOT A BARE exists()
 -- ---------------------------------------------------------------------------
--- 0047's footer proposed the ownership test inline. An RLS policy body is
+-- 0047's footer suggested the ownership test inline. An RLS policy body is
 -- evaluated AS THE INVOKING USER, so a bare `select ... from jobs` inside it is
 -- itself filtered by the RLS policies on public.jobs. Today that happens to
 -- work, because jobs is wide open — meaning the correctness of a security
