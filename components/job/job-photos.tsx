@@ -78,17 +78,14 @@ export function JobPhotos({ jobId, photos, onUpdate, currentUserId }: Props) {
     // The ROW goes first, and its result is checked before the object is
     // touched. Both were previously fired and ignored, with an unconditional
     // success toast — which was harmless only while everyone could delete
-    // everything. Migration 0049 WOULD scope both to office/admin or the job's
-    // assigned technician — it is DRAFTED AND NOT APPLIED, so production's only
-    // job_photos policy is still 0000_baseline.sql:165,
-    // `for all using (auth.role() = 'authenticated')`.
+    // everything. Migration 0049 (applied 2026-08-22) scopes both to
+    // office/admin or the job's assigned technician.
     //
-    // The checking below is right either way, and that is the point: neither
+    // The checking below does not depend on which policy is in force: neither
     // call throws on a refusal — storage.remove() returns { data, error }, and
-    // a PostgREST delete that RLS filters out succeeds against zero rows — so
-    // the handling does not depend on which policy is in force. Today a
-    // zero-row result means the row was already gone; once 0049 is applied it
-    // can also mean refused. Both are handled.
+    // a PostgREST delete that RLS filters out succeeds against zero rows. A
+    // zero-row result now means either the row was already gone, or the
+    // delete was refused by RLS. Both are handled.
     //
     // Row first because it is the authoritative record and it fails closed: if
     // it is refused, nothing has been destroyed and nothing is orphaned. The
@@ -104,15 +101,11 @@ export function JobPhotos({ jobId, photos, onUpdate, currentUserId }: Props) {
       return;
     }
     if (count === 0) {
-      // Deliberately does NOT name the reason. Migration 0049, which scopes
-      // this delete to office/admin or the job's assigned technician, is
-      // DRAFTED AND NOT APPLIED — production's only job_photos policy is still
-      // 0000_baseline.sql:165, `for all using (auth.role() = 'authenticated')`.
-      // So today a zero-row result means the row is already gone, not that
-      // permission was refused, and the old wording stated a rule that is not
-      // in force. Once 0049 is applied both readings are true and this stays
-      // correct; asserting the stricter one now would be telling the user
-      // something false about the system.
+      // Deliberately does NOT name the reason. Migration 0049 (applied
+      // 2026-08-22) scopes this delete to office/admin or the job's assigned
+      // technician, so a zero-row result can now mean either the row was
+      // already gone or the delete was refused by RLS — the vague wording
+      // stays correct under both.
       toast.error("That photo could not be removed — it may already have been deleted. Refresh and try again.");
       return;
     }

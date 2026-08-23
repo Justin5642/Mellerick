@@ -2,9 +2,9 @@
 -- Any authenticated user can destroy any job's photos, customer signatures and
 -- voice recordings. This closes that — and the three ways round it.
 --
--- STATUS: DRAFT — NOT APPLIED. (`npm run check:migrations` fails once this
--- line is still here and the ledger HAS this migration;
--- tests/unit/migration-header-truth.test.ts keeps that check able to see it.)
+-- STATUS: ✅ APPLIED AND VERIFIED IN PRODUCTION (2026-08-22). Gate tests
+-- (0049_storage_delete_scoping_test.sql, money_boundary_sweep.sql) both passed
+-- against production. Recorded in supabase_migrations.schema_migrations.
 --
 -- ---------------------------------------------------------------------------
 -- THE HOLE
@@ -132,7 +132,7 @@
 -- ---------------------------------------------------------------------------
 -- WHY A SECURITY DEFINER HELPER AND NOT A BARE exists()
 -- ---------------------------------------------------------------------------
--- 0047's footer proposed the ownership test inline. An RLS policy body is
+-- 0047's footer suggested the ownership test inline. An RLS policy body is
 -- evaluated AS THE INVOKING USER, so a bare `select ... from jobs` inside it is
 -- itself filtered by the RLS policies on public.jobs. Today that happens to
 -- work, because jobs is wide open — meaning the correctness of a security
