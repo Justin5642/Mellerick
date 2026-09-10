@@ -104,6 +104,7 @@
       "favicon": "./assets/favicon.png"
     },
     "plugins": [
+      "./plugins/withThirdPartySQLitePod",
       "expo-router",
       "expo-secure-store",
       [
