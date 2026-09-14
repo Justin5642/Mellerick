@@ -119,6 +119,10 @@ export default function BackflowDeviceScreen() {
 
   return (
     <SafeAreaView style={styles.container} edges={["bottom", "left", "right"]}>
+      <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
+        <Ionicons name="arrow-back" size={18} color={colors.slate500} />
+        <Text style={styles.backButtonText}>Back</Text>
+      </TouchableOpacity>
       <View style={styles.header}>
         <Text style={styles.title} numberOfLines={1}>
           {device.customers?.name ?? "Unknown customer"}
@@ -204,12 +208,14 @@ function DetailItem({ label, value }: { label: string; value: string }) {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.bg },
   center: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: colors.bg },
+  backButton: { flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 16, paddingTop: 12 },
+  backButtonText: { color: colors.slate500, fontSize: 13, fontWeight: "500" },
   header: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
     paddingHorizontal: 16,
-    paddingTop: 12,
+    paddingTop: 8,
     gap: 8,
   },
   title: { fontSize: 17, fontWeight: "700", color: colors.slate900, flex: 1 },
