@@ -335,7 +335,12 @@ export default function NewBackflowTestScreen() {
           ? "The test was logged and the report sent to the water authority."
           : "The test is saved on this device and will be submitted to the water authority automatically when you're back online."
       );
-      router.replace(`/backflow/${deviceId}`);
+      // back(), not replace(): this screen was reached by pushing from the device
+      // detail screen, which is still underneath in the stack and already
+      // refetches on focus. replace() pushed a duplicate copy on top instead,
+      // so tapping Back landed on an identical clone and looked like it did
+      // nothing.
+      router.back();
     } catch (e) {
       Alert.alert("Couldn't save the test", e instanceof Error ? e.message : "Please try again.");
     } finally {
