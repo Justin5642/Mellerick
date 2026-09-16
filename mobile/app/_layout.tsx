@@ -90,6 +90,25 @@ function RootNavigation() {
     );
   }
 
+  // staff.tsx exposes an "Active" toggle that, until now, only hid a technician
+  // from pickers — it never actually blocked sign-in. This is what makes it a
+  // real lockout: a deactivated account still authenticates against Supabase
+  // (the password is unchanged) but is stopped here before any protected route
+  // mounts.
+  if (session && profile && !profile.is_active) {
+    return (
+      <View style={{ flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: colors.bg, padding: 32, gap: 12 }}>
+        <Text style={{ fontSize: 16, fontWeight: "700", color: colors.slate900, textAlign: "center" }}>Account deactivated</Text>
+        <Text style={{ fontSize: 13, color: colors.slate500, textAlign: "center" }}>
+          Your account has been deactivated. Contact your office administrator if you believe this is a mistake.
+        </Text>
+        <TouchableOpacity onPress={signOut} style={{ marginTop: 8, paddingHorizontal: 20, paddingVertical: 10, borderRadius: 10, backgroundColor: colors.blue600 }}>
+          <Text style={{ color: "#fff", fontWeight: "600" }}>Sign out</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
+
   // Fail-closed: signed in but no recognizable role → no group is registered, so
   // show a safe error state instead of a blank shell (never guess a role).
   if (session && !isTech && !isOffice) {
