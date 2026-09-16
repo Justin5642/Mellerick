@@ -4,7 +4,10 @@ import { Stack } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { colors } from "../lib/theme";
 import { MoneyText } from "../design/components/MoneyText";
+import { supabase } from "../lib/supabase";
 import { listStaff, saveStaff, listLeave, addLeave, removeLeave, type StaffMember, type LeaveEntry, type LeaveType } from "../lib/data/reads/staff";
+
+const API_BASE_URL = process.env.EXPO_PUBLIC_API_BASE_URL;
 
 const LEAVE_TYPES: LeaveType[] = ["sick", "annual", "public_holiday", "other"];
 
@@ -18,6 +21,7 @@ const roleColor: Record<string, { bg: string; text: string }> = {
 interface Draft {
   id: string;
   full_name: string;
+  email: string;
   role: (typeof ROLES)[number];
   is_active: boolean;
   phone: string;
@@ -35,6 +39,7 @@ function toDraft(s: StaffMember): Draft {
   return {
     id: s.id,
     full_name: s.full_name,
+    email: s.email,
     role: (s.role as Draft["role"]) ?? "technician",
     is_active: s.is_active,
     phone: s.phone ?? "",
@@ -57,6 +62,7 @@ export default function StaffScreen() {
   const [leaveDraft, setLeaveDraft] = useState<{ leaveType: LeaveType; startDate: string; endDate: string; hours: string; notes: string } | null>(null);
   const [leaveSaving, setLeaveSaving] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [resetSending, setResetSending] = useState(false);
 
   // A failed load must not look like an empty roster. listStaff now throws
   // rather than returning [], so the screen can say "could not load" instead of
@@ -137,6 +143,24 @@ export default function StaffScreen() {
     }
   }
 
+  // Same call the login screen's own "Forgot password?" makes — Supabase sends
+  // the reset link regardless of who triggers it. Doing it from here means a
+  // dismissed or locked-out tech doesn't need to be talked through finding
+  // their own reset flow.
+  async function sendPasswordReset() {
+    if (!draft || resetSending) return;
+    setResetSending(true);
+    const { error } = await supabase.auth.resetPasswordForEmail(draft.email, {
+      redirectTo: `${API_BASE_URL}/update-password`,
+    });
+    setResetSending(false);
+    if (error) {
+      Alert.alert("Couldn't send reset email", error.message);
+    } else {
+      Alert.alert("Sent", `Password reset email sent to ${draft.email}.`);
+    }
+  }
+
   const set = (k: keyof Draft) => (v: string) => setDraft((d) => d && { ...d, [k]: v });
 
   return (
@@ -193,6 +217,10 @@ Pull down to retry.`}</Text>
                 <Text style={styles.switchLabel}>Active</Text>
                 <Switch value={draft?.is_active ?? true} onValueChange={(v) => setDraft((d) => d && { ...d, is_active: v })} />
               </View>
+              <TouchableOpacity style={styles.resetBtn} onPress={sendPasswordReset} disabled={resetSending}>
+                <Ionicons name="key-outline" size={14} color={colors.blue600} />
+                <Text style={styles.resetBtnText}>{resetSending ? "Sending…" : "Send password reset email"}</Text>
+              </TouchableOpacity>
               <Field label="Phone" value={draft?.phone ?? ""} onChange={set("phone")} />
               <Text style={styles.section}>Pay & on-costs</Text>
               <View style={styles.twoCol}>
@@ -303,6 +331,8 @@ const styles = StyleSheet.create({
   segTextActive: { color: "#fff" },
   switchRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingVertical: 6, marginBottom: 6 },
   switchLabel: { fontSize: 14, fontWeight: "600", color: colors.slate700 },
+  resetBtn: { flexDirection: "row", alignItems: "center", gap: 6, paddingVertical: 8, marginBottom: 12 },
+  resetBtnText: { fontSize: 13, fontWeight: "600", color: colors.blue600 },
   twoCol: { flexDirection: "row", gap: 12 },
   actions: { flexDirection: "row", gap: 10, marginTop: 12 },
   cancel: { flex: 1, paddingVertical: 12, borderRadius: 10, backgroundColor: colors.bg, alignItems: "center", borderWidth: 1, borderColor: colors.border },

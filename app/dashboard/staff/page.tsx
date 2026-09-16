@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Users, Plus, Mail, Phone, Shield, Wrench, Monitor, RotateCw, DollarSign, Pencil, Truck } from "lucide-react";
+import { Users, Plus, Mail, Phone, Shield, Wrench, Monitor, RotateCw, DollarSign, Pencil, Truck, KeyRound } from "lucide-react";
 import { StaffCostDialog } from "@/components/staff/staff-cost-dialog";
 import { StaffEditDialog } from "@/components/staff/staff-edit-dialog";
 import { ListPageSkeleton } from "@/components/ui/loading-skeletons";
@@ -31,6 +31,7 @@ export default function StaffPage() {
   const [form, setForm] = useState({ full_name: "", email: "", phone: "", role: "technician" });
   const [errors, setErrors] = useState<Record<string, boolean>>({});
   const [resendingId, setResendingId] = useState<string | null>(null);
+  const [resettingId, setResettingId] = useState<string | null>(null);
   const [role, setRole] = useState<string | null>(null);
   const [costDialogFor, setCostDialogFor] = useState<{ id: string; name: string } | null>(null);
   const [editingMember, setEditingMember] = useState<any>(null);
@@ -114,6 +115,22 @@ export default function StaffPage() {
       toast.success(`Invite re-sent to ${member.email}`);
     }
     setResendingId(null);
+  }
+
+  // Same client-side call the tech's own /forgot-password page makes — Supabase
+  // sends the reset link regardless of who triggers it. Sending it from here is
+  // what removes the need for a tech to know the office web app exists.
+  async function sendPasswordReset(member: any) {
+    setResettingId(member.id);
+    const { error } = await supabase.auth.resetPasswordForEmail(member.email, {
+      redirectTo: `${window.location.origin}/update-password`,
+    });
+    setResettingId(null);
+    if (error) {
+      toast.error(`Could not send reset email: ${error.message}`);
+    } else {
+      toast.success(`Password reset email sent to ${member.email}`);
+    }
   }
 
   async function toggleActive(id: string, current: boolean) {
@@ -269,6 +286,17 @@ export default function StaffPage() {
                         <RotateCw className="w-3 h-3" />
                         {resendingId === member.id ? "Sending..." : "Resend Invite"}
                       </Button>
+                      {isAdmin && (
+                        <Button
+                          variant="ghost" size="sm"
+                          className="text-xs h-7 gap-1 text-slate-400 hover:text-blue-600"
+                          disabled={resettingId === member.id}
+                          onClick={() => sendPasswordReset(member)}
+                        >
+                          <KeyRound className="w-3 h-3" />
+                          {resettingId === member.id ? "Sending..." : "Reset Password"}
+                        </Button>
+                      )}
                       <Button
                         variant="ghost" size="sm"
                         className={`text-xs h-7 ${member.is_active ? "text-slate-400 hover:text-red-500" : "text-slate-400 hover:text-green-600"}`}
