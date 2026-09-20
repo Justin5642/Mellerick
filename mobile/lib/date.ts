@@ -79,6 +79,18 @@ export function withDateKeyPreservingTime(value: string | Date, newDateKey: stri
   return fromBusinessInputValue(`${newDateKey}T${timePart}`);
 }
 
+// A stable "N days forward/back" step that stays on the same Melbourne
+// calendar date regardless of DST — anchoring at UTC noon means the
+// Melbourne-local clock is always somewhere between 22:00-23:00 the same
+// day (offset is always +10 or +11), so it never rolls over a date line.
+// Mirrors the web lib/date.ts (used by the schedule board's day/week nav).
+export function shiftDateKey(key: string, days: number): string {
+  const [y, m, d] = key.split("-").map(Number);
+  const anchor = new Date(Date.UTC(y, m - 1, d, 12, 0, 0));
+  anchor.setUTCDate(anchor.getUTCDate() + days);
+  return dateKeyInBusinessTZ(anchor);
+}
+
 // Move a scheduled job to a new day: start keeps its time-of-day; end keeps the
 // original DURATION (so an overnight/multi-hour job stays the same length).
 // Mirrors the web schedule board's drag-to-reschedule (team-schedule-view.tsx).

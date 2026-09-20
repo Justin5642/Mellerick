@@ -26,6 +26,17 @@ export class ScheduleRepository {
     await this.updateJob(jobId, { scheduled_start: scheduledStartIso, scheduled_end: scheduledEndIso });
   }
 
+  /**
+   * The "Schedule Job" flow's confirm step: assign + set the time block in
+   * one write (one outbox entry, one coalesced calendar sync) rather than a
+   * reassign() + reschedule() pair — mirrors the web dialog's single
+   * applyScheduleChange call, so a job is never briefly assigned with no
+   * time (or timed with no assignee) between two separate writes.
+   */
+  async schedule(jobId: string, assignedTo: string, scheduledStartIso: string, scheduledEndIso: string): Promise<void> {
+    await this.updateJob(jobId, { assigned_to: assignedTo, scheduled_start: scheduledStartIso, scheduled_end: scheduledEndIso });
+  }
+
   private async updateJob(jobId: string, payload: Record<string, unknown>): Promise<void> {
     const opId = this.ids.newId();
     const op: WriteOperation = {

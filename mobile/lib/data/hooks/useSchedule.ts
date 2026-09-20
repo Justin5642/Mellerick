@@ -22,5 +22,10 @@ export function useSchedule() {
       (jobId: string, scheduledStartIso: string, scheduledEndIso: string | null) => run((r) => r.reschedule(jobId, scheduledStartIso, scheduledEndIso)),
       [run]
     ),
+    schedule: useCallback(
+      (jobId: string, assignedTo: string, scheduledStartIso: string, scheduledEndIso: string) =>
+        run((r) => r.schedule(jobId, assignedTo, scheduledStartIso, scheduledEndIso)),
+      [run]
+    ),
   };
 }

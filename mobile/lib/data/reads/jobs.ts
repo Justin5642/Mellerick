@@ -74,6 +74,8 @@ export interface JobDetail {
   overtime_reason: string | null;
   overtime_category: string | null;
   voice_report_transcript: string | null;
+  assigned_to: string | null;
+  assigned_profile: { full_name: string } | null;
   customers: { name: string; phone: string | null; mobile: string | null; email: string | null } | null;
   sites: {
     name: string;
@@ -139,6 +141,7 @@ export const SQL_GET_JOB = `
          j.job_type, j.created_at, j.scheduled_start, j.scheduled_end,
          j.actual_start, j.actual_end, j.completion_notes,
          j.overtime_reason, j.overtime_category, j.voice_report_transcript,
+         j.assigned_to, p.full_name AS assigned_profile_full_name,
          c.name AS customer_name, c.phone AS customer_phone,
          c.mobile AS customer_mobile, c.email AS customer_email,
          s.name AS site_name, s.address_line1 AS site_address_line1,
@@ -147,6 +150,7 @@ export const SQL_GET_JOB = `
   FROM jobs j
   LEFT JOIN customers c ON c.id = j.customer_id
   LEFT JOIN sites     s ON s.id = j.site_id
+  LEFT JOIN profiles  p ON p.id = j.assigned_to
   WHERE j.id = ?`;
 
 export const SQL_LIST_OFFICE_JOBS = `
@@ -233,6 +237,8 @@ interface RawJobDetailRow {
   overtime_reason: string | null;
   overtime_category: string | null;
   voice_report_transcript: string | null;
+  assigned_to: string | null;
+  assigned_profile_full_name: string | null;
   customer_name: string | null;
   customer_phone: string | null;
   customer_mobile: string | null;
@@ -323,6 +329,8 @@ function mapJobDetail(r: RawJobDetailRow): JobDetail {
     overtime_reason: r.overtime_reason,
     overtime_category: r.overtime_category,
     voice_report_transcript: r.voice_report_transcript,
+    assigned_to: r.assigned_to,
+    assigned_profile: nestOne(r.assigned_profile_full_name, { full_name: r.assigned_profile_full_name as string }),
     customers: nestOne(r.customer_name, {
       name: r.customer_name as string,
       phone: r.customer_phone,
@@ -419,7 +427,7 @@ export async function getJob(id: string): Promise<JobDetail | null> {
     const res = await supabase
       .from("jobs")
       .select(
-        "id, job_number, title, status, priority, description, notes, job_type, created_at, scheduled_start, scheduled_end, actual_start, actual_end, completion_notes, overtime_reason, overtime_category, voice_report_transcript, customers(name, phone, mobile, email), sites(name, address_line1, suburb, state, postcode, site_lat, site_lng)"
+        "id, job_number, title, status, priority, description, notes, job_type, created_at, scheduled_start, scheduled_end, actual_start, actual_end, completion_notes, overtime_reason, overtime_category, voice_report_transcript, assigned_to, assigned_profile:profiles!jobs_assigned_to_fkey(full_name), customers(name, phone, mobile, email), sites(name, address_line1, suburb, state, postcode, site_lat, site_lng)"
       )
       .eq("id", id)
       .single();

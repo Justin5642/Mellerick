@@ -16,6 +16,7 @@ import { JobTimeTab } from "../../components/job/time";
 import { JobSignatureTab } from "../../components/job/signature";
 import { JobDocumentsTab } from "../../components/job/documents";
 import { JobVariationsTab } from "../../components/job/variations";
+import { ScheduleJobModal } from "../../components/job/schedule-job-modal";
 
 const TABS = [
   { key: "overview", label: "Overview" },
@@ -44,6 +45,7 @@ export default function JobDetailScreen() {
   const [error, setError] = useState<unknown>(null);
   const [tab, setTab] = useState<TabKey>("overview");
   const [editing, setEditing] = useState(false);
+  const [scheduleOpen, setScheduleOpen] = useState(false);
   const [savingEdit, setSavingEdit] = useState(false);
   const [details, setDetails] = useState<{ title: string; description: string } | null>(null);
 
@@ -162,6 +164,12 @@ export default function JobDetailScreen() {
           #{job.job_number} — {job.title}
         </Text>
         {isOfficeOrAdmin && (
+          <TouchableOpacity style={styles.scheduleBtn} onPress={() => setScheduleOpen(true)} accessibilityLabel="Schedule job">
+            <Ionicons name="calendar-outline" size={14} color="#fff" />
+            <Text style={styles.scheduleText}>Schedule</Text>
+          </TouchableOpacity>
+        )}
+        {isOfficeOrAdmin && (
           <TouchableOpacity style={styles.billingBtn} onPress={() => router.push(`/job/${id}/billing`)} accessibilityLabel="Job billing">
             <Ionicons name="cash-outline" size={14} color={colors.blue600} />
             <Text style={styles.billingText}>Billing</Text>
@@ -181,6 +189,18 @@ export default function JobDetailScreen() {
       <Text style={styles.subtitle}>
         {job.customers?.name}
         {job.sites ? ` · ${job.sites.name}, ${job.sites.suburb}` : ""}
+      </Text>
+      <Text style={styles.scheduleSubtitle}>
+        {job.assigned_profile && job.scheduled_start
+          ? `${job.assigned_profile.full_name} · ${new Date(job.scheduled_start).toLocaleString("en-AU", {
+              weekday: "short",
+              day: "numeric",
+              month: "short",
+              hour: "2-digit",
+              minute: "2-digit",
+              timeZone: "Australia/Melbourne",
+            })}`
+          : "Not scheduled"}
       </Text>
 
       <View style={styles.tabBarWrap}>
@@ -279,7 +299,7 @@ export default function JobDetailScreen() {
               multiline
             />
 
-            <Text style={styles.editHint}>Status, priority and type save instantly. Customer, site and schedule are edited on the web.</Text>
+            <Text style={styles.editHint}>Status, priority and type save instantly. Customer and site are edited on the web.</Text>
 
             <View style={styles.editActions}>
               <TouchableOpacity style={styles.cancelBtn} onPress={() => setEditing(false)} disabled={savingEdit}>
@@ -292,6 +312,17 @@ export default function JobDetailScreen() {
           </ScrollView>
         </View>
       </Modal>
+
+      <ScheduleJobModal
+        visible={scheduleOpen}
+        onClose={() => setScheduleOpen(false)}
+        jobId={job.id}
+        jobStatus={job.status}
+        currentAssignedTo={job.assigned_to}
+        currentScheduledStart={job.scheduled_start}
+        currentScheduledEnd={job.scheduled_end}
+        onScheduled={(patch) => setJob((j: any) => ({ ...j, ...patch }))}
+      />
     </SafeAreaView>
   );
 }
@@ -314,6 +345,8 @@ const styles = StyleSheet.create({
   title: { fontSize: 17, fontWeight: "700", color: colors.slate900, flex: 1 },
   billingBtn: { flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 999, borderWidth: 1, borderColor: colors.blue100, backgroundColor: colors.blue100 },
   billingText: { fontSize: 12, fontWeight: "700", color: colors.blue600 },
+  scheduleBtn: { flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 999, backgroundColor: colors.blue600 },
+  scheduleText: { fontSize: 12, fontWeight: "700", color: "#fff" },
   badge: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 999 },
   badgeEditable: { flexDirection: "row", alignItems: "center", gap: 3 },
   badgeText: { fontSize: 11, fontWeight: "600", textTransform: "capitalize" },
@@ -336,6 +369,7 @@ const styles = StyleSheet.create({
   doneBtn: { flex: 1, paddingVertical: 12, borderRadius: 10, backgroundColor: colors.blue600, alignItems: "center" },
   doneText: { color: "#fff", fontWeight: "700", fontSize: 14 },
   subtitle: { fontSize: 13, color: colors.slate500, paddingHorizontal: 16, marginTop: 2 },
+  scheduleSubtitle: { fontSize: 12, color: colors.slate400, paddingHorizontal: 16, marginTop: 2 },
   tabBarWrap: { borderBottomWidth: 1, borderBottomColor: colors.border, marginTop: 12 },
   tabBar: { paddingHorizontal: 12, gap: 4 },
   tab: { paddingHorizontal: 14, paddingVertical: 10, borderBottomWidth: 2, borderBottomColor: "transparent" },

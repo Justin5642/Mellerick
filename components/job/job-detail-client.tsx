@@ -5,10 +5,11 @@ import { useSearchParams } from "next/navigation";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { ArrowLeft, Briefcase, FileText, Image, List, MessageSquare, PenLine, ClipboardList, Clock, Receipt, GitPullRequestArrow, DollarSign, Truck, TrendingUp, Trash2 } from "lucide-react";
+import { ArrowLeft, Briefcase, FileText, Image, List, MessageSquare, PenLine, ClipboardList, Clock, Receipt, GitPullRequestArrow, DollarSign, Truck, TrendingUp, Trash2, CalendarClock } from "lucide-react";
 import Link from "next/link";
 import { JobOverview } from "./job-overview";
 import { DeleteJobDialog } from "./delete-job-dialog";
+import { ScheduleJobDialog } from "./schedule-job-dialog";
 import { JobDocuments } from "./job-documents";
 import { JobPhotos } from "./job-photos";
 import { JobLineItems } from "./job-line-items";
@@ -61,6 +62,8 @@ export function JobDetailClient({ job, currentUserId, photos: initialPhotos, doc
   );
   const highlightVariationId = searchParams.get("variation");
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const [scheduleOpen, setScheduleOpen] = useState(false);
+  const assignedStaff = staff.find((s: any) => s.id === job.assigned_to) ?? null;
 
   const [photos, setPhotos] = useState(initialPhotos);
   const [documents, setDocuments] = useState(initialDocuments);
@@ -115,9 +118,30 @@ export function JobDetailClient({ job, currentUserId, photos: initialPhotos, doc
                 {job.sites ? ` · ${job.sites.name}, ${job.sites.suburb}` : ""}
                 {""}
               </p>
+              <p className="text-xs text-slate-400 mt-1">
+                {assignedStaff && job.scheduled_start ? (
+                  <>
+                    {assignedStaff.full_name} ·{" "}
+                    {new Date(job.scheduled_start).toLocaleString("en-AU", {
+                      weekday: "short",
+                      day: "numeric",
+                      month: "short",
+                      hour: "2-digit",
+                      minute: "2-digit",
+                      timeZone: "Australia/Melbourne",
+                    })}
+                  </>
+                ) : (
+                  "Not scheduled"
+                )}
+              </p>
             </div>
           </div>
           <div className="flex items-center gap-2 shrink-0">
+            <Button size="sm" className="gap-1.5" onClick={() => setScheduleOpen(true)}>
+              <CalendarClock className="w-4 h-4" />
+              Schedule Job
+            </Button>
             {unbilledVariations.length > 0 && (
               <span
                 className="text-xs font-medium px-2.5 py-1 rounded-full bg-orange-100 text-orange-700"
@@ -243,6 +267,18 @@ export function JobDetailClient({ job, currentUserId, photos: initialPhotos, doc
         jobTitle={job.title}
         open={deleteOpen}
         onOpenChange={setDeleteOpen}
+      />
+
+      <ScheduleJobDialog
+        open={scheduleOpen}
+        onOpenChange={setScheduleOpen}
+        jobId={job.id}
+        jobNumber={job.job_number}
+        jobStatus={job.status}
+        staff={staff}
+        currentAssignedTo={job.assigned_to}
+        currentScheduledStart={job.scheduled_start}
+        currentScheduledEnd={job.scheduled_end}
       />
     </div>
   );

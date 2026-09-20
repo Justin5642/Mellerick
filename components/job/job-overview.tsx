@@ -13,6 +13,7 @@ import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Phone, Mail, MapPin, Calendar, User, Save, Navigation } from "lucide-react";
 import { formatDate, toBusinessInputValue, fromBusinessInputValue } from "@/lib/date";
+import { DEFAULT_SHIFT_START_TIME, DEFAULT_SHIFT_END_TIME } from "@/lib/scheduling";
 import { CustomerPicker } from "@/components/customer-picker";
 import { AddSiteDialog } from "@/components/site-add-dialog";
 
@@ -82,7 +83,7 @@ export function JobOverview({ job, staff }: Props) {
   // picking a date, or before.
   function setAllDay() {
     const datePart = (form.scheduled_start || toBusinessInputValue(new Date())).slice(0, 10);
-    setForm((prev) => ({ ...prev, scheduled_start: `${datePart}T07:00`, scheduled_end: `${datePart}T15:30` }));
+    setForm((prev) => ({ ...prev, scheduled_start: `${datePart}T${DEFAULT_SHIFT_START_TIME}`, scheduled_end: `${datePart}T${DEFAULT_SHIFT_END_TIME}` }));
   }
 
   async function save() {

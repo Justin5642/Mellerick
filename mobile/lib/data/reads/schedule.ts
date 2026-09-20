@@ -1,6 +1,7 @@
 import { supabase } from "../../supabase";
 import { fromLocalOr } from "./source";
 import { unwrapRows } from "./unwrap";
+import { businessDayRange } from "../../scheduling";
 
 export interface AssignableStaff {
   id: string;
@@ -40,6 +41,39 @@ export async function listAssignableStaff(): Promise<AssignableStaff[]> {
       // Stable: role first, then alphabetical (the query's full_name order isn't
       // preserved by a role-only sort).
       return [...rows].sort((a, b) => rank(a.role) - rank(b.role) || a.full_name.localeCompare(b.full_name));
+    },
+    { roles: ["office", "admin"] }
+  );
+}
+
+// How many jobs (other than `excludeJobId`) a technician already has
+// scheduled on a given business date — feeds the Schedule Job flow's "All
+// day" smart default (lib/scheduling.ts's defaultAllDay).
+export async function countOtherScheduledJobs(
+  technicianId: string,
+  dateKey: string,
+  excludeJobId: string
+): Promise<number> {
+  const { dayStartIso, dayEndIso } = businessDayRange(dateKey);
+  return fromLocalOr(
+    async (db) => {
+      const row = await db.getOptional<{ n: number }>(
+        `SELECT COUNT(*) AS n FROM jobs
+         WHERE assigned_to = ? AND id != ? AND scheduled_start >= ? AND scheduled_start < ?`,
+        [technicianId, excludeJobId, dayStartIso, dayEndIso]
+      );
+      return row?.n ?? 0;
+    },
+    async () => {
+      const { count, error } = await supabase
+        .from("jobs")
+        .select("id", { count: "exact", head: true })
+        .eq("assigned_to", technicianId)
+        .neq("id", excludeJobId)
+        .gte("scheduled_start", dayStartIso)
+        .lt("scheduled_start", dayEndIso);
+      if (error) throw error;
+      return count ?? 0;
     },
     { roles: ["office", "admin"] }
   );
