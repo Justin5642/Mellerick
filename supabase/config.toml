@@ -235,15 +235,47 @@ otp_length = 6
 # Number of seconds before the email OTP expires (defaults to 1 hour).
 otp_expiry = 3600
 
-# Use a production-ready SMTP server
-# [auth.email.smtp]
-# enabled = true
-# host = "smtp.sendgrid.net"
-# port = 587
-# user = "apikey"
-# pass = "env(SENDGRID_API_KEY)"
-# admin_email = "admin@email.com"
-# sender_name = "Admin"
+# Custom SMTP for Auth emails (signup confirmation, password reset, email
+# change), routed through Resend — the same provider already used for
+# invoice/quote/staff-invite emails elsewhere in this app (lib/resend.ts).
+# WITHOUT this, Supabase's own built-in mailer is used instead, which is
+# capped at just 2 emails/hour, PROJECT-WIDE, shared across every auth email
+# type combined ("for testing purposes only" per Supabase's own docs) — easy
+# to hit from a single person testing "forgot password" a couple of times in
+# a row, and the cause of the "too many times" error reported when
+# requesting a reset (confirmed NOT caused by the 0055 lockout hook: its
+# login_lockouts table was checked directly against production and was
+# completely empty at the time). Custom SMTP raises this to 30/hour by
+# default, further adjustable on the Rate Limits settings page.
+#
+# `user`/`pass` are Resend's fixed SMTP-relay credentials (see
+# https://resend.com/docs/send-with-smtp) — "resend" is a literal, public
+# constant, not a secret; `pass` is the real secret and comes from the same
+# RESEND_API_KEY env var already used elsewhere in this repo, never a literal
+# value in this file.
+#
+# `admin_email` is deliberately a NEW env var (AUTH_EMAIL_FROM), not a reuse
+# of lib/resend.ts's EMAIL_FROM: EMAIL_FROM is the combined Resend API
+# format "Display Name <address>", but this field is a bare address only
+# (display name is the separate `sender_name` field below) — reusing
+# EMAIL_FROM here would double up the name or fail to parse. Must be an
+# address on a domain verified in the Resend dashboard, same constraint
+# lib/resend.ts documents for EMAIL_FROM, or Resend will reject the send.
+#
+# NOTE: like every other [auth.*] setting in this file, writing it here only
+# affects local `supabase start` dev — it does not change the hosted
+# project. The hosted project's own SMTP settings must be turned on
+# separately, by hand, in Dashboard -> Authentication -> Emails -> SMTP
+# Settings (same "config.toml can't reach the Dashboard" limitation as the
+# password_verification_attempt hook above).
+[auth.email.smtp]
+enabled = true
+host = "smtp.resend.com"
+port = 587
+user = "resend"
+pass = "env(RESEND_API_KEY)"
+admin_email = "env(AUTH_EMAIL_FROM)"
+sender_name = "Mellerick Plumbing"
 
 # Uncomment to customize email template
 # [auth.email.template.invite]
