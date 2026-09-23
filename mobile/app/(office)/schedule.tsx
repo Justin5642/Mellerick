@@ -8,7 +8,7 @@ import { supabase } from "../../lib/supabase";
 import { colors } from "../../lib/theme";
 import { JobListRow } from "../../design/components/JobListRow";
 import { ScreenError } from "../../design/components/ScreenError";
-import { businessDayLabel, formatBusinessTime, computeReschedule, localDateKey } from "../../lib/date";
+import { businessDayLabel, formatBusinessTime, computeRescheduleWithTime, localDateKey } from "../../lib/date";
 import { useSchedule } from "../../lib/data/hooks/useSchedule";
 import { listAssignableStaff, type AssignableStaff } from "../../lib/data/reads/schedule";
 import { unwrapRows } from "../../lib/data/reads/unwrap";
@@ -34,6 +34,8 @@ export default function ScheduleScreen() {
   const [menuJob, setMenuJob] = useState<SchedJob | null>(null);
   const [reassignJob, setReassignJob] = useState<SchedJob | null>(null);
   const [datePickerFor, setDatePickerFor] = useState<SchedJob | null>(null);
+  const [timePickerFor, setTimePickerFor] = useState<SchedJob | null>(null);
+  const [pendingDate, setPendingDate] = useState<Date | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<unknown>(null);
   const [staffError, setStaffError] = useState<unknown>(null);
@@ -108,13 +110,11 @@ export default function ScheduleScreen() {
     }
   }
 
-  async function onDatePicked(event: DateTimePickerEvent, selected?: Date) {
-    const job = datePickerFor;
-    if (Platform.OS !== "ios") setDatePickerFor(null); // Android dialog closes itself
-    if (event.type !== "set" || !selected || !job || !schedule.ready) return;
+  async function applyReschedule(job: SchedJob, dateKey: string, hour: number, minute: number) {
+    if (!schedule.ready) return;
     setBusy(true);
     try {
-      const { scheduledStartIso, scheduledEndIso } = computeReschedule(job.scheduled_start, job.scheduled_end, localDateKey(selected));
+      const { scheduledStartIso, scheduledEndIso } = computeRescheduleWithTime(job.scheduled_start, job.scheduled_end, dateKey, hour, minute);
       await schedule.reschedule(job.id, scheduledStartIso, scheduledEndIso);
       // Optimistic: update + re-sort by start so it lands in the right day section.
       setJobs((cur) =>
@@ -122,12 +122,38 @@ export default function ScheduleScreen() {
           .map((j) => (j.id === job.id ? { ...j, scheduled_start: scheduledStartIso, scheduled_end: scheduledEndIso } : j))
           .sort((a, b) => a.scheduled_start.localeCompare(b.scheduled_start))
       );
-      setDatePickerFor(null);
     } catch (e) {
       Alert.alert("Couldn't reschedule", e instanceof Error ? e.message : "Please try again.");
     } finally {
       setBusy(false);
     }
+  }
+
+  // iOS's inline "datetime" mode picks date+time in one control and applies
+  // immediately, same as the original date-only picker did -- stays open for
+  // continuous scrolling. Android has no combined mode, so the date dialog
+  // chains into a second time dialog before anything is applied.
+  function onDatePicked(event: DateTimePickerEvent, selected?: Date) {
+    const job = datePickerFor;
+    if (Platform.OS === "ios") {
+      if (event.type === "set" && selected && job) {
+        void applyReschedule(job, localDateKey(selected), selected.getHours(), selected.getMinutes());
+      }
+      return;
+    }
+    setDatePickerFor(null); // Android dialog closes itself
+    if (event.type !== "set" || !selected || !job) return;
+    setPendingDate(selected);
+    setTimePickerFor(job);
+  }
+
+  function onTimePicked(event: DateTimePickerEvent, selected?: Date) {
+    const job = timePickerFor;
+    const date = pendingDate;
+    setTimePickerFor(null);
+    setPendingDate(null);
+    if (event.type !== "set" || !selected || !job || !date) return;
+    void applyReschedule(job, localDateKey(date), selected.getHours(), selected.getMinutes());
   }
 
   // Checked BEFORE the list, so a failed read can never render as "Nothing
@@ -182,7 +208,7 @@ export default function ScheduleScreen() {
               {menuJob ? ` · ${formatBusinessTime(menuJob.scheduled_start)}` : ""}
             </Text>
             <Action icon="person-outline" label="Reassign technician" onPress={() => { setReassignJob(menuJob); setMenuJob(null); }} />
-            <Action icon="calendar-outline" label="Reschedule day" onPress={() => { setDatePickerFor(menuJob); setMenuJob(null); }} />
+            <Action icon="calendar-outline" label="Reschedule" onPress={() => { setDatePickerFor(menuJob); setMenuJob(null); }} />
             <Action icon="open-outline" label="Open job details" onPress={() => { const id = menuJob?.id; setMenuJob(null); if (id) router.push(`/job/${id}`); }} />
           </View>
         </TouchableOpacity>
@@ -227,7 +253,14 @@ export default function ScheduleScreen() {
       </Modal>
 
       {datePickerFor && (
-        <DateTimePicker value={new Date(datePickerFor.scheduled_start)} mode="date" onChange={onDatePicked} />
+        <DateTimePicker
+          value={new Date(datePickerFor.scheduled_start)}
+          mode={Platform.OS === "ios" ? "datetime" : "date"}
+          onChange={onDatePicked}
+        />
+      )}
+      {timePickerFor && (
+        <DateTimePicker value={pendingDate ?? new Date(timePickerFor.scheduled_start)} mode="time" onChange={onTimePicked} />
       )}
     </SafeAreaView>
   );

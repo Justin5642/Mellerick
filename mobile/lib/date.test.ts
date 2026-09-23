@@ -1,4 +1,4 @@
-import { withDateKeyPreservingTime, computeReschedule, toBusinessInputValue, fromBusinessInputValue } from "./date";
+import { withDateKeyPreservingTime, computeReschedule, computeRescheduleWithTime, toBusinessInputValue, fromBusinessInputValue } from "./date";
 
 describe("Melbourne business-time conversions", () => {
   it("round-trips a winter (AEST +10) wall-clock time through UTC", () => {
@@ -36,5 +36,25 @@ describe("computeReschedule", () => {
 
   it("returns a null end when the job had no scheduled_end", () => {
     expect(computeReschedule("2026-07-27T23:00:00.000Z", null, "2026-08-01").scheduledEndIso).toBeNull();
+  });
+});
+
+describe("computeRescheduleWithTime", () => {
+  it("uses the picked time-of-day instead of preserving the old one, and keeps the duration (AEST)", () => {
+    const r = computeRescheduleWithTime(
+      "2026-07-27T23:00:00.000Z" /* 9am */,
+      "2026-07-28T01:00:00.000Z" /* 11am, +2h */,
+      "2026-07-30",
+      14,
+      30
+    );
+    expect(r.scheduledStartIso).toBe("2026-07-30T04:30:00.000Z"); // 2:30pm AEST 30 Jul
+    expect(r.scheduledEndIso).toBe("2026-07-30T06:30:00.000Z"); // 4:30pm AEST 30 Jul — duration kept
+  });
+
+  it("handles the summer offset (AEDT)", () => {
+    const r = computeRescheduleWithTime("2026-01-14T22:00:00.000Z" /* 9am AEDT */, null, "2026-01-20", 7, 5);
+    expect(r.scheduledStartIso).toBe("2026-01-19T20:05:00.000Z"); // 7:05am AEDT 20 Jan
+    expect(r.scheduledEndIso).toBeNull();
   });
 });

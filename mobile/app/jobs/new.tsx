@@ -31,6 +31,7 @@ export default function NewJobScreen() {
   const [priority, setPriority] = useState<(typeof PRIORITIES)[number]>("normal");
   const [schedDate, setSchedDate] = useState<Date | null>(null);
   const [showDate, setShowDate] = useState(false);
+  const [showTime, setShowTime] = useState(false);
   const [description, setDescription] = useState("");
   const [saving, setSaving] = useState(false);
 
@@ -59,9 +60,30 @@ export default function NewJobScreen() {
     setPickAssignee(true);
   }
 
+  // iOS's inline "datetime" mode returns a full date+time in one control, same
+  // as the original date-only picker did for date alone -- stays open for
+  // continuous scrolling, same as before. Android has no combined mode, so the
+  // date dialog chains into a second time dialog on selection.
   function onDateChange(event: DateTimePickerEvent, selected?: Date) {
-    setShowDate(Platform.OS === "ios");
-    if (event.type === "set" && selected) setSchedDate(selected);
+    if (Platform.OS === "ios") {
+      if (event.type === "set" && selected) setSchedDate(selected);
+      return;
+    }
+    setShowDate(false);
+    if (event.type !== "set" || !selected) return;
+    const combined = new Date(selected);
+    if (schedDate) combined.setHours(schedDate.getHours(), schedDate.getMinutes(), 0, 0);
+    else combined.setHours(8, 0, 0, 0);
+    setSchedDate(combined);
+    setShowTime(true);
+  }
+
+  function onTimeChange(event: DateTimePickerEvent, selected?: Date) {
+    setShowTime(false);
+    if (event.type !== "set" || !selected || !schedDate) return;
+    const combined = new Date(schedDate);
+    combined.setHours(selected.getHours(), selected.getMinutes(), 0, 0);
+    setSchedDate(combined);
   }
 
   async function save() {
@@ -70,14 +92,7 @@ export default function NewJobScreen() {
     if (!title.trim()) { Alert.alert("Title required", "Enter a job title."); return; }
     setSaving(true);
     try {
-      // Default the scheduled time to 8:00am local on the picked day (a full
-      // start/end time editor is a web action for now).
-      let scheduledStartIso: string | null = null;
-      if (schedDate) {
-        const d = new Date(schedDate);
-        d.setHours(8, 0, 0, 0);
-        scheduledStartIso = d.toISOString();
-      }
+      const scheduledStartIso = schedDate ? schedDate.toISOString() : null;
       const { id, synced } = await createJob({
         customerId: customer.id,
         title: title.trim(),
@@ -154,10 +169,17 @@ export default function NewJobScreen() {
 
       <Text style={styles.label}>Schedule (optional)</Text>
       <TouchableOpacity style={styles.selector} onPress={() => setShowDate(true)}>
-        <Text style={[styles.selectorText, !schedDate && styles.placeholder]}>{schedDate ? `${schedDate.toLocaleDateString("en-AU")} · 8:00am` : "Not scheduled"}</Text>
+        <Text style={[styles.selectorText, !schedDate && styles.placeholder]}>
+          {schedDate
+            ? `${schedDate.toLocaleDateString("en-AU")} · ${schedDate.toLocaleTimeString("en-AU", { hour: "numeric", minute: "2-digit" })}`
+            : "Not scheduled"}
+        </Text>
         <Ionicons name="calendar-outline" size={16} color={colors.slate400} />
       </TouchableOpacity>
-      {showDate && <DateTimePicker value={schedDate ?? new Date()} mode="date" onChange={onDateChange} />}
+      {showDate && (
+        <DateTimePicker value={schedDate ?? new Date()} mode={Platform.OS === "ios" ? "datetime" : "date"} onChange={onDateChange} />
+      )}
+      {showTime && <DateTimePicker value={schedDate ?? new Date()} mode="time" onChange={onTimeChange} />}
 
       <Text style={[styles.label, { marginTop: 12 }]}>Description (optional)</Text>
       <TextInput style={[styles.input, styles.multiline]} value={description} onChangeText={setDescription} placeholder="What needs doing" placeholderTextColor={colors.slate400} multiline />
@@ -165,7 +187,7 @@ export default function NewJobScreen() {
       <TouchableOpacity style={[styles.saveBtn, saving && styles.saveBtnDisabled]} onPress={save} disabled={saving}>
         <Text style={styles.saveText}>{saving ? "Saving…" : "Create job"}</Text>
       </TouchableOpacity>
-      <Text style={styles.footnote}>The job number is assigned on sync. Full time-of-day scheduling is on the web.</Text>
+      <Text style={styles.footnote}>The job number is assigned on sync.</Text>
 
       <CustomerPicker visible={pickCustomer} onClose={() => setPickCustomer(false)} onSelect={onSelectCustomer} />
 

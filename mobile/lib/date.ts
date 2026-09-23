@@ -105,3 +105,23 @@ export function computeReschedule(
     : null;
   return { scheduledStartIso, scheduledEndIso };
 }
+
+// Same as computeReschedule, but for the mobile "Reschedule" action's picker
+// flow, which lets the time-of-day change too, not just the day -- so the new
+// time comes from the picker instead of being preserved from the old start.
+// End keeps the original DURATION, same as computeReschedule.
+export function computeRescheduleWithTime(
+  startIso: string,
+  endIso: string | null,
+  newDateKey: string,
+  hour: number,
+  minute: number
+): { scheduledStartIso: string; scheduledEndIso: string | null } {
+  const hh = String(hour).padStart(2, "0");
+  const mm = String(minute).padStart(2, "0");
+  const scheduledStartIso = fromBusinessInputValue(`${newDateKey}T${hh}:${mm}`);
+  const scheduledEndIso = endIso
+    ? new Date(new Date(scheduledStartIso).getTime() + (new Date(endIso).getTime() - new Date(startIso).getTime())).toISOString()
+    : null;
+  return { scheduledStartIso, scheduledEndIso };
+}
