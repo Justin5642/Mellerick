@@ -32,28 +32,49 @@ export default function UpdatePasswordPage() {
     // Supabase fires PASSWORD_RECOVERY when the recovery link is opened and
     // the session is established from the URL. We also check for an existing
     // session in case it was already exchanged.
+    let cancelled = false;
     const { data: sub } = supabase.auth.onAuthStateChange((event) => {
       if (event === "PASSWORD_RECOVERY" || event === "SIGNED_IN") {
+        cancelled = true;
         setReady(true);
       }
     });
 
-    supabase.auth.getSession().then(({ data }) => {
-      if (data.session) {
-        setReady(true);
-      } else {
-        // Give the URL-based session exchange a moment; if still nothing, the
-        // link is invalid or expired.
-        setTimeout(() => {
-          supabase.auth.getSession().then(({ data: d }) => {
-            if (d.session) setReady(true);
-            else setInvalid(true);
-          });
-        }, 1500);
-      }
-    });
+    // Establishing a session from the URL's access_token/refresh_token is
+    // async and NOT instant -- a single fixed ~1.5s wait was reported to mark
+    // a perfectly valid, freshly-clicked recovery link as "invalid or
+    // expired" on weak mobile signal, because the exchange simply hadn't
+    // finished yet. Poll instead of one fixed-length wait: up to 10 tries,
+    // 700ms apart (~7s total), stopping the moment a session shows up (via
+    // this poll or the event listener above, whichever wins) rather than
+    // racing a single arbitrary timeout against real network conditions.
+    let attempts = 0;
+    const maxAttempts = 10;
+    const intervalMs = 700;
 
-    return () => sub.subscription.unsubscribe();
+    const poll = () => {
+      if (cancelled) return;
+      supabase.auth.getSession().then(({ data }) => {
+        if (cancelled) return;
+        if (data.session) {
+          cancelled = true;
+          setReady(true);
+          return;
+        }
+        attempts += 1;
+        if (attempts >= maxAttempts) {
+          setInvalid(true);
+        } else {
+          setTimeout(poll, intervalMs);
+        }
+      });
+    };
+    poll();
+
+    return () => {
+      cancelled = true;
+      sub.subscription.unsubscribe();
+    };
   }, [supabase]);
 
   async function handleUpdate(e: React.FormEvent) {
