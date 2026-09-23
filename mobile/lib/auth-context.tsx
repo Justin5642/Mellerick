@@ -2,6 +2,8 @@ import { createContext, useContext, useEffect, useRef, useState, type ReactNode 
 import type { Session } from "@supabase/supabase-js";
 import { supabase } from "./supabase";
 
+const API_BASE_URL = process.env.EXPO_PUBLIC_API_BASE_URL;
+
 interface Profile {
   id: string;
   full_name: string;
@@ -137,8 +139,42 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   async function signIn(email: string, password: string) {
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
-    return { error: error?.message ?? null };
+    // Routed through the web app's /api/auth/login when configured, so the
+    // 6-attempts/10-minute lockout policy (migration 0056) applies here too
+    // -- mobile and web share the one enforcement point rather than each
+    // needing its own copy of the policy. Falls back to signing in directly
+    // when EXPO_PUBLIC_API_BASE_URL isn't set, same "degrade gracefully when
+    // the web API isn't configured" rule as the other API_BASE_URL call
+    // sites in this app -- a build without it should still let staff sign in,
+    // just without the app-level lockout.
+    if (!API_BASE_URL) {
+      const { error } = await supabase.auth.signInWithPassword({ email, password });
+      return { error: error?.message ?? null };
+    }
+
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/auth/login`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, password }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        return { error: data.error ?? "Sign in failed" };
+      }
+      const { access_token, refresh_token } = data.session ?? {};
+      if (!access_token || !refresh_token) {
+        return { error: "Sign in failed" };
+      }
+      const { error } = await supabase.auth.setSession({ access_token, refresh_token });
+      return { error: error?.message ?? null };
+    } catch {
+      // Network failure talking to the web API -- fall back to signing in
+      // directly rather than stranding a technician who can't reach the
+      // office server but does have signal to Supabase itself.
+      const { error } = await supabase.auth.signInWithPassword({ email, password });
+      return { error: error?.message ?? null };
+    }
   }
 
   async function signOut() {

@@ -10,7 +10,6 @@
 // so a build that succeeded without them would ship a broken sign-in page.
 
 import { useState } from "react";
-import { createClient } from "@/lib/supabase/client";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { toast } from "sonner";
@@ -24,14 +23,22 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const router = useRouter();
-  const supabase = createClient();
 
+  // Goes through the server-side /api/auth/login route rather than calling
+  // supabase.auth.signInWithPassword() directly, so the 6-attempts/10-minute
+  // lockout policy (migration 0056) applies -- see that route's comment for
+  // why this can't be enforced from the client itself.
   async function handleLogin(e: React.FormEvent) {
     e.preventDefault();
     setLoading(true);
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
-    if (error) {
-      toast.error(error.message);
+    const res = await fetch("/api/auth/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email, password }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      toast.error(data.error ?? "Sign in failed");
       setLoading(false);
     } else {
       router.push("/dashboard");
