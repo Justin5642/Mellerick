@@ -102,6 +102,13 @@ streams:
       FROM job_notes
       WHERE job_id IN (SELECT id FROM jobs WHERE assigned_to = auth.user_id())
 
+  tech_job_stage_notes:
+    auto_subscribe: true
+    query: |
+      SELECT id, job_id, stage, content, author_id, created_at
+      FROM job_stage_notes
+      WHERE job_id IN (SELECT id FROM jobs WHERE assigned_to = auth.user_id())
+
   tech_time_entries:
     auto_subscribe: true
     query: |
@@ -181,6 +188,10 @@ streams:
   office_job_notes:
     auto_subscribe: true
     query: SELECT job_notes.* FROM job_notes JOIN profiles ON profiles.id = auth.user_id() WHERE profiles.role = 'office' OR profiles.role = 'admin'
+
+  office_job_stage_notes:
+    auto_subscribe: true
+    query: SELECT job_stage_notes.* FROM job_stage_notes JOIN profiles ON profiles.id = auth.user_id() WHERE profiles.role = 'office' OR profiles.role = 'admin'
 
   office_invoices:
     auto_subscribe: true

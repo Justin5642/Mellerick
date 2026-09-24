@@ -62,6 +62,7 @@ describe("technician streams", () => {
       "customers",
       "job_notes",
       "job_photos",
+      "job_stage_notes",
       "job_variations",
       "jobs",
       "profiles",

@@ -1,9 +1,11 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { View, Text, StyleSheet, TextInput, TouchableOpacity, FlatList, ActivityIndicator } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { supabase } from "../../lib/supabase";
 import { colors } from "../../lib/theme";
 import { useJobNotes } from "../../lib/data/hooks/useJobNotes";
+import { useJobStageNotes } from "../../lib/data/hooks/useJobStageNotes";
+import { JOB_STAGES, getJobStageLabel } from "../../lib/job-stages";
 import { ScreenError } from "../../design/components/ScreenError";
 import { unwrapRows } from "../../lib/data/reads/unwrap";
 import { netInfoConnectivity } from "../../lib/data/net/connectivity";
@@ -24,11 +26,19 @@ interface Note {
   profiles: { full_name: string } | null;
 }
 
+interface StageNote extends Note {
+  stage: string;
+}
+
 // A provisional note shown the instant it's queued (also the offline path). It
 // carries the same client id as the queued write, so the real row replaces it
 // on the next online reload with no duplicate.
 function optimisticNote(id: string, content: string): Note {
   return { id, content, created_at: new Date().toISOString(), profiles: { full_name: "You" } };
+}
+
+function optimisticStageNote(id: string, stage: string, content: string): StageNote {
+  return { id, stage, content, created_at: new Date().toISOString(), profiles: { full_name: "You" } };
 }
 
 export function JobNotesTab({ jobId, currentUserId }: { jobId: string; currentUserId: string }) {
@@ -39,6 +49,65 @@ export function JobNotesTab({ jobId, currentUserId }: { jobId: string; currentUs
   const [error, setError] = useState<unknown>(null);
   const notesComposer = useJobNotes();
   const layer = useDataLayer();
+
+  const [stageNotes, setStageNotes] = useState<StageNote[]>([]);
+  const [stageContent, setStageContent] = useState("");
+  const [selectedStage, setSelectedStage] = useState<string | null>(null);
+  const [stageFilter, setStageFilter] = useState<string | null>(null);
+  const [stageSaving, setStageSaving] = useState(false);
+  const [stageError, setStageError] = useState<unknown>(null);
+  const stageNotesComposer = useJobStageNotes();
+
+  const loadStageNotes = useCallback(async () => {
+    try {
+      setStageError(null);
+      if (!(await netInfoConnectivity.isOnline())) return;
+      const res = await supabase
+        .from("job_stage_notes")
+        .select("*, profiles(full_name)")
+        .eq("job_id", jobId)
+        .order("created_at", { ascending: false });
+      const rows = unwrapRows(res as never, "JobNotesTab.loadStageNotes") as unknown as StageNote[];
+      const pending = layer ? await layer.outbox.pendingRowIds() : new Set<string>();
+      setStageNotes((prev) => reconcileRows(prev, rows, pending));
+    } catch (e) {
+      setStageError(e);
+    }
+  }, [jobId, layer]);
+
+  useEffect(() => {
+    void loadStageNotes();
+  }, [loadStageNotes]);
+
+  useSyncSettled(loadStageNotes);
+
+  async function handleAddStageNote() {
+    if (!stageContent.trim() || !selectedStage || stageSaving || !stageNotesComposer.ready) return;
+    setStageSaving(true);
+    try {
+      const text = stageContent.trim();
+      const stage = selectedStage;
+      const { id } = await stageNotesComposer.addNote({ jobId, stage, authorId: currentUserId, content: text });
+      setStageNotes((prev) => [optimisticStageNote(id, stage, text), ...prev]);
+      setStageContent("");
+    } finally {
+      setStageSaving(false);
+    }
+  }
+
+  // Grouped by stage in the fixed workflow order, not by timestamp, so a
+  // technician can pull up everything logged at (say) the drain stage in one
+  // place instead of scrolling a single interleaved feed.
+  const stageNotesByStage = useMemo(() => {
+    const map = new Map<string, StageNote[]>();
+    for (const s of JOB_STAGES) map.set(s.value, []);
+    for (const note of stageNotes) {
+      if (!map.has(note.stage)) map.set(note.stage, []);
+      map.get(note.stage)!.push(note);
+    }
+    return map;
+  }, [stageNotes]);
+  const stagesToShow = stageFilter ? JOB_STAGES.filter((s) => s.value === stageFilter) : JOB_STAGES;
 
   // Reads refresh from the server only when online; offline, local state (incl.
   // the optimistic note just queued) is authoritative. Even online we MERGE, so
@@ -123,16 +192,102 @@ export function JobNotesTab({ jobId, currentUserId }: { jobId: string; currentUs
   // This takes the composer down with it, matching the Time tab: a note written
   // against a job whose state we failed to read is worth less than the tech
   // knowing the read is broken.
-  if (error) {
+  if (error || stageError) {
     return (
       <View style={styles.container}>
-        <ScreenError error={error} onRetry={() => { void loadNotes(); }} />
+        <ScreenError
+          error={error ?? stageError}
+          onRetry={() => { void loadNotes(); void loadStageNotes(); }}
+        />
       </View>
     );
   }
 
   return (
     <View style={styles.container}>
+      <Text style={styles.sectionTitle}>Stage Notes</Text>
+      <Text style={styles.sectionSubtitle}>History by workflow stage — visible to everyone on this job</Text>
+
+      <View style={styles.chipRow}>
+        {JOB_STAGES.map((s) => (
+          <TouchableOpacity
+            key={s.value}
+            style={[styles.chip, selectedStage === s.value && styles.chipActive]}
+            onPress={() => setSelectedStage(s.value)}
+          >
+            <Text style={[styles.chipText, selectedStage === s.value && styles.chipTextActive]}>{s.label}</Text>
+          </TouchableOpacity>
+        ))}
+      </View>
+
+      <View style={styles.composer}>
+        <TextInput
+          style={styles.input}
+          value={stageContent}
+          onChangeText={setStageContent}
+          placeholder={selectedStage ? `Add a note for the ${getJobStageLabel(selectedStage)} stage...` : "Pick a stage above first..."}
+          multiline
+        />
+        <View style={styles.buttonRow}>
+          <View />
+          <TouchableOpacity
+            style={styles.addButton}
+            onPress={handleAddStageNote}
+            disabled={stageSaving || !stageContent.trim() || !selectedStage}
+          >
+            <Text style={styles.addButtonText}>{stageSaving ? "..." : "Add stage note"}</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+
+      <View style={styles.chipRow}>
+        <TouchableOpacity style={[styles.chip, stageFilter === null && styles.chipActive]} onPress={() => setStageFilter(null)}>
+          <Text style={[styles.chipText, stageFilter === null && styles.chipTextActive]}>All stages</Text>
+        </TouchableOpacity>
+        {JOB_STAGES.map((s) => (
+          <TouchableOpacity
+            key={s.value}
+            style={[styles.chip, stageFilter === s.value && styles.chipActive]}
+            onPress={() => setStageFilter(s.value)}
+          >
+            <Text style={[styles.chipText, stageFilter === s.value && styles.chipTextActive]}>
+              {s.label} ({stageNotesByStage.get(s.value)?.length ?? 0})
+            </Text>
+          </TouchableOpacity>
+        ))}
+      </View>
+
+      {stageNotes.length === 0 ? (
+        <Text style={styles.emptyText}>No stage notes yet — pick a stage above to log the first one.</Text>
+      ) : (
+        stagesToShow.map((stage) => {
+          const items = stageNotesByStage.get(stage.value) ?? [];
+          if (items.length === 0) return null;
+          return (
+            <View key={stage.value} style={styles.stageGroup}>
+              <Text style={styles.stageGroupLabel}>{stage.label}</Text>
+              {items.map((note) => (
+                <View key={note.id} style={styles.noteCard}>
+                  <View style={styles.noteHeader}>
+                    <Text style={styles.noteAuthor}>{note.profiles?.full_name ?? "Unknown"}</Text>
+                    <Text style={styles.noteDate}>
+                      {new Date(note.created_at).toLocaleDateString("en-AU", { day: "numeric", month: "short" })}{" "}
+                      {new Date(note.created_at).toLocaleTimeString("en-AU", { hour: "2-digit", minute: "2-digit" })}
+                    </Text>
+                  </View>
+                  <Text style={styles.noteContent}>{note.content}</Text>
+                </View>
+              ))}
+            </View>
+          );
+        })
+      )}
+
+      <View style={styles.divider} />
+
+      <Text style={styles.sectionTitle}>Notes & Activity</Text>
+      <Text style={styles.sectionSubtitle}>General job log visible to all staff</Text>
+
       <View style={styles.composer}>
         <TextInput
           style={styles.input}
@@ -180,6 +335,22 @@ export function JobNotesTab({ jobId, currentUserId }: { jobId: string; currentUs
 
 const styles = StyleSheet.create({
   container: { padding: 16 },
+  sectionTitle: { fontSize: 15, fontWeight: "700", color: colors.slate900 },
+  sectionSubtitle: { fontSize: 12, color: colors.slate400, marginBottom: 12 },
+  divider: { height: 1, backgroundColor: colors.border, marginVertical: 16 },
+  chipRow: { flexDirection: "row", flexWrap: "wrap", gap: 6, marginBottom: 12 },
+  chip: {
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+  },
+  chipActive: { backgroundColor: colors.slate900, borderColor: colors.slate900 },
+  chipText: { fontSize: 12, color: colors.slate700 },
+  chipTextActive: { color: "#fff" },
+  stageGroup: { marginBottom: 12 },
+  stageGroupLabel: { fontSize: 12, fontWeight: "700", color: colors.slate700, marginBottom: 6 },
   composer: { gap: 8, marginBottom: 16 },
   input: {
     borderWidth: 1,

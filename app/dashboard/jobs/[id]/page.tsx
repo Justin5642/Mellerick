@@ -15,6 +15,7 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
     { data: photos },
     { data: documents },
     { data: notes },
+    { data: stageNotes },
     { data: lineItems },
     { data: pricingItems },
     { data: staff },
@@ -31,6 +32,7 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
     supabase.from("job_photos").select("*, profiles(full_name)").eq("job_id", id).order("created_at", { ascending: false }),
     supabase.from("job_documents").select("*, profiles(full_name)").eq("job_id", id).order("created_at", { ascending: false }),
     supabase.from("job_notes").select("*, profiles(full_name)").eq("job_id", id).order("created_at", { ascending: false }),
+    supabase.from("job_stage_notes").select("*, profiles(full_name)").eq("job_id", id).order("created_at", { ascending: false }),
     supabase.from("job_items").select("*").eq("job_id", id).order("created_at"),
     supabase.from("pricing_items").select("*").eq("is_active", true).order("category").order("name"),
     supabase.from("profiles").select("id, full_name, role").eq("is_active", true).order("full_name"),
@@ -97,6 +99,7 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
       photos={photos ?? []}
       documents={documents ?? []}
       notes={notes ?? []}
+      stageNotes={stageNotes ?? []}
       lineItems={lineItems ?? []}
       pricingItems={pricingItems ?? []}
       staff={staffForDisplay}

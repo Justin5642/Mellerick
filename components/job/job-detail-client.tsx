@@ -34,6 +34,7 @@ interface Props {
   photos: any[];
   documents: any[];
   notes: any[];
+  stageNotes: any[];
   lineItems: any[];
   pricingItems: any[];
   staff: any[];
@@ -50,7 +51,7 @@ interface Props {
   minMarginPct: number;
 }
 
-export function JobDetailClient({ job, currentUserId, photos: initialPhotos, documents: initialDocuments, notes: initialNotes, lineItems: initialLineItems, pricingItems, staff, purchaseOrders: initialPOs, timeEntries: initialTimeEntries, variations: initialVariations, variationTypes, expenses: initialExpenses, equipmentOptions, equipmentUsage: initialEquipmentUsage, isAdmin, staffCostProfiles, jobInvoices, minMarginPct }: Props) {
+export function JobDetailClient({ job, currentUserId, photos: initialPhotos, documents: initialDocuments, notes: initialNotes, stageNotes: initialStageNotes, lineItems: initialLineItems, pricingItems, staff, purchaseOrders: initialPOs, timeEntries: initialTimeEntries, variations: initialVariations, variationTypes, expenses: initialExpenses, equipmentOptions, equipmentUsage: initialEquipmentUsage, isAdmin, staffCostProfiles, jobInvoices, minMarginPct }: Props) {
   // Deep-links like /dashboard/jobs/[id]?tab=variations&variation=[id]
   // (used by the Approvals page's "Price & review" link) land here — read
   // them once on mount so the right tab opens and the right variation is
@@ -68,6 +69,7 @@ export function JobDetailClient({ job, currentUserId, photos: initialPhotos, doc
   const [photos, setPhotos] = useState(initialPhotos);
   const [documents, setDocuments] = useState(initialDocuments);
   const [notes, setNotes] = useState(initialNotes);
+  const [stageNotes, setStageNotes] = useState(initialStageNotes);
   const [lineItems, setLineItems] = useState(initialLineItems);
   const [purchaseOrders, setPurchaseOrders] = useState(initialPOs);
   const [timeEntries, setTimeEntries] = useState(initialTimeEntries);
@@ -252,7 +254,14 @@ export function JobDetailClient({ job, currentUserId, photos: initialPhotos, doc
               <JobLineItems jobId={job.id} lineItems={lineItems} pricingItems={pricingItems} onUpdate={setLineItems} />
             </TabsContent>
             <TabsContent value="notes" className="m-0 h-full">
-              <JobNotes jobId={job.id} notes={notes} onUpdate={setNotes} currentUserId={currentUserId} />
+              <JobNotes
+                jobId={job.id}
+                notes={notes}
+                onUpdate={setNotes}
+                currentUserId={currentUserId}
+                stageNotes={stageNotes}
+                onUpdateStageNotes={setStageNotes}
+              />
             </TabsContent>
             <TabsContent value="signature" className="m-0 h-full">
               <JobSignature jobId={job.id} currentUserId={currentUserId} existingSignature={job.completion_notes} voiceReportTranscript={job.voice_report_transcript} />

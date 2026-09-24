@@ -9,6 +9,7 @@ export type Aggregate =
   | "job_photo"
   | "job"
   | "job_note"
+  | "job_stage_note"
   | "job_variation"
   | "backflow_device"
   | "backflow_test"

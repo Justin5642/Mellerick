@@ -8,6 +8,7 @@ import { cryptoIdGen, type IdGen } from "./ids";
 import { TimeEntriesRepository } from "./repositories/timeEntries";
 import { JobPhotosRepository } from "./repositories/jobPhotos";
 import { JobNotesRepository } from "./repositories/jobNotes";
+import { JobStageNotesRepository } from "./repositories/jobStageNotes";
 import { SignatureRepository } from "./repositories/signature";
 import { VoiceReportRepository } from "./repositories/voiceReport";
 import { FinanceRepository } from "./repositories/finance";
@@ -30,6 +31,7 @@ export interface DataLayer {
   timeEntries: TimeEntriesRepository;
   photos: JobPhotosRepository;
   notes: JobNotesRepository;
+  stageNotes: JobStageNotesRepository;
   signature: SignatureRepository;
   voiceReport: VoiceReportRepository;
   finance: FinanceRepository;
@@ -69,6 +71,7 @@ export function createDataLayer(deps: DataLayerDeps): DataLayer {
   const timeEntries = new TimeEntriesRepository(outbox, ids);
   const photos = new JobPhotosRepository(outbox, ids);
   const notes = new JobNotesRepository(outbox, ids);
+  const stageNotes = new JobStageNotesRepository(outbox, ids);
   const signature = new SignatureRepository(outbox, ids);
   const voiceReport = new VoiceReportRepository(outbox, ids);
   const finance = new FinanceRepository(outbox, ids);
@@ -82,5 +85,5 @@ export function createDataLayer(deps: DataLayerDeps): DataLayer {
   const backflow = new BackflowRepository(outbox, ids);
   const settings = new SettingsRepository(outbox, ids);
   const variations = new VariationsRepository(outbox, ids);
-  return { outbox, engine, timeEntries, photos, notes, signature, voiceReport, finance, customers, inventory, equipment, jobBilling, approvals, schedule, jobs, backflow, settings, variations };
+  return { outbox, engine, timeEntries, photos, notes, stageNotes, signature, voiceReport, finance, customers, inventory, equipment, jobBilling, approvals, schedule, jobs, backflow, settings, variations };
 }

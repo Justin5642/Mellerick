@@ -234,6 +234,15 @@ const job_photos = new Table({
   simpro_file_id: column.text,
 });
 
+const job_stage_notes = new Table({
+  // id (text) is implicit
+  job_id: column.text,
+  stage: column.text,
+  content: column.text,
+  author_id: column.text,
+  created_at: column.text,
+});
+
 const job_variations = new Table({
   // id (text) is implicit
   job_id: column.text,
@@ -425,6 +434,7 @@ export const AppSchema = new Schema({
   job_items,
   job_notes,
   job_photos,
+  job_stage_notes,
   job_variations,
   jobs,
   po_cost_centers,
