@@ -22,6 +22,7 @@ import { JobExpenses } from "./job-expenses";
 import { JobEquipment } from "./job-equipment";
 import { JobProfitability } from "./job-profitability";
 import { jobStatusColors, jobPriorityColors } from "@/lib/badge-colors";
+import { getCurrentStageNote, getJobStageLabel } from "@/lib/job-stages";
 
 // Kept in sync with the `value`s in the TabsTrigger list below — used to
 // validate a `?tab=` query param (e.g. from the Approvals page's "Price &
@@ -70,6 +71,10 @@ export function JobDetailClient({ job, currentUserId, photos: initialPhotos, doc
   const [documents, setDocuments] = useState(initialDocuments);
   const [notes, setNotes] = useState(initialNotes);
   const [stageNotes, setStageNotes] = useState(initialStageNotes);
+  // Most recent stage note across all stages — "where the last person left
+  // off" — shown as a header badge so it's visible without opening the Notes
+  // tab. Distinct from job.status (whole-job lifecycle) and job.priority.
+  const currentStageNote = getCurrentStageNote(stageNotes);
   const [lineItems, setLineItems] = useState(initialLineItems);
   const [purchaseOrders, setPurchaseOrders] = useState(initialPOs);
   const [timeEntries, setTimeEntries] = useState(initialTimeEntries);
@@ -114,6 +119,14 @@ export function JobDetailClient({ job, currentUserId, photos: initialPhotos, doc
                 <span className={`text-xs px-2 py-0.5 rounded-full font-medium capitalize ${jobPriorityColors[job.priority]}`}>
                   {job.priority}
                 </span>
+                {currentStageNote && (
+                  <span
+                    className="text-xs px-2 py-0.5 rounded-full font-medium bg-cyan-100 text-cyan-800"
+                    title={`Last stage note: ${currentStageNote.content}`}
+                  >
+                    Stage: {getJobStageLabel(currentStageNote.stage)}
+                  </span>
+                )}
               </div>
               <p className="text-sm text-slate-500 mt-0.5">
                 {job.customers?.name}

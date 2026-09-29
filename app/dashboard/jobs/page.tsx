@@ -10,12 +10,18 @@ import Link from "next/link";
 import { formatDate } from "@/lib/date";
 import { ListPageSkeleton } from "@/components/ui/loading-skeletons";
 import { jobStatusColors, jobPriorityColors } from "@/lib/badge-colors";
+import { getJobStageLabel } from "@/lib/job-stages";
 
 export default function JobsPage() {
   const supabase = createClient();
   const [jobs, setJobs] = useState<any[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
+  // job_id -> most recent stage note (stage + created_at only — this is a
+  // list view, not the note detail, so the full content isn't needed here).
+  // "Current stage" is where the last person left off on that job; a
+  // separate concept from job.status (whole-job lifecycle) shown alongside it.
+  const [currentStageByJob, setCurrentStageByJob] = useState<Map<string, { stage: string; created_at: string }>>(new Map());
 
   useEffect(() => {
     async function load() {
@@ -40,6 +46,32 @@ export default function JobsPage() {
         from += pageSize;
       }
       setJobs(all);
+
+      // Bulk-fetch every stage note's job_id/stage/created_at (narrow select,
+      // same pagination pattern as above) and reduce to one "latest note per
+      // job" map client-side — cheaper than a per-job query, and avoids
+      // needing a DB view just for this list.
+      let stageFrom = 0;
+      const allStageNotes: { job_id: string; stage: string; created_at: string | null }[] = [];
+      for (;;) {
+        const { data, error: stageError } = await supabase
+          .from("job_stage_notes")
+          .select("job_id, stage, created_at")
+          .range(stageFrom, stageFrom + pageSize - 1);
+        if (stageError) break; // Non-fatal — the jobs list still works without stage badges.
+        allStageNotes.push(...(data ?? []));
+        if (!data || data.length < pageSize) break;
+        stageFrom += pageSize;
+      }
+      const latest = new Map<string, { stage: string; created_at: string }>();
+      for (const note of allStageNotes) {
+        if (!note.created_at) continue; // column defaults to now() — a null here would only mean a data anomaly, skip it rather than let it win every comparison.
+        const existing = latest.get(note.job_id);
+        if (!existing || note.created_at > existing.created_at) {
+          latest.set(note.job_id, { stage: note.stage, created_at: note.created_at });
+        }
+      }
+      setCurrentStageByJob(latest);
     }
     load();
   }, []);
@@ -152,6 +184,11 @@ export default function JobsPage() {
                     <span className={`text-xs px-2 py-0.5 rounded-full font-medium capitalize ${jobStatusColors[job.status] ?? ""}`}>
                       {job.status?.replace("_", " ")}
                     </span>
+                    {currentStageByJob.get(job.id) && (
+                      <span className="text-xs px-2 py-0.5 rounded-full font-medium bg-cyan-100 text-cyan-800">
+                        {getJobStageLabel(currentStageByJob.get(job.id)!.stage)}
+                      </span>
+                    )}
                   </div>
                 </Link>
               ))}

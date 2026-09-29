@@ -15,6 +15,14 @@ describe("JobListRow", () => {
     expect(screen.getByText("scheduled")).toBeTruthy();
   });
 
+  it("renders a stage pill (label, not raw value) when given, and omits it when absent", () => {
+    const { rerender } = render(<JobListRow jobNumber={1} title="X" status="scheduled" stage="rough_in" />);
+    expect(screen.getByText("Rough In")).toBeTruthy();
+
+    rerender(<JobListRow jobNumber={1} title="X" status="scheduled" stage={null} />);
+    expect(screen.queryByText("Rough In")).toBeNull();
+  });
+
   it("calls onPress when tapped", () => {
     const onPress = jest.fn();
     render(<JobListRow jobNumber={1} title="X" status="pending" onPress={onPress} />);

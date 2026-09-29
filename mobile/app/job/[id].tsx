@@ -17,6 +17,7 @@ import { JobSignatureTab } from "../../components/job/signature";
 import { JobDocumentsTab } from "../../components/job/documents";
 import { JobVariationsTab } from "../../components/job/variations";
 import { ScheduleJobModal } from "../../components/job/schedule-job-modal";
+import { getJobStageLabel } from "../../lib/job-stages";
 
 const TABS = [
   { key: "overview", label: "Overview" },
@@ -48,6 +49,11 @@ export default function JobDetailScreen() {
   const [scheduleOpen, setScheduleOpen] = useState(false);
   const [savingEdit, setSavingEdit] = useState(false);
   const [details, setDetails] = useState<{ title: string; description: string } | null>(null);
+  // Latest stage note's stage only (not the full note history — that's the
+  // Notes tab's job) — just enough for a header badge showing where the last
+  // person left off. Best-effort: left null (badge simply doesn't render) if
+  // offline or the query fails, same tolerance as the Notes tab's own read.
+  const [currentStage, setCurrentStage] = useState<string | null>(null);
 
   // Both awaits can throw — the session lookup and the row read. Uncaught, the
   // throw skipped setLoading(false) and the technician sat on a spinner that
@@ -61,6 +67,19 @@ export default function JobDetailScreen() {
       setUserId(user?.id ?? null);
 
       setJob(await getJob(id));
+
+      try {
+        const { data: latestStageNote } = await supabase
+          .from("job_stage_notes")
+          .select("stage")
+          .eq("job_id", id)
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        setCurrentStage(latestStageNote?.stage ?? null);
+      } catch {
+        setCurrentStage(null); // Offline or query failure — non-fatal, badge just won't show.
+      }
     } catch (e) {
       setError(e);
     } finally {
@@ -183,6 +202,11 @@ export default function JobDetailScreen() {
         ) : (
           <View style={[styles.badge, { backgroundColor: sc.bg }]}>
             <Text style={[styles.badgeText, { color: sc.text }]}>{job.status.replace("_", " ")}</Text>
+          </View>
+        )}
+        {currentStage && (
+          <View style={[styles.badge, { backgroundColor: colors.blue100 }]}>
+            <Text style={[styles.badgeText, { color: colors.blue600 }]}>Stage: {getJobStageLabel(currentStage)}</Text>
           </View>
         )}
       </View>

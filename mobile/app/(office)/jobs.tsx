@@ -16,6 +16,7 @@ interface OfficeJob {
   priority: string;
   customers: { name: string } | null;
   assigned_profile?: { full_name: string } | null;
+  current_stage?: string | null;
 }
 
 const PAGE = 50;
@@ -146,6 +147,7 @@ export default function OfficeJobsScreen() {
             subtitle={`${item.customers?.name ?? "—"}${item.assigned_profile?.full_name ? ` · ${item.assigned_profile.full_name}` : ""}`}
             status={item.status}
             priority={item.priority}
+            stage={item.current_stage}
             onPress={() => router.push(`/job/${item.id}`)}
           />
         )}
