@@ -6,7 +6,7 @@ import { supabase } from "../../lib/supabase";
 import { colors } from "../../lib/theme";
 import { useJobNotes } from "../../lib/data/hooks/useJobNotes";
 import { useJobStageNotes } from "../../lib/data/hooks/useJobStageNotes";
-import { JOB_STAGES, getJobStageLabel } from "../../lib/job-stages";
+import { JOB_STAGES, getJobStageLabel, getCurrentStageNote } from "../../lib/job-stages";
 import { ScreenError } from "../../design/components/ScreenError";
 import { unwrapRows } from "../../lib/data/reads/unwrap";
 import { netInfoConnectivity } from "../../lib/data/net/connectivity";
@@ -172,6 +172,11 @@ export function JobNotesTab({ jobId, currentUserId }: { jobId: string; currentUs
   }, [stageNotes]);
   const stagesToShow = stageFilter ? JOB_STAGES.filter((s) => s.value === stageFilter) : JOB_STAGES;
 
+  // "Where the last person left off" — the single most recent stage note
+  // across all stages, surfaced above the composer so a tech opening this
+  // job sees current status without reading the full history.
+  const currentStageNote = useMemo(() => getCurrentStageNote(stageNotes), [stageNotes]);
+
   // Reads refresh from the server only when online; offline, local state (incl.
   // the optimistic note just queued) is authoritative. Even online we MERGE, so
   // an optimistic note whose write is still pending survives a racing reload.
@@ -270,6 +275,20 @@ export function JobNotesTab({ jobId, currentUserId }: { jobId: string; currentUs
     <View style={styles.container}>
       <Text style={styles.sectionTitle}>Stage Notes</Text>
       <Text style={styles.sectionSubtitle}>History by workflow stage — visible to everyone on this job</Text>
+
+      {currentStageNote && (
+        <View style={styles.currentStageBanner}>
+          <View style={styles.currentStageBadge}>
+            <Text style={styles.currentStageBadgeText}>Currently at: {getJobStageLabel(currentStageNote.stage)}</Text>
+          </View>
+          <Text style={styles.currentStageContent} numberOfLines={2}>{currentStageNote.content}</Text>
+          <Text style={styles.currentStageMeta}>
+            {currentStageNote.profiles?.full_name ?? "Unknown"} ·{" "}
+            {new Date(currentStageNote.created_at).toLocaleDateString("en-AU", { day: "numeric", month: "short" })}{" "}
+            {new Date(currentStageNote.created_at).toLocaleTimeString("en-AU", { hour: "2-digit", minute: "2-digit" })}
+          </Text>
+        </View>
+      )}
 
       <View style={styles.chipRow}>
         {JOB_STAGES.map((s) => (
@@ -429,6 +448,11 @@ const styles = StyleSheet.create({
   chipActive: { backgroundColor: colors.slate900, borderColor: colors.slate900 },
   chipText: { fontSize: 12, color: colors.slate700 },
   chipTextActive: { color: "#fff" },
+  currentStageBanner: { backgroundColor: colors.blue100, borderRadius: 10, padding: 10, marginBottom: 12, gap: 4 },
+  currentStageBadge: { alignSelf: "flex-start", backgroundColor: colors.blue600, borderRadius: 999, paddingHorizontal: 8, paddingVertical: 3 },
+  currentStageBadgeText: { color: "#fff", fontSize: 11, fontWeight: "700" },
+  currentStageContent: { fontSize: 12, color: colors.slate700 },
+  currentStageMeta: { fontSize: 11, color: colors.slate400 },
   stageGroup: { marginBottom: 12 },
   stageGroupLabel: { fontSize: 12, fontWeight: "700", color: colors.slate700, marginBottom: 6 },
   composer: { gap: 8, marginBottom: 16 },

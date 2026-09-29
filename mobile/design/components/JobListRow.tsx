@@ -1,6 +1,7 @@
 import { ReactNode } from "react";
 import { View, Text, TouchableOpacity, StyleSheet } from "react-native";
 import { colors, statusColors } from "../../lib/theme";
+import { getJobStageLabel } from "../../lib/job-stages";
 
 // Priority chip colors (theme has no priority map; keep it local + small).
 const priorityColors: Record<string, { bg: string; text: string }> = {
@@ -21,6 +22,8 @@ export interface JobListRowProps {
   subtitle?: string;
   status: string;
   priority?: string;
+  /** Most recent job_stage_notes stage ("where the last person left off"), or null/undefined if none logged yet. */
+  stage?: string | null;
   /** Optional leading element (e.g. a time column on the schedule). */
   leading?: ReactNode;
   onPress?: () => void;
@@ -28,8 +31,8 @@ export interface JobListRowProps {
 
 // One job row shared by the dashboard lists, the office Jobs list, and the
 // schedule agenda: "#num — title", a subtitle (customer · assignee), and
-// status/priority pills. Read-only; money never appears here (parity with web).
-export function JobListRow({ jobNumber, title, subtitle, status, priority, leading, onPress }: JobListRowProps) {
+// status/priority/stage pills. Read-only; money never appears here (parity with web).
+export function JobListRow({ jobNumber, title, subtitle, status, priority, stage, leading, onPress }: JobListRowProps) {
   const s = statusColors[status] ?? { bg: colors.slate100, text: colors.slate500 };
   const p = priority ? priorityColors[priority] ?? { bg: colors.slate100, text: colors.slate500 } : null;
   return (
@@ -50,6 +53,11 @@ export function JobListRow({ jobNumber, title, subtitle, status, priority, leadi
         <View style={[styles.pill, { backgroundColor: s.bg }]}>
           <Text style={[styles.pillText, { color: s.text }]}>{humanize(status)}</Text>
         </View>
+        {!!stage && (
+          <View style={[styles.pill, { backgroundColor: colors.blue100 }]}>
+            <Text style={[styles.pillText, { color: colors.blue600 }]}>{getJobStageLabel(stage)}</Text>
+          </View>
+        )}
       </View>
     </TouchableOpacity>
   );

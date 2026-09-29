@@ -9,7 +9,7 @@ import { MessageSquare, Send, Sparkles, Mic, Square, Loader2 } from "lucide-reac
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { formatDate, formatTime } from "@/lib/date";
-import { JOB_STAGES, getJobStageLabel } from "@/lib/job-stages";
+import { JOB_STAGES, getJobStageLabel, getCurrentStageNote } from "@/lib/job-stages";
 
 interface Props {
   jobId: string;
@@ -145,6 +145,12 @@ export function JobNotes({ jobId, notes, onUpdate, currentUserId, stageNotes, on
   // so "history builds up stage by stage" — a technician opening the drain
   // stage's history sees every drain note together, not interleaved with
   // fit-off notes from a different visit.
+  // "Where the last person left off" — the single most recent stage note
+  // across all stages, surfaced up top so a tech opening this job (or an
+  // office user scanning it) doesn't have to read the full stage-by-stage
+  // history just to see current status.
+  const currentStageNote = useMemo(() => getCurrentStageNote(stageNotes), [stageNotes]);
+
   const stagesToShow = stageFilter === "all" ? JOB_STAGES : JOB_STAGES.filter((s) => s.value === stageFilter);
   const stageNotesByStage = useMemo(() => {
     const map = new Map<string, any[]>();
@@ -164,6 +170,21 @@ export function JobNotes({ jobId, notes, onUpdate, currentUserId, stageNotes, on
           <h2 className="text-base font-semibold text-slate-900">Stage Notes</h2>
           <p className="text-sm text-slate-500">History by workflow stage — visible to everyone on this job</p>
         </div>
+
+        {currentStageNote && (
+          <div className="flex items-start gap-2 bg-cyan-50 border border-cyan-200 rounded-lg px-3 py-2">
+            <Badge className="bg-cyan-100 text-cyan-800 hover:bg-cyan-100 w-fit shrink-0">
+              Currently at: {getJobStageLabel(currentStageNote.stage)}
+            </Badge>
+            <div className="min-w-0">
+              <p className="text-xs text-slate-600 truncate">{currentStageNote.content}</p>
+              <p className="text-[11px] text-slate-400">
+                {currentStageNote.profiles?.full_name ?? "Unknown"} ·{" "}
+                {formatDate(currentStageNote.created_at, { day: "numeric", month: "short" })} at {formatTime(currentStageNote.created_at)}
+              </p>
+            </div>
+          </div>
+        )}
 
         <div className="flex flex-col sm:flex-row gap-2">
           <Select value={stageForNewNote} onValueChange={(v) => setStageForNewNote(v ?? "")}>

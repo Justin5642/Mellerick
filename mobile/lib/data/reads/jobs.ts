@@ -97,6 +97,11 @@ export interface OfficeJob {
   priority: string;
   customers: { name: string } | null;
   assigned_profile: { full_name: string } | null;
+  // Stage of the most recent job_stage_notes row for this job (null = no
+  // stage note logged yet) — "where the last person left off", surfaced as a
+  // badge in the office jobs list so office staff can scan job status without
+  // opening each job. Distinct from `status` (whole-job lifecycle).
+  current_stage: string | null;
 }
 
 /** app/(tabs)/search.tsx `Job` */
@@ -115,6 +120,12 @@ const ROLES = { roles: ["office", "admin"] as ("office" | "admin")[] };
 // The (office)/jobs.tsx SELECT, shared by its search and pagination queries.
 const OFFICE_SELECT =
   "id, job_number, title, status, priority, customers(name), assigned_profile:profiles!jobs_assigned_to_fkey(full_name)";
+
+// Same, plus the latest job_stage_notes row per job. `.order(..., {
+// foreignTable})` + `.limit(1, {foreignTable})` below scope to the embedded
+// resource, so PostgREST returns at most one (the most recent) stage note per
+// job instead of the full history.
+const OFFICE_SELECT_WITH_STAGE = `${OFFICE_SELECT}, job_stage_notes(stage, created_at)`;
 
 // ---------------------------------------------------------------------------
 // Local SQL (SQLite dialect — design §0/§3 rewrites: embeds → LEFT JOIN +
@@ -153,10 +164,14 @@ export const SQL_GET_JOB = `
   LEFT JOIN profiles  p ON p.id = j.assigned_to
   WHERE j.id = ?`;
 
+// current_stage: a correlated subquery reusing the job_stage_notes_job_id_
+// stage_created_at_idx index (0057 migration) to grab just the most recent
+// note's stage per job, without pulling the full note history for a list row.
 export const SQL_LIST_OFFICE_JOBS = `
   SELECT j.id, j.job_number, j.title, j.status, j.priority,
          c.name AS customer_name,
-         p.full_name AS assigned_profile_full_name
+         p.full_name AS assigned_profile_full_name,
+         (SELECT n.stage FROM job_stage_notes n WHERE n.job_id = j.id ORDER BY n.created_at DESC LIMIT 1) AS current_stage
   FROM jobs j
   LEFT JOIN customers c ON c.id = j.customer_id
   LEFT JOIN profiles  p ON p.id = j.assigned_to
@@ -169,7 +184,8 @@ export const SQL_LIST_OFFICE_JOBS = `
 export const SQL_SEARCH_OFFICE_JOBS = `
   SELECT j.id, j.job_number, j.title, j.status, j.priority,
          c.name AS customer_name,
-         p.full_name AS assigned_profile_full_name
+         p.full_name AS assigned_profile_full_name,
+         (SELECT n.stage FROM job_stage_notes n WHERE n.job_id = j.id ORDER BY n.created_at DESC LIMIT 1) AS current_stage
   FROM jobs j
   LEFT JOIN customers c ON c.id = j.customer_id
   LEFT JOIN profiles  p ON p.id = j.assigned_to
@@ -260,6 +276,7 @@ interface RawOfficeJobRow {
   priority: string;
   customer_name: string | null;
   assigned_profile_full_name: string | null;
+  current_stage: string | null;
 }
 
 interface RawJobSearchRow {
@@ -372,7 +389,13 @@ function mapOfficeJob(r: RawOfficeJobRow): OfficeJob {
     assigned_profile: nestOne(r.assigned_profile_full_name, {
       full_name: r.assigned_profile_full_name as string,
     }),
+    current_stage: r.current_stage ?? null,
   };
+}
+
+/** Pulls the stage off a `.limit(1, {foreignTable})`-scoped embed array. */
+function currentStageFromEmbed(rows: { stage: string; created_at: string }[] | null | undefined): string | null {
+  return rows?.[0]?.stage ?? null;
 }
 
 /** Escape LIKE metacharacters so a bound query matches as a plain substring. */
@@ -453,15 +476,20 @@ export async function listOfficeJobs(offset: number, limit: number): Promise<Off
       const rows = await db.getAll<RawOfficeJobRow>(SQL_LIST_OFFICE_JOBS, [limit, offset]);
       return rows.map(mapOfficeJob);
     },
-    // Unchanged Supabase body (app/(office)/jobs.tsx loadMore).
+    // Base body is app/(office)/jobs.tsx's original loadMore query, plus the
+    // job_stage_notes embed (see OFFICE_SELECT_WITH_STAGE) scoped to the
+    // single most recent row per job via the foreign-table order+limit below.
     async () => {
       const res = await supabase
         .from("jobs")
-        .select(OFFICE_SELECT)
+        .select(OFFICE_SELECT_WITH_STAGE)
         .order("created_at", { ascending: false })
         .order("id", { ascending: false })
+        .order("created_at", { ascending: false, foreignTable: "job_stage_notes" })
+        .limit(1, { foreignTable: "job_stage_notes" })
         .range(offset, offset + limit - 1);
-      return unwrapRows(res as never, "listOfficeJobs") as unknown as OfficeJob[];
+      const rows = unwrapRows(res as never, "listOfficeJobs") as unknown as (OfficeJob & { job_stage_notes: { stage: string; created_at: string }[] })[];
+      return rows.map((r) => ({ ...r, current_stage: currentStageFromEmbed(r.job_stage_notes) }));
     },
     ROLES
   );
@@ -485,17 +513,22 @@ export async function searchOfficeJobs(query: string, limit: number): Promise<Of
       ]);
       return rows.map(mapOfficeJob);
     },
-    // Unchanged Supabase body (app/(office)/jobs.tsx runSearch).
+    // Base body is app/(office)/jobs.tsx's original runSearch query, plus the
+    // same job_stage_notes latest-row embed as listOfficeJobs above.
     async () => {
       const safe = query.replace(/[,()%]/g, " ").trim();
-      let builder = supabase.from("jobs").select(OFFICE_SELECT).order("created_at", { ascending: false })
-        .order("id", { ascending: false }).limit(limit);
+      let builder = supabase.from("jobs").select(OFFICE_SELECT_WITH_STAGE).order("created_at", { ascending: false })
+        .order("id", { ascending: false })
+        .order("created_at", { ascending: false, foreignTable: "job_stage_notes" })
+        .limit(1, { foreignTable: "job_stage_notes" })
+        .limit(limit);
       if (safe) {
         const numeric = /^\d+$/.test(safe);
         builder = builder.or(`title.ilike.%${safe}%${numeric ? `,job_number.eq.${safe}` : ""}`);
       }
       const res = await builder;
-      return unwrapRows(res as never, "searchOfficeJobs") as unknown as OfficeJob[];
+      const rows = unwrapRows(res as never, "searchOfficeJobs") as unknown as (OfficeJob & { job_stage_notes: { stage: string; created_at: string }[] })[];
+      return rows.map((r) => ({ ...r, current_stage: currentStageFromEmbed(r.job_stage_notes) }));
     },
     ROLES
   );

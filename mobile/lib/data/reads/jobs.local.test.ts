@@ -190,25 +190,26 @@ describe("getJob (local)", () => {
 
 describe("listOfficeJobs (local)", () => {
   const sqliteRows = [
-    { id: "j1", job_number: 101, title: "Backflow annual test", status: "scheduled", priority: "normal", customer_name: "Acme Pty Ltd", assigned_profile_full_name: "Terry Tech" },
-    { id: "j2", job_number: 102, title: "Unassigned quote visit", status: "pending", priority: "low", customer_name: null, assigned_profile_full_name: null },
+    { id: "j1", job_number: 101, title: "Backflow annual test", status: "scheduled", priority: "normal", customer_name: "Acme Pty Ltd", assigned_profile_full_name: "Terry Tech", current_stage: "drain" },
+    { id: "j2", job_number: 102, title: "Unassigned quote visit", status: "pending", priority: "low", customer_name: null, assigned_profile_full_name: null, current_stage: null },
   ];
 
-  it("maps rows and paginates with LIMIT/OFFSET parity to .range()", async () => {
+  it("maps rows (incl. current_stage from the correlated subquery) and paginates with LIMIT/OFFSET parity to .range()", async () => {
     const getAll = jest.fn().mockResolvedValue(sqliteRows);
     setLocalReads(fakeReads({ getAll }));
 
     const rows = await listOfficeJobs(50, 50);
 
     expect(rows).toEqual([
-      { id: "j1", job_number: 101, title: "Backflow annual test", status: "scheduled", priority: "normal", customers: { name: "Acme Pty Ltd" }, assigned_profile: { full_name: "Terry Tech" } },
-      { id: "j2", job_number: 102, title: "Unassigned quote visit", status: "pending", priority: "low", customers: null, assigned_profile: null },
+      { id: "j1", job_number: 101, title: "Backflow annual test", status: "scheduled", priority: "normal", customers: { name: "Acme Pty Ltd" }, assigned_profile: { full_name: "Terry Tech" }, current_stage: "drain" },
+      { id: "j2", job_number: 102, title: "Unassigned quote visit", status: "pending", priority: "low", customers: null, assigned_profile: null, current_stage: null },
     ]);
     const [sql, params] = getAll.mock.calls[0];
     expect(norm(sql)).toBe(norm(`
       SELECT j.id, j.job_number, j.title, j.status, j.priority,
              c.name AS customer_name,
-             p.full_name AS assigned_profile_full_name
+             p.full_name AS assigned_profile_full_name,
+             (SELECT n.stage FROM job_stage_notes n WHERE n.job_id = j.id ORDER BY n.created_at DESC LIMIT 1) AS current_stage
       FROM jobs j
       LEFT JOIN customers c ON c.id = j.customer_id
       LEFT JOIN profiles  p ON p.id = j.assigned_to
@@ -230,7 +231,8 @@ describe("searchOfficeJobs (local)", () => {
     expect(norm(sql)).toBe(norm(`
       SELECT j.id, j.job_number, j.title, j.status, j.priority,
              c.name AS customer_name,
-             p.full_name AS assigned_profile_full_name
+             p.full_name AS assigned_profile_full_name,
+             (SELECT n.stage FROM job_stage_notes n WHERE n.job_id = j.id ORDER BY n.created_at DESC LIMIT 1) AS current_stage
       FROM jobs j
       LEFT JOIN customers c ON c.id = j.customer_id
       LEFT JOIN profiles  p ON p.id = j.assigned_to
