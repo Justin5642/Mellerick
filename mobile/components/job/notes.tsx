@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { View, Text, StyleSheet, TextInput, TouchableOpacity, FlatList, ActivityIndicator } from "react-native";
+import { View, Text, StyleSheet, TextInput, TouchableOpacity, FlatList, ActivityIndicator, Alert } from "react-native";
+import { useAudioRecorder, useAudioRecorderState, AudioModule, RecordingPresets, setAudioModeAsync } from "expo-audio";
 import { Ionicons } from "@expo/vector-icons";
 import { supabase } from "../../lib/supabase";
 import { colors } from "../../lib/theme";
@@ -56,7 +57,69 @@ export function JobNotesTab({ jobId, currentUserId }: { jobId: string; currentUs
   const [stageFilter, setStageFilter] = useState<string | null>(null);
   const [stageSaving, setStageSaving] = useState(false);
   const [stageError, setStageError] = useState<unknown>(null);
+  const [stageTranscribing, setStageTranscribing] = useState(false);
+  const stageAudioRecorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
+  const stageRecorderState = useAudioRecorderState(stageAudioRecorder);
   const stageNotesComposer = useJobStageNotes();
+
+  // Voice-to-text for stage notes: record in-app -> upload -> the office
+  // server transcribes via Whisper and runs the same AI polish pass as
+  // "Polish with AI" below, in one round trip. The result drops straight
+  // into stageContent, ready to glance at and tap "Add stage note" — never
+  // auto-saved, so a bad transcription can just be edited or re-recorded.
+  async function startStageRecording() {
+    if (!(await netInfoConnectivity.isOnline())) {
+      Alert.alert("No internet connection", "Voice notes need an internet connection to transcribe. You can still type the note directly.");
+      return;
+    }
+    const perm = await AudioModule.requestRecordingPermissionsAsync();
+    if (!perm.granted) {
+      Alert.alert("Microphone permission needed", "Enable microphone access in Settings to dictate a note.");
+      return;
+    }
+    await setAudioModeAsync({ playsInSilentMode: true, allowsRecording: true });
+    await stageAudioRecorder.prepareToRecordAsync();
+    stageAudioRecorder.record();
+  }
+
+  async function stopStageRecording() {
+    await stageAudioRecorder.stop();
+    const uri = stageAudioRecorder.uri;
+    if (!uri) return;
+    await transcribeStageRecording(uri);
+  }
+
+  async function transcribeStageRecording(uri: string) {
+    if (!API_BASE_URL) return;
+    setStageTranscribing(true);
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const accessToken = sessionData.session?.access_token;
+      if (!accessToken) return;
+      const formData = new FormData();
+      // React Native's fetch accepts this { uri, name, type } shape for a
+      // FormData file field — the same pattern used to upload the job-level
+      // voice report (see lib/data/repositories/voiceReport.ts), just
+      // uploaded directly here instead of going through the outbox, since
+      // this call is inherently online-only (it needs OpenAI either way).
+      formData.append("audio", { uri, name: "note.m4a", type: "audio/m4a" } as unknown as Blob);
+      const res = await fetch(`${API_BASE_URL}/api/ai/transcribe-note`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${accessToken}` },
+        body: formData,
+      });
+      const data = await res.json();
+      if (res.ok && data.text) {
+        setStageContent(data.text);
+      } else {
+        Alert.alert("Transcription failed", data.error ?? "Try again.");
+      }
+    } catch {
+      Alert.alert("Transcription failed", "Check your connection and try again.");
+    } finally {
+      setStageTranscribing(false);
+    }
+  }
 
   const loadStageNotes = useCallback(async () => {
     try {
@@ -225,11 +288,28 @@ export function JobNotesTab({ jobId, currentUserId }: { jobId: string; currentUs
           style={styles.input}
           value={stageContent}
           onChangeText={setStageContent}
-          placeholder={selectedStage ? `Add a note for the ${getJobStageLabel(selectedStage)} stage...` : "Pick a stage above first..."}
+          placeholder={selectedStage ? `Add a note for the ${getJobStageLabel(selectedStage)} stage, or tap Record to dictate...` : "Pick a stage above first..."}
           multiline
         />
         <View style={styles.buttonRow}>
-          <View />
+          <TouchableOpacity
+            style={[styles.polishButton, stageRecorderState.isRecording && styles.recordButtonActive]}
+            onPress={stageRecorderState.isRecording ? stopStageRecording : startStageRecording}
+            disabled={stageTranscribing}
+          >
+            {stageTranscribing ? (
+              <ActivityIndicator size="small" color={colors.blue600} />
+            ) : (
+              <Ionicons
+                name={stageRecorderState.isRecording ? "stop-circle" : "mic"}
+                size={14}
+                color={stageRecorderState.isRecording ? "#fff" : colors.blue600}
+              />
+            )}
+            <Text style={[styles.polishButtonText, stageRecorderState.isRecording && styles.recordButtonTextActive]}>
+              {stageTranscribing ? "Transcribing..." : stageRecorderState.isRecording ? "Stop" : "Record note"}
+            </Text>
+          </TouchableOpacity>
           <TouchableOpacity
             style={styles.addButton}
             onPress={handleAddStageNote}
@@ -375,6 +455,8 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
   },
   polishButtonText: { color: colors.slate700, fontWeight: "600", fontSize: 13 },
+  recordButtonActive: { backgroundColor: colors.red600, borderColor: colors.red600 },
+  recordButtonTextActive: { color: "#fff" },
   addButton: { backgroundColor: colors.blue600, borderRadius: 10, paddingHorizontal: 16, paddingVertical: 12 },
   addButtonText: { color: "#fff", fontWeight: "600", fontSize: 14 },
   noteCard: { backgroundColor: colors.card, borderWidth: 1, borderColor: colors.border, borderRadius: 10, padding: 12, marginBottom: 8 },

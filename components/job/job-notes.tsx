@@ -1,11 +1,11 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { MessageSquare, Send, Sparkles } from "lucide-react";
+import { MessageSquare, Send, Sparkles, Mic, Square, Loader2 } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { formatDate, formatTime } from "@/lib/date";
@@ -72,6 +72,58 @@ export function JobNotes({ jobId, notes, onUpdate, currentUserId, stageNotes, on
   const [stageForNewNote, setStageForNewNote] = useState<string>("");
   const [stageContent, setStageContent] = useState("");
   const [stageSaving, setStageSaving] = useState(false);
+  const [stageRecording, setStageRecording] = useState(false);
+  const [stageTranscribing, setStageTranscribing] = useState(false);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+
+  // Voice-to-text for stage notes: record -> upload -> /api/ai/transcribe-note
+  // does Whisper + the same AI polish pass as "Polish with AI" in one round
+  // trip, and the result drops straight into stageContent — ready to glance
+  // at and tap "Add stage note", or edit first. Never auto-saved.
+  async function handleStartRecording() {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const recorder = new MediaRecorder(stream);
+      audioChunksRef.current = [];
+      recorder.ondataavailable = (e) => {
+        if (e.data.size > 0) audioChunksRef.current.push(e.data);
+      };
+      recorder.onstop = () => {
+        stream.getTracks().forEach((t) => t.stop());
+        void handleTranscribe(recorder.mimeType || "audio/webm");
+      };
+      mediaRecorderRef.current = recorder;
+      recorder.start();
+      setStageRecording(true);
+    } catch {
+      toast.error("Couldn't access the microphone — check your browser's permission for this site.");
+    }
+  }
+
+  function handleStopRecording() {
+    mediaRecorderRef.current?.stop();
+    setStageRecording(false);
+  }
+
+  async function handleTranscribe(mimeType: string) {
+    const blob = new Blob(audioChunksRef.current, { type: mimeType });
+    audioChunksRef.current = [];
+    if (blob.size === 0) return;
+    setStageTranscribing(true);
+    try {
+      const formData = new FormData();
+      formData.append("audio", blob, "note.webm");
+      const res = await fetch("/api/ai/transcribe-note", { method: "POST", body: formData });
+      const data = await res.json();
+      if (!res.ok) { toast.error(data.error ?? "Transcription failed"); return; }
+      setStageContent(data.text);
+    } catch {
+      toast.error("Transcription failed — check your connection and try again.");
+    } finally {
+      setStageTranscribing(false);
+    }
+  }
 
   async function handleAddStageNote() {
     if (!stageContent.trim() || !stageForNewNote) return;
@@ -125,12 +177,30 @@ export function JobNotes({ jobId, notes, onUpdate, currentUserId, stageNotes, on
           <Textarea
             value={stageContent}
             onChange={(e) => setStageContent(e.target.value)}
-            placeholder={stageForNewNote ? `Add a note for the ${getJobStageLabel(stageForNewNote)} stage...` : "Pick a stage first..."}
+            placeholder={stageForNewNote ? `Add a note for the ${getJobStageLabel(stageForNewNote)} stage, or tap Record to dictate...` : "Pick a stage first..."}
             rows={2}
             className="resize-none text-sm flex-1"
           />
         </div>
-        <div className="flex justify-end">
+        <div className="flex items-center justify-between gap-2">
+          <Button
+            type="button"
+            variant={stageRecording ? "destructive" : "outline"}
+            size="sm"
+            onClick={stageRecording ? handleStopRecording : handleStartRecording}
+            disabled={stageTranscribing}
+            className="gap-1.5 text-slate-600"
+            title="Dictate this note instead of typing it"
+          >
+            {stageTranscribing ? (
+              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+            ) : stageRecording ? (
+              <Square className="w-3.5 h-3.5" />
+            ) : (
+              <Mic className="w-3.5 h-3.5" />
+            )}
+            {stageTranscribing ? "Transcribing..." : stageRecording ? "Stop recording" : "Record note"}
+          </Button>
           <Button onClick={handleAddStageNote} disabled={stageSaving || !stageContent.trim() || !stageForNewNote} className="gap-2 h-9">
             <Send className="w-3.5 h-3.5" />
             {stageSaving ? "..." : "Add stage note"}
