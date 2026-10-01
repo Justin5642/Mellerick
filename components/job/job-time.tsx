@@ -61,6 +61,9 @@ interface Props {
   // Active staff for the admin "log on behalf of" picker in the edit dialog.
   staff?: StaffOption[];
   onUpdate: (entries: TimeEntry[]) => void;
+  // The stage picked when this job was scheduled — new clock-ins (manual or
+  // geofence-auto) default to it instead of landing unassigned.
+  scheduledCostCenterId?: string | null;
 }
 
 const GEOFENCE_RADIUS = 150;
@@ -90,7 +93,7 @@ function syncBilling(entryId: string) {
   fetch(`/api/time-entries/${entryId}/sync-billing`, { method: "POST" }).catch(() => {});
 }
 
-export function JobTime({ jobId, currentUserId, timeEntries: initial, pos, site, costCenters, isAdmin, staff, onUpdate }: Props) {
+export function JobTime({ jobId, currentUserId, timeEntries: initial, pos, site, costCenters, isAdmin, staff, onUpdate, scheduledCostCenterId }: Props) {
   const supabase = createClient();
   const [entries, setEntries] = useState<TimeEntry[]>(initial);
   const [loading, setLoading] = useState(false);
@@ -168,7 +171,7 @@ export function JobTime({ jobId, currentUserId, timeEntries: initial, pos, site,
           if (!open) {
             const { data, error } = await supabase
               .from("time_entries")
-              .insert({ job_id: jobId, staff_id: currentUserId, clock_in: new Date().toISOString(), auto_clocked: true })
+              .insert({ job_id: jobId, staff_id: currentUserId, clock_in: new Date().toISOString(), auto_clocked: true, cost_center_id: scheduledCostCenterId ?? null })
               .select(TIME_ENTRY_SELECT_WITH_STAFF)
               .single();
             // NEVER swallow this. Discarding the error here is how a technician
@@ -222,14 +225,14 @@ export function JobTime({ jobId, currentUserId, timeEntries: initial, pos, site,
     );
 
     return () => navigator.geolocation.clearWatch(watchId);
-  }, [jobId, currentUserId, poWithLocation?.site_lat, poWithLocation?.site_lng]);
+  }, [jobId, currentUserId, poWithLocation?.site_lat, poWithLocation?.site_lng, scheduledCostCenterId]);
 
   async function clockIn() {
     if (myOpenEntry || loading) return;
     setLoading(true);
     const { data, error } = await supabase
       .from("time_entries")
-      .insert({ job_id: jobId, staff_id: currentUserId, clock_in: new Date().toISOString(), auto_clocked: false })
+      .insert({ job_id: jobId, staff_id: currentUserId, clock_in: new Date().toISOString(), auto_clocked: false, cost_center_id: scheduledCostCenterId ?? null })
       .select(TIME_ENTRY_SELECT_WITH_STAFF)
       .single();
     setLoading(false);

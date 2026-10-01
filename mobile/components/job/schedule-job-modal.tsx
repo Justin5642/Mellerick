@@ -12,6 +12,7 @@ import {
   validateScheduleWindow,
 } from "../../lib/scheduling";
 import { dateKeyInBusinessTZ, toBusinessInputValue, fromBusinessInputValue } from "../../lib/date";
+import type { JobCostCentre } from "../../lib/data/reads/jobBilling";
 
 interface Props {
   visible: boolean;
@@ -21,16 +22,19 @@ interface Props {
   currentAssignedTo: string | null;
   currentScheduledStart: string | null;
   currentScheduledEnd: string | null;
+  costCenters?: JobCostCentre[];
+  currentScheduledCostCenterId?: string | null;
   onScheduled: (patch: {
     assigned_to: string;
     assigned_profile: { full_name: string };
     scheduled_start: string;
     scheduled_end: string;
     status: string;
+    scheduled_cost_center_id: string | null;
   }) => void;
 }
 
-type Step = "technician" | "time" | "confirm";
+type Step = "technician" | "time" | "stage" | "confirm";
 
 function friendlyTime(hhmm: string): string {
   const [h, m] = hhmm.split(":").map(Number);
@@ -54,12 +58,15 @@ export function ScheduleJobModal({
   currentAssignedTo,
   currentScheduledStart,
   currentScheduledEnd,
+  costCenters = [],
+  currentScheduledCostCenterId,
   onScheduled,
 }: Props) {
   const { schedule, ready } = useSchedule();
   const [step, setStep] = useState<Step>("technician");
   const [staff, setStaff] = useState<AssignableStaff[]>([]);
   const [technician, setTechnician] = useState<AssignableStaff | null>(null);
+  const [costCenterId, setCostCenterId] = useState<string | null>(currentScheduledCostCenterId ?? null);
   const [date, setDate] = useState(new Date());
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [allDay, setAllDay] = useState(true);
@@ -74,6 +81,7 @@ export function ScheduleJobModal({
     listAssignableStaff().then(setStaff).catch(() => {});
     setStep("technician");
     setTechnician(null);
+    setCostCenterId(currentScheduledCostCenterId ?? null);
     setDate(currentScheduledStart ? new Date(currentScheduledStart) : new Date());
     if (currentScheduledStart && currentScheduledEnd) {
       setAllDay(false);
@@ -85,7 +93,7 @@ export function ScheduleJobModal({
       setEndTime(DEFAULT_SHIFT_END_TIME);
     }
     setOtherJobsThatDay(null);
-  }, [visible, currentScheduledStart, currentScheduledEnd]);
+  }, [visible, currentScheduledStart, currentScheduledEnd, currentScheduledCostCenterId]);
 
   // Pre-select the currently assigned technician once the staff list has
   // loaded (it isn't known until listAssignableStaff resolves).
@@ -144,6 +152,7 @@ export function ScheduleJobModal({
   const scheduledStartIso = fromBusinessInputValue(`${dateKey}T${startTime}`);
   const scheduledEndIso = fromBusinessInputValue(`${dateKey}T${endTime}`);
   const windowError = validateScheduleWindow(scheduledStartIso, scheduledEndIso);
+  const hasCostCenters = costCenters.length > 0;
 
   function timeAsDate(hhmm: string): Date {
     const [h, m] = hhmm.split(":").map(Number);
@@ -156,13 +165,14 @@ export function ScheduleJobModal({
     if (!technician || windowError || saving || !ready) return;
     setSaving(true);
     try {
-      await schedule(jobId, technician.id, scheduledStartIso, scheduledEndIso);
+      await schedule(jobId, technician.id, scheduledStartIso, scheduledEndIso, costCenterId);
       onScheduled({
         assigned_to: technician.id,
         assigned_profile: { full_name: technician.full_name },
         scheduled_start: scheduledStartIso,
         scheduled_end: scheduledEndIso,
         status: jobStatus === "pending" ? "scheduled" : jobStatus,
+        scheduled_cost_center_id: costCenterId,
       });
       onClose();
     } catch (e) {
@@ -250,6 +260,37 @@ export function ScheduleJobModal({
             </View>
           )}
 
+          {step === "stage" && (
+            <View style={{ gap: 6 }}>
+              <Text style={styles.label}>Cost centre (optional)</Text>
+              <TouchableOpacity
+                style={[styles.row, costCenterId === null && styles.rowActive]}
+                onPress={() => setCostCenterId(null)}
+              >
+                <Text style={styles.rowText}>No stage selected</Text>
+                {costCenterId === null && <Ionicons name="checkmark" size={18} color={colors.blue600} />}
+              </TouchableOpacity>
+              {costCenters.map((cc) => {
+                const active = costCenterId === cc.id;
+                return (
+                  <TouchableOpacity
+                    key={cc.id}
+                    style={[styles.row, active && styles.rowActive]}
+                    onPress={() => setCostCenterId(cc.id)}
+                  >
+                    <Text style={styles.rowText}>
+                      {cc.name}{cc.po_number ? ` (PO #${cc.po_number})` : ""}
+                    </Text>
+                    {active && <Ionicons name="checkmark" size={18} color={colors.blue600} />}
+                  </TouchableOpacity>
+                );
+              })}
+              <Text style={styles.hint}>
+                Time logged on this job defaults to this stage at clock-in — the technician can still change it per entry.
+              </Text>
+            </View>
+          )}
+
           {step === "confirm" && (
             <View style={styles.confirmBox}>
               <Text style={styles.confirmTech}>{technician?.full_name}</Text>
@@ -262,6 +303,11 @@ export function ScheduleJobModal({
                 {new Date(scheduledEndIso).toLocaleTimeString("en-AU", { hour: "2-digit", minute: "2-digit", timeZone: "Australia/Melbourne" })}
                 {allDay ? " · All day" : ""}
               </Text>
+              {hasCostCenters && (
+                <Text style={styles.confirmLine}>
+                  Stage: {costCenters.find((cc) => cc.id === costCenterId)?.name ?? "None"}
+                </Text>
+              )}
               <Text style={styles.hint}>
                 This sets the planned schedule block only — worked hours are still captured separately via clock-on/clock-off.
               </Text>
@@ -271,7 +317,13 @@ export function ScheduleJobModal({
           <View style={styles.actions}>
             <TouchableOpacity
               style={styles.cancelBtn}
-              onPress={() => (step === "technician" ? onClose() : setStep(step === "confirm" ? "time" : "technician"))}
+              onPress={() =>
+                step === "technician"
+                  ? onClose()
+                  : setStep(
+                      step === "confirm" ? (hasCostCenters ? "stage" : "time") : step === "stage" ? "time" : "technician"
+                    )
+              }
               disabled={saving}
             >
               <Text style={styles.cancelText}>{step === "technician" ? "Cancel" : "Back"}</Text>
@@ -282,7 +334,16 @@ export function ScheduleJobModal({
               </TouchableOpacity>
             )}
             {step === "time" && (
-              <TouchableOpacity style={[styles.doneBtn, !!windowError && styles.doneBtnDisabled]} onPress={() => setStep("confirm")} disabled={!!windowError}>
+              <TouchableOpacity
+                style={[styles.doneBtn, !!windowError && styles.doneBtnDisabled]}
+                onPress={() => setStep(hasCostCenters ? "stage" : "confirm")}
+                disabled={!!windowError}
+              >
+                <Text style={styles.doneText}>Next</Text>
+              </TouchableOpacity>
+            )}
+            {step === "stage" && (
+              <TouchableOpacity style={styles.doneBtn} onPress={() => setStep("confirm")}>
                 <Text style={styles.doneText}>Next</Text>
               </TouchableOpacity>
             )}

@@ -231,7 +231,7 @@ export function JobDetailClient({ job, currentUserId, photos: initialPhotos, doc
               />
             </TabsContent>
             <TabsContent value="time" className="m-0 h-full">
-              <JobTime jobId={job.id} currentUserId={currentUserId} timeEntries={timeEntries} pos={purchaseOrders} site={job.sites} costCenters={costCenters} isAdmin={isAdmin} staff={staff} onUpdate={setTimeEntries} />
+              <JobTime jobId={job.id} currentUserId={currentUserId} timeEntries={timeEntries} pos={purchaseOrders} site={job.sites} costCenters={costCenters} isAdmin={isAdmin} staff={staff} onUpdate={setTimeEntries} scheduledCostCenterId={job.scheduled_cost_center_id} />
             </TabsContent>
             <TabsContent value="variations" className="m-0 h-full">
               <JobVariations jobId={job.id} variations={variations} variationTypes={variationTypes} currentUserId={currentUserId} onUpdate={setVariations} highlightVariationId={highlightVariationId} />
@@ -301,6 +301,8 @@ export function JobDetailClient({ job, currentUserId, photos: initialPhotos, doc
         currentAssignedTo={job.assigned_to}
         currentScheduledStart={job.scheduled_start}
         currentScheduledEnd={job.scheduled_end}
+        costCenters={costCenters}
+        currentScheduledCostCenterId={job.scheduled_cost_center_id}
       />
     </div>
   );

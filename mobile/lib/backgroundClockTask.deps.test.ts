@@ -70,7 +70,7 @@ beforeEach(() => {
 describe("supabaseClockDeps.onArrive — the travel leg actually reaches the database", () => {
   it("writes a travel row with NON-ZERO hours timed from the departure", async () => {
     // 25 minutes of driving. The bug this pins produced 0 and discarded the row.
-    await supabaseClockDeps.onArrive("job-b", iso(25 * MIN), "job-a", iso(0), "staff-1");
+    await supabaseClockDeps.onArrive("job-b", iso(25 * MIN), "job-a", iso(0), "staff-1", null);
 
     const travel = mockInsert.mock.calls.map((c) => c[0]).find((p) => p.entry_type === "travel");
     // jest's expect takes one argument — no message parameter, unlike vitest.
@@ -80,7 +80,7 @@ describe("supabaseClockDeps.onArrive — the travel leg actually reaches the dat
   });
 
   it("times the leg from the DEPARTURE, not from the arrival", async () => {
-    await supabaseClockDeps.onArrive("job-b", iso(25 * MIN), "job-a", iso(0), "staff-1");
+    await supabaseClockDeps.onArrive("job-b", iso(25 * MIN), "job-a", iso(0), "staff-1", null);
 
     const travel = mockInsert.mock.calls.map((c) => c[0]).find((p) => p.entry_type === "travel");
     expect(travel.clock_in).toBe(iso(0));
@@ -88,7 +88,7 @@ describe("supabaseClockDeps.onArrive — the travel leg actually reaches the dat
   });
 
   it("attributes the drive to the job it started from", async () => {
-    await supabaseClockDeps.onArrive("job-b", iso(25 * MIN), "job-a", iso(0), "staff-1");
+    await supabaseClockDeps.onArrive("job-b", iso(25 * MIN), "job-a", iso(0), "staff-1", null);
 
     const travel = mockInsert.mock.calls.map((c) => c[0]).find((p) => p.entry_type === "travel");
     expect(travel.travel_from_job_id).toBe("job-a");
@@ -97,7 +97,7 @@ describe("supabaseClockDeps.onArrive — the travel leg actually reaches the dat
   });
 
   it("always clocks in at the new site, travel leg or not", async () => {
-    await supabaseClockDeps.onArrive("job-b", iso(25 * MIN), null, null, "staff-1");
+    await supabaseClockDeps.onArrive("job-b", iso(25 * MIN), null, null, "staff-1", null);
 
     const work = mockInsert.mock.calls.map((c) => c[0]).find((p) => p.entry_type === "work");
     expect(work).toBeDefined();
@@ -108,7 +108,7 @@ describe("supabaseClockDeps.onArrive — the travel leg actually reaches the dat
   it("writes NO travel row when there is no pending departure", async () => {
     // First site of the day: nothing was driven from, so inventing a leg would
     // put fabricated time on a payslip.
-    await supabaseClockDeps.onArrive("job-b", iso(25 * MIN), null, null, "staff-1");
+    await supabaseClockDeps.onArrive("job-b", iso(25 * MIN), null, null, "staff-1", null);
 
     expect(mockInsert.mock.calls.map((c) => c[0]).find((p) => p.entry_type === "travel")).toBeUndefined();
   });
@@ -117,7 +117,7 @@ describe("supabaseClockDeps.onArrive — the travel leg actually reaches the dat
     // Nine hours "driving" means the phone was off or the departure never
     // fired. The arrival is still real, so it must still be recorded — losing
     // the leg is a gap the office can correct; a nine-hour drive is a lie.
-    await supabaseClockDeps.onArrive("job-b", iso(9 * 60 * MIN), "job-a", iso(0), "staff-1");
+    await supabaseClockDeps.onArrive("job-b", iso(9 * 60 * MIN), "job-a", iso(0), "staff-1", null);
 
     const payloads = mockInsert.mock.calls.map((c) => c[0]);
     expect(payloads.find((p) => p.entry_type === "travel")).toBeUndefined();
@@ -127,7 +127,7 @@ describe("supabaseClockDeps.onArrive — the travel leg actually reaches the dat
   it("writes NO travel row for a NEGATIVE duration", async () => {
     // Cross-device clock skew. This is the defect that reached payroll on the
     // manual path; it must not reach it here.
-    await supabaseClockDeps.onArrive("job-b", iso(0), "job-a", iso(25 * MIN), "staff-1");
+    await supabaseClockDeps.onArrive("job-b", iso(0), "job-a", iso(25 * MIN), "staff-1", null);
 
     expect(mockInsert.mock.calls.map((c) => c[0]).find((p) => p.entry_type === "travel")).toBeUndefined();
   });

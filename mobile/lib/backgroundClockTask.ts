@@ -21,7 +21,7 @@ import type { LocationReading } from "./backgroundClockPlan";
 // not depend on whether the app happened to be open. Divergence here would be
 // invisible and would show up only as a disputed payslip.
 
-async function insertWorkClockIn(jobId: string, at: string, staffId: string): Promise<void> {
+async function insertWorkClockIn(jobId: string, at: string, staffId: string, costCenterId: string | null): Promise<void> {
   // Idempotence: if an entry is already open for this job, do nothing. The task
   // can legitimately re-derive a transition after the process is killed mid-way,
   // and a second clock-in would double-count the visit.
@@ -42,6 +42,7 @@ async function insertWorkClockIn(jobId: string, at: string, staffId: string): Pr
     clock_in: at,
     auto_clocked: true,
     entry_type: "work",
+    cost_center_id: costCenterId,
   });
   if (insertError) throw new Error(`backgroundClock clockIn: ${insertError.message}`);
 }
@@ -108,8 +109,8 @@ async function closeWorkEntry(jobId: string, at: string, staffId: string): Promi
 
 export const supabaseClockDeps: BackgroundClockDeps = {
   ...storageDeps,
-  onArrive: async (jobId, at, fromJobId, fromAt, staffId) => {
-    await insertWorkClockIn(jobId, at, staffId);
+  onArrive: async (jobId, at, fromJobId, fromAt, staffId, costCenterId) => {
+    await insertWorkClockIn(jobId, at, staffId, costCenterId);
     // Both are required: fromJobId says where the drive started, fromAt says
     // when. Without the second the leg was always zero-length and discarded.
     if (fromJobId && fromAt) await insertTravelLeg(jobId, fromJobId, fromAt, at, staffId);

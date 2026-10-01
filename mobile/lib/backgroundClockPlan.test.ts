@@ -16,8 +16,8 @@ import type { TrackedSite } from "./geofenceState";
 // be killed between invocations — so the decision must be a pure function of
 // (batch, sites, previously-persisted state). That is what this is.
 
-const SITE_A: TrackedSite = { jobId: "job-a", lat: -37.8136, lng: 144.9631 };
-const SITE_B: TrackedSite = { jobId: "job-b", lat: -37.9136, lng: 144.9631 };
+const SITE_A: TrackedSite = { jobId: "job-a", lat: -37.8136, lng: 144.9631, scheduledCostCenterId: null };
+const SITE_B: TrackedSite = { jobId: "job-b", lat: -37.9136, lng: 144.9631, scheduledCostCenterId: null };
 
 const at = (site: TrackedSite, ms: number) => ({
   coords: { latitude: site.lat, longitude: site.lng },
@@ -32,7 +32,7 @@ describe("planBackgroundClockActions", () => {
   it("plans an arrival when the batch enters a site", () => {
     const { actions, insideJobId } = planBackgroundClockActions([at(SITE_A, T0)], [SITE_A], null);
     expect(insideJobId).toBe("job-a");
-    expect(actions).toEqual([{ type: "arrive", jobId: "job-a", at: new Date(T0).toISOString(), fromJobId: null, fromAt: null }]);
+    expect(actions).toEqual([{ type: "arrive", jobId: "job-a", at: new Date(T0).toISOString(), fromJobId: null, fromAt: null, costCenterId: null }]);
   });
 
   // THE CASE THAT JUSTIFIES PROCESSING THE WHOLE BATCH.
@@ -54,8 +54,8 @@ describe("planBackgroundClockActions", () => {
     // time between them is unattributable and gets dropped.
     const { actions } = planBackgroundClockActions([at(SITE_B, T0)], [SITE_A, SITE_B], "job-a");
     expect(actions).toEqual([
-      { type: "depart", jobId: "job-a", at: new Date(T0).toISOString(), fromJobId: null, fromAt: null },
-      { type: "arrive", jobId: "job-b", at: new Date(T0).toISOString(), fromJobId: "job-a", fromAt: new Date(T0).toISOString() },
+      { type: "depart", jobId: "job-a", at: new Date(T0).toISOString(), fromJobId: null, fromAt: null, costCenterId: null },
+      { type: "arrive", jobId: "job-b", at: new Date(T0).toISOString(), fromJobId: "job-a", fromAt: new Date(T0).toISOString(), costCenterId: null },
     ]);
   });
 

@@ -48,6 +48,7 @@ export type ScheduleChange = {
   assigned_to?: string | null;
   scheduled_start?: string | null;
   scheduled_end?: string | null;
+  scheduled_cost_center_id?: string | null;
   // The other job columns an editable form saves in the same statement.
   //
   // NAMED, not an open `[column: string]: unknown` index signature. That was

@@ -59,13 +59,14 @@ export class TimeEntriesRepository {
    * backgroundClockTask.ts:18-22 warns "would show up only as a disputed
    * payslip".
    */
-  async clockIn(input: { jobId: string; staffId: string; autoClocked?: boolean }): Promise<string> {
+  async clockIn(input: { jobId: string; staffId: string; autoClocked?: boolean; costCenterId?: string | null }): Promise<string> {
     const rowId = this.ids.newId();
     const opId = await this.enqueueWrite(rowId, "insert", {
       job_id: input.jobId,
       staff_id: input.staffId,
       clock_in: this.time.nowIso(),
       auto_clocked: input.autoClocked ?? false,
+      cost_center_id: input.costCenterId ?? null,
     });
     await this.enqueueBillingSync(rowId, opId);
     return rowId;
