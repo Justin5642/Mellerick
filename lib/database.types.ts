@@ -1347,6 +1347,7 @@ export type Database = {
           overtime_reason: string | null
           priority: string
           ready_to_invoice: boolean
+          scheduled_cost_center_id: string | null
           scheduled_end: string | null
           scheduled_start: string | null
           simpro_job_id: number | null
@@ -1381,6 +1382,7 @@ export type Database = {
           overtime_reason?: string | null
           priority?: string
           ready_to_invoice?: boolean
+          scheduled_cost_center_id?: string | null
           scheduled_end?: string | null
           scheduled_start?: string | null
           simpro_job_id?: number | null
@@ -1415,6 +1417,7 @@ export type Database = {
           overtime_reason?: string | null
           priority?: string
           ready_to_invoice?: boolean
+          scheduled_cost_center_id?: string | null
           scheduled_end?: string | null
           scheduled_start?: string | null
           simpro_job_id?: number | null
@@ -1454,6 +1457,20 @@ export type Database = {
             columns: ["overtime_logged_by"]
             isOneToOne: false
             referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "jobs_scheduled_cost_center_id_fkey"
+            columns: ["scheduled_cost_center_id"]
+            isOneToOne: false
+            referencedRelation: "po_cost_centers"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "jobs_scheduled_cost_center_id_fkey"
+            columns: ["scheduled_cost_center_id"]
+            isOneToOne: false
+            referencedRelation: "po_cost_centers_public"
             referencedColumns: ["id"]
           },
           {
