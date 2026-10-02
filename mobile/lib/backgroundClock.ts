@@ -51,7 +51,9 @@ export interface BackgroundClockDeps {
     fromJobId: string | null,
     /** When the previous site was left — the travel leg's start. */
     fromAt: string | null,
-    staffId: string
+    staffId: string,
+    /** The arriving job's scheduled stage. */
+    costCenterId: string | null
   ): Promise<void>;
   onDepart(jobId: string, at: string, staffId: string): Promise<void>;
 }
@@ -83,7 +85,7 @@ export async function applyBackgroundBatch(
     if (action.type === "depart") {
       await deps.onDepart(action.jobId, action.at, staffId);
     } else {
-      await deps.onArrive(action.jobId, action.at, action.fromJobId, action.fromAt, staffId);
+      await deps.onArrive(action.jobId, action.at, action.fromJobId, action.fromAt, staffId, action.costCenterId);
     }
   }
 

@@ -16,8 +16,8 @@ jest.mock("@react-native-async-storage/async-storage", () => ({
 // classically). Nothing in this layer can be exercised on a device without a
 // technician physically driving between two sites.
 
-const SITE_A: TrackedSite = { jobId: "job-a", lat: -37.8136, lng: 144.9631 };
-const SITE_B: TrackedSite = { jobId: "job-b", lat: -37.9136, lng: 144.9631 };
+const SITE_A: TrackedSite = { jobId: "job-a", lat: -37.8136, lng: 144.9631, scheduledCostCenterId: null };
+const SITE_B: TrackedSite = { jobId: "job-b", lat: -37.9136, lng: 144.9631, scheduledCostCenterId: null };
 
 const T0 = Date.parse("2026-08-04T08:00:00.000Z");
 const at = (s: TrackedSite, ms: number) => ({ coords: { latitude: s.lat, longitude: s.lng }, timestamp: ms });
@@ -73,7 +73,8 @@ describe("applyBackgroundBatch", () => {
       new Date(T0).toISOString(),
       "job-a",
       new Date(T0).toISOString(),
-      "staff-1"
+      "staff-1",
+      null
     );
   });
 

@@ -15,8 +15,8 @@ import { nextGeofenceState, GEOFENCE_RADIUS_METERS, type TrackedSite } from "./g
 // so there is nothing to mock and the real distance maths is what is under test.
 
 // Two points ~111m apart in latitude (0.001 deg ≈ 111m).
-const SITE_A: TrackedSite = { jobId: "job-a", lat: -37.8136, lng: 144.9631 };
-const SITE_B: TrackedSite = { jobId: "job-b", lat: -37.9136, lng: 144.9631 }; // ~11km away
+const SITE_A: TrackedSite = { jobId: "job-a", lat: -37.8136, lng: 144.9631, scheduledCostCenterId: null };
+const SITE_B: TrackedSite = { jobId: "job-b", lat: -37.9136, lng: 144.9631, scheduledCostCenterId: null }; // ~11km away
 
 const AT_SITE_A = { latitude: -37.8136, longitude: 144.9631 };
 const NEAR_SITE_A = { latitude: -37.8137, longitude: 144.9631 }; // ~11m — inside
@@ -57,8 +57,8 @@ describe("nextGeofenceState", () => {
 
   it("picks the NEAREST site when two overlap", () => {
     const overlapping: TrackedSite[] = [
-      { jobId: "far", lat: -37.8137, lng: 144.9631 }, // ~11m
-      { jobId: "near", lat: -37.8136, lng: 144.9631 }, // 0m
+      { jobId: "far", lat: -37.8137, lng: 144.9631, scheduledCostCenterId: null }, // ~11m
+      { jobId: "near", lat: -37.8136, lng: 144.9631, scheduledCostCenterId: null }, // 0m
     ];
     expect(nextGeofenceState(AT_SITE_A, overlapping, null).insideJobId).toBe("near");
   });
@@ -74,7 +74,7 @@ describe("nextGeofenceState", () => {
   it("ignores a site with missing coordinates rather than treating it as (0,0)", () => {
     // A site with null lat/lng is off the coast of Africa if coerced to zero,
     // which would make the technician permanently "departed" from it.
-    const sites = [{ jobId: "no-coords", lat: null as never, lng: null as never }, SITE_A];
+    const sites = [{ jobId: "no-coords", lat: null as never, lng: null as never, scheduledCostCenterId: null }, SITE_A];
     expect(nextGeofenceState(AT_SITE_A, sites, null).insideJobId).toBe("job-a");
   });
 

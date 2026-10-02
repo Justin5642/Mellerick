@@ -86,7 +86,7 @@ export function LocationTrackingProvider({ children }: { children: ReactNode }) 
     async function loadSites() {
       const { data, error } = await supabase
         .from("jobs")
-        .select("id, status, sites(site_lat, site_lng)")
+        .select("id, status, scheduled_cost_center_id, sites(site_lat, site_lng)")
         .eq("assigned_to", userId)
         .not("status", "in", '("completed","cancelled")');
       if (cancelled) return;
@@ -104,7 +104,12 @@ export function LocationTrackingProvider({ children }: { children: ReactNode }) 
 
       sitesRef.current = (data ?? [])
         .filter((j: any) => j.sites?.site_lat && j.sites?.site_lng)
-        .map((j: any) => ({ jobId: j.id, lat: j.sites.site_lat, lng: j.sites.site_lng }));
+        .map((j: any) => ({
+          jobId: j.id,
+          lat: j.sites.site_lat,
+          lng: j.sites.site_lng,
+          scheduledCostCenterId: j.scheduled_cost_center_id ?? null,
+        }));
 
       // Hand the same list to the background task. It runs with no React tree
       // and cannot fetch this itself, so the foreground is the only place that
@@ -240,12 +245,18 @@ export function LocationTrackingProvider({ children }: { children: ReactNode }) 
       const target = insideJobId ?? previousJobId;
       if (!target) return;
 
+      // Only consulted on an arrival (see GeofenceTransitionInput), but looked
+      // up from the same site list either way rather than threading insideJobId
+      // separately.
+      const targetSite = sites.find((s) => s.jobId === target);
+
       const result = await applyGeofenceTransition(
         {
           kind: insideJobId ? "arrival" : "departure",
           jobId: target,
           staffId,
           pendingDeparture: departureRef.current,
+          costCenterId: targetSite?.scheduledCostCenterId ?? null,
         },
         makeTransitionDeps(layer)
       );

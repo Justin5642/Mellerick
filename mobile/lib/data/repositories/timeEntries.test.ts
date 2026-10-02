@@ -52,6 +52,7 @@ describe("TimeEntriesRepository", () => {
       staff_id: "s1",
       clock_in: "2026-07-21T09:00:00.000Z",
       auto_clocked: false,
+      cost_center_id: null,
     });
   });
 

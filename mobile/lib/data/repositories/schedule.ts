@@ -33,8 +33,19 @@ export class ScheduleRepository {
    * applyScheduleChange call, so a job is never briefly assigned with no
    * time (or timed with no assignee) between two separate writes.
    */
-  async schedule(jobId: string, assignedTo: string, scheduledStartIso: string, scheduledEndIso: string): Promise<void> {
-    await this.updateJob(jobId, { assigned_to: assignedTo, scheduled_start: scheduledStartIso, scheduled_end: scheduledEndIso });
+  async schedule(
+    jobId: string,
+    assignedTo: string,
+    scheduledStartIso: string,
+    scheduledEndIso: string,
+    costCenterId: string | null = null
+  ): Promise<void> {
+    await this.updateJob(jobId, {
+      assigned_to: assignedTo,
+      scheduled_start: scheduledStartIso,
+      scheduled_end: scheduledEndIso,
+      scheduled_cost_center_id: costCenterId,
+    });
   }
 
   private async updateJob(jobId: string, payload: Record<string, unknown>): Promise<void> {

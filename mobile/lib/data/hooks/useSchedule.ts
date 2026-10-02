@@ -23,8 +23,8 @@ export function useSchedule() {
       [run]
     ),
     schedule: useCallback(
-      (jobId: string, assignedTo: string, scheduledStartIso: string, scheduledEndIso: string) =>
-        run((r) => r.schedule(jobId, assignedTo, scheduledStartIso, scheduledEndIso)),
+      (jobId: string, assignedTo: string, scheduledStartIso: string, scheduledEndIso: string, costCenterId: string | null = null) =>
+        run((r) => r.schedule(jobId, assignedTo, scheduledStartIso, scheduledEndIso, costCenterId)),
       [run]
     ),
   };

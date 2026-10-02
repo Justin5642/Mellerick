@@ -10,7 +10,7 @@ import type { ManualEntryInput, EditEntryInput } from "../repositories/timeEntri
 // (online) or keep its optimistic local state (offline).
 export interface TimeClock {
   ready: boolean;
-  clockIn(input: { jobId: string; staffId: string }): Promise<{ id: string; synced: boolean }>;
+  clockIn(input: { jobId: string; staffId: string; costCenterId?: string | null }): Promise<{ id: string; synced: boolean }>;
   clockOut(input: { entryId: string; clockInIso: string }): Promise<{ synced: boolean }>;
   addManual(input: ManualEntryInput): Promise<{ id: string; synced: boolean }>;
   editEntry(input: EditEntryInput): Promise<{ synced: boolean }>;

@@ -32,6 +32,8 @@ export interface ClockAction {
    * arrival.
    */
   fromAt: string | null;
+  /** On an arrival, the arriving job's scheduled stage — null on a departure. */
+  costCenterId: string | null;
 }
 
 /** A departure waiting for the arrival that closes it into a travel leg. */
@@ -95,7 +97,7 @@ export function planBackgroundClockActions(
 
     if (state.transition === "departure") {
       const jobId = state.previousJobId as string;
-      actions.push({ type: "depart", jobId, at, fromJobId: null, fromAt: null });
+      actions.push({ type: "depart", jobId, at, fromJobId: null, fromAt: null, costCenterId: null });
       // The technician is now driving. Remember from where and when, so the
       // arrival — which may be several readings or several INVOCATIONS later —
       // can attribute the leg.
@@ -106,7 +108,7 @@ export function planBackgroundClockActions(
       // must close the old entry before opening the new one, or the technician
       // ends up clocked in at two jobs simultaneously.
       if (state.previousJobId) {
-        actions.push({ type: "depart", jobId: state.previousJobId, at, fromJobId: null, fromAt: null });
+        actions.push({ type: "depart", jobId: state.previousJobId, at, fromJobId: null, fromAt: null, costCenterId: null });
         pendingDeparture = { jobId: state.previousJobId, at };
       }
       actions.push({
@@ -115,6 +117,7 @@ export function planBackgroundClockActions(
         at,
         fromJobId: pendingDeparture?.jobId ?? null,
         fromAt: pendingDeparture?.at ?? null,
+        costCenterId: sites.find((s) => s.jobId === state.insideJobId)?.scheduledCostCenterId ?? null,
       });
       // Consumed. Leaving it set would attach the same departure to the NEXT
       // arrival too and invent a second, longer leg.

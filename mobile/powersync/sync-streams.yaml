@@ -85,7 +85,8 @@ streams:
     query: |
       SELECT id, job_number, title, description, notes, status, priority, job_type,
              customer_id, site_id, assigned_to, scheduled_start, scheduled_end,
-             actual_start, actual_end, completion_notes, voice_report_transcript, created_at
+             actual_start, actual_end, completion_notes, voice_report_transcript, created_at,
+             scheduled_cost_center_id
       FROM jobs WHERE assigned_to = auth.user_id()
 
   tech_job_photos:

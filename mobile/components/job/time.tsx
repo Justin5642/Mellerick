@@ -61,7 +61,7 @@ function formatDateTime(d: Date) {
 // visible immediately (including fully offline). It carries the same
 // client-generated id as the queued write, so when the outbox syncs and the
 // server list reloads, the real row replaces this one with no duplicate.
-function optimisticEntry(id: string, staffId: string, clockInIso: string): TimeEntry {
+function optimisticEntry(id: string, staffId: string, clockInIso: string, costCenterId: string | null = null): TimeEntry {
   return {
     id,
     staff_id: staffId,
@@ -70,7 +70,7 @@ function optimisticEntry(id: string, staffId: string, clockInIso: string): TimeE
     hours: null,
     auto_clocked: false,
     entry_type: "work",
-    cost_center_id: null,
+    cost_center_id: costCenterId,
     edited_at: null,
     profiles: { full_name: "You" },
   };
@@ -279,7 +279,17 @@ function TimeEntryModal({
   );
 }
 
-export function JobTimeTab({ jobId, currentUserId }: { jobId: string; currentUserId: string }) {
+export function JobTimeTab({
+  jobId,
+  currentUserId,
+  scheduledCostCenterId,
+}: {
+  jobId: string;
+  currentUserId: string;
+  // The stage picked when this job was scheduled — manual clock-in defaults to
+  // it instead of landing unassigned.
+  scheduledCostCenterId?: string | null;
+}) {
   const [entries, setEntries] = useState<TimeEntry[]>([]);
   const [costCenters, setCostCenters] = useState<CostCenterOption[]>([]);
   const [loading, setLoading] = useState(false);
@@ -356,10 +366,10 @@ export function JobTimeTab({ jobId, currentUserId }: { jobId: string; currentUse
     if (myOpenEntry || loading || !timeClock.ready) return;
     setLoading(true);
     const clockInIso = new Date().toISOString();
-    const { id } = await timeClock.clockIn({ jobId, staffId: currentUserId });
+    const { id } = await timeClock.clockIn({ jobId, staffId: currentUserId, costCenterId: scheduledCostCenterId ?? null });
     // Optimistic: show immediately (this is also the offline display path). The
     // server row reconciles in via useSyncSettled once the write lands.
-    setEntries((prev) => [optimisticEntry(id, currentUserId, clockInIso), ...prev]);
+    setEntries((prev) => [optimisticEntry(id, currentUserId, clockInIso, scheduledCostCenterId ?? null), ...prev]);
     setLoading(false);
   }
 

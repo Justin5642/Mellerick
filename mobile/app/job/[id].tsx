@@ -18,6 +18,7 @@ import { JobDocumentsTab } from "../../components/job/documents";
 import { JobVariationsTab } from "../../components/job/variations";
 import { ScheduleJobModal } from "../../components/job/schedule-job-modal";
 import { getJobStageLabel } from "../../lib/job-stages";
+import { getJobCostCentres, type JobCostCentre } from "../../lib/data/reads/jobBilling";
 
 const TABS = [
   { key: "overview", label: "Overview" },
@@ -54,6 +55,9 @@ export default function JobDetailScreen() {
   // person left off. Best-effort: left null (badge simply doesn't render) if
   // offline or the query fails, same tolerance as the Notes tab's own read.
   const [currentStage, setCurrentStage] = useState<string | null>(null);
+  // Stage picker options for the Schedule modal — same read the Time tab
+  // already uses, loaded here so the modal has it before it opens.
+  const [costCenters, setCostCenters] = useState<JobCostCentre[]>([]);
 
   // Both awaits can throw — the session lookup and the row read. Uncaught, the
   // throw skipped setLoading(false) and the technician sat on a spinner that
@@ -67,6 +71,12 @@ export default function JobDetailScreen() {
       setUserId(user?.id ?? null);
 
       setJob(await getJob(id));
+
+      try {
+        setCostCenters(await getJobCostCentres(id));
+      } catch {
+        setCostCenters([]); // Best-effort, same tolerance as the Time tab's own load.
+      }
 
       try {
         const { data: latestStageNote } = await supabase
@@ -239,7 +249,9 @@ export default function JobDetailScreen() {
 
       <ScrollView style={styles.content} contentContainerStyle={{ paddingBottom: 40 }}>
         {tab === "overview" && <JobOverviewTab job={job} currentUserId={userId} />}
-        {tab === "time" && userId && <JobTimeTab jobId={job.id} currentUserId={userId} />}
+        {tab === "time" && userId && (
+          <JobTimeTab jobId={job.id} currentUserId={userId} scheduledCostCenterId={job.scheduled_cost_center_id} />
+        )}
         {tab === "variations" && userId && <JobVariationsTab jobId={job.id} currentUserId={userId} />}
         {tab === "photos" && userId && (
           <JobPhotosTab
@@ -345,6 +357,8 @@ export default function JobDetailScreen() {
         currentAssignedTo={job.assigned_to}
         currentScheduledStart={job.scheduled_start}
         currentScheduledEnd={job.scheduled_end}
+        costCenters={costCenters}
+        currentScheduledCostCenterId={job.scheduled_cost_center_id}
         onScheduled={(patch) => setJob((j: any) => ({ ...j, ...patch }))}
       />
     </SafeAreaView>

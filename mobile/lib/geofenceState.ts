@@ -19,6 +19,8 @@ export interface TrackedSite {
   jobId: string;
   lat: number;
   lng: number;
+  /** The stage this job was scheduled against — new clock-ins at this site default to it. */
+  scheduledCostCenterId: string | null;
 }
 
 export interface Coords {

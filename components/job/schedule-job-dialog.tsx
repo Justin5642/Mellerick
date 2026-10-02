@@ -18,6 +18,7 @@ import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Check, ChevronLeft, ChevronRight, User } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -25,6 +26,13 @@ interface StaffMember {
   id: string;
   full_name: string;
   role: string;
+}
+
+interface CostCenterOption {
+  id: string;
+  name: string;
+  code: string | null;
+  po_number?: string;
 }
 
 interface Props {
@@ -37,9 +45,11 @@ interface Props {
   currentAssignedTo: string | null;
   currentScheduledStart: string | null;
   currentScheduledEnd: string | null;
+  costCenters?: CostCenterOption[];
+  currentScheduledCostCenterId?: string | null;
 }
 
-type Step = "technician" | "time" | "confirm";
+type Step = "technician" | "time" | "stage" | "confirm";
 
 function initials(name: string) {
   return name.split(" ").map((n) => n[0]).join("").toUpperCase().slice(0, 2);
@@ -71,6 +81,8 @@ export function ScheduleJobDialog({
   currentAssignedTo,
   currentScheduledStart,
   currentScheduledEnd,
+  costCenters = [],
+  currentScheduledCostCenterId,
 }: Props) {
   const router = useRouter();
   const supabaseClient = createClient();
@@ -78,6 +90,7 @@ export function ScheduleJobDialog({
 
   const [step, setStep] = useState<Step>("technician");
   const [technicianId, setTechnicianId] = useState<string | null>(currentAssignedTo);
+  const [costCenterId, setCostCenterId] = useState<string | null>(currentScheduledCostCenterId ?? null);
   const [dateKey, setDateKey] = useState(() =>
     currentScheduledStart ? dateKeyInBusinessTZ(currentScheduledStart) : dateKeyInBusinessTZ(new Date())
   );
@@ -94,6 +107,7 @@ export function ScheduleJobDialog({
     if (!open) return;
     setStep("technician");
     setTechnicianId(currentAssignedTo);
+    setCostCenterId(currentScheduledCostCenterId ?? null);
     setDateKey(currentScheduledStart ? dateKeyInBusinessTZ(currentScheduledStart) : dateKeyInBusinessTZ(new Date()));
     if (currentScheduledStart && currentScheduledEnd) {
       setAllDay(false);
@@ -105,7 +119,7 @@ export function ScheduleJobDialog({
       setEndTime(DEFAULT_SHIFT_END_TIME);
     }
     setOtherJobsThatDay(null);
-  }, [open, currentAssignedTo, currentScheduledStart, currentScheduledEnd]);
+  }, [open, currentAssignedTo, currentScheduledStart, currentScheduledEnd, currentScheduledCostCenterId]);
 
   // Smart default: entering the time step (or changing the date there) checks
   // how many OTHER jobs the picked technician already has that day. Zero ->
@@ -152,6 +166,7 @@ export function ScheduleJobDialog({
   const scheduledStartIso = fromBusinessInputValue(`${dateKey}T${startTime}`);
   const scheduledEndIso = fromBusinessInputValue(`${dateKey}T${endTime}`);
   const windowError = validateScheduleWindow(scheduledStartIso, scheduledEndIso);
+  const hasCostCenters = costCenters.length > 0;
 
   async function confirm() {
     if (!technicianId || windowError) return;
@@ -160,6 +175,7 @@ export function ScheduleJobDialog({
       assigned_to: technicianId,
       scheduled_start: scheduledStartIso,
       scheduled_end: scheduledEndIso,
+      scheduled_cost_center_id: costCenterId,
       // A pending job becomes scheduled the moment it's put on the board;
       // anything past that (in progress, on hold, etc.) is left alone.
       ...(jobStatus === "pending" ? { status: "scheduled" } : {}),
@@ -251,6 +267,26 @@ export function ScheduleJobDialog({
           </div>
         )}
 
+        {step === "stage" && (
+          <div className="space-y-3">
+            <Label>Cost centre (optional)</Label>
+            <Select value={costCenterId ?? "none"} onValueChange={(v) => setCostCenterId(v === "none" ? null : v)}>
+              <SelectTrigger><SelectValue placeholder="No stage selected" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none">No stage selected</SelectItem>
+                {costCenters.map((cc) => (
+                  <SelectItem key={cc.id} value={cc.id}>
+                    {cc.name}{cc.po_number ? ` (PO #${cc.po_number})` : ""}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <p className="text-xs text-slate-400">
+              Time logged on this job defaults to this stage at clock-in — the technician can still change it per entry.
+            </p>
+          </div>
+        )}
+
         {step === "confirm" && (
           <div className="space-y-3">
             <div className="rounded-lg border border-slate-200 p-4 space-y-2">
@@ -267,6 +303,11 @@ export function ScheduleJobDialog({
                 {new Date(scheduledEndIso).toLocaleTimeString("en-AU", { hour: "2-digit", minute: "2-digit", timeZone: "Australia/Melbourne" })}
                 {allDay ? " · All day" : ""}
               </p>
+              {costCenters.length > 0 && (
+                <p className="text-sm text-slate-500">
+                  Stage: {costCenters.find((cc) => cc.id === costCenterId)?.name ?? "None"}
+                </p>
+              )}
             </div>
             <p className="text-xs text-slate-400">
               This sets the planned schedule block only — actual worked hours are still captured separately via clock-on/clock-off.
@@ -279,7 +320,11 @@ export function ScheduleJobDialog({
             <Button
               variant="outline"
               className="gap-1.5"
-              onClick={() => setStep(step === "confirm" ? "time" : "technician")}
+              onClick={() =>
+                setStep(
+                  step === "confirm" ? (hasCostCenters ? "stage" : "time") : step === "stage" ? "time" : "technician"
+                )
+              }
               disabled={saving}
             >
               <ChevronLeft className="w-4 h-4" />
@@ -298,7 +343,13 @@ export function ScheduleJobDialog({
             </Button>
           )}
           {step === "time" && (
-            <Button className="gap-1.5" onClick={() => setStep("confirm")} disabled={!!windowError}>
+            <Button className="gap-1.5" onClick={() => setStep(hasCostCenters ? "stage" : "confirm")} disabled={!!windowError}>
+              Next
+              <ChevronRight className="w-4 h-4" />
+            </Button>
+          )}
+          {step === "stage" && (
+            <Button className="gap-1.5" onClick={() => setStep("confirm")}>
               Next
               <ChevronRight className="w-4 h-4" />
             </Button>

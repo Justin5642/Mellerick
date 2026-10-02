@@ -56,11 +56,13 @@ export interface GeofenceTransitionInput {
   staffId: string;
   /** A departure awaiting the arrival that closes it into a travel leg. */
   pendingDeparture: PendingDeparture | null;
+  /** The arriving job's scheduled stage — only consulted on an arrival. */
+  costCenterId?: string | null;
 }
 
 export interface GeofenceTransitionDeps {
   findOpenEntry(jobId: string, staffId: string): Promise<OpenEntryLookup>;
-  clockIn(input: { jobId: string; staffId: string }): Promise<string>;
+  clockIn(input: { jobId: string; staffId: string; costCenterId?: string | null }): Promise<string>;
   clockOut(input: { entryId: string; clockInIso: string }): Promise<void>;
   addTravelLeg(input: {
     jobId: string;
@@ -111,7 +113,7 @@ export async function applyGeofenceTransition(
 
   if (input.kind === "arrival") {
     if (lookup.status === "none") {
-      await deps.clockIn({ jobId: input.jobId, staffId: input.staffId });
+      await deps.clockIn({ jobId: input.jobId, staffId: input.staffId, costCenterId: input.costCenterId ?? null });
     }
 
     const departure = input.pendingDeparture;
