@@ -211,7 +211,7 @@ set search_path = public, pg_temp
 as $$
 begin
   delete from job_assignments
-  where job_id = p_job_id and staff_id <> all (p_staff_ids);
+  where job_assignments.job_id = p_job_id and job_assignments.staff_id <> all (p_staff_ids);
 
   insert into job_assignments (job_id, staff_id, assigned_by)
   select p_job_id, s, auth.uid() from unnest(p_staff_ids) as s
