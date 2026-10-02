@@ -209,6 +209,7 @@ returns table(staff_id uuid)
 language plpgsql
 set search_path = public, pg_temp
 as $$
+#variable_conflict use_column
 begin
   delete from job_assignments
   where job_assignments.job_id = p_job_id and job_assignments.staff_id <> all (p_staff_ids);
