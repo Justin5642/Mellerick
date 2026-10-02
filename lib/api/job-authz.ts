@@ -9,22 +9,25 @@ export async function isOfficeOrAdmin(admin: SupabaseClient, userId: string): Pr
 
 // Per-record authorization for job billing actions. Office/admin may reconcile
 // any job's billing; a technician may reconcile only a job they're assigned to
-// (jobs.assigned_to) — this preserves the fire-and-forget mobile self-heal that
-// runs after a tech logs their own time, without letting a tech touch another
-// job's financial rows. Takes a service-role client since it reads role +
-// assignment across users.
+// (job_assignments — any current assignee, not just jobs.assigned_to's
+// trigger-derived "primary") — this preserves the fire-and-forget mobile
+// self-heal that runs after a tech logs their own time, without letting a tech
+// touch another job's financial rows. Takes a service-role client since it
+// reads role + assignment across users. Database-side counterpart:
+// user_can_manage_job() (supabase/migrations/0059_add_job_assignments.sql) —
+// if you change this rule, change that one too.
 export async function canManageJobBilling(
   admin: SupabaseClient,
   userId: string,
   jobId: string
 ): Promise<boolean> {
-  const [office, { data: job }] = await Promise.all([
+  const [office, { data: assignment }] = await Promise.all([
     isOfficeOrAdmin(admin, userId),
-    admin.from("jobs").select("assigned_to").eq("id", jobId).maybeSingle(),
+    admin.from("job_assignments").select("staff_id").eq("job_id", jobId).eq("staff_id", userId).maybeSingle(),
   ]);
 
   if (office) return true;
-  return !!job && job.assigned_to === userId;
+  return !!assignment;
 }
 
 // Same policy keyed on a time entry: resolve its job, then defer to the job

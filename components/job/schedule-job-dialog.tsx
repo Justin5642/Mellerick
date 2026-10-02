@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
-import { applyScheduleChange, type ScheduleWriteClient } from "@/lib/schedule-dispatch";
+import { applyScheduleChange, setJobAssignments, type ScheduleWriteClient } from "@/lib/schedule-dispatch";
 import {
   DEFAULT_SHIFT_START_TIME,
   DEFAULT_SHIFT_END_TIME,
@@ -42,7 +42,7 @@ interface Props {
   jobNumber: number;
   jobStatus: string;
   staff: StaffMember[];
-  currentAssignedTo: string | null;
+  currentAssignedIds: string[];
   currentScheduledStart: string | null;
   currentScheduledEnd: string | null;
   costCenters?: CostCenterOption[];
@@ -78,7 +78,7 @@ export function ScheduleJobDialog({
   jobNumber,
   jobStatus,
   staff,
-  currentAssignedTo,
+  currentAssignedIds,
   currentScheduledStart,
   currentScheduledEnd,
   costCenters = [],
@@ -89,7 +89,7 @@ export function ScheduleJobDialog({
   const supabase = supabaseClient as unknown as ScheduleWriteClient;
 
   const [step, setStep] = useState<Step>("technician");
-  const [technicianId, setTechnicianId] = useState<string | null>(currentAssignedTo);
+  const [technicianIds, setTechnicianIds] = useState<string[]>(currentAssignedIds);
   const [costCenterId, setCostCenterId] = useState<string | null>(currentScheduledCostCenterId ?? null);
   const [dateKey, setDateKey] = useState(() =>
     currentScheduledStart ? dateKeyInBusinessTZ(currentScheduledStart) : dateKeyInBusinessTZ(new Date())
@@ -97,16 +97,16 @@ export function ScheduleJobDialog({
   const [allDay, setAllDay] = useState(true);
   const [startTime, setStartTime] = useState(DEFAULT_SHIFT_START_TIME);
   const [endTime, setEndTime] = useState(DEFAULT_SHIFT_END_TIME);
-  const [otherJobsThatDay, setOtherJobsThatDay] = useState<number | null>(null);
+  const [conflictsByTechnician, setConflictsByTechnician] = useState<Record<string, number>>({});
   const [saving, setSaving] = useState(false);
 
   // Fresh wizard every time the dialog opens, seeded from whatever the job
   // already has (re-scheduling an already-scheduled job starts from its
-  // current technician/time rather than blank).
+  // current technicians/time rather than blank).
   useEffect(() => {
     if (!open) return;
     setStep("technician");
-    setTechnicianId(currentAssignedTo);
+    setTechnicianIds(currentAssignedIds);
     setCostCenterId(currentScheduledCostCenterId ?? null);
     setDateKey(currentScheduledStart ? dateKeyInBusinessTZ(currentScheduledStart) : dateKeyInBusinessTZ(new Date()));
     if (currentScheduledStart && currentScheduledEnd) {
@@ -118,30 +118,48 @@ export function ScheduleJobDialog({
       setStartTime(DEFAULT_SHIFT_START_TIME);
       setEndTime(DEFAULT_SHIFT_END_TIME);
     }
-    setOtherJobsThatDay(null);
-  }, [open, currentAssignedTo, currentScheduledStart, currentScheduledEnd, currentScheduledCostCenterId]);
+    setConflictsByTechnician({});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, currentScheduledStart, currentScheduledEnd, currentScheduledCostCenterId]);
 
   // Smart default: entering the time step (or changing the date there) checks
-  // how many OTHER jobs the picked technician already has that day. Zero ->
-  // All day stays on (one job filling the shift); one or more -> default it
-  // off so this job gets its own custom block instead of everyone getting
-  // stamped 7:00-3:30.
+  // how many OTHER jobs each picked technician already has that day. Zero for
+  // all of them -> All day stays on (one job filling the shift); one or more
+  // for any technician -> default it off so this job gets its own custom
+  // block instead of everyone getting stamped 7:00-3:30.
   useEffect(() => {
-    if (!open || step !== "time" || !technicianId) return;
+    if (!open || step !== "time" || technicianIds.length === 0) return;
     let cancelled = false;
     (async () => {
       const { dayStartIso, dayEndIso } = businessDayRange(dateKey);
-      const { count, error } = await supabaseClient
+      const { data: otherJobs, error: jobsError } = await supabaseClient
         .from("jobs")
-        .select("id", { count: "exact", head: true })
-        .eq("assigned_to", technicianId)
+        .select("id")
         .neq("id", jobId)
         .gte("scheduled_start", dayStartIso)
         .lt("scheduled_start", dayEndIso);
-      if (cancelled || error) return;
-      const n = count ?? 0;
-      setOtherJobsThatDay(n);
-      const nextAllDay = defaultAllDay(n);
+      if (cancelled || jobsError) return;
+      const otherJobIds = (otherJobs ?? []).map((j: { id: string }) => j.id);
+      if (otherJobIds.length === 0) {
+        setConflictsByTechnician({});
+        setAllDay(true);
+        setStartTime(DEFAULT_SHIFT_START_TIME);
+        setEndTime(DEFAULT_SHIFT_END_TIME);
+        return;
+      }
+      const { data: assignments, error: assignError } = await supabaseClient
+        .from("job_assignments")
+        .select("staff_id")
+        .in("job_id", otherJobIds)
+        .in("staff_id", technicianIds);
+      if (cancelled || assignError) return;
+      const counts: Record<string, number> = {};
+      for (const a of (assignments ?? []) as { staff_id: string }[]) {
+        counts[a.staff_id] = (counts[a.staff_id] ?? 0) + 1;
+      }
+      setConflictsByTechnician(counts);
+      const maxConflicts = Math.max(0, ...Object.values(counts));
+      const nextAllDay = defaultAllDay(maxConflicts);
       setAllDay(nextAllDay);
       if (nextAllDay) {
         setStartTime(DEFAULT_SHIFT_START_TIME);
@@ -152,7 +170,7 @@ export function ScheduleJobDialog({
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, step, technicianId, dateKey]);
+  }, [open, step, technicianIds, dateKey]);
 
   function toggleAllDay(next: boolean) {
     setAllDay(next);
@@ -162,17 +180,20 @@ export function ScheduleJobDialog({
     }
   }
 
-  const technician = staff.find((s) => s.id === technicianId) ?? null;
+  const selectedTechnicians = staff.filter((s) => technicianIds.includes(s.id));
   const scheduledStartIso = fromBusinessInputValue(`${dateKey}T${startTime}`);
   const scheduledEndIso = fromBusinessInputValue(`${dateKey}T${endTime}`);
   const windowError = validateScheduleWindow(scheduledStartIso, scheduledEndIso);
   const hasCostCenters = costCenters.length > 0;
 
+  function toggleTechnician(id: string) {
+    setTechnicianIds((prev) => (prev.includes(id) ? prev.filter((t) => t !== id) : [...prev, id]));
+  }
+
   async function confirm() {
-    if (!technicianId || windowError) return;
+    if (technicianIds.length === 0 || windowError) return;
     setSaving(true);
     const result = await applyScheduleChange(supabase, jobId, {
-      assigned_to: technicianId,
       scheduled_start: scheduledStartIso,
       scheduled_end: scheduledEndIso,
       scheduled_cost_center_id: costCenterId,
@@ -180,11 +201,19 @@ export function ScheduleJobDialog({
       // anything past that (in progress, on hold, etc.) is left alone.
       ...(jobStatus === "pending" ? { status: "scheduled" } : {}),
     });
-    setSaving(false);
     if (!result.ok) {
+      setSaving(false);
       toast.error(result.error);
       return;
     }
+
+    const assignmentResult = await setJobAssignments(supabase, jobId, technicianIds);
+    setSaving(false);
+    if (!assignmentResult.ok) {
+      toast.error(assignmentResult.error);
+      return;
+    }
+
     if (result.calendarSynced) toast.success("Job scheduled");
     else toast.warning("Job scheduled — Google Calendar not updated");
     onOpenChange(false);
@@ -202,12 +231,12 @@ export function ScheduleJobDialog({
           <div className="space-y-1 max-h-80 overflow-y-auto -mx-1 px-1">
             {staff.length === 0 && <p className="text-sm text-slate-400 py-6 text-center">No active staff found.</p>}
             {staff.map((s) => {
-              const active = technicianId === s.id;
+              const active = technicianIds.includes(s.id);
               return (
                 <button
                   key={s.id}
                   type="button"
-                  onClick={() => setTechnicianId(s.id)}
+                  onClick={() => toggleTechnician(s.id)}
                   className={cn(
                     "w-full flex items-center gap-3 rounded-lg border px-3 py-2.5 text-left transition-colors",
                     active ? "border-blue-500 bg-blue-50" : "border-slate-200 hover:bg-slate-50"
@@ -246,11 +275,14 @@ export function ScheduleJobDialog({
               </span>
             </label>
 
-            {otherJobsThatDay !== null && otherJobsThatDay > 0 && (
-              <p className="text-xs text-amber-600">
-                {technician?.full_name ?? "This technician"} already has {otherJobsThatDay} job{otherJobsThatDay === 1 ? "" : "s"} that day — set a custom time block below.
-              </p>
-            )}
+            {Object.entries(conflictsByTechnician).map(([staffId, n]) => {
+              const name = staff.find((s) => s.id === staffId)?.full_name ?? "This technician";
+              return (
+                <p key={staffId} className="text-xs text-amber-600">
+                  {name} already has {n} job{n === 1 ? "" : "s"} that day — set a custom time block below.
+                </p>
+              );
+            })}
 
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-2">
@@ -292,7 +324,9 @@ export function ScheduleJobDialog({
             <div className="rounded-lg border border-slate-200 p-4 space-y-2">
               <div className="flex items-center gap-2">
                 <User className="w-4 h-4 text-slate-400" />
-                <span className="text-sm font-medium text-slate-900">{technician?.full_name}</span>
+                <span className="text-sm font-medium text-slate-900">
+                  {selectedTechnicians.map((t) => t.full_name).join(", ")}
+                </span>
               </div>
               <p className="text-sm text-slate-500">
                 {new Date(scheduledStartIso).toLocaleDateString("en-AU", { weekday: "long", day: "numeric", month: "long", timeZone: "Australia/Melbourne" })}
@@ -337,7 +371,7 @@ export function ScheduleJobDialog({
           )}
 
           {step === "technician" && (
-            <Button className="gap-1.5" onClick={() => setStep("time")} disabled={!technicianId}>
+            <Button className="gap-1.5" onClick={() => setStep("time")} disabled={technicianIds.length === 0}>
               Next
               <ChevronRight className="w-4 h-4" />
             </Button>

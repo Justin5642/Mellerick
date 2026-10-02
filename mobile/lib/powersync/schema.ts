@@ -182,6 +182,14 @@ const invoices = new Table({
   work_description: column.text,
 });
 
+const job_assignments = new Table({
+  // id (text) is implicit
+  job_id: column.text,
+  staff_id: column.text,
+  assigned_by: column.text,
+  created_at: column.text,
+});
+
 const job_expenses = new Table({
   // id (text) is implicit
   job_id: column.text,
@@ -431,6 +439,7 @@ export const AppSchema = new Schema({
   inventory,
   invoice_items,
   invoices,
+  job_assignments,
   job_expenses,
   job_items,
   job_notes,

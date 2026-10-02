@@ -39,6 +39,7 @@ export default function ScheduleScreen() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<unknown>(null);
   const [staffError, setStaffError] = useState<unknown>(null);
+  const [reassignAssigneeCount, setReassignAssigneeCount] = useState<number | null>(null);
 
   // Unwrapped rather than defaulted to []: this list's empty state is "Nothing
   // scheduled.", which an office user reads as the day being clear. A failed
@@ -89,6 +90,21 @@ export default function ScheduleScreen() {
     }
     return Array.from(map, ([title, data]) => ({ title, data }));
   }, [jobs]);
+
+  // A job can have more than one technician (job_assignments, migration 0059)
+  // even though this sheet only ever picks one. Reassigning here goes through
+  // `assigned_to`, which the database collapses to that single pick — so
+  // before showing the sheet, check whether this job currently has a crew and
+  // warn that picking here will shrink it to one.
+  function openReassign(job: SchedJob) {
+    setReassignJob(job);
+    setReassignAssigneeCount(null);
+    supabase
+      .from("job_assignments")
+      .select("staff_id", { count: "exact", head: true })
+      .eq("job_id", job.id)
+      .then(({ count }) => setReassignAssigneeCount(count ?? null));
+  }
 
   async function onReassign(assignedTo: string | null) {
     const job = reassignJob;
@@ -207,7 +223,7 @@ export default function ScheduleScreen() {
               {menuJob?.profiles?.full_name ?? "Unassigned"}
               {menuJob ? ` · ${formatBusinessTime(menuJob.scheduled_start)}` : ""}
             </Text>
-            <Action icon="person-outline" label="Reassign technician" onPress={() => { setReassignJob(menuJob); setMenuJob(null); }} />
+            <Action icon="person-outline" label="Reassign technician" onPress={() => { if (menuJob) openReassign(menuJob); setMenuJob(null); }} />
             <Action icon="calendar-outline" label="Reschedule" onPress={() => { setDatePickerFor(menuJob); setMenuJob(null); }} />
             <Action icon="open-outline" label="Open job details" onPress={() => { const id = menuJob?.id; setMenuJob(null); if (id) router.push(`/job/${id}`); }} />
           </View>
@@ -227,6 +243,15 @@ export default function ScheduleScreen() {
                 <Ionicons name="alert-circle-outline" size={18} color={colors.orange700} />
                 <Text style={styles.staffErrorText}>Couldn&apos;t load the technician list. Tap to retry.</Text>
               </TouchableOpacity>
+            ) : null}
+            {reassignAssigneeCount !== null && reassignAssigneeCount > 1 ? (
+              <View style={styles.staffErrorRow}>
+                <Ionicons name="warning-outline" size={18} color={colors.orange700} />
+                <Text style={styles.staffErrorText}>
+                  This job has {reassignAssigneeCount} technicians assigned. Picking one here replaces the whole
+                  crew with just them — manage multiple technicians from the web app instead.
+                </Text>
+              </View>
             ) : null}
             <ScrollView style={{ maxHeight: 360 }}>
               <TouchableOpacity style={styles.staffRow} onPress={() => onReassign(null)} disabled={busy}>

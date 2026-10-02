@@ -50,9 +50,10 @@ interface Props {
   staffCostProfiles: any[];
   jobInvoices: any[];
   minMarginPct: number;
+  currentAssignedIds: string[];
 }
 
-export function JobDetailClient({ job, currentUserId, photos: initialPhotos, documents: initialDocuments, notes: initialNotes, stageNotes: initialStageNotes, lineItems: initialLineItems, pricingItems, staff, purchaseOrders: initialPOs, timeEntries: initialTimeEntries, variations: initialVariations, variationTypes, expenses: initialExpenses, equipmentOptions, equipmentUsage: initialEquipmentUsage, isAdmin, staffCostProfiles, jobInvoices, minMarginPct }: Props) {
+export function JobDetailClient({ job, currentUserId, photos: initialPhotos, documents: initialDocuments, notes: initialNotes, stageNotes: initialStageNotes, lineItems: initialLineItems, pricingItems, staff, purchaseOrders: initialPOs, timeEntries: initialTimeEntries, variations: initialVariations, variationTypes, expenses: initialExpenses, equipmentOptions, equipmentUsage: initialEquipmentUsage, isAdmin, staffCostProfiles, jobInvoices, minMarginPct, currentAssignedIds }: Props) {
   // Deep-links like /dashboard/jobs/[id]?tab=variations&variation=[id]
   // (used by the Approvals page's "Price & review" link) land here — read
   // them once on mount so the right tab opens and the right variation is
@@ -298,7 +299,7 @@ export function JobDetailClient({ job, currentUserId, photos: initialPhotos, doc
         jobNumber={job.job_number}
         jobStatus={job.status}
         staff={staff}
-        currentAssignedTo={job.assigned_to}
+        currentAssignedIds={currentAssignedIds}
         currentScheduledStart={job.scheduled_start}
         currentScheduledEnd={job.scheduled_end}
         costCenters={costCenters}
