@@ -80,6 +80,12 @@ streams:
       FROM backflow_tests
 
   # ---- Technician: their assigned jobs + children, MONEY-STRIPPED ------------
+  #
+  # Scoped through job_assignments (migration 0059), not jobs.assigned_to
+  # directly, so every technician on a crew job gets it, not just whichever one
+  # jobs.assigned_to happens to report as "primary". jobs.assigned_to is still
+  # a plain streamed column below (devices still render it), it is just no
+  # longer what gates WHICH jobs a device receives.
   tech_jobs:
     auto_subscribe: true
     query: |
@@ -87,35 +93,44 @@ streams:
              customer_id, site_id, assigned_to, scheduled_start, scheduled_end,
              actual_start, actual_end, completion_notes, voice_report_transcript, created_at,
              scheduled_cost_center_id
-      FROM jobs WHERE assigned_to = auth.user_id()
+      FROM jobs WHERE id IN (SELECT job_id FROM job_assignments WHERE staff_id = auth.user_id())
+
+  # Every technician's current assignments for jobs they're on -- so a device
+  # can render "who else is on this job", not just its own membership.
+  tech_job_assignments:
+    auto_subscribe: true
+    query: |
+      SELECT id, job_id, staff_id, created_at
+      FROM job_assignments
+      WHERE job_id IN (SELECT job_id FROM job_assignments WHERE staff_id = auth.user_id())
 
   tech_job_photos:
     auto_subscribe: true
     query: |
       SELECT id, job_id, storage_path, photo_type, uploaded_by, created_at
       FROM job_photos
-      WHERE job_id IN (SELECT id FROM jobs WHERE assigned_to = auth.user_id())
+      WHERE job_id IN (SELECT job_id FROM job_assignments WHERE staff_id = auth.user_id())
 
   tech_job_notes:
     auto_subscribe: true
     query: |
       SELECT id, job_id, content, author_id, created_at
       FROM job_notes
-      WHERE job_id IN (SELECT id FROM jobs WHERE assigned_to = auth.user_id())
+      WHERE job_id IN (SELECT job_id FROM job_assignments WHERE staff_id = auth.user_id())
 
   tech_job_stage_notes:
     auto_subscribe: true
     query: |
       SELECT id, job_id, stage, content, author_id, created_at
       FROM job_stage_notes
-      WHERE job_id IN (SELECT id FROM jobs WHERE assigned_to = auth.user_id())
+      WHERE job_id IN (SELECT job_id FROM job_assignments WHERE staff_id = auth.user_id())
 
   tech_time_entries:
     auto_subscribe: true
     query: |
       SELECT id, job_id, staff_id, clock_in, clock_out, hours, entry_type, cost_center_id, notes, created_at
       FROM time_entries
-      WHERE job_id IN (SELECT id FROM jobs WHERE assigned_to = auth.user_id())
+      WHERE job_id IN (SELECT job_id FROM job_assignments WHERE staff_id = auth.user_id())
 
   # RATE-STRIPPED: omits rate, total_amount, admin_notes.
   tech_job_variations:
@@ -124,7 +139,7 @@ streams:
       SELECT id, job_id, variation_type_id, custom_name, description, quantity, unit,
              status, photo_storage_path, logged_by, logged_at
       FROM job_variations
-      WHERE job_id IN (SELECT id FROM jobs WHERE assigned_to = auth.user_id())
+      WHERE job_id IN (SELECT job_id FROM job_assignments WHERE staff_id = auth.user_id())
 
   # ---- Office/admin: full business set (money allowed), ROLE-GATED -----------
   # Gate: JOIN the requesting user's profiles row; the stream only yields rows
@@ -173,6 +188,10 @@ streams:
   office_jobs:
     auto_subscribe: true
     query: SELECT jobs.* FROM jobs JOIN profiles ON profiles.id = auth.user_id() WHERE profiles.role = 'office' OR profiles.role = 'admin'
+
+  office_job_assignments:
+    auto_subscribe: true
+    query: SELECT job_assignments.* FROM job_assignments JOIN profiles ON profiles.id = auth.user_id() WHERE profiles.role = 'office' OR profiles.role = 'admin'
 
   office_job_items:
     auto_subscribe: true

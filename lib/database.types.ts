@@ -926,6 +926,52 @@ export type Database = {
           },
         ]
       }
+      job_assignments: {
+        Row: {
+          assigned_by: string | null
+          created_at: string | null
+          id: string
+          job_id: string
+          staff_id: string
+        }
+        Insert: {
+          assigned_by?: string | null
+          created_at?: string | null
+          id?: string
+          job_id: string
+          staff_id: string
+        }
+        Update: {
+          assigned_by?: string | null
+          created_at?: string | null
+          id?: string
+          job_id?: string
+          staff_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "job_assignments_assigned_by_fkey"
+            columns: ["assigned_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "job_assignments_job_id_fkey"
+            columns: ["job_id"]
+            isOneToOne: false
+            referencedRelation: "jobs"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "job_assignments_staff_id_fkey"
+            columns: ["staff_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       job_expenses: {
         Row: {
           amount: number

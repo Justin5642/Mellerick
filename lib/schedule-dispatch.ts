@@ -34,6 +34,10 @@ export type ScheduleWriteClient = {
       ): PromiseLike<{ error: { message: string } | null; count?: number | null }>;
     };
   };
+  rpc(
+    fn: "set_job_assignments",
+    args: { p_job_id: string; p_staff_ids: string[] }
+  ): PromiseLike<{ data: { staff_id: string }[] | null; error: { message: string } | null }>;
 };
 
 /**
@@ -129,4 +133,40 @@ export async function pushJobToCalendar(
     // Offline, or the request never left. Whatever the caller wrote still stands.
     return false;
   }
+}
+
+export type AssignmentDispatchResult = { ok: true } | { ok: false; error: string };
+
+/**
+ * Replace a job's assignee set (migration 0059 — job_assignments). Routed
+ * through the `set_job_assignments` RPC rather than a direct table write so
+ * the delete+insert is atomic and RLS-gated by that function's own grant.
+ *
+ * The RPC returns the resulting set, which is checked against what was asked
+ * for: RLS can silently drop a row (same class of silent-no-op this file
+ * already guards against on the `jobs` row write via `count: "exact"`), and
+ * without this check the dialog would report success while a technician
+ * quietly failed to be added.
+ */
+export async function setJobAssignments(
+  supabase: ScheduleWriteClient,
+  jobId: string,
+  staffIds: string[]
+): Promise<AssignmentDispatchResult> {
+  const { data, error } = await supabase.rpc("set_job_assignments", {
+    p_job_id: jobId,
+    p_staff_ids: staffIds,
+  });
+  if (error) return { ok: false, error: error.message };
+
+  const got = new Set((data ?? []).map((r) => r.staff_id));
+  const want = new Set(staffIds);
+  const matches = got.size === want.size && [...want].every((id) => got.has(id));
+  if (!matches) {
+    return {
+      ok: false,
+      error: "Technician assignment could not be saved — it may have changed since you opened this dialog.",
+    };
+  }
+  return { ok: true };
 }

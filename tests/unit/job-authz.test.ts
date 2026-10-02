@@ -22,20 +22,31 @@ describe("isOfficeOrAdmin", () => {
 
 describe("canManageJobBilling", () => {
   it("allows office/admin on any job", async () => {
-    const c = client({ profiles: { data: { role: "office" } }, jobs: { data: { assigned_to: "someone-else" } } });
+    const c = client({ profiles: { data: { role: "office" } }, job_assignments: { data: null } });
     expect(await canManageJobBilling(c, "u1", "job1")).toBe(true);
   });
 
-  it("allows a technician only on a job assigned to them", async () => {
-    const own = client({ profiles: { data: { role: "technician" } }, jobs: { data: { assigned_to: "u1" } } });
+  it("allows a technician who is the job's (sole) assignee", async () => {
+    const own = client({ profiles: { data: { role: "technician" } }, job_assignments: { data: { staff_id: "u1" } } });
     expect(await canManageJobBilling(own, "u1", "job1")).toBe(true);
 
-    const other = client({ profiles: { data: { role: "technician" } }, jobs: { data: { assigned_to: "u2" } } });
+    const other = client({ profiles: { data: { role: "technician" } }, job_assignments: { data: null } });
     expect(await canManageJobBilling(other, "u1", "job1")).toBe(false);
   });
 
-  it("denies a technician when the job does not exist", async () => {
-    const c = client({ profiles: { data: { role: "technician" } }, jobs: { data: null } });
+  // The point of migration 0059: a crew job has more than one assignee, and
+  // billing self-heal must not be limited to whichever one jobs.assigned_to
+  // happens to report as "primary".
+  it("allows a technician who is a SECONDARY assignee, not just the primary", async () => {
+    const secondary = client({
+      profiles: { data: { role: "technician" } },
+      job_assignments: { data: { staff_id: "u1" } }, // the row matching THIS user, regardless of who's primary
+    });
+    expect(await canManageJobBilling(secondary, "u1", "job1")).toBe(true);
+  });
+
+  it("denies a technician when they have no assignment row for the job", async () => {
+    const c = client({ profiles: { data: { role: "technician" } }, job_assignments: { data: null } });
     expect(await canManageJobBilling(c, "u1", "missing")).toBe(false);
   });
 });
@@ -50,14 +61,14 @@ describe("canManageTimeEntryBilling", () => {
     const own = client({
       time_entries: { data: { job_id: "job1" } },
       profiles: { data: { role: "technician" } },
-      jobs: { data: { assigned_to: "u1" } },
+      job_assignments: { data: { staff_id: "u1" } },
     });
     expect(await canManageTimeEntryBilling(own, "u1", "te1")).toEqual({ allowed: true, jobId: "job1" });
 
     const other = client({
       time_entries: { data: { job_id: "job1" } },
       profiles: { data: { role: "technician" } },
-      jobs: { data: { assigned_to: "u2" } },
+      job_assignments: { data: null },
     });
     expect(await canManageTimeEntryBilling(other, "u1", "te1")).toEqual({ allowed: false, jobId: "job1" });
   });

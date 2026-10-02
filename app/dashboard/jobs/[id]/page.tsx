@@ -26,6 +26,7 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
     { data: expenses },
     { data: equipmentOptions },
     { data: equipmentUsage },
+    { data: jobAssignments },
   ] = await Promise.all([
     supabase.from("jobs").select("*, customers(id, name, phone, mobile, email), sites(name, address_line1, suburb, state, postcode, site_lat, site_lng)").eq("id", id).single(),
     supabase.auth.getUser(),
@@ -47,26 +48,32 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
     supabase.from("job_expenses").select("*").eq("job_id", id).order("created_at", { ascending: false }),
     supabase.from("equipment").select("*").eq("is_active", true).order("name"),
     supabase.from("equipment_usage_log").select("*").eq("job_id", id).order("usage_date", { ascending: false }),
+    supabase.from("job_assignments").select("staff_id").eq("job_id", id),
   ]);
 
   if (!job) notFound();
 
+  const currentAssignedIds = (jobAssignments ?? []).map((a: { staff_id: string }) => a.staff_id);
+
   // The staff list above only includes active profiles (so you can't assign
   // new work to someone who's left), but a job can already be assigned to
-  // someone who's since been deactivated. The assignment dropdown renders
-  // the technician's name by matching their id against this list, so if
-  // they're missing from it entirely it falls back to showing the raw
-  // profile id instead of their name. Fetch and append that one profile
-  // (flagged) so the current assignment always displays correctly.
+  // someone who's since been deactivated. The assignment dialog renders each
+  // technician's name by matching their id against this list, so if they're
+  // missing from it entirely it falls back to showing the raw profile id
+  // instead of their name. Fetch and append any such profile (flagged) so
+  // every current assignment always displays correctly.
   let staffForDisplay = staff ?? [];
-  if (job.assigned_to && !staffForDisplay.some((s: any) => s.id === job.assigned_to)) {
-    const { data: assignedProfile } = await supabase
+  const missingAssignedIds = currentAssignedIds.filter((sid: string) => !staffForDisplay.some((s: any) => s.id === sid));
+  if (missingAssignedIds.length > 0) {
+    const { data: assignedProfiles } = await supabase
       .from("profiles")
       .select("id, full_name, role")
-      .eq("id", job.assigned_to)
-      .single();
-    if (assignedProfile) {
-      staffForDisplay = [...staffForDisplay, { ...assignedProfile, full_name: `${assignedProfile.full_name} (inactive)` }];
+      .in("id", missingAssignedIds);
+    if (assignedProfiles) {
+      staffForDisplay = [
+        ...staffForDisplay,
+        ...assignedProfiles.map((p) => ({ ...p, full_name: `${p.full_name} (inactive)` })),
+      ];
     }
   }
 
@@ -114,6 +121,7 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
       staffCostProfiles={staffCostProfiles}
       jobInvoices={jobInvoices}
       minMarginPct={minMarginPct}
+      currentAssignedIds={currentAssignedIds}
     />
   );
 }

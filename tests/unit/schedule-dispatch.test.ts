@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from "vitest";
 import { readdirSync, readFileSync } from "node:fs";
 import { join, relative } from "node:path";
 
-import { applyScheduleChange, pushJobToCalendar } from "@/lib/schedule-dispatch";
+import { applyScheduleChange, pushJobToCalendar, setJobAssignments } from "@/lib/schedule-dispatch";
 
 // ============================================================================
 // Item 1.8, first half — the drag that never reached Google.
@@ -58,6 +58,10 @@ function fakeClient(error: { message: string } | null, rows: number | null = 1) 
           },
         };
         return api;
+      },
+      // applyScheduleChange never calls rpc(); this only satisfies the type.
+      rpc() {
+        return Promise.resolve({ data: null, error: null });
       },
     },
   };
@@ -189,6 +193,54 @@ describe("pushJobToCalendar", () => {
     });
 
     expect(await pushJobToCalendar("job1", offline)).toBe(false);
+  });
+});
+
+/** A client whose only job is to answer `rpc("set_job_assignments", ...)`. */
+function rpcClient(data: { staff_id: string }[] | null, error: { message: string } | null = null) {
+  return {
+    from() {
+      throw new Error("setJobAssignments should not touch .from()");
+    },
+    rpc() {
+      return Promise.resolve({ data, error });
+    },
+  };
+}
+
+describe("setJobAssignments", () => {
+  it("reports success when the RPC returns exactly the requested set", async () => {
+    const client = rpcClient([{ staff_id: "a" }, { staff_id: "b" }]);
+
+    const result = await setJobAssignments(client, "job1", ["a", "b"]);
+
+    expect(result).toEqual({ ok: true });
+  });
+
+  it("is order-independent when comparing the returned set", async () => {
+    const client = rpcClient([{ staff_id: "b" }, { staff_id: "a" }]);
+
+    expect(await setJobAssignments(client, "job1", ["a", "b"])).toEqual({ ok: true });
+  });
+
+  it("reports the database's refusal instead of reporting success", async () => {
+    const client = rpcClient(null, { message: "new row violates row-level security policy" });
+
+    const result = await setJobAssignments(client, "job1", ["a"]);
+
+    expect(result).toEqual({ ok: false, error: "new row violates row-level security policy" });
+  });
+
+  it("treats a set that came back short as a refusal, not a save", async () => {
+    // RLS can silently drop a row the way a jobs UPDATE can silently match
+    // zero rows: no error, just a row that never happened. A caller that only
+    // checked `error` would tell the office a technician was added when they
+    // were not.
+    const client = rpcClient([{ staff_id: "a" }]);
+
+    const result = await setJobAssignments(client, "job1", ["a", "b"]);
+
+    expect(result.ok).toBe(false);
   });
 });
 
