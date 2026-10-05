@@ -1,10 +1,11 @@
 import { useEffect, useState } from "react";
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Modal, Alert, Platform } from "react-native";
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Modal, Alert, Platform, TextInput } from "react-native";
 import DateTimePicker, { type DateTimePickerEvent } from "@react-native-community/datetimepicker";
 import { Ionicons } from "@expo/vector-icons";
 import { colors } from "../../lib/theme";
 import { listAssignableStaff, countOtherScheduledJobs, type AssignableStaff } from "../../lib/data/reads/schedule";
 import { useSchedule } from "../../lib/data/hooks/useSchedule";
+import { useJobNotes } from "../../lib/data/hooks/useJobNotes";
 import {
   DEFAULT_SHIFT_START_TIME,
   DEFAULT_SHIFT_END_TIME,
@@ -19,14 +20,13 @@ interface Props {
   onClose: () => void;
   jobId: string;
   jobStatus: string;
-  currentAssignedTo: string | null;
+  currentAssignedIds: string[];
+  currentUserId: string;
   currentScheduledStart: string | null;
   currentScheduledEnd: string | null;
   costCenters?: JobCostCentre[];
   currentScheduledCostCenterId?: string | null;
   onScheduled: (patch: {
-    assigned_to: string;
-    assigned_profile: { full_name: string };
     scheduled_start: string;
     scheduled_end: string;
     status: string;
@@ -34,7 +34,7 @@ interface Props {
   }) => void;
 }
 
-type Step = "technician" | "time" | "stage" | "confirm";
+type Step = "technician" | "time" | "stage" | "notes" | "confirm";
 
 function friendlyTime(hhmm: string): string {
   const [h, m] = hhmm.split(":").map(Number);
@@ -44,18 +44,21 @@ function friendlyTime(hhmm: string): string {
 }
 
 /**
- * Mobile twin of the web job detail's "Schedule Job" dialog — same 3 steps
- * (technician, time with an All day toggle, confirm), same shared rules
- * (lib/scheduling.ts), writing through ScheduleRepository.schedule() so the
- * update is one durable outbox entry with a coalesced calendar sync, exactly
- * like the web dialog's single applyScheduleChange call.
+ * Mobile twin of the web job detail's "Schedule Job" dialog — multi-select
+ * technician, time with an All day toggle, optional cost centre, an optional
+ * note for the technician, then confirm — same shared rules (lib/scheduling.ts),
+ * writing through ScheduleRepository.schedule() so the job/time update is one
+ * durable outbox entry with a coalesced calendar sync and a coalesced
+ * assign-technicians side effect (which proxies set_job_assignments through
+ * the web API, since the outbox has no native RPC path).
  */
 export function ScheduleJobModal({
   visible,
   onClose,
   jobId,
   jobStatus,
-  currentAssignedTo,
+  currentAssignedIds,
+  currentUserId,
   currentScheduledStart,
   currentScheduledEnd,
   costCenters = [],
@@ -63,9 +66,10 @@ export function ScheduleJobModal({
   onScheduled,
 }: Props) {
   const { schedule, ready } = useSchedule();
+  const { addNote } = useJobNotes();
   const [step, setStep] = useState<Step>("technician");
   const [staff, setStaff] = useState<AssignableStaff[]>([]);
-  const [technician, setTechnician] = useState<AssignableStaff | null>(null);
+  const [technicianIds, setTechnicianIds] = useState<string[]>(currentAssignedIds);
   const [costCenterId, setCostCenterId] = useState<string | null>(currentScheduledCostCenterId ?? null);
   const [date, setDate] = useState(new Date());
   const [showDatePicker, setShowDatePicker] = useState(false);
@@ -73,14 +77,15 @@ export function ScheduleJobModal({
   const [startTime, setStartTime] = useState(DEFAULT_SHIFT_START_TIME);
   const [endTime, setEndTime] = useState(DEFAULT_SHIFT_END_TIME);
   const [showTimePicker, setShowTimePicker] = useState<"start" | "end" | null>(null);
-  const [otherJobsThatDay, setOtherJobsThatDay] = useState<number | null>(null);
+  const [conflictsByTechnician, setConflictsByTechnician] = useState<Record<string, number>>({});
+  const [noteText, setNoteText] = useState("");
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     if (!visible) return;
     listAssignableStaff().then(setStaff).catch(() => {});
     setStep("technician");
-    setTechnician(null);
+    setTechnicianIds(currentAssignedIds);
     setCostCenterId(currentScheduledCostCenterId ?? null);
     setDate(currentScheduledStart ? new Date(currentScheduledStart) : new Date());
     if (currentScheduledStart && currentScheduledEnd) {
@@ -92,29 +97,32 @@ export function ScheduleJobModal({
       setStartTime(DEFAULT_SHIFT_START_TIME);
       setEndTime(DEFAULT_SHIFT_END_TIME);
     }
-    setOtherJobsThatDay(null);
+    setConflictsByTechnician({});
+    setNoteText("");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visible, currentScheduledStart, currentScheduledEnd, currentScheduledCostCenterId]);
-
-  // Pre-select the currently assigned technician once the staff list has
-  // loaded (it isn't known until listAssignableStaff resolves).
-  useEffect(() => {
-    if (!currentAssignedTo || technician) return;
-    const match = staff.find((s) => s.id === currentAssignedTo);
-    if (match) setTechnician(match);
-  }, [staff, currentAssignedTo, technician]);
 
   const dateKey = dateKeyInBusinessTZ(date);
 
-  // Smart default, same rule as the web dialog: zero other jobs that day ->
-  // All day stays on; one or more -> default off for a custom block.
+  function toggleTechnician(id: string) {
+    setTechnicianIds((prev) => (prev.includes(id) ? prev.filter((t) => t !== id) : [...prev, id]));
+  }
+
+  // Smart default, same rule as the web dialog: zero other jobs that day for
+  // any selected technician -> All day stays on; one or more for any of them
+  // -> default off for a custom block. Reuses the existing single-technician
+  // read (unchanged, still PowerSync-backed) once per selected id rather than
+  // widening that read's contract to accept an array.
   useEffect(() => {
-    if (!visible || step !== "time" || !technician) return;
+    if (!visible || step !== "time" || technicianIds.length === 0) return;
     let cancelled = false;
-    countOtherScheduledJobs(technician.id, dateKey, jobId)
-      .then((n) => {
+    Promise.all(technicianIds.map((id) => countOtherScheduledJobs(id, dateKey, jobId).then((n) => [id, n] as const)))
+      .then((pairs) => {
         if (cancelled) return;
-        setOtherJobsThatDay(n);
-        const nextAllDay = defaultAllDay(n);
+        const counts = Object.fromEntries(pairs.filter(([, n]) => n > 0));
+        setConflictsByTechnician(counts);
+        const maxConflicts = Math.max(0, ...Object.values(counts));
+        const nextAllDay = defaultAllDay(maxConflicts);
         setAllDay(nextAllDay);
         if (nextAllDay) {
           setStartTime(DEFAULT_SHIFT_START_TIME);
@@ -125,7 +133,7 @@ export function ScheduleJobModal({
     return () => {
       cancelled = true;
     };
-  }, [visible, step, technician, dateKey, jobId]);
+  }, [visible, step, technicianIds, dateKey, jobId]);
 
   function toggleAllDay() {
     const next = !allDay;
@@ -149,6 +157,7 @@ export function ScheduleJobModal({
     else setEndTime(hhmm);
   }
 
+  const selectedTechnicians = staff.filter((s) => technicianIds.includes(s.id));
   const scheduledStartIso = fromBusinessInputValue(`${dateKey}T${startTime}`);
   const scheduledEndIso = fromBusinessInputValue(`${dateKey}T${endTime}`);
   const windowError = validateScheduleWindow(scheduledStartIso, scheduledEndIso);
@@ -162,23 +171,39 @@ export function ScheduleJobModal({
   }
 
   async function confirm() {
-    if (!technician || windowError || saving || !ready) return;
+    if (technicianIds.length === 0 || windowError || saving || !ready) return;
     setSaving(true);
     try {
-      await schedule(jobId, technician.id, scheduledStartIso, scheduledEndIso, costCenterId);
-      onScheduled({
-        assigned_to: technician.id,
-        assigned_profile: { full_name: technician.full_name },
-        scheduled_start: scheduledStartIso,
-        scheduled_end: scheduledEndIso,
-        status: jobStatus === "pending" ? "scheduled" : jobStatus,
-        scheduled_cost_center_id: costCenterId,
-      });
-      onClose();
+      await schedule(jobId, technicianIds, scheduledStartIso, scheduledEndIso, costCenterId);
     } catch (e) {
-      Alert.alert("Couldn't schedule", e instanceof Error ? e.message : "Please try again.");
-    } finally {
       setSaving(false);
+      Alert.alert("Couldn't schedule", e instanceof Error ? e.message : "Please try again.");
+      return;
+    }
+
+    // The schedule itself landed — a note failure shouldn't look like the
+    // whole operation failed, so it's reported separately rather than
+    // routing through the same catch block above.
+    let noteFailed = false;
+    const trimmed = noteText.trim();
+    if (trimmed) {
+      try {
+        await addNote({ jobId, authorId: currentUserId, content: trimmed });
+      } catch {
+        noteFailed = true;
+      }
+    }
+
+    onScheduled({
+      scheduled_start: scheduledStartIso,
+      scheduled_end: scheduledEndIso,
+      status: jobStatus === "pending" ? "scheduled" : jobStatus,
+      scheduled_cost_center_id: costCenterId,
+    });
+    setSaving(false);
+    onClose();
+    if (noteFailed) {
+      Alert.alert("Job scheduled", "The note could not be saved — add it from the Notes tab.");
     }
   }
 
@@ -192,12 +217,12 @@ export function ScheduleJobModal({
             <View style={{ gap: 6 }}>
               {staff.length === 0 && <Text style={styles.hint}>No active staff found.</Text>}
               {staff.map((s) => {
-                const active = technician?.id === s.id;
+                const active = technicianIds.includes(s.id);
                 return (
                   <TouchableOpacity
                     key={s.id}
                     style={[styles.row, active && styles.rowActive]}
-                    onPress={() => setTechnician(s)}
+                    onPress={() => toggleTechnician(s.id)}
                   >
                     <View style={{ flex: 1 }}>
                       <Text style={styles.rowText}>{s.full_name}</Text>
@@ -228,11 +253,14 @@ export function ScheduleJobModal({
                 </Text>
               </TouchableOpacity>
 
-              {otherJobsThatDay !== null && otherJobsThatDay > 0 && (
-                <Text style={styles.warnHint}>
-                  {technician?.full_name ?? "This technician"} already has {otherJobsThatDay} job{otherJobsThatDay === 1 ? "" : "s"} that day — set a custom time block below.
-                </Text>
-              )}
+              {Object.entries(conflictsByTechnician).map(([staffId, n]) => {
+                const name = staff.find((s) => s.id === staffId)?.full_name ?? "This technician";
+                return (
+                  <Text key={staffId} style={styles.warnHint}>
+                    {name} already has {n} job{n === 1 ? "" : "s"} that day — set a custom time block below.
+                  </Text>
+                );
+              })}
 
               <View style={{ flexDirection: "row", gap: 10 }}>
                 <View style={{ flex: 1 }}>
@@ -291,9 +319,26 @@ export function ScheduleJobModal({
             </View>
           )}
 
+          {step === "notes" && (
+            <View style={{ gap: 6 }}>
+              <Text style={styles.label}>Notes for the technician (optional)</Text>
+              <TextInput
+                style={[styles.input, styles.inputMultiline]}
+                value={noteText}
+                onChangeText={setNoteText}
+                placeholder="What should they achieve on this job today?"
+                placeholderTextColor={colors.slate400}
+                multiline
+              />
+              <Text style={styles.hint}>
+                Posted to this job&apos;s Notes tab, visible to everyone assigned.
+              </Text>
+            </View>
+          )}
+
           {step === "confirm" && (
             <View style={styles.confirmBox}>
-              <Text style={styles.confirmTech}>{technician?.full_name}</Text>
+              <Text style={styles.confirmTech}>{selectedTechnicians.map((t) => t.full_name).join(", ")}</Text>
               <Text style={styles.confirmLine}>
                 {new Date(scheduledStartIso).toLocaleDateString("en-AU", { weekday: "long", day: "numeric", month: "long", timeZone: "Australia/Melbourne" })}
               </Text>
@@ -321,7 +366,13 @@ export function ScheduleJobModal({
                 step === "technician"
                   ? onClose()
                   : setStep(
-                      step === "confirm" ? (hasCostCenters ? "stage" : "time") : step === "stage" ? "time" : "technician"
+                      step === "confirm"
+                        ? "notes"
+                        : step === "notes"
+                        ? (hasCostCenters ? "stage" : "time")
+                        : step === "stage"
+                        ? "time"
+                        : "technician"
                     )
               }
               disabled={saving}
@@ -329,20 +380,25 @@ export function ScheduleJobModal({
               <Text style={styles.cancelText}>{step === "technician" ? "Cancel" : "Back"}</Text>
             </TouchableOpacity>
             {step === "technician" && (
-              <TouchableOpacity style={[styles.doneBtn, !technician && styles.doneBtnDisabled]} onPress={() => setStep("time")} disabled={!technician}>
+              <TouchableOpacity style={[styles.doneBtn, technicianIds.length === 0 && styles.doneBtnDisabled]} onPress={() => setStep("time")} disabled={technicianIds.length === 0}>
                 <Text style={styles.doneText}>Next</Text>
               </TouchableOpacity>
             )}
             {step === "time" && (
               <TouchableOpacity
                 style={[styles.doneBtn, !!windowError && styles.doneBtnDisabled]}
-                onPress={() => setStep(hasCostCenters ? "stage" : "confirm")}
+                onPress={() => setStep(hasCostCenters ? "stage" : "notes")}
                 disabled={!!windowError}
               >
                 <Text style={styles.doneText}>Next</Text>
               </TouchableOpacity>
             )}
             {step === "stage" && (
+              <TouchableOpacity style={styles.doneBtn} onPress={() => setStep("notes")}>
+                <Text style={styles.doneText}>Next</Text>
+              </TouchableOpacity>
+            )}
+            {step === "notes" && (
               <TouchableOpacity style={styles.doneBtn} onPress={() => setStep("confirm")}>
                 <Text style={styles.doneText}>Next</Text>
               </TouchableOpacity>
@@ -360,6 +416,8 @@ export function ScheduleJobModal({
 }
 
 const styles = StyleSheet.create({
+  input: { borderWidth: 1, borderColor: colors.border, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10, fontSize: 14, backgroundColor: colors.bg, color: colors.slate900 },
+  inputMultiline: { minHeight: 90, textAlignVertical: "top" },
   overlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.4)", justifyContent: "flex-end" },
   sheetScroll: { maxHeight: "88%", flexGrow: 0 },
   sheet: { backgroundColor: colors.card, borderTopLeftRadius: 16, borderTopRightRadius: 16, padding: 16, paddingBottom: 28 },

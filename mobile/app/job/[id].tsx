@@ -58,6 +58,25 @@ export default function JobDetailScreen() {
   // Stage picker options for the Schedule modal — same read the Time tab
   // already uses, loaded here so the modal has it before it opens.
   const [costCenters, setCostCenters] = useState<JobCostCentre[]>([]);
+  // The job's full crew (migration 0059, job_assignments) — a deliberate
+  // separate, ad-hoc query rather than widening getJob()/JobDetail, whose
+  // local/remote read parity contract this screen must not destabilize.
+  // Mirrors the same pattern already used in (office)/schedule.tsx.
+  const [assignedStaff, setAssignedStaff] = useState<{ id: string; full_name: string }[]>([]);
+
+  const refreshAssignedStaff = useCallback(async () => {
+    try {
+      const { data } = await supabase
+        .from("job_assignments")
+        .select("staff_id, profiles(full_name)")
+        .eq("job_id", id);
+      setAssignedStaff(
+        (data ?? []).map((a: any) => ({ id: a.staff_id, full_name: a.profiles?.full_name ?? "" }))
+      );
+    } catch {
+      setAssignedStaff([]); // Best-effort, same tolerance as costCenters/currentStage above.
+    }
+  }, [id]);
 
   // Both awaits can throw — the session lookup and the row read. Uncaught, the
   // throw skipped setLoading(false) and the technician sat on a spinner that
@@ -78,6 +97,8 @@ export default function JobDetailScreen() {
         setCostCenters([]); // Best-effort, same tolerance as the Time tab's own load.
       }
 
+      await refreshAssignedStaff();
+
       try {
         const { data: latestStageNote } = await supabase
           .from("job_stage_notes")
@@ -95,7 +116,7 @@ export default function JobDetailScreen() {
     } finally {
       setLoading(false);
     }
-  }, [id]);
+  }, [id, refreshAssignedStaff]);
 
   useFocusEffect(
     useCallback(() => {
@@ -225,8 +246,8 @@ export default function JobDetailScreen() {
         {job.sites ? ` · ${job.sites.name}, ${job.sites.suburb}` : ""}
       </Text>
       <Text style={styles.scheduleSubtitle}>
-        {job.assigned_profile && job.scheduled_start
-          ? `${job.assigned_profile.full_name} · ${new Date(job.scheduled_start).toLocaleString("en-AU", {
+        {assignedStaff.length > 0 && job.scheduled_start
+          ? `${assignedStaff.map((a) => a.full_name).join(", ")} · ${new Date(job.scheduled_start).toLocaleString("en-AU", {
               weekday: "short",
               day: "numeric",
               month: "short",
@@ -354,12 +375,16 @@ export default function JobDetailScreen() {
         onClose={() => setScheduleOpen(false)}
         jobId={job.id}
         jobStatus={job.status}
-        currentAssignedTo={job.assigned_to}
+        currentAssignedIds={assignedStaff.map((a) => a.id)}
+        currentUserId={userId ?? ""}
         currentScheduledStart={job.scheduled_start}
         currentScheduledEnd={job.scheduled_end}
         costCenters={costCenters}
         currentScheduledCostCenterId={job.scheduled_cost_center_id}
-        onScheduled={(patch) => setJob((j: any) => ({ ...j, ...patch }))}
+        onScheduled={(patch) => {
+          setJob((j: any) => ({ ...j, ...patch }));
+          void refreshAssignedStaff();
+        }}
       />
     </SafeAreaView>
   );

@@ -300,6 +300,7 @@ export function JobDetailClient({ job, currentUserId, photos: initialPhotos, doc
         jobStatus={job.status}
         staff={staff}
         currentAssignedIds={currentAssignedIds}
+        currentUserId={currentUserId}
         currentScheduledStart={job.scheduled_start}
         currentScheduledEnd={job.scheduled_end}
         costCenters={costCenters}

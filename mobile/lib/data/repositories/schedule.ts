@@ -32,23 +32,44 @@ export class ScheduleRepository {
    * reassign() + reschedule() pair — mirrors the web dialog's single
    * applyScheduleChange call, so a job is never briefly assigned with no
    * time (or timed with no assignee) between two separate writes.
+   *
+   * `assigned_to` is deliberately NOT written here (migration 0059). It is
+   * derived by the `sync_job_primary_assignee` trigger from `job_assignments`,
+   * which is set below via the `set_job_assignments` RPC (proxied through the
+   * assign-technicians side effect, since the outbox cannot call RPCs
+   * directly). Writing `assigned_to` directly here too would race: the
+   * `collapse_job_assignments_on_direct_write` trigger would first collapse
+   * job_assignments down to one row, with the full crew only restored once
+   * the dependent side effect lands.
    */
   async schedule(
     jobId: string,
-    assignedTo: string,
+    staffIds: string[],
     scheduledStartIso: string,
     scheduledEndIso: string,
     costCenterId: string | null = null
   ): Promise<void> {
-    await this.updateJob(jobId, {
-      assigned_to: assignedTo,
+    const opId = await this.updateJob(jobId, {
       scheduled_start: scheduledStartIso,
       scheduled_end: scheduledEndIso,
       scheduled_cost_center_id: costCenterId,
     });
+    const assign: SideEffectOperation = {
+      kind: "side_effect",
+      id: this.ids.newId(),
+      effect: "assign-technicians",
+      coalesceKey: `assign-technicians:${jobId}`,
+      payload: { jobId, staffIds },
+      dependsOn: opId,
+      status: "pending",
+      attempts: 0,
+      nextAttemptAt: 0,
+      createdAt: this.time.nowMs(),
+    };
+    await this.outbox.enqueue(assign);
   }
 
-  private async updateJob(jobId: string, payload: Record<string, unknown>): Promise<void> {
+  private async updateJob(jobId: string, payload: Record<string, unknown>): Promise<string> {
     const opId = this.ids.newId();
     const op: WriteOperation = {
       kind: "write",
@@ -78,5 +99,6 @@ export class ScheduleRepository {
       createdAt: this.time.nowMs(),
     };
     await this.outbox.enqueue(cal);
+    return opId;
   }
 }

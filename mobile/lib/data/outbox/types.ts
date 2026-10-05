@@ -70,7 +70,8 @@ export type SideEffectKind =
   | "sync-job-billing"
   | "sync-calendar"
   | "transcribe-voice-report"
-  | "backflow-submit";
+  | "backflow-submit"
+  | "assign-technicians";
 
 export interface SideEffectOperation {
   kind: "side_effect";
