@@ -199,6 +199,7 @@ const sideEffectPath: Record<SideEffectKind, (p: Record<string, unknown>) => str
   "sync-calendar": (p) => `/api/jobs/${p.jobId}/sync-calendar`,
   "transcribe-voice-report": (p) => `/api/jobs/${p.jobId}/transcribe-voice-report`,
   "backflow-submit": (p) => `/api/backflow/tests/${p.testId}/submit`,
+  "assign-technicians": (p) => `/api/jobs/${p.jobId}/set-assignments`,
 };
 
 /**

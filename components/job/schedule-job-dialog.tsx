@@ -17,6 +17,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Check, ChevronLeft, ChevronRight, User } from "lucide-react";
@@ -43,13 +44,14 @@ interface Props {
   jobStatus: string;
   staff: StaffMember[];
   currentAssignedIds: string[];
+  currentUserId: string;
   currentScheduledStart: string | null;
   currentScheduledEnd: string | null;
   costCenters?: CostCenterOption[];
   currentScheduledCostCenterId?: string | null;
 }
 
-type Step = "technician" | "time" | "stage" | "confirm";
+type Step = "technician" | "time" | "stage" | "notes" | "confirm";
 
 function initials(name: string) {
   return name.split(" ").map((n) => n[0]).join("").toUpperCase().slice(0, 2);
@@ -79,6 +81,7 @@ export function ScheduleJobDialog({
   jobStatus,
   staff,
   currentAssignedIds,
+  currentUserId,
   currentScheduledStart,
   currentScheduledEnd,
   costCenters = [],
@@ -98,6 +101,7 @@ export function ScheduleJobDialog({
   const [startTime, setStartTime] = useState(DEFAULT_SHIFT_START_TIME);
   const [endTime, setEndTime] = useState(DEFAULT_SHIFT_END_TIME);
   const [conflictsByTechnician, setConflictsByTechnician] = useState<Record<string, number>>({});
+  const [noteText, setNoteText] = useState("");
   const [saving, setSaving] = useState(false);
 
   // Fresh wizard every time the dialog opens, seeded from whatever the job
@@ -119,6 +123,7 @@ export function ScheduleJobDialog({
       setEndTime(DEFAULT_SHIFT_END_TIME);
     }
     setConflictsByTechnician({});
+    setNoteText("");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, currentScheduledStart, currentScheduledEnd, currentScheduledCostCenterId]);
 
@@ -208,12 +213,23 @@ export function ScheduleJobDialog({
     }
 
     const assignmentResult = await setJobAssignments(supabase, jobId, technicianIds);
-    setSaving(false);
     if (!assignmentResult.ok) {
+      setSaving(false);
       toast.error(assignmentResult.error);
       return;
     }
 
+    // The schedule itself landed — a note failure shouldn't read as the whole
+    // operation failing, so it gets its own toast rather than aborting here.
+    const trimmed = noteText.trim();
+    if (trimmed) {
+      const { error: noteError } = await supabaseClient
+        .from("job_notes")
+        .insert({ job_id: jobId, author_id: currentUserId, content: trimmed });
+      if (noteError) toast.warning("Job scheduled — note could not be saved");
+    }
+
+    setSaving(false);
     if (result.calendarSynced) toast.success("Job scheduled");
     else toast.warning("Job scheduled — Google Calendar not updated");
     onOpenChange(false);
@@ -319,6 +335,21 @@ export function ScheduleJobDialog({
           </div>
         )}
 
+        {step === "notes" && (
+          <div className="space-y-2">
+            <Label>Notes for the technician (optional)</Label>
+            <Textarea
+              value={noteText}
+              onChange={(e) => setNoteText(e.target.value)}
+              placeholder="What should they achieve on this job today?"
+              rows={4}
+            />
+            <p className="text-xs text-slate-400">
+              Posted to this job&apos;s Notes tab, visible to everyone assigned.
+            </p>
+          </div>
+        )}
+
         {step === "confirm" && (
           <div className="space-y-3">
             <div className="rounded-lg border border-slate-200 p-4 space-y-2">
@@ -356,7 +387,13 @@ export function ScheduleJobDialog({
               className="gap-1.5"
               onClick={() =>
                 setStep(
-                  step === "confirm" ? (hasCostCenters ? "stage" : "time") : step === "stage" ? "time" : "technician"
+                  step === "confirm"
+                    ? "notes"
+                    : step === "notes"
+                    ? (hasCostCenters ? "stage" : "time")
+                    : step === "stage"
+                    ? "time"
+                    : "technician"
                 )
               }
               disabled={saving}
@@ -377,12 +414,18 @@ export function ScheduleJobDialog({
             </Button>
           )}
           {step === "time" && (
-            <Button className="gap-1.5" onClick={() => setStep(hasCostCenters ? "stage" : "confirm")} disabled={!!windowError}>
+            <Button className="gap-1.5" onClick={() => setStep(hasCostCenters ? "stage" : "notes")} disabled={!!windowError}>
               Next
               <ChevronRight className="w-4 h-4" />
             </Button>
           )}
           {step === "stage" && (
+            <Button className="gap-1.5" onClick={() => setStep("notes")}>
+              Next
+              <ChevronRight className="w-4 h-4" />
+            </Button>
+          )}
+          {step === "notes" && (
             <Button className="gap-1.5" onClick={() => setStep("confirm")}>
               Next
               <ChevronRight className="w-4 h-4" />
