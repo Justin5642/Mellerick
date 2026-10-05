@@ -331,7 +331,7 @@ export function ScheduleJobModal({
                 multiline
               />
               <Text style={styles.hint}>
-                Posted to this job's Notes tab, visible to everyone assigned.
+                Posted to this job&apos;s Notes tab, visible to everyone assigned.
               </Text>
             </View>
           )}
