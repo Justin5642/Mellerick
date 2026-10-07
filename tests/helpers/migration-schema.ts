@@ -44,7 +44,10 @@ const NOT_A_COLUMN = /^(primary key|foreign key|unique|check|constraint|referenc
 export function migrationTables(sql: string): Map<string, TableColumns> {
   const out = new Map<string, TableColumns>();
 
-  const tableRe = /create table (?:if not exists )?(\w+)\s*\(([\s\S]*?)\n\);/gi;
+  // Table name may be schema-qualified (`public.login_lockouts`, the one
+  // migration — 0055 — that writes it that way); `(?:\w+\.)?` drops the
+  // qualifier rather than failing to match the statement at all.
+  const tableRe = /create table (?:if not exists )?(?:\w+\.)?(\w+)\s*\(([\s\S]*?)\n\);/gi;
   for (const [, table, body] of sql.matchAll(tableRe)) {
     const cols: TableColumns = new Map();
     for (const line of body.split("\n")) {

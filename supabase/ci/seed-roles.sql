@@ -227,6 +227,11 @@ values ('88888888-0000-0000-0000-000000000001', '66666666-0000-0000-0000-0000000
         'CI Stage', 'CI1', 5500.00, 24)
 on conflict (id) do nothing;
 
+insert into vendor_orders (id, cost_center_id, job_id, vendor_name, amount, gst_amount)
+values ('99999999-0000-0000-0000-000000000001', '88888888-0000-0000-0000-000000000001',
+        'cccccccc-0000-0000-0000-000000000001', 'CI Vendor', 850.00, 85.00)
+on conflict (id) do nothing;
+
 -- Payroll for the CI technician — admin-only since 0014, so the technician the
 -- sweep impersonates must read none of it. charge_out_rate (0026) is nullable
 -- and is one of the columns the sweep names, so it is set explicitly: a NULL

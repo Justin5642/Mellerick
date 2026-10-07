@@ -246,8 +246,8 @@ const job_stage_notes = new Table({
   // id (text) is implicit
   job_id: column.text,
   stage: column.text,
-  content: column.text,
   author_id: column.text,
+  content: column.text,
   created_at: column.text,
 });
 
@@ -319,6 +319,7 @@ const po_cost_centers = new Table({
   allocated_hours: column.real,
   sort_order: column.integer,
   created_at: column.text,
+  simpro_cost_center_id: column.integer,
 });
 
 const pricing_items = new Table({
@@ -354,6 +355,7 @@ const purchase_orders = new Table({
   notes: column.text,
   created_at: column.text,
   updated_at: column.text,
+  simpro_job_id: column.integer,
 });
 
 const quote_items = new Table({
