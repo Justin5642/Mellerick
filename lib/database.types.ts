@@ -875,6 +875,52 @@ export type Database = {
           },
         ]
       }
+      job_assignments: {
+        Row: {
+          assigned_by: string | null
+          created_at: string | null
+          id: string
+          job_id: string
+          staff_id: string
+        }
+        Insert: {
+          assigned_by?: string | null
+          created_at?: string | null
+          id?: string
+          job_id: string
+          staff_id: string
+        }
+        Update: {
+          assigned_by?: string | null
+          created_at?: string | null
+          id?: string
+          job_id?: string
+          staff_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "job_assignments_assigned_by_fkey"
+            columns: ["assigned_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "job_assignments_job_id_fkey"
+            columns: ["job_id"]
+            isOneToOne: false
+            referencedRelation: "jobs"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "job_assignments_staff_id_fkey"
+            columns: ["staff_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       job_documents: {
         Row: {
           created_at: string | null
@@ -920,52 +966,6 @@ export type Database = {
           {
             foreignKeyName: "job_documents_uploaded_by_fkey"
             columns: ["uploaded_by"]
-            isOneToOne: false
-            referencedRelation: "profiles"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
-      job_assignments: {
-        Row: {
-          assigned_by: string | null
-          created_at: string | null
-          id: string
-          job_id: string
-          staff_id: string
-        }
-        Insert: {
-          assigned_by?: string | null
-          created_at?: string | null
-          id?: string
-          job_id: string
-          staff_id: string
-        }
-        Update: {
-          assigned_by?: string | null
-          created_at?: string | null
-          id?: string
-          job_id?: string
-          staff_id?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "job_assignments_assigned_by_fkey"
-            columns: ["assigned_by"]
-            isOneToOne: false
-            referencedRelation: "profiles"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "job_assignments_job_id_fkey"
-            columns: ["job_id"]
-            isOneToOne: false
-            referencedRelation: "jobs"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "job_assignments_staff_id_fkey"
-            columns: ["staff_id"]
             isOneToOne: false
             referencedRelation: "profiles"
             referencedColumns: ["id"]
@@ -1535,6 +1535,27 @@ export type Database = {
           },
         ]
       }
+      login_lockouts: {
+        Row: {
+          failed_count: number
+          first_failed_at: string
+          locked_until: string | null
+          user_id: string
+        }
+        Insert: {
+          failed_count?: number
+          first_failed_at?: string
+          locked_until?: string | null
+          user_id: string
+        }
+        Update: {
+          failed_count?: number
+          first_failed_at?: string
+          locked_until?: string | null
+          user_id?: string
+        }
+        Relationships: []
+      }
       po_cost_centers: {
         Row: {
           allocated_amount: number | null
@@ -1544,6 +1565,7 @@ export type Database = {
           id: string
           name: string
           po_id: string
+          simpro_cost_center_id: number | null
           sort_order: number | null
         }
         Insert: {
@@ -1554,6 +1576,7 @@ export type Database = {
           id?: string
           name: string
           po_id: string
+          simpro_cost_center_id?: number | null
           sort_order?: number | null
         }
         Update: {
@@ -1564,6 +1587,7 @@ export type Database = {
           id?: string
           name?: string
           po_id?: string
+          simpro_cost_center_id?: number | null
           sort_order?: number | null
         }
         Relationships: [
@@ -1666,6 +1690,7 @@ export type Database = {
           job_id: string
           notes: string | null
           po_number: string
+          simpro_job_id: number | null
           site_address: string | null
           site_lat: number | null
           site_lng: number | null
@@ -1680,6 +1705,7 @@ export type Database = {
           job_id: string
           notes?: string | null
           po_number: string
+          simpro_job_id?: number | null
           site_address?: string | null
           site_lat?: number | null
           site_lng?: number | null
@@ -1694,6 +1720,7 @@ export type Database = {
           job_id?: string
           notes?: string | null
           po_number?: string
+          simpro_job_id?: number | null
           site_address?: string | null
           site_lat?: number | null
           site_lng?: number | null
@@ -2148,6 +2175,83 @@ export type Database = {
         }
         Relationships: []
       }
+      vendor_orders: {
+        Row: {
+          amount: number
+          cost_center_id: string
+          created_at: string | null
+          description: string | null
+          entered_by: string | null
+          gst_amount: number
+          id: string
+          job_id: string
+          notes: string | null
+          order_date: string | null
+          order_number: string | null
+          status: string
+          vendor_name: string
+        }
+        Insert: {
+          amount?: number
+          cost_center_id: string
+          created_at?: string | null
+          description?: string | null
+          entered_by?: string | null
+          gst_amount?: number
+          id?: string
+          job_id: string
+          notes?: string | null
+          order_date?: string | null
+          order_number?: string | null
+          status?: string
+          vendor_name: string
+        }
+        Update: {
+          amount?: number
+          cost_center_id?: string
+          created_at?: string | null
+          description?: string | null
+          entered_by?: string | null
+          gst_amount?: number
+          id?: string
+          job_id?: string
+          notes?: string | null
+          order_date?: string | null
+          order_number?: string | null
+          status?: string
+          vendor_name?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "vendor_orders_cost_center_id_fkey"
+            columns: ["cost_center_id"]
+            isOneToOne: false
+            referencedRelation: "po_cost_centers"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "vendor_orders_cost_center_id_fkey"
+            columns: ["cost_center_id"]
+            isOneToOne: false
+            referencedRelation: "po_cost_centers_public"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "vendor_orders_entered_by_fkey"
+            columns: ["entered_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "vendor_orders_job_id_fkey"
+            columns: ["job_id"]
+            isOneToOne: false
+            referencedRelation: "jobs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       xero_tokens: {
         Row: {
           access_token: string
@@ -2394,13 +2498,50 @@ export type Database = {
       }
     }
     Functions: {
+      check_login_lockout: { Args: { p_user_id: string }; Returns: Json }
+      clear_login_lockout: { Args: { p_user_id: string }; Returns: undefined }
+      hook_password_verification_attempt: {
+        Args: { event: Json }
+        Returns: Json
+      }
       is_admin: { Args: { uid: string }; Returns: boolean }
       is_office_or_admin: { Args: { uid: string }; Returns: boolean }
       reapply_time_entries_grants: { Args: never; Returns: undefined }
+      record_login_failure: { Args: { p_user_id: string }; Returns: Json }
+      replace_google_tokens: {
+        Args: {
+          p_access_token: string
+          p_google_email: string
+          p_refresh_token: string
+          p_token_expiry: string
+        }
+        Returns: undefined
+      }
+      replace_line_items: {
+        Args: { p_items: Json; p_parent_id: string; p_table: string }
+        Returns: number
+      }
+      replace_xero_tokens: {
+        Args: {
+          p_access_token: string
+          p_refresh_token: string
+          p_tenant_id: string
+          p_tenant_name: string
+          p_token_expiry: string
+        }
+        Returns: undefined
+      }
+      set_job_assignments: {
+        Args: { p_job_id: string; p_staff_ids: string[] }
+        Returns: {
+          staff_id: string
+        }[]
+      }
       storage_object_is_money_document: {
         Args: { object_name: string }
         Returns: boolean
       }
+      user_can_manage_job: { Args: { job_id_text: string }; Returns: boolean }
     }
     Enums: {
       [_ in never]: never
@@ -2419,12 +2560,12 @@ export type Tables<
   DefaultSchemaTableNameOrOptions extends
     | keyof (DefaultSchema["Tables"] & DefaultSchema["Views"])
     | { schema: keyof DatabaseWithoutInternals },
-  TableName extends DefaultSchemaTableNameOrOptions extends {
+  TableName extends (DefaultSchemaTableNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof (DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"] &
         DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Views"])
-    : never = never,
+    : never) = never,
 > = DefaultSchemaTableNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
@@ -2448,11 +2589,11 @@ export type TablesInsert<
   DefaultSchemaTableNameOrOptions extends
     | keyof DefaultSchema["Tables"]
     | { schema: keyof DatabaseWithoutInternals },
-  TableName extends DefaultSchemaTableNameOrOptions extends {
+  TableName extends (DefaultSchemaTableNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"]
-    : never = never,
+    : never) = never,
 > = DefaultSchemaTableNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
@@ -2473,11 +2614,11 @@ export type TablesUpdate<
   DefaultSchemaTableNameOrOptions extends
     | keyof DefaultSchema["Tables"]
     | { schema: keyof DatabaseWithoutInternals },
-  TableName extends DefaultSchemaTableNameOrOptions extends {
+  TableName extends (DefaultSchemaTableNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"]
-    : never = never,
+    : never) = never,
 > = DefaultSchemaTableNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
@@ -2498,11 +2639,11 @@ export type Enums<
   DefaultSchemaEnumNameOrOptions extends
     | keyof DefaultSchema["Enums"]
     | { schema: keyof DatabaseWithoutInternals },
-  EnumName extends DefaultSchemaEnumNameOrOptions extends {
+  EnumName extends (DefaultSchemaEnumNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof DatabaseWithoutInternals[DefaultSchemaEnumNameOrOptions["schema"]]["Enums"]
-    : never = never,
+    : never) = never,
 > = DefaultSchemaEnumNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
@@ -2515,11 +2656,11 @@ export type CompositeTypes<
   PublicCompositeTypeNameOrOptions extends
     | keyof DefaultSchema["CompositeTypes"]
     | { schema: keyof DatabaseWithoutInternals },
-  CompositeTypeName extends PublicCompositeTypeNameOrOptions extends {
+  CompositeTypeName extends (PublicCompositeTypeNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof DatabaseWithoutInternals[PublicCompositeTypeNameOrOptions["schema"]]["CompositeTypes"]
-    : never = never,
+    : never) = never,
 > = PublicCompositeTypeNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }

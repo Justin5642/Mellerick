@@ -45,8 +45,12 @@ try {
   // execFileSync of a Windows .cmd shim fails with EINVAL, which is what
   // `npx.cmd` is. Every argument here is a fixed literal — no interpolation,
   // nothing user-supplied — so handing them to a shell introduces nothing.
+  // Pinned: an unpinned `npx supabase` re-resolves to whatever is newest on
+  // every run, and a newer major has been observed to hang indefinitely here
+  // (stuck on auth with no stderr) rather than fail cleanly. 2.109.1 is the
+  // version already relied on elsewhere in this repo for `db query --linked`.
   generated = execFileSync(
-    "npx supabase gen types typescript " + source.join(" ") + " --schema public",
+    "npx supabase@2.109.1 gen types typescript " + source.join(" ") + " --schema public",
     { cwd: REPO, encoding: "utf8", maxBuffer: 64 * 1024 * 1024, shell: true }
   );
 } catch (e) {

@@ -20,6 +20,7 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
     { data: pricingItems },
     { data: staff },
     { data: purchaseOrders },
+    { data: vendorOrders },
     { data: timeEntries },
     { data: variations },
     { data: variationTypes },
@@ -38,6 +39,7 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
     supabase.from("pricing_items").select("*").eq("is_active", true).order("category").order("name"),
     supabase.from("profiles").select("id, full_name, role").eq("is_active", true).order("full_name"),
     supabase.from("purchase_orders").select("*, po_cost_centers(*)").eq("job_id", id).order("created_at"),
+    supabase.from("vendor_orders").select("*").eq("job_id", id).order("created_at", { ascending: false }),
     // time_entries has two FKs to profiles (staff_id, edited_by), so an
     // unhinted "profiles(...)" embed is ambiguous and PostgREST rejects the
     // whole query (PGRST201) — naming the exact FK fixes it (see
@@ -111,6 +113,7 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
       pricingItems={pricingItems ?? []}
       staff={staffForDisplay}
       purchaseOrders={purchaseOrders ?? []}
+      vendorOrders={vendorOrders ?? []}
       timeEntries={timeEntries ?? []}
       variations={variations ?? []}
       variationTypes={variationTypes ?? []}
