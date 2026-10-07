@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Plus, Trash2, Navigation, MapPin, Loader2 } from "lucide-react";
+import { Plus, Trash2, Navigation, MapPin, Loader2, ShoppingCart, X } from "lucide-react";
 
 interface CostCenter {
   id: string;
@@ -44,6 +44,20 @@ const OVERTIME_LABELS: Record<string, string> = {
   other: "Other",
 };
 
+interface VendorOrder {
+  id: string;
+  cost_center_id: string;
+  job_id: string;
+  vendor_name: string;
+  order_number: string | null;
+  description: string | null;
+  amount: number;
+  gst_amount: number;
+  status: "ordered" | "received" | "cancelled";
+  order_date: string | null;
+  notes: string | null;
+}
+
 interface ExpenseForAgg {
   cost_center_id: string | null;
   amount: number;
@@ -64,7 +78,21 @@ interface Props {
   overtimeCategory?: string | null;
   expenses: ExpenseForAgg[];
   timeEntries: TimeEntryForAgg[];
+  vendorOrders: VendorOrder[];
+  onVendorOrdersUpdate: (vendorOrders: VendorOrder[]) => void;
 }
+
+const VENDOR_ORDER_STATUS_LABELS: Record<VendorOrder["status"], string> = {
+  ordered: "Ordered",
+  received: "Received",
+  cancelled: "Cancelled",
+};
+
+const VENDOR_ORDER_STATUS_COLORS: Record<VendorOrder["status"], string> = {
+  ordered: "bg-amber-100 text-amber-700",
+  received: "bg-green-100 text-green-700",
+  cancelled: "bg-slate-100 text-slate-400 line-through",
+};
 
 function progressColor(pct: number) {
   if (pct >= 95) return "bg-red-500";
@@ -72,9 +100,13 @@ function progressColor(pct: number) {
   return "bg-green-500";
 }
 
-export function JobPO({ jobId, pos: initialPos, totalHoursLogged, onUpdate, overtimeReason, overtimeCategory, expenses, timeEntries }: Props) {
+export function JobPO({ jobId, pos: initialPos, totalHoursLogged, onUpdate, overtimeReason, overtimeCategory, expenses, timeEntries, vendorOrders: initialVendorOrders, onVendorOrdersUpdate }: Props) {
   const supabase = createClient();
   const [pos, setPos] = useState<PurchaseOrder[]>(initialPos);
+  const [vendorOrders, setVendorOrders] = useState<VendorOrder[]>(initialVendorOrders);
+  const [voFormOpenFor, setVoFormOpenFor] = useState<string | null>(null);
+  const [voSaving, setVoSaving] = useState(false);
+  const [voForm, setVoForm] = useState({ vendor_name: "", order_number: "", amount: "", order_date: "", notes: "" });
   const [showForm, setShowForm] = useState(false);
   const [geocoding, setGeocoding] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -223,6 +255,57 @@ export function JobPO({ jobId, pos: initialPos, totalHoursLogged, onUpdate, over
     toast.success("PO removed");
   }
 
+  async function saveVendorOrder(costCenterId: string) {
+    if (!voForm.vendor_name.trim()) { toast.error("Vendor name is required"); return; }
+    setVoSaving(true);
+    const { data, error } = await supabase.from("vendor_orders").insert({
+      cost_center_id: costCenterId,
+      job_id: jobId,
+      vendor_name: voForm.vendor_name,
+      order_number: voForm.order_number || null,
+      amount: parseFloat(voForm.amount) || 0,
+      order_date: voForm.order_date || null,
+      notes: voForm.notes || null,
+    }).select().single();
+
+    if (error || !data) { toast.error("Failed to save vendor order"); setVoSaving(false); return; }
+
+    const updated = [data as VendorOrder, ...vendorOrders];
+    setVendorOrders(updated);
+    onVendorOrdersUpdate(updated);
+    setVoFormOpenFor(null);
+    setVoForm({ vendor_name: "", order_number: "", amount: "", order_date: "", notes: "" });
+    toast.success("Vendor order raised");
+    setVoSaving(false);
+  }
+
+  async function updateVendorOrderStatus(id: string, status: VendorOrder["status"]) {
+    const { error } = await supabase.from("vendor_orders").update({ status }).eq("id", id);
+    if (error) { toast.error("Failed to update status"); return; }
+    const updated = vendorOrders.map(v => v.id === id ? { ...v, status } : v);
+    setVendorOrders(updated);
+    onVendorOrdersUpdate(updated);
+  }
+
+  async function deleteVendorOrder(id: string) {
+    const { error, count } = await supabase.from("vendor_orders").delete({ count: "exact" }).eq("id", id);
+    if (error || count === 0) { toast.error(error?.message ?? "Could not remove this vendor order."); return; }
+    const updated = vendorOrders.filter(v => v.id !== id);
+    setVendorOrders(updated);
+    onVendorOrdersUpdate(updated);
+    toast.success("Vendor order removed");
+  }
+
+  const vendorOrdersByCostCenter: Record<string, VendorOrder[]> = {};
+  for (const vo of vendorOrders) {
+    (vendorOrdersByCostCenter[vo.cost_center_id] ??= []).push(vo);
+  }
+  const committedByCostCenter: Record<string, number> = {};
+  for (const vo of vendorOrders) {
+    if (vo.status === "cancelled") continue;
+    committedByCostCenter[vo.cost_center_id] = (committedByCostCenter[vo.cost_center_id] ?? 0) + (Number(vo.amount) || 0);
+  }
+
   const totalAllocatedHours = pos.reduce((sum, p) => sum + (Number(p.total_hours) || 0), 0);
   const totalAllocatedValue = pos.reduce((sum, p) => sum + (Number(p.total_value) || 0), 0);
   const hoursPct = totalAllocatedHours > 0 ? Math.min((totalHoursLogged / totalAllocatedHours) * 100, 100) : 0;
@@ -319,6 +402,9 @@ export function JobPO({ jobId, pos: initialPos, totalHoursLogged, onUpdate, over
                 const allocatedHours = Number(cc.allocated_hours) || 0;
                 const dollarPct = allocatedAmount > 0 ? Math.min((spent / allocatedAmount) * 100, 100) : 0;
                 const stageHoursPct = allocatedHours > 0 ? Math.min((hoursLogged / allocatedHours) * 100, 100) : 0;
+                const committed = committedByCostCenter[cc.id] ?? 0;
+                const committedPct = allocatedAmount > 0 ? Math.min((committed / allocatedAmount) * 100, 100) : 0;
+                const ccVendorOrders = vendorOrdersByCostCenter[cc.id] ?? [];
                 return (
                   <div key={cc.id} className="rounded-lg border border-slate-100 p-3 space-y-2">
                     <div className="flex items-center justify-between">
@@ -342,6 +428,91 @@ export function JobPO({ jobId, pos: initialPos, totalHoursLogged, onUpdate, over
                       <div className="w-full bg-slate-200 rounded-full h-2">
                         <div className={`h-2 rounded-full ${progressColor(stageHoursPct)}`} style={{ width: `${stageHoursPct}%` }} />
                       </div>
+                    </div>
+                    {allocatedAmount > 0 && (
+                      <div>
+                        <div className="flex justify-between text-xs text-slate-500 mb-1">
+                          <span>${committed.toFixed(2)} committed</span>
+                          <span>${allocatedAmount.toFixed(2)} allocated</span>
+                        </div>
+                        <div className="w-full bg-slate-200 rounded-full h-2">
+                          <div className="h-2 rounded-full bg-sky-400" style={{ width: `${committedPct}%` }} />
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Vendor Orders */}
+                    <div className="pt-1 space-y-1.5">
+                      {ccVendorOrders.map(vo => (
+                        <div key={vo.id} className="flex items-center justify-between gap-2 rounded border border-slate-100 bg-slate-50/60 px-2 py-1.5 text-xs">
+                          <div className="min-w-0">
+                            <span className="font-medium text-slate-700">{vo.vendor_name}</span>
+                            {vo.order_number && <span className="text-slate-400 font-mono"> · {vo.order_number}</span>}
+                          </div>
+                          <div className="flex items-center gap-2 shrink-0">
+                            <span className="text-slate-600">${Number(vo.amount).toFixed(2)}</span>
+                            <select
+                              value={vo.status}
+                              onChange={e => updateVendorOrderStatus(vo.id, e.target.value as VendorOrder["status"])}
+                              className={`rounded px-1.5 py-0.5 text-[11px] font-medium border-0 ${VENDOR_ORDER_STATUS_COLORS[vo.status]}`}
+                            >
+                              {(Object.keys(VENDOR_ORDER_STATUS_LABELS) as VendorOrder["status"][]).map(s => (
+                                <option key={s} value={s}>{VENDOR_ORDER_STATUS_LABELS[s]}</option>
+                              ))}
+                            </select>
+                            <button onClick={() => deleteVendorOrder(vo.id)} className="text-slate-300 hover:text-red-400 transition-colors">
+                              <Trash2 className="w-3 h-3" />
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+
+                      {voFormOpenFor === cc.id ? (
+                        <div className="rounded border border-slate-200 p-2 space-y-2">
+                          <div className="grid grid-cols-2 gap-2">
+                            <Input
+                              value={voForm.vendor_name}
+                              onChange={e => setVoForm(p => ({ ...p, vendor_name: e.target.value }))}
+                              placeholder="Vendor name *"
+                              className="text-xs h-7"
+                            />
+                            <Input
+                              value={voForm.order_number}
+                              onChange={e => setVoForm(p => ({ ...p, order_number: e.target.value }))}
+                              placeholder="Order #"
+                              className="text-xs h-7 font-mono"
+                            />
+                            <Input
+                              type="number" step="0.01"
+                              value={voForm.amount}
+                              onChange={e => setVoForm(p => ({ ...p, amount: e.target.value }))}
+                              placeholder="$ Amount"
+                              className="text-xs h-7"
+                            />
+                            <Input
+                              type="date"
+                              value={voForm.order_date}
+                              onChange={e => setVoForm(p => ({ ...p, order_date: e.target.value }))}
+                              className="text-xs h-7"
+                            />
+                          </div>
+                          <div className="flex justify-end gap-2">
+                            <Button type="button" variant="ghost" size="sm" className="h-7 text-xs" onClick={() => { setVoFormOpenFor(null); setVoForm({ vendor_name: "", order_number: "", amount: "", order_date: "", notes: "" }); }}>
+                              <X className="w-3 h-3" />
+                            </Button>
+                            <Button type="button" size="sm" className="h-7 text-xs" onClick={() => saveVendorOrder(cc.id)} disabled={voSaving}>
+                              {voSaving ? "Saving..." : "Save"}
+                            </Button>
+                          </div>
+                        </div>
+                      ) : (
+                        <button
+                          onClick={() => setVoFormOpenFor(cc.id)}
+                          className="flex items-center gap-1 text-xs text-slate-400 hover:text-slate-600 transition-colors"
+                        >
+                          <ShoppingCart className="w-3 h-3" />Raise Vendor Order
+                        </button>
+                      )}
                     </div>
                   </div>
                 );

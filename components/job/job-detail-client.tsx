@@ -40,6 +40,7 @@ interface Props {
   pricingItems: any[];
   staff: any[];
   purchaseOrders: any[];
+  vendorOrders: any[];
   timeEntries: any[];
   variations: any[];
   variationTypes: any[];
@@ -53,7 +54,7 @@ interface Props {
   currentAssignedIds: string[];
 }
 
-export function JobDetailClient({ job, currentUserId, photos: initialPhotos, documents: initialDocuments, notes: initialNotes, stageNotes: initialStageNotes, lineItems: initialLineItems, pricingItems, staff, purchaseOrders: initialPOs, timeEntries: initialTimeEntries, variations: initialVariations, variationTypes, expenses: initialExpenses, equipmentOptions, equipmentUsage: initialEquipmentUsage, isAdmin, staffCostProfiles, jobInvoices, minMarginPct, currentAssignedIds }: Props) {
+export function JobDetailClient({ job, currentUserId, photos: initialPhotos, documents: initialDocuments, notes: initialNotes, stageNotes: initialStageNotes, lineItems: initialLineItems, pricingItems, staff, purchaseOrders: initialPOs, vendorOrders: initialVendorOrders, timeEntries: initialTimeEntries, variations: initialVariations, variationTypes, expenses: initialExpenses, equipmentOptions, equipmentUsage: initialEquipmentUsage, isAdmin, staffCostProfiles, jobInvoices, minMarginPct, currentAssignedIds }: Props) {
   // Deep-links like /dashboard/jobs/[id]?tab=variations&variation=[id]
   // (used by the Approvals page's "Price & review" link) land here — read
   // them once on mount so the right tab opens and the right variation is
@@ -78,6 +79,7 @@ export function JobDetailClient({ job, currentUserId, photos: initialPhotos, doc
   const currentStageNote = getCurrentStageNote(stageNotes);
   const [lineItems, setLineItems] = useState(initialLineItems);
   const [purchaseOrders, setPurchaseOrders] = useState(initialPOs);
+  const [vendorOrders, setVendorOrders] = useState(initialVendorOrders);
   const [timeEntries, setTimeEntries] = useState(initialTimeEntries);
   const [variations, setVariations] = useState(initialVariations);
   const [expenses, setExpenses] = useState(initialExpenses);
@@ -229,6 +231,8 @@ export function JobDetailClient({ job, currentUserId, photos: initialPhotos, doc
                 overtimeCategory={job.overtime_category}
                 expenses={expenses}
                 timeEntries={timeEntries}
+                vendorOrders={vendorOrders}
+                onVendorOrdersUpdate={setVendorOrders}
               />
             </TabsContent>
             <TabsContent value="time" className="m-0 h-full">
