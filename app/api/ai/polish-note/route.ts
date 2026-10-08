@@ -5,7 +5,7 @@ import { polishNoteText } from "@/lib/ai/polish-note";
 
 // Cleans up rough, often voice-dictated technician job notes into clear,
 // professional wording before they're saved to the job's permanent record.
-// The prompt + OpenAI call live in lib/ai/polish-note.ts, shared with
+// The prompt + Claude call live in lib/ai/polish-note.ts, shared with
 // /api/ai/transcribe-note (record-in-app voice notes), so both input paths
 // polish identically.
 
@@ -32,8 +32,8 @@ export async function POST(request: NextRequest) {
   const userId = await getAuthenticatedUserId(request);
   if (!userId) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
 
-  if (!process.env.OPENAI_API_KEY) {
-    return NextResponse.json({ error: "OPENAI_API_KEY is not configured on the server" }, { status: 500 });
+  if (!process.env.ANTHROPIC_API_KEY) {
+    return NextResponse.json({ error: "ANTHROPIC_API_KEY is not configured on the server" }, { status: 500 });
   }
 
   const body = await request.json().catch(() => ({}));
