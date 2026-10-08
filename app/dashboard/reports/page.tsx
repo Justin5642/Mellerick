@@ -42,10 +42,15 @@ export default async function ReportsPage() {
   equipmentTwelveMonthsAgo.setFullYear(equipmentTwelveMonthsAgo.getFullYear() - 1);
   const equipmentCutoffDate = equipmentTwelveMonthsAgo.toISOString().slice(0, 10);
 
+  // The three growing tables select only the columns the sums below read, and
+  // are ordered by id: range() paging over an unordered select has no stable
+  // row order between requests, so a page boundary could skip or repeat a row
+  // and the "complete" total would not be. (equipment and staff_cost_profiles
+  // stay "*" — small tables, and the cost helpers read most of their columns.)
   const [invoicesResult, quotesResult, jobsResult, profilesResult, equipmentResult, equipmentUsageResult, viewer] = await Promise.all([
-    fetchAllRows(supabase.from("invoices").select("id, total, status, created_at, customer_id, customers(name)")),
-    fetchAllRows(supabase.from("quotes").select("id, total, status, created_at")),
-    fetchAllRows(supabase.from("jobs").select("id, status, assigned_to, created_at")),
+    fetchAllRows(supabase.from("invoices").select("total, status, created_at, customer_id, customers(name)").order("id")),
+    fetchAllRows(supabase.from("quotes").select("total, status").order("id")),
+    fetchAllRows(supabase.from("jobs").select("status, assigned_to").order("id")),
     fetchAllRows(supabase.from("profiles").select("id, full_name").eq("is_active", true)),
     fetchAllRows(supabase.from("equipment").select("*").eq("is_active", true)),
     fetchAllRows(
