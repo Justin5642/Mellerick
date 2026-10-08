@@ -1,18 +1,12 @@
-import { createClient } from "@/lib/supabase/server";
+import { getViewer } from "@/lib/auth/viewer";
 import { redirect } from "next/navigation";
 import { AppSidebar } from "@/components/app-sidebar";
 
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-
-  if (!user) redirect("/login");
-
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("full_name, role")
-    .eq("id", user.id)
-    .single();
+  // Shared with the page below via React cache() — one auth + profile lookup.
+  const viewer = await getViewer();
+  if (!viewer) redirect("/login");
+  const { user, profile } = viewer;
 
   // Route-level gating for technicians lives in middleware.ts, not here: a
   // layout cannot see the pathname, and hiding a sidebar link only changes what
@@ -23,8 +17,8 @@ export default async function DashboardLayout({ children }: { children: React.Re
     <div className="flex h-screen overflow-hidden bg-slate-50">
       <AppSidebar
         userEmail={user.email}
-        userName={profile?.full_name}
-        userRole={profile?.role}
+        userName={profile?.full_name ?? undefined}
+        userRole={profile?.role ?? undefined}
       />
       {/* Clears the fixed mobile top bar rendered by AppSidebar below md --
           its actual height is the 56px bar plus whatever safe-area clearance

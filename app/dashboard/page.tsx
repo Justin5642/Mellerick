@@ -1,5 +1,6 @@
 export const dynamic = "force-dynamic";
 
+import { getViewer } from "@/lib/auth/viewer";
 import { createClient } from "@/lib/supabase/server";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -32,7 +33,7 @@ function StatCard({ title, value, icon: Icon, color, href }: {
 
 export default async function DashboardPage() {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = (await getViewer())?.user;
 
   // Guarded rather than asserted. `user!.id` below relied on the layout (and
   // now middleware) having redirected an unauthenticated visitor first — true

@@ -1,6 +1,7 @@
 export const dynamic = "force-dynamic";
 
 import { createClient } from "@/lib/supabase/server";
+import { getViewer } from "@/lib/auth/viewer";
 import { notFound } from "next/navigation";
 import { JobDetailClient } from "@/components/job/job-detail-client";
 import { TIME_ENTRY_SELECT_WITH_STAFF } from "@/lib/time-entry-columns";
@@ -11,7 +12,7 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
 
   const [
     { data: job },
-    { data: { user } },
+    viewer,
     { data: photos },
     { data: documents },
     { data: notes },
@@ -30,7 +31,7 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
     { data: jobAssignments },
   ] = await Promise.all([
     supabase.from("jobs").select("*, customers(id, name, phone, mobile, email), sites(name, address_line1, suburb, state, postcode, site_lat, site_lng)").eq("id", id).single(),
-    supabase.auth.getUser(),
+    getViewer(),
     supabase.from("job_photos").select("*, profiles(full_name)").eq("job_id", id).order("created_at", { ascending: false }),
     supabase.from("job_documents").select("*, profiles(full_name)").eq("job_id", id).order("created_at", { ascending: false }),
     supabase.from("job_notes").select("*, profiles(full_name)").eq("job_id", id).order("created_at", { ascending: false }),
@@ -87,10 +88,12 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
   let staffCostProfiles: any[] = [];
   let jobInvoices: any[] = [];
   let minMarginPct = 30;
+  const user = viewer?.user;
   if (user) {
-    const { data: viewerProfile } = await supabase.from("profiles").select("role").eq("id", user.id).single();
-    isAdmin = viewerProfile?.role === "admin";
-    isOffice = isAdmin || viewerProfile?.role === "office";
+    // Role comes from the per-request cached viewer (lib/auth/viewer.ts), not
+    // another profiles round trip after the batch above.
+    isAdmin = viewer?.profile?.role === "admin";
+    isOffice = isAdmin || viewer?.profile?.role === "office";
   }
   if (isAdmin) {
     const [{ data: costProfiles }, { data: invoicesForJob }, { data: rateConfig }] = await Promise.all([

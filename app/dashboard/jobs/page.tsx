@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -12,92 +12,117 @@ import { ListPageSkeleton } from "@/components/ui/loading-skeletons";
 import { jobStatusColors, jobPriorityColors } from "@/lib/badge-colors";
 import { getJobStageLabel } from "@/lib/job-stages";
 
+const PAGE_SIZE = 50;
+// Only what the list renders. The old select("*") pulled every column of
+// every job (transcripts, notes, descriptions) for ~825+ jobs up front.
+const LIST_COLUMNS = "id, job_number, title, status, priority, scheduled_start, customers(name)";
+
+type StageInfo = { stage: string; created_at: string };
+
+// Strip characters that would break a PostgREST or() filter string.
+function cleanQuery(q: string) {
+  return q.replace(/[,()%*\\"]/g, " ").trim();
+}
+
 export default function JobsPage() {
   const supabase = createClient();
   const [jobs, setJobs] = useState<any[] | null>(null);
+  const [total, setTotal] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
-  // job_id -> most recent stage note (stage + created_at only — this is a
-  // list view, not the note detail, so the full content isn't needed here).
-  // "Current stage" is where the last person left off on that job; a
-  // separate concept from job.status (whole-job lifecycle) shown alongside it.
-  const [currentStageByJob, setCurrentStageByJob] = useState<Map<string, { stage: string; created_at: string }>>(new Map());
+  const [query, setQuery] = useState(""); // debounced `search`
+  const [loadingMore, setLoadingMore] = useState(false);
+  // job_id -> most recent stage note. "Current stage" is where the last person
+  // left off on that job; a separate concept from job.status (whole-job
+  // lifecycle) shown alongside it. Fetched only for the jobs on screen.
+  const [currentStageByJob, setCurrentStageByJob] = useState<Map<string, StageInfo>>(new Map());
 
   useEffect(() => {
+    const t = setTimeout(() => setQuery(cleanQuery(search)), 300);
+    return () => clearTimeout(t);
+  }, [search]);
+
+  // Search runs in the database. Customer and site matches are resolved to ids
+  // first (PostgREST can't OR across embedded tables), then OR-ed with the
+  // job's own columns.
+  const fetchPage = useCallback(
+    async (q: string, from: number) => {
+      let builder = supabase.from("jobs").select(LIST_COLUMNS, { count: "exact" });
+      if (q) {
+        const [{ data: customers }, { data: sites }] = await Promise.all([
+          supabase.from("customers").select("id").ilike("name", `%${q}%`).limit(200),
+          supabase.from("sites").select("id").or(`name.ilike.%${q}%,address_line1.ilike.%${q}%,suburb.ilike.%${q}%`).limit(200),
+        ]);
+        const ors = [`title.ilike.%${q}%`, `description.ilike.%${q}%`, `status.ilike.%${q}%`, `priority.ilike.%${q}%`];
+        const num = q.replace(/^#/, "");
+        if (/^\d+$/.test(num)) ors.push(`job_number.eq.${num}`);
+        if (customers?.length) ors.push(`customer_id.in.(${customers.map((c) => c.id).join(",")})`);
+        if (sites?.length) ors.push(`site_id.in.(${sites.map((s) => s.id).join(",")})`);
+        builder = builder.or(ors.join(","));
+      }
+      return builder.order("created_at", { ascending: false }).range(from, from + PAGE_SIZE - 1);
+    },
+    [supabase]
+  );
+
+  const loadStages = useCallback(
+    async (jobIds: string[]) => {
+      if (jobIds.length === 0) return;
+      const { data, error: stageError } = await supabase
+        .from("job_stage_notes")
+        .select("job_id, stage, created_at")
+        .in("job_id", jobIds)
+        .order("created_at", { ascending: false });
+      if (stageError) return; // Non-fatal — the list still works without stage badges.
+      setCurrentStageByJob((prev) => {
+        const next = new Map(prev);
+        for (const note of data ?? []) {
+          if (!note.created_at) continue;
+          const existing = next.get(note.job_id);
+          if (!existing || note.created_at > existing.created_at) next.set(note.job_id, { stage: note.stage, created_at: note.created_at });
+        }
+        return next;
+      });
+    },
+    [supabase]
+  );
+
+  // First page — reruns when the (debounced) search changes.
+  useEffect(() => {
+    let cancelled = false;
     async function load() {
-      // Paginate explicitly — Supabase caps an unranged .select() at 1000
-      // rows, which would silently hide older jobs (and results of the
-      // search box below) once the table grows past that.
-      const pageSize = 1000;
-      let from = 0;
-      const all: any[] = [];
-      for (;;) {
-        const { data, error } = await supabase
-          .from("jobs")
-          .select("*, customers(name), sites(name, address_line1, suburb)")
-          .order("created_at", { ascending: false })
-          .range(from, from + pageSize - 1);
-        if (error) {
-          setError(error.message);
-          return;
-        }
-        all.push(...(data ?? []));
-        if (!data || data.length < pageSize) break;
-        from += pageSize;
+      setError(null);
+      const { data, error: listError, count } = await fetchPage(query, 0);
+      if (cancelled) return;
+      if (listError) {
+        setError(listError.message);
+        return;
       }
-      setJobs(all);
-
-      // Bulk-fetch every stage note's job_id/stage/created_at (narrow select,
-      // same pagination pattern as above) and reduce to one "latest note per
-      // job" map client-side — cheaper than a per-job query, and avoids
-      // needing a DB view just for this list.
-      let stageFrom = 0;
-      const allStageNotes: { job_id: string; stage: string; created_at: string | null }[] = [];
-      for (;;) {
-        const { data, error: stageError } = await supabase
-          .from("job_stage_notes")
-          .select("job_id, stage, created_at")
-          .range(stageFrom, stageFrom + pageSize - 1);
-        if (stageError) break; // Non-fatal — the jobs list still works without stage badges.
-        allStageNotes.push(...(data ?? []));
-        if (!data || data.length < pageSize) break;
-        stageFrom += pageSize;
-      }
-      const latest = new Map<string, { stage: string; created_at: string }>();
-      for (const note of allStageNotes) {
-        if (!note.created_at) continue; // column defaults to now() — a null here would only mean a data anomaly, skip it rather than let it win every comparison.
-        const existing = latest.get(note.job_id);
-        if (!existing || note.created_at > existing.created_at) {
-          latest.set(note.job_id, { stage: note.stage, created_at: note.created_at });
-        }
-      }
-      setCurrentStageByJob(latest);
+      setJobs(data ?? []);
+      setTotal(count ?? null);
+      void loadStages((data ?? []).map((j: any) => j.id));
     }
-    load();
-  }, []);
+    void load();
+    return () => {
+      cancelled = true;
+    };
+  }, [query, fetchPage, loadStages]);
 
-  const filteredJobs = useMemo(() => {
-    if (!jobs) return jobs;
-    const q = search.trim().toLowerCase();
-    if (!q) return jobs;
-    return jobs.filter((job: any) => {
-      const haystack = [
-        job.job_number,
-        job.title,
-        job.description,
-        job.status,
-        job.priority,
-        job.customers?.name,
-        job.sites?.name,
-        job.sites?.address_line1,
-        job.sites?.suburb,
-      ]
-        .filter(Boolean)
-        .join(" ")
-        .toLowerCase();
-      return haystack.includes(q);
-    });
-  }, [jobs, search]);
+  async function loadMore() {
+    if (!jobs || loadingMore) return;
+    setLoadingMore(true);
+    const { data, error: moreError } = await fetchPage(query, jobs.length);
+    setLoadingMore(false);
+    if (moreError) {
+      setError(moreError.message);
+      return;
+    }
+    setJobs([...jobs, ...(data ?? [])]);
+    void loadStages((data ?? []).map((j: any) => j.id));
+  }
+
+  const filteredJobs = jobs;
+  const hasMore = jobs !== null && total !== null && jobs.length < total;
 
   if (jobs === null && !error) {
     return <ListPageSkeleton />;
@@ -113,7 +138,7 @@ export default function JobsPage() {
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Jobs</h1>
           <p className="text-slate-500 text-sm mt-1">
-            {filteredJobs?.length ?? 0} of {jobs?.length ?? 0} jobs
+            {total === null ? "" : query ? `${total} matching job${total === 1 ? "" : "s"}` : `${total} jobs`}
           </p>
         </div>
         <Link href="/dashboard/jobs/new">
@@ -149,7 +174,7 @@ export default function JobsPage() {
           {!filteredJobs || filteredJobs.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-16 text-slate-400">
               <Briefcase className="w-12 h-12 mb-3 opacity-40" />
-              {jobs && jobs.length > 0 && search ? (
+              {query ? (
                 <p className="text-sm font-medium">No jobs match &ldquo;{search}&rdquo;</p>
               ) : (
                 <>
@@ -196,6 +221,14 @@ export default function JobsPage() {
           )}
         </CardContent>
       </Card>
+
+      {hasMore && (
+        <div className="flex justify-center">
+          <Button variant="outline" onClick={loadMore} disabled={loadingMore}>
+            {loadingMore ? "Loading..." : `Load more (${(total ?? 0) - (jobs?.length ?? 0)} more)`}
+          </Button>
+        </div>
+      )}
     </div>
   );
 }
