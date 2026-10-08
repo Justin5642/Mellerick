@@ -35,7 +35,9 @@ beforeAll(async () => {
   const { data: docs, error: dErr } = await admin
     .from("job_documents")
     .insert([
-      { job_id: jobId, storage_path: paths.general, file_name: "plans.pdf" },
+      // Every row names office_only: a multi-row insert sends null for a key
+      // only some rows set, which the NOT NULL column rejects.
+      { job_id: jobId, storage_path: paths.general, file_name: "plans.pdf", office_only: false },
       { job_id: jobId, storage_path: paths.officeOnly, file_name: "purchase-order.pdf", office_only: true },
     ])
     .select("id, office_only");
