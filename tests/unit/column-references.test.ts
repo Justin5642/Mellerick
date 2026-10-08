@@ -134,6 +134,21 @@ describe("referencedColumns — chain scoping (N13)", () => {
     expect([...referencedColumns(src, "jobs")]).toEqual(["ready_to_invoice"]);
   });
 
+  it("does not count an embedded table's order column as this table's", () => {
+    // Shape from app/dashboard/page.tsx: the latest passing test per device.
+    // `test_date` is a backflow_tests column; the device's own filters and
+    // plain orders in the same chain still count.
+    const src = [
+      `supabase.from("backflow_devices")`,
+      `  .select("test_frequency_months, backflow_tests(test_date)")`,
+      `  .eq("is_active", true)`,
+      `  .eq("backflow_tests.result", "pass")`,
+      `  .order("test_date", { referencedTable: "backflow_tests", ascending: false })`,
+      `  .order("serial_number")`,
+    ].join("\n");
+    expect([...referencedColumns(src, "backflow_devices")]).toEqual(["is_active", "serial_number"]);
+  });
+
   it("is not confused by parentheses inside a select string", () => {
     const src = `supabase.from("jobs").select("*, customers(name)").eq("status", s)`;
     expect([...referencedColumns(src, "jobs")]).toEqual(["status"]);
