@@ -15,7 +15,18 @@ export default async function SchedulePage() {
       // "profiles(...)" embed is ambiguous — PostgREST rejects the whole
       // query (PGRST201), which meant this query was returning zero rows
       // for every job, assigned or not. Hinting the exact FK fixes it.
-      .select("*, customers(name), profiles!jobs_assigned_to_fkey(full_name), sites(name, address_line1, suburb, state, site_lat, site_lng)")
+      //
+      // Only the columns TeamScheduleView's Job type reads — "*" shipped every
+      // job's descriptions, notes and voice transcripts to draw a card.
+      //
+      // Deliberately NOT date-windowed: the board's prev/next arrows step to
+      // any day or week client-side, and the List tab's "Upcoming" shows every
+      // open job, past-dated ones included. A window would silently drop jobs
+      // the UI shows. The set is bounded by open work (completed/cancelled
+      // excluded), not by history.
+      .select(
+        "id, job_number, title, status, scheduled_start, scheduled_end, assigned_to, customers(name), profiles!jobs_assigned_to_fkey(full_name), sites(name, address_line1, suburb, state, site_lat, site_lng)"
+      )
       // The Schedule board only makes sense for jobs that actually have a
       // time slot — a job with no scheduled_start hasn't been scheduled
       // yet, so it belongs in the general Jobs list (where it's still
