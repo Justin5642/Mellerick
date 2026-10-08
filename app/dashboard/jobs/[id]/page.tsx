@@ -5,6 +5,7 @@ import { getViewer } from "@/lib/auth/viewer";
 import { notFound } from "next/navigation";
 import { JobDetailClient } from "@/components/job/job-detail-client";
 import { TIME_ENTRY_SELECT_WITH_STAFF } from "@/lib/time-entry-columns";
+import { sumAllocatedHours } from "@/lib/hours-scoreboard";
 
 export default async function JobDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -95,6 +96,22 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
     isAdmin = viewer?.profile?.role === "admin";
     isOffice = isAdmin || viewer?.profile?.role === "office";
   }
+  // Technicians get the Hours Scoreboard on Overview instead of the PO tab.
+  // `purchase_orders` (above) is office/admin-only under RLS (0038) and returns
+  // no rows to a tech, so their allocation comes from the money-free
+  // `purchase_orders_public` view — hours only, never total_value. Do not widen
+  // this select. Office/admin keep the base-table read and the PO tab.
+  let techAllocatedHours = 0;
+  let techAllocatedHoursError: string | null = null;
+  if (user && !isOffice) {
+    const { data: publicPos, error: publicPosError } = await supabase
+      .from("purchase_orders_public")
+      .select("total_hours")
+      .eq("job_id", id);
+    if (publicPosError) techAllocatedHoursError = publicPosError.message;
+    else techAllocatedHours = sumAllocatedHours(publicPos ?? []);
+  }
+
   if (isAdmin) {
     const [{ data: costProfiles }, { data: invoicesForJob }, { data: rateConfig }] = await Promise.all([
       supabase.from("staff_cost_profiles").select("*"),
@@ -127,6 +144,8 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
       equipmentUsage={equipmentUsage ?? []}
       isAdmin={isAdmin}
       isOffice={isOffice}
+      techAllocatedHours={techAllocatedHours}
+      techAllocatedHoursError={techAllocatedHoursError}
       staffCostProfiles={staffCostProfiles}
       jobInvoices={jobInvoices}
       minMarginPct={minMarginPct}

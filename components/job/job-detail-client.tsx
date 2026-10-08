@@ -16,6 +16,7 @@ import { JobLineItems } from "./job-line-items";
 import { JobNotes } from "./job-notes";
 import { JobSignature } from "./job-signature";
 import { JobPO } from "./job-po";
+import { JobHoursScoreboard } from "./job-hours-scoreboard";
 import { JobTime } from "./job-time";
 import { JobVariations } from "./job-variations";
 import { JobExpenses } from "./job-expenses";
@@ -50,21 +51,27 @@ interface Props {
   isAdmin: boolean;
   // office or admin — may hide documents from technicians (Office only).
   isOffice: boolean;
+  // Technicians only: allocated hours from the money-free purchase_orders_public
+  // view, for the Overview Hours Scoreboard. Always 0/null for office/admin.
+  techAllocatedHours: number;
+  techAllocatedHoursError: string | null;
   staffCostProfiles: any[];
   jobInvoices: any[];
   minMarginPct: number;
   currentAssignedIds: string[];
 }
 
-export function JobDetailClient({ job, currentUserId, photos: initialPhotos, documents: initialDocuments, notes: initialNotes, stageNotes: initialStageNotes, lineItems: initialLineItems, pricingItems, staff, purchaseOrders: initialPOs, vendorOrders: initialVendorOrders, timeEntries: initialTimeEntries, variations: initialVariations, variationTypes, expenses: initialExpenses, equipmentOptions, equipmentUsage: initialEquipmentUsage, isAdmin, isOffice, staffCostProfiles, jobInvoices, minMarginPct, currentAssignedIds }: Props) {
+export function JobDetailClient({ job, currentUserId, photos: initialPhotos, documents: initialDocuments, notes: initialNotes, stageNotes: initialStageNotes, lineItems: initialLineItems, pricingItems, staff, purchaseOrders: initialPOs, vendorOrders: initialVendorOrders, timeEntries: initialTimeEntries, variations: initialVariations, variationTypes, expenses: initialExpenses, equipmentOptions, equipmentUsage: initialEquipmentUsage, isAdmin, isOffice, techAllocatedHours, techAllocatedHoursError, staffCostProfiles, jobInvoices, minMarginPct, currentAssignedIds }: Props) {
   // Deep-links like /dashboard/jobs/[id]?tab=variations&variation=[id]
   // (used by the Approvals page's "Price & review" link) land here — read
   // them once on mount so the right tab opens and the right variation is
   // highlighted, instead of always defaulting to Overview.
   const searchParams = useSearchParams();
   const requestedTab = searchParams.get("tab");
+  // The PO tab (PO values, cost-centre amounts, vendor orders) is office/admin
+  // only — a technician deep-linked to ?tab=po lands on Overview instead.
   const [activeTab, setActiveTab] = useState(
-    requestedTab && TAB_VALUES.includes(requestedTab) ? requestedTab : "overview"
+    requestedTab && TAB_VALUES.includes(requestedTab) && (isOffice || requestedTab !== "po") ? requestedTab : "overview"
   );
   const highlightVariationId = searchParams.get("variation");
   const [deleteOpen, setDeleteOpen] = useState(false);
@@ -195,7 +202,7 @@ export function JobDetailClient({ job, currentUserId, photos: initialPhotos, doc
             <TabsList className="h-auto bg-transparent p-0 gap-0 flex w-max min-w-full">
               {[
                 { value: "overview", label: "Overview", icon: Briefcase },
-                { value: "po", label: "Purchase Orders", icon: ClipboardList },
+                ...(isOffice ? [{ value: "po", label: "Purchase Orders", icon: ClipboardList }] : []),
                 { value: "time", label: "Time", icon: Clock },
                 { value: "variations", label: "Variations", icon: GitPullRequestArrow },
                 { value: "expenses", label: "Expenses", icon: DollarSign },
@@ -221,8 +228,23 @@ export function JobDetailClient({ job, currentUserId, photos: initialPhotos, doc
 
           <div className="flex-1 overflow-y-auto">
             <TabsContent value="overview" className="m-0 h-full">
+              {/* Technicians: hours-only scoreboard (no $), same placement as mobile. */}
+              {!isOffice && (techAllocatedHours > 0 || techAllocatedHoursError) && (
+                <div className="px-6 pt-6">
+                  <JobHoursScoreboard
+                    jobId={job.id}
+                    currentUserId={currentUserId}
+                    allocatedHours={techAllocatedHours}
+                    loadError={techAllocatedHoursError}
+                    timeEntries={timeEntries}
+                    overtimeReason={job.overtime_reason}
+                    overtimeCategory={job.overtime_category}
+                  />
+                </div>
+              )}
               <JobOverview job={job} staff={staff} />
             </TabsContent>
+            {isOffice && (
             <TabsContent value="po" className="m-0 h-full">
               <JobPO
                 jobId={job.id}
@@ -237,6 +259,7 @@ export function JobDetailClient({ job, currentUserId, photos: initialPhotos, doc
                 onVendorOrdersUpdate={setVendorOrders}
               />
             </TabsContent>
+            )}
             <TabsContent value="time" className="m-0 h-full">
               <JobTime jobId={job.id} currentUserId={currentUserId} timeEntries={timeEntries} pos={purchaseOrders} site={job.sites} costCenters={costCenters} isAdmin={isAdmin} staff={staff} onUpdate={setTimeEntries} scheduledCostCenterId={job.scheduled_cost_center_id} />
             </TabsContent>

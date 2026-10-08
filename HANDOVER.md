@@ -139,6 +139,11 @@ stream gated on the caller's own profile row.
 - [`lib/api/caller-client.ts`](lib/api/caller-client.ts) — a Bearer token yields a
   client scoped to that caller (RLS runs as them); no token falls back to the
   cookie client unchanged. This is what lets mobile call the web API routes.
+- Web job page: the **Purchase Orders tab is office/admin only** (PO values,
+  cost-centre amounts, vendor orders). Technicians get an hours-only
+  `JobHoursScoreboard` on Overview, fed by `purchase_orders_public.total_hours`
+  (never the base table) + `time_entries` hours — maths in
+  `lib/hours-scoreboard.ts`, mirroring the mobile card.
 
 ---
 
