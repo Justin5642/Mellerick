@@ -59,7 +59,11 @@ export function JobOverview({ job, staff }: Props) {
   useEffect(() => {
     async function loadSites() {
       if (!form.customer_id) { setSites([]); return; }
-      const { data } = await supabase.from("sites").select("id, name, suburb").eq("customer_id", form.customer_id);
+      // Active sites only — plus the job's saved site even if it has since
+      // been archived, so the dropdown never blanks out an existing value.
+      let query = supabase.from("sites").select("id, name, suburb").eq("customer_id", form.customer_id);
+      query = job.site_id ? query.or(`is_active.eq.true,id.eq.${job.site_id}`) : query.eq("is_active", true);
+      const { data } = await query;
       setSites(data ?? []);
     }
     loadSites();

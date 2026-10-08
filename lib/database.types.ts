@@ -1891,6 +1891,7 @@ export type Database = {
           created_at: string | null
           customer_id: string
           id: string
+          is_active: boolean
           name: string
           notes: string | null
           postcode: string
@@ -1907,6 +1908,7 @@ export type Database = {
           created_at?: string | null
           customer_id: string
           id?: string
+          is_active?: boolean
           name: string
           notes?: string | null
           postcode: string
@@ -1923,6 +1925,7 @@ export type Database = {
           created_at?: string | null
           customer_id?: string
           id?: string
+          is_active?: boolean
           name?: string
           notes?: string | null
           postcode?: string

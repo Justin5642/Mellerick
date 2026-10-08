@@ -40,7 +40,8 @@ export default function NewJobScreen() {
     setPickCustomer(false);
     setSite(null);
     const detail = await getCustomer(c.id);
-    setSites(detail?.sites ?? []);
+    // Archived sites stay on old jobs but aren't offered for new ones.
+    setSites((detail?.sites ?? []).filter((s) => s.is_active));
   }
 
   // Pre-select the customer when launched from a customer's "New Job" shortcut.
@@ -50,7 +51,7 @@ export default function NewJobScreen() {
     getCustomer(customerId).then((detail) => {
       if (cancelled || !detail) return;
       setCustomer({ id: detail.id, name: detail.name } as CustomerListRow);
-      setSites(detail.sites ?? []);
+      setSites((detail.sites ?? []).filter((s) => s.is_active));
     }).catch(() => {});
     return () => { cancelled = true; };
   }, [customerId]);

@@ -20,6 +20,7 @@ import {
   Plus,
 } from "lucide-react";
 import { formatDate } from "@/lib/date";
+import { SiteArchiveButton } from "@/components/site-archive-button";
 import { formatInvoiceNumber } from "@/lib/utils";
 import { jobStatusColors, quoteStatusColors, invoiceStatusColors } from "@/lib/badge-colors";
 
@@ -45,6 +46,10 @@ export default async function CustomerDetailPage({
     ]);
 
   if (!customer) notFound();
+
+  // Archived sites listed last, dimmed, so they can be restored.
+  const activeSites = (sites ?? []).filter((s: any) => s.is_active !== false);
+  const archivedSites = (sites ?? []).filter((s: any) => s.is_active === false);
 
   const totalInvoiced = (invoices ?? []).reduce((sum, i: any) => sum + Number(i.total), 0);
   const totalOutstanding = (invoices ?? [])
@@ -156,21 +161,25 @@ export default async function CustomerDetailPage({
 
           <Card>
             <CardHeader>
-              <CardTitle className="text-base">Sites ({sites?.length ?? 0})</CardTitle>
+              <CardTitle className="text-base">Sites ({activeSites.length})</CardTitle>
             </CardHeader>
             <CardContent className="space-y-3">
               {!sites || sites.length === 0 ? (
                 <p className="text-sm text-slate-400">No sites added</p>
               ) : (
-                sites.map((site: any) => (
-                  <div key={site.id} className="flex items-start gap-2 text-sm">
+                [...activeSites, ...archivedSites].map((site: any) => (
+                  <div key={site.id} className={`flex items-start gap-2 text-sm ${site.is_active === false ? "opacity-60" : ""}`}>
                     <MapPin className="w-4 h-4 text-slate-400 mt-0.5 flex-shrink-0" />
-                    <div>
-                      <p className="font-medium text-slate-800">{site.name}</p>
+                    <div className="flex-1">
+                      <p className="font-medium text-slate-800">
+                        {site.name}
+                        {site.is_active === false && <Badge variant="outline" className="ml-2 text-[10px]">Archived</Badge>}
+                      </p>
                       <p className="text-slate-500 text-xs">
                         {site.address_line1}, {site.suburb} {site.state} {site.postcode}
                       </p>
                     </div>
+                    <SiteArchiveButton siteId={site.id} siteName={site.name} isActive={site.is_active !== false} />
                   </div>
                 ))
               )}

@@ -55,7 +55,7 @@ export default function NewJobPage() {
   useEffect(() => {
     async function loadSites() {
       if (!form.customer_id) { setSites([]); return; }
-      const { data } = await supabase.from("sites").select("id, name, suburb").eq("customer_id", form.customer_id);
+      const { data } = await supabase.from("sites").select("id, name, suburb").eq("customer_id", form.customer_id).eq("is_active", true);
       setSites(data ?? []);
     }
     loadSites();

@@ -128,6 +128,7 @@ export default function NewBackflowDeviceScreen() {
       .from("sites")
       .select("id, name, suburb")
       .eq("customer_id", customerId)
+      .eq("is_active", true)
       .then(({ data }) => setSites(data ?? []));
   }, [customerId]);
 

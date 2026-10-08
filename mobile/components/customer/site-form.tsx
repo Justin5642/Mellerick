@@ -33,14 +33,13 @@ export function SiteFormSheet({
   existing,
   onClose,
   onSaved,
-  onRemoved,
 }: {
   visible: boolean;
   customerId: string;
   existing?: Site | null;
   onClose: () => void;
+  // Also called after archive/restore, so the caller reloads the list.
   onSaved: () => void;
-  onRemoved?: () => void;
 }) {
   const customers = useCustomers();
   const [draft, setDraft] = useState<Draft>(toDraft(existing ?? null));
@@ -76,15 +75,26 @@ export function SiteFormSheet({
     }
   }
 
-  async function remove() {
-    if (!existing || saving) return;
+  async function setActive(active: boolean) {
+    if (!existing || saving || !customers.ready) return;
     setSaving(true);
     try {
-      await customers.removeSite(existing.id);
-      onRemoved?.();
+      await customers.setSiteActive(existing.id, active);
+      onSaved();
     } finally {
       setSaving(false);
     }
+  }
+
+  function confirmArchive() {
+    Alert.alert(
+      "Archive site?",
+      "It will be hidden from site lists and pickers. Existing jobs and quotes keep it, and you can restore it any time.",
+      [
+        { text: "Cancel", style: "cancel" },
+        { text: "Archive", style: "destructive", onPress: () => void setActive(false) },
+      ]
+    );
   }
 
   const set = (k: keyof Draft) => (v: string) => setDraft((d) => ({ ...d, [k]: v }));
@@ -106,10 +116,16 @@ export function SiteFormSheet({
             <Field label="Notes" value={draft.notes} onChange={set("notes")} multiline />
           </ScrollView>
           <View style={styles.actions}>
-            {existing && onRemoved ? (
-              <TouchableOpacity style={styles.remove} onPress={remove} disabled={saving}>
-                <Text style={styles.removeText}>Remove</Text>
-              </TouchableOpacity>
+            {existing ? (
+              existing.is_active ? (
+                <TouchableOpacity style={styles.remove} onPress={confirmArchive} disabled={saving}>
+                  <Text style={styles.removeText}>Archive</Text>
+                </TouchableOpacity>
+              ) : (
+                <TouchableOpacity style={styles.restore} onPress={() => void setActive(true)} disabled={saving}>
+                  <Text style={styles.restoreText}>Restore</Text>
+                </TouchableOpacity>
+              )
             ) : null}
             <TouchableOpacity style={styles.cancel} onPress={onClose} disabled={saving}>
               <Text style={styles.cancelText}>Cancel</Text>
@@ -145,6 +161,8 @@ const styles = StyleSheet.create({
   actions: { flexDirection: "row", gap: 10, marginTop: 12, alignItems: "center" },
   remove: { paddingHorizontal: 14, paddingVertical: 12, borderRadius: 10, backgroundColor: colors.red100, borderWidth: 1, borderColor: colors.red600 },
   removeText: { color: colors.red600, fontWeight: "600", fontSize: 13 },
+  restore: { paddingHorizontal: 14, paddingVertical: 12, borderRadius: 10, backgroundColor: colors.bg, borderWidth: 1, borderColor: colors.blue600 },
+  restoreText: { color: colors.blue600, fontWeight: "600", fontSize: 13 },
   cancel: { flex: 1, paddingVertical: 12, borderRadius: 10, backgroundColor: colors.bg, alignItems: "center", borderWidth: 1, borderColor: colors.border },
   cancelText: { color: colors.slate700, fontWeight: "600", fontSize: 14 },
   saveBtn: { flex: 1, paddingVertical: 12, borderRadius: 10, backgroundColor: colors.blue600, alignItems: "center" },

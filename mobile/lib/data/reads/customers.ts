@@ -33,6 +33,9 @@ export interface Site {
   state: string;
   postcode: string;
   notes: string | null;
+  // false = archived: hidden from pickers, kept for history (jobs/quotes
+  // still reference it). Includes archived sites so they can be restored.
+  is_active: boolean;
 }
 export interface CustomerDetail {
   id: string;
@@ -65,7 +68,7 @@ export const SQL_GET_CUSTOMER = `
   FROM customers WHERE id = ?`;
 
 export const SQL_GET_CUSTOMER_SITES = `
-  SELECT id, name, address_line1, address_line2, suburb, state, postcode, notes
+  SELECT id, name, address_line1, address_line2, suburb, state, postcode, notes, is_active
   FROM sites WHERE customer_id = ?`;
 
 export const SQL_CUSTOMER_JOBS = `
@@ -145,7 +148,9 @@ export async function getCustomer(id: string): Promise<CustomerDetail | null> {
     async (db) => {
       const row = await db.getOptional<RawCustomerDetailRow>(SQL_GET_CUSTOMER, [id]);
       if (!row) return null;
-      const sites = await db.getAll<Site>(SQL_GET_CUSTOMER_SITES, [id]);
+      const siteRows = await db.getAll<Omit<Site, "is_active"> & { is_active: number | null }>(SQL_GET_CUSTOMER_SITES, [id]);
+      // A row synced before the column existed reads null — treat as active.
+      const sites: Site[] = siteRows.map((r) => ({ ...r, is_active: r.is_active !== 0 }));
       return {
         id: row.id,
         name: row.name,
@@ -163,7 +168,7 @@ export async function getCustomer(id: string): Promise<CustomerDetail | null> {
     async () => {
       const res = await supabase
         .from("customers")
-        .select("*, sites(id, name, address_line1, address_line2, suburb, state, postcode, notes)")
+        .select("*, sites(id, name, address_line1, address_line2, suburb, state, postcode, notes, is_active)")
         .eq("id", id)
         .single();
       return unwrap(res as never, "getCustomer") as unknown as CustomerDetail | null;
