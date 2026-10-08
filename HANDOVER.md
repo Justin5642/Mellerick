@@ -756,5 +756,16 @@ check missed. After applying it, run `scripts/audit-job-documents.mjs` (dry run
 first, then `--commit`) to flag the ~3.9k imported Simpro attachments that show
 prices; review the CSV it writes to `scripts/data/`.
 
+**Backflow signature storage (migration `0066`, draft, not yet applied):**
+0047's note that `backflow-certificates` has no policy is stale — 0048 added
+INSERT for `<deviceId>/signatures/…`, which fixed the web upload. But the mobile
+outbox uploads with `upsert: true`, which storage needs SELECT + UPDATE for, so a
+technician's signed test from the phone is refused and dead-letters. `0066`
+re-creates the bucket's policies by enumeration: signatures only, under an
+existing device; SELECT/UPDATE only on a signature you uploaded yourself;
+office/admin read and delete everything; anon nothing.
+`tests/rls/backflow-certificates.test.ts` proves it on the CI stack. After
+applying, log a signed test from the mobile app and confirm it settles.
+
 All 21 other open questions are resolved, each with its reasoning recorded in
 `mobile/DECISIONS-FOR-AVI.md`.
