@@ -6,7 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Briefcase, Users, Receipt, AlertCircle, CheckCircle2, Clock, DollarSign, Droplets } from "lucide-react";
 import Link from "next/link";
-import { businessDateParts, formatDate, formatTime, isTodayInBusinessTZ } from "@/lib/date";
+import { businessDateParts, dateKeyInBusinessTZ, formatDate, formatTime, fromBusinessInputValue, shiftDateKey } from "@/lib/date";
 import { jobStatusColors, jobPriorityColors } from "@/lib/badge-colors";
 import { computeNextDueDate, getDueStatus } from "@/lib/backflow";
 import { redirect } from "next/navigation";
@@ -42,6 +42,14 @@ export default async function DashboardPage() {
   // is actually used.
   if (!user) redirect("/login");
 
+  // Today as a [Melbourne midnight, next Melbourne midnight) window, so the
+  // database returns only today's jobs instead of every open scheduled job
+  // for JS to filter. Same set isTodayInBusinessTZ used to pick (DST changes
+  // happen at 2-3am, never at midnight, so both ends are real instants).
+  const todayKey = dateKeyInBusinessTZ(new Date());
+  const todayStart = fromBusinessInputValue(`${todayKey}T00:00`);
+  const tomorrowStart = fromBusinessInputValue(`${shiftDateKey(todayKey, 1)}T00:00`);
+
   const [
     { count: totalJobs },
     { count: activeJobs },
@@ -62,28 +70,37 @@ export default async function DashboardPage() {
       // "profiles(...)" embed is ambiguous and PostgREST rejects the whole
       // query (PGRST201) — the query silently returned no rows at all as a
       // result. Naming the alias "assigned_profile" (rather than
-      // "assigned_to", which collides with the raw uuid column from "*")
+      // "assigned_to", which would collide with the raw uuid column)
       // and hinting the exact FK fixes both the failure and the collision.
-      .select("*, customers(name), assigned_profile:profiles!jobs_assigned_to_fkey(full_name)")
+      .select("id, job_number, title, status, priority, customers(name), assigned_profile:profiles!jobs_assigned_to_fkey(full_name)")
       .order("created_at", { ascending: false })
       .limit(8),
     supabase.from("profiles").select("full_name").eq("id", user.id).single(),
     supabase.from("jobs")
-      .select("*, customers(name), profiles!jobs_assigned_to_fkey(full_name)")
-      .not("scheduled_start", "is", null)
+      .select("id, job_number, title, status, scheduled_start, scheduled_end, customers(name), profiles!jobs_assigned_to_fkey(full_name)")
+      .gte("scheduled_start", todayStart)
+      .lt("scheduled_start", tomorrowStart)
       // Exclude only completed/cancelled (matching "My Jobs" and the Team
       // Schedule) instead of allow-listing specific statuses, so an on_hold
       // job scheduled for today still shows up here.
       .not("status", "in", '("completed","cancelled")')
       .order("scheduled_start"),
-    supabase.from("backflow_devices").select("test_frequency_months, backflow_tests(test_date, result)").eq("is_active", true),
+    // Due status only needs each device's latest PASSING test, so the embed
+    // is filtered and limited to that one row in the database rather than
+    // shipping every test ever recorded. Not an inner join: a device with no
+    // pass still comes back (empty array) and stays "no_test", as before.
+    supabase.from("backflow_devices")
+      .select("test_frequency_months, backflow_tests(test_date)")
+      .eq("is_active", true)
+      .eq("backflow_tests.result", "pass")
+      .order("test_date", { referencedTable: "backflow_tests", ascending: false })
+      .limit(1, { referencedTable: "backflow_tests" }),
   ]);
 
-  const todaysJobs = (scheduledJobs ?? []).filter((j: any) => isTodayInBusinessTZ(j.scheduled_start));
+  const todaysJobs = scheduledJobs ?? [];
 
   const backflowDueCount = (backflowDevices ?? []).filter((device: any) => {
-    const passingTests = (device.backflow_tests ?? []).filter((t: any) => t.result === "pass");
-    const lastPass = passingTests.sort((a: any, b: any) => (a.test_date < b.test_date ? 1 : -1))[0];
+    const lastPass = (device.backflow_tests ?? [])[0];
     const nextDueDate = computeNextDueDate(lastPass?.test_date, Number(device.test_frequency_months));
     const status = getDueStatus(nextDueDate);
     return status === "overdue" || status === "due_soon";

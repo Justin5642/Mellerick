@@ -196,10 +196,9 @@ describe("Register backflow device screen — the server's answer decides the na
       if (!empty) break;
       fireEvent.changeText(empty, "20");
     }
-    // "Register Device" is both the screen title and the submit button; the
-    // button is the later of the two.
-    const labels = screen.getAllByText("Register Device");
-    fireEvent.press(labels[labels.length - 1]);
+    // "Register Device" is the submit button. The screen title moved to the
+    // native header (root _layout.tsx), which this test does not render.
+    fireEvent.press(screen.getByText("Register Device"));
   }
 
   it("does not open the detail for a device the server rejected", async () => {

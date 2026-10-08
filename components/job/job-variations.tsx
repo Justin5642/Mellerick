@@ -58,7 +58,8 @@ export function JobVariations({
 }: {
   jobId: string;
   variations: Variation[];
-  variationTypes: VariationType[];
+  // null while the types are still loading (fetched on first open of this tab).
+  variationTypes: VariationType[] | null;
   currentUserId: string;
   onUpdate: (v: Variation[]) => void;
   highlightVariationId?: string | null;
@@ -86,7 +87,7 @@ export function JobVariations({
     }
   }, [highlightVariationId]);
 
-  const selectedType = variationTypes.find((t) => t.id === typeId);
+  const selectedType = variationTypes?.find((t) => t.id === typeId);
 
   function set(updated: Variation[]) {
     setVariations(updated);
@@ -363,7 +364,10 @@ export function JobVariations({
                   <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="custom">Custom / Other (needs office approval)</SelectItem>
-                    {variationTypes.map((t) => (
+                    {variationTypes === null && (
+                      <SelectItem value="__loading" disabled>Loading standard types...</SelectItem>
+                    )}
+                    {(variationTypes ?? []).map((t) => (
                       <SelectItem key={t.id} value={t.id}>
                         {t.name} — ${Number(t.rate).toFixed(2)}/{t.unit} {t.auto_approve ? "(auto-approve)" : "(needs approval)"}
                       </SelectItem>

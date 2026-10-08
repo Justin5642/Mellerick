@@ -170,6 +170,16 @@ function RootNavigation() {
 
       {/* Shared across roles (reached from tech tabs and office Jobs/Dashboard). */}
       <Stack.Screen name="job/[id]" options={{ headerShown: true, title: "Job Details" }} />
+      {/* Backflow detail / register / log-test are reached from the technician
+          Backflow tab AND the office backflow list. They used to fall through to
+          `headerShown: false` above and draw their own "Back" row inside a
+          SafeAreaView that (like job/[id]) leaves out the top edge because it
+          expects a native header, so the back control sat under the status bar
+          / notch. The native header owns the top inset and the back button now.
+          test/screens/header-safe-area.test.ts keeps that pairing true. */}
+      <Stack.Screen name="backflow/[id]" options={{ headerShown: true, title: "Backflow Device" }} />
+      <Stack.Screen name="backflow/new" options={{ headerShown: true, title: "Register Device" }} />
+      <Stack.Screen name="backflow-test/[id]" options={{ headerShown: true, title: "Log Backflow Test" }} />
     </Stack>
   );
 }

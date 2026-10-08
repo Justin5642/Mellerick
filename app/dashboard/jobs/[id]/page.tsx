@@ -5,6 +5,7 @@ import { getViewer } from "@/lib/auth/viewer";
 import { notFound } from "next/navigation";
 import { JobDetailClient } from "@/components/job/job-detail-client";
 import { TIME_ENTRY_SELECT_WITH_STAFF } from "@/lib/time-entry-columns";
+import { sumAllocatedHours } from "@/lib/hours-scoreboard";
 
 export default async function JobDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -18,18 +19,18 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
     { data: notes },
     { data: stageNotes },
     { data: lineItems },
-    { data: pricingItems },
     { data: staff },
     { data: purchaseOrders },
     { data: vendorOrders },
     { data: timeEntries },
     { data: variations },
-    { data: variationTypes },
     { data: expenses },
-    { data: equipmentOptions },
     { data: equipmentUsage },
     { data: jobAssignments },
   ] = await Promise.all([
+    // Only per-job rows load here. The shared catalogs (pricing_items,
+    // variation_types, equipment) are fetched by JobDetailClient the first
+    // time the tab that reads them is opened — most visits never do.
     supabase.from("jobs").select("*, customers(id, name, phone, mobile, email), sites(name, address_line1, suburb, state, postcode, site_lat, site_lng)").eq("id", id).single(),
     getViewer(),
     supabase.from("job_photos").select("*, profiles(full_name)").eq("job_id", id).order("created_at", { ascending: false }),
@@ -37,7 +38,6 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
     supabase.from("job_notes").select("*, profiles(full_name)").eq("job_id", id).order("created_at", { ascending: false }),
     supabase.from("job_stage_notes").select("*, profiles(full_name)").eq("job_id", id).order("created_at", { ascending: false }),
     supabase.from("job_items").select("*").eq("job_id", id).order("created_at"),
-    supabase.from("pricing_items").select("*").eq("is_active", true).order("category").order("name"),
     supabase.from("profiles").select("id, full_name, role").eq("is_active", true).order("full_name"),
     supabase.from("purchase_orders").select("*, po_cost_centers(*)").eq("job_id", id).order("created_at"),
     supabase.from("vendor_orders").select("*").eq("job_id", id).order("created_at", { ascending: false }),
@@ -47,9 +47,7 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
     // app/dashboard/page.tsx for the same class of bug on "jobs").
     supabase.from("time_entries").select(TIME_ENTRY_SELECT_WITH_STAFF).eq("job_id", id).order("clock_in", { ascending: false }),
     supabase.from("job_variations").select("*, variation_types(name), profiles!job_variations_logged_by_fkey(full_name)").eq("job_id", id).order("created_at", { ascending: false }),
-    supabase.from("variation_types").select("*").eq("is_active", true).order("name"),
     supabase.from("job_expenses").select("*").eq("job_id", id).order("created_at", { ascending: false }),
-    supabase.from("equipment").select("*").eq("is_active", true).order("name"),
     supabase.from("equipment_usage_log").select("*").eq("job_id", id).order("usage_date", { ascending: false }),
     supabase.from("job_assignments").select("staff_id").eq("job_id", id),
   ]);
@@ -95,6 +93,22 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
     isAdmin = viewer?.profile?.role === "admin";
     isOffice = isAdmin || viewer?.profile?.role === "office";
   }
+  // Technicians get the Hours Scoreboard on Overview instead of the PO tab.
+  // `purchase_orders` (above) is office/admin-only under RLS (0038) and returns
+  // no rows to a tech, so their allocation comes from the money-free
+  // `purchase_orders_public` view — hours only, never total_value. Do not widen
+  // this select. Office/admin keep the base-table read and the PO tab.
+  let techAllocatedHours = 0;
+  let techAllocatedHoursError: string | null = null;
+  if (user && !isOffice) {
+    const { data: publicPos, error: publicPosError } = await supabase
+      .from("purchase_orders_public")
+      .select("total_hours")
+      .eq("job_id", id);
+    if (publicPosError) techAllocatedHoursError = publicPosError.message;
+    else techAllocatedHours = sumAllocatedHours(publicPos ?? []);
+  }
+
   if (isAdmin) {
     const [{ data: costProfiles }, { data: invoicesForJob }, { data: rateConfig }] = await Promise.all([
       supabase.from("staff_cost_profiles").select("*"),
@@ -115,18 +129,17 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
       notes={notes ?? []}
       stageNotes={stageNotes ?? []}
       lineItems={lineItems ?? []}
-      pricingItems={pricingItems ?? []}
       staff={staffForDisplay}
       purchaseOrders={purchaseOrders ?? []}
       vendorOrders={vendorOrders ?? []}
       timeEntries={timeEntries ?? []}
       variations={variations ?? []}
-      variationTypes={variationTypes ?? []}
       expenses={expenses ?? []}
-      equipmentOptions={equipmentOptions ?? []}
       equipmentUsage={equipmentUsage ?? []}
       isAdmin={isAdmin}
       isOffice={isOffice}
+      techAllocatedHours={techAllocatedHours}
+      techAllocatedHoursError={techAllocatedHoursError}
       staffCostProfiles={staffCostProfiles}
       jobInvoices={jobInvoices}
       minMarginPct={minMarginPct}

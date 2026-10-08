@@ -251,14 +251,6 @@ export default function NewBackflowDeviceScreen() {
 
   return (
     <SafeAreaView style={styles.container} edges={["bottom", "left", "right"]}>
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
-          <Ionicons name="arrow-back" size={18} color={colors.slate500} />
-          <Text style={styles.backButtonText}>Back</Text>
-        </TouchableOpacity>
-        <Text style={styles.title}>Register Device</Text>
-      </View>
-
       <ScrollView style={styles.content} contentContainerStyle={{ paddingBottom: 60 }}>
         <View style={styles.card}>
           <Text style={styles.cardTitle}>Property &amp; Authority</Text>
@@ -364,10 +356,6 @@ export default function NewBackflowDeviceScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.bg },
-  header: { flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 16, paddingTop: 12, paddingBottom: 8 },
-  backButton: { flexDirection: "row", alignItems: "center", gap: 4 },
-  backButtonText: { color: colors.slate500, fontSize: 13, fontWeight: "500" },
-  title: { fontSize: 17, fontWeight: "700", color: colors.slate900 },
   content: { flex: 1, marginTop: 6 },
   card: {
     backgroundColor: colors.card,

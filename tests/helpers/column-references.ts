@@ -187,8 +187,17 @@ export function referencedColumns(src: string, table: string): Set<string> {
   for (const m of src.matchAll(fromRe)) {
     const chunk = chainAfter(src, m.index! + m[0].length);
 
-    for (const [, col] of chunk.matchAll(/\.(?:eq|neq|gt|gte|lt|lte|is|in|order)\(\s*["'`](\w+)["'`]/g)) {
-      found.add(col);
+    for (const fm of chunk.matchAll(/\.(?:eq|neq|gt|gte|lt|lte|is|in|order)\(\s*["'`](\w+)["'`]/g)) {
+      // `.order("col", { referencedTable: "child" })` (or the older
+      // `foreignTable`) orders an EMBEDDED table's rows, so `col` is the
+      // child's column, not this table's. Filters name a child's column with a
+      // dot (`"child.col"`), which \w+ already refuses; order has no such
+      // marker in the column string, only this option.
+      const open = chunk.indexOf("(", fm.index!);
+      const end = callEnd(chunk, open);
+      const args = end === -1 ? "" : chunk.slice(open, end);
+      if (/\b(?:referencedTable|foreignTable)\s*:/.test(args)) continue;
+      found.add(fm[1]);
     }
 
     for (const om of chunk.matchAll(/\.(?:update|insert|upsert)\(\s*\{/g)) {

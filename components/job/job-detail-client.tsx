@@ -1,7 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import dynamic from "next/dynamic";
 import { useSearchParams } from "next/navigation";
+import { createClient } from "@/lib/supabase/client";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -9,18 +11,29 @@ import { ArrowLeft, Briefcase, FileText, Image, List, MessageSquare, PenLine, Cl
 import Link from "next/link";
 import { JobOverview } from "./job-overview";
 import { DeleteJobDialog } from "./delete-job-dialog";
-import { ScheduleJobDialog } from "./schedule-job-dialog";
-import { JobDocuments } from "./job-documents";
-import { JobPhotos } from "./job-photos";
-import { JobLineItems } from "./job-line-items";
-import { JobNotes } from "./job-notes";
-import { JobSignature } from "./job-signature";
-import { JobPO } from "./job-po";
-import { JobTime } from "./job-time";
-import { JobVariations } from "./job-variations";
-import { JobExpenses } from "./job-expenses";
-import { JobEquipment } from "./job-equipment";
-import { JobProfitability } from "./job-profitability";
+import { JobHoursScoreboard } from "./job-hours-scoreboard";
+
+// Overview is the default tab, so it ships in the page bundle. Every other
+// tab is its own chunk, fetched the first time it is shown — Base UI only
+// mounts the active panel, so an unopened tab costs nothing. SSR stays on so
+// a `?tab=` deep link still renders that tab in the server HTML.
+function TabLoading() {
+  return <div className="p-6 text-sm text-slate-400">Loading...</div>;
+}
+const JobDocuments = dynamic(() => import("./job-documents").then((m) => m.JobDocuments), { loading: TabLoading });
+const JobPhotos = dynamic(() => import("./job-photos").then((m) => m.JobPhotos), { loading: TabLoading });
+const JobLineItems = dynamic(() => import("./job-line-items").then((m) => m.JobLineItems), { loading: TabLoading });
+const JobNotes = dynamic(() => import("./job-notes").then((m) => m.JobNotes), { loading: TabLoading });
+const JobSignature = dynamic(() => import("./job-signature").then((m) => m.JobSignature), { loading: TabLoading });
+const JobPO = dynamic(() => import("./job-po").then((m) => m.JobPO), { loading: TabLoading });
+const JobTime = dynamic(() => import("./job-time").then((m) => m.JobTime), { loading: TabLoading });
+const JobVariations = dynamic(() => import("./job-variations").then((m) => m.JobVariations), { loading: TabLoading });
+const JobExpenses = dynamic(() => import("./job-expenses").then((m) => m.JobExpenses), { loading: TabLoading });
+const JobEquipment = dynamic(() => import("./job-equipment").then((m) => m.JobEquipment), { loading: TabLoading });
+const JobProfitability = dynamic(() => import("./job-profitability").then((m) => m.JobProfitability), { loading: TabLoading });
+// The schedule wizard is mounted on first open (it re-seeds itself on every
+// open anyway), so its code is only fetched when someone clicks Schedule Job.
+const ScheduleJobDialog = dynamic(() => import("./schedule-job-dialog").then((m) => m.ScheduleJobDialog), { ssr: false });
 import { jobStatusColors, jobPriorityColors } from "@/lib/badge-colors";
 import { getCurrentStageNote, getJobStageLabel } from "@/lib/job-stages";
 
@@ -28,6 +41,29 @@ import { getCurrentStageNote, getJobStageLabel } from "@/lib/job-stages";
 // validate a `?tab=` query param (e.g. from the Approvals page's "Price &
 // review" link) before trusting it as the initial active tab.
 const TAB_VALUES = ["overview", "po", "time", "variations", "expenses", "equipment", "costing", "documents", "photos", "items", "notes", "signature"];
+
+// Reference catalogs (pricing items, variation types, equipment) are only
+// read by one or two tabs, so the server page no longer loads them up front.
+// This fetches one the first time a tab that needs it is shown, through the
+// browser client — same session, same RLS, same query the server ran — and
+// keeps it for the life of the page so switching tabs doesn't refetch.
+// null = not loaded yet. A failed read resolves to [] exactly as the
+// server's `data ?? []` did.
+function useCatalogOnFirstUse<T>(wanted: boolean, load: () => PromiseLike<{ data: T[] | null }>): T[] | null {
+  const [rows, setRows] = useState<T[] | null>(null);
+  const started = useRef(false);
+  useEffect(() => {
+    if (!wanted || started.current) return;
+    started.current = true;
+    load().then(
+      ({ data }) => setRows(data ?? []),
+      () => setRows([])
+    );
+    // load is a fresh closure each render; `wanted` flipping is the trigger.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [wanted]);
+  return rows;
+}
 
 interface Props {
   job: any;
@@ -37,38 +73,42 @@ interface Props {
   notes: any[];
   stageNotes: any[];
   lineItems: any[];
-  pricingItems: any[];
   staff: any[];
   purchaseOrders: any[];
   vendorOrders: any[];
   timeEntries: any[];
   variations: any[];
-  variationTypes: any[];
   expenses: any[];
-  equipmentOptions: any[];
   equipmentUsage: any[];
   isAdmin: boolean;
   // office or admin — may hide documents from technicians (Office only).
   isOffice: boolean;
+  // Technicians only: allocated hours from the money-free purchase_orders_public
+  // view, for the Overview Hours Scoreboard. Always 0/null for office/admin.
+  techAllocatedHours: number;
+  techAllocatedHoursError: string | null;
   staffCostProfiles: any[];
   jobInvoices: any[];
   minMarginPct: number;
   currentAssignedIds: string[];
 }
 
-export function JobDetailClient({ job, currentUserId, photos: initialPhotos, documents: initialDocuments, notes: initialNotes, stageNotes: initialStageNotes, lineItems: initialLineItems, pricingItems, staff, purchaseOrders: initialPOs, vendorOrders: initialVendorOrders, timeEntries: initialTimeEntries, variations: initialVariations, variationTypes, expenses: initialExpenses, equipmentOptions, equipmentUsage: initialEquipmentUsage, isAdmin, isOffice, staffCostProfiles, jobInvoices, minMarginPct, currentAssignedIds }: Props) {
+export function JobDetailClient({ job, currentUserId, photos: initialPhotos, documents: initialDocuments, notes: initialNotes, stageNotes: initialStageNotes, lineItems: initialLineItems, staff, purchaseOrders: initialPOs, vendorOrders: initialVendorOrders, timeEntries: initialTimeEntries, variations: initialVariations, expenses: initialExpenses, equipmentUsage: initialEquipmentUsage, isAdmin, isOffice, techAllocatedHours, techAllocatedHoursError, staffCostProfiles, jobInvoices, minMarginPct, currentAssignedIds }: Props) {
   // Deep-links like /dashboard/jobs/[id]?tab=variations&variation=[id]
   // (used by the Approvals page's "Price & review" link) land here — read
   // them once on mount so the right tab opens and the right variation is
   // highlighted, instead of always defaulting to Overview.
   const searchParams = useSearchParams();
   const requestedTab = searchParams.get("tab");
+  // The PO tab (PO values, cost-centre amounts, vendor orders) is office/admin
+  // only — a technician deep-linked to ?tab=po lands on Overview instead.
   const [activeTab, setActiveTab] = useState(
-    requestedTab && TAB_VALUES.includes(requestedTab) ? requestedTab : "overview"
+    requestedTab && TAB_VALUES.includes(requestedTab) && (isOffice || requestedTab !== "po") ? requestedTab : "overview"
   );
   const highlightVariationId = searchParams.get("variation");
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [scheduleOpen, setScheduleOpen] = useState(false);
+  const [scheduleMounted, setScheduleMounted] = useState(false);
   const assignedStaff = staff.find((s: any) => s.id === job.assigned_to) ?? null;
 
   const [photos, setPhotos] = useState(initialPhotos);
@@ -86,6 +126,19 @@ export function JobDetailClient({ job, currentUserId, photos: initialPhotos, doc
   const [variations, setVariations] = useState(initialVariations);
   const [expenses, setExpenses] = useState(initialExpenses);
   const [equipmentUsage, setEquipmentUsage] = useState(initialEquipmentUsage);
+
+  const pricingItems = useCatalogOnFirstUse<any>(activeTab === "items", () =>
+    createClient().from("pricing_items").select("*").eq("is_active", true).order("category").order("name")
+  );
+  const variationTypes = useCatalogOnFirstUse<any>(activeTab === "variations", () =>
+    createClient().from("variation_types").select("*").eq("is_active", true).order("name")
+  );
+  // Equipment names and $/hour are part of what the Equipment and Costing
+  // tabs draw (not just a picker), so those two tabs wait for it rather than
+  // briefly showing "Unknown equipment" or an understated cost.
+  const equipmentOptions = useCatalogOnFirstUse<any>(activeTab === "equipment" || (isAdmin && activeTab === "costing"), () =>
+    createClient().from("equipment").select("*").eq("is_active", true).order("name")
+  );
   // Only "work" entries count against the allocated-hours budget — travel
   // time between jobs is tracked separately and shouldn't eat into it.
   const totalHoursLogged = timeEntries
@@ -158,7 +211,7 @@ export function JobDetailClient({ job, currentUserId, photos: initialPhotos, doc
             </div>
           </div>
           <div className="flex items-center gap-2 shrink-0">
-            <Button size="sm" className="gap-1.5" onClick={() => setScheduleOpen(true)}>
+            <Button size="sm" className="gap-1.5" onClick={() => { setScheduleMounted(true); setScheduleOpen(true); }}>
               <CalendarClock className="w-4 h-4" />
               Schedule Job
             </Button>
@@ -195,7 +248,7 @@ export function JobDetailClient({ job, currentUserId, photos: initialPhotos, doc
             <TabsList className="h-auto bg-transparent p-0 gap-0 flex w-max min-w-full">
               {[
                 { value: "overview", label: "Overview", icon: Briefcase },
-                { value: "po", label: "Purchase Orders", icon: ClipboardList },
+                ...(isOffice ? [{ value: "po", label: "Purchase Orders", icon: ClipboardList }] : []),
                 { value: "time", label: "Time", icon: Clock },
                 { value: "variations", label: "Variations", icon: GitPullRequestArrow },
                 { value: "expenses", label: "Expenses", icon: DollarSign },
@@ -221,8 +274,23 @@ export function JobDetailClient({ job, currentUserId, photos: initialPhotos, doc
 
           <div className="flex-1 overflow-y-auto">
             <TabsContent value="overview" className="m-0 h-full">
+              {/* Technicians: hours-only scoreboard (no $), same placement as mobile. */}
+              {!isOffice && (techAllocatedHours > 0 || techAllocatedHoursError) && (
+                <div className="px-6 pt-6">
+                  <JobHoursScoreboard
+                    jobId={job.id}
+                    currentUserId={currentUserId}
+                    allocatedHours={techAllocatedHours}
+                    loadError={techAllocatedHoursError}
+                    timeEntries={timeEntries}
+                    overtimeReason={job.overtime_reason}
+                    overtimeCategory={job.overtime_category}
+                  />
+                </div>
+              )}
               <JobOverview job={job} staff={staff} />
             </TabsContent>
+            {isOffice && (
             <TabsContent value="po" className="m-0 h-full">
               <JobPO
                 jobId={job.id}
@@ -237,6 +305,7 @@ export function JobDetailClient({ job, currentUserId, photos: initialPhotos, doc
                 onVendorOrdersUpdate={setVendorOrders}
               />
             </TabsContent>
+            )}
             <TabsContent value="time" className="m-0 h-full">
               <JobTime jobId={job.id} currentUserId={currentUserId} timeEntries={timeEntries} pos={purchaseOrders} site={job.sites} costCenters={costCenters} isAdmin={isAdmin} staff={staff} onUpdate={setTimeEntries} scheduledCostCenterId={job.scheduled_cost_center_id} />
             </TabsContent>
@@ -247,21 +316,29 @@ export function JobDetailClient({ job, currentUserId, photos: initialPhotos, doc
               <JobExpenses jobId={job.id} jobNumber={job.job_number} expenses={expenses} onUpdate={setExpenses} currentUserId={currentUserId} costCenters={costCenters} />
             </TabsContent>
             <TabsContent value="equipment" className="m-0 h-full">
-              <JobEquipment jobId={job.id} usage={equipmentUsage} equipmentOptions={equipmentOptions} onUpdate={setEquipmentUsage} />
+              {equipmentOptions ? (
+                <JobEquipment jobId={job.id} usage={equipmentUsage} equipmentOptions={equipmentOptions} onUpdate={setEquipmentUsage} />
+              ) : (
+                <TabLoading />
+              )}
             </TabsContent>
             {isAdmin && (
               <TabsContent value="costing" className="m-0 h-full">
-                <JobProfitability
-                  timeEntries={timeEntries}
-                  staffCostProfiles={staffCostProfiles}
-                  expenses={expenses}
-                  equipmentUsage={equipmentUsage}
-                  equipmentOptions={equipmentOptions}
-                  invoices={jobInvoices}
-                  jobItems={lineItems}
-                  variations={variations}
-                  minMarginPct={minMarginPct}
-                />
+                {equipmentOptions ? (
+                  <JobProfitability
+                    timeEntries={timeEntries}
+                    staffCostProfiles={staffCostProfiles}
+                    expenses={expenses}
+                    equipmentUsage={equipmentUsage}
+                    equipmentOptions={equipmentOptions}
+                    invoices={jobInvoices}
+                    jobItems={lineItems}
+                    variations={variations}
+                    minMarginPct={minMarginPct}
+                  />
+                ) : (
+                  <TabLoading />
+                )}
               </TabsContent>
             )}
             <TabsContent value="documents" className="m-0 h-full">
@@ -298,20 +375,22 @@ export function JobDetailClient({ job, currentUserId, photos: initialPhotos, doc
         onOpenChange={setDeleteOpen}
       />
 
-      <ScheduleJobDialog
-        open={scheduleOpen}
-        onOpenChange={setScheduleOpen}
-        jobId={job.id}
-        jobNumber={job.job_number}
-        jobStatus={job.status}
-        staff={staff}
-        currentAssignedIds={currentAssignedIds}
-        currentUserId={currentUserId}
-        currentScheduledStart={job.scheduled_start}
-        currentScheduledEnd={job.scheduled_end}
-        costCenters={costCenters}
-        currentScheduledCostCenterId={job.scheduled_cost_center_id}
-      />
+      {scheduleMounted && (
+        <ScheduleJobDialog
+          open={scheduleOpen}
+          onOpenChange={setScheduleOpen}
+          jobId={job.id}
+          jobNumber={job.job_number}
+          jobStatus={job.status}
+          staff={staff}
+          currentAssignedIds={currentAssignedIds}
+          currentUserId={currentUserId}
+          currentScheduledStart={job.scheduled_start}
+          currentScheduledEnd={job.scheduled_end}
+          costCenters={costCenters}
+          currentScheduledCostCenterId={job.scheduled_cost_center_id}
+        />
+      )}
     </div>
   );
 }
