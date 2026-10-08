@@ -3,16 +3,23 @@ export const dynamic = "force-dynamic";
 import { createClient } from "@/lib/supabase/server";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Receipt, Plus, AlertCircle } from "lucide-react";
+import { Plus, AlertCircle } from "lucide-react";
 import Link from "next/link";
-import { formatDate } from "@/lib/date";
-import { formatInvoiceNumber } from "@/lib/utils";
-import { invoiceStatusColors } from "@/lib/badge-colors";
+import { InvoiceList } from "@/components/invoice/invoice-list";
+import { INVOICE_LIST_COLUMNS, INVOICE_PAGE_SIZE, type InvoiceListRow } from "@/lib/invoice-list";
 
 export default async function InvoicesPage() {
   const supabase = await createClient();
-  const [{ data: invoices }, { data: readyJobs }, { data: unbilledVariations }] = await Promise.all([
-    supabase.from("invoices").select("*, customers(name)").order("created_at", { ascending: false }),
+  const [{ data: invoices, count: invoiceCount }, { data: readyJobs }, { data: unbilledVariations }] = await Promise.all([
+    // First page only, with the total for the header. Every invoice with every
+    // column used to load here; the rest now come 50 at a time via Load more
+    // (components/invoice/invoice-list.tsx, same columns and order).
+    supabase
+      .from("invoices")
+      .select(INVOICE_LIST_COLUMNS, { count: "exact" })
+      .order("created_at", { ascending: false })
+      .order("id", { ascending: false })
+      .range(0, INVOICE_PAGE_SIZE - 1),
     supabase.from("jobs").select("id, job_number, title, customer_id, customers(name)").eq("ready_to_invoice", true).order("updated_at", { ascending: false }),
     // Catches the case ready_to_invoice can't: a job that already got its
     // first invoice, then had a variation approved later. Nothing else
@@ -40,6 +47,7 @@ export default async function InvoicesPage() {
     existing.variationsCount += 1;
     queue.set(job.id, existing);
   }
+  const totalInvoices = invoiceCount ?? invoices?.length ?? 0;
   const invoiceQueue = Array.from(queue.values()).sort((a, b) => (b.needsFirstInvoice ? 1 : 0) - (a.needsFirstInvoice ? 1 : 0));
 
   return (
@@ -47,7 +55,7 @@ export default async function InvoicesPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Invoices</h1>
-          <p className="text-slate-500 text-sm mt-1">{invoices?.length ?? 0} total invoices</p>
+          <p className="text-slate-500 text-sm mt-1">{totalInvoices} total invoices</p>
         </div>
         <Link href="/dashboard/invoices/new">
           <Button className="gap-2"><Plus className="w-4 h-4" />New Invoice</Button>
@@ -93,36 +101,7 @@ export default async function InvoicesPage() {
         </Card>
       )}
 
-      <Card>
-        <CardContent className="p-0">
-          {!invoices || invoices.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-16 text-slate-400">
-              <Receipt className="w-12 h-12 mb-3 opacity-40" />
-              <p className="text-sm font-medium">No invoices yet</p>
-              <Link href="/dashboard/invoices/new" className="mt-2 text-sm text-blue-600 hover:underline">Create your first invoice</Link>
-            </div>
-          ) : (
-            <div className="divide-y">
-              {invoices.map((inv: any) => (
-                <Link key={inv.id} href={`/dashboard/invoices/${inv.id}`} className="flex items-center justify-between px-6 py-4 hover:bg-slate-50 transition-colors group">
-                  <div className="flex-1 min-w-0">
-                    <p className="font-medium text-sm group-hover:text-blue-600 transition-colors truncate">
-                      {formatInvoiceNumber(inv.invoice_number)} — {inv.title}
-                    </p>
-                    <p className="text-xs text-slate-500 mt-0.5">
-                      {inv.customers?.name} · Due {inv.due_date ? formatDate(inv.due_date) : "—"}
-                    </p>
-                  </div>
-                  <div className="flex items-center gap-3 ml-4 flex-shrink-0">
-                    <span className="text-sm font-semibold text-slate-700">${Number(inv.total).toLocaleString("en-AU", { minimumFractionDigits: 2 })}</span>
-                    <span className={`text-xs px-2 py-0.5 rounded-full font-medium capitalize ${invoiceStatusColors[inv.status]}`}>{inv.status}</span>
-                  </div>
-                </Link>
-              ))}
-            </div>
-          )}
-        </CardContent>
-      </Card>
+      <InvoiceList initialInvoices={(invoices ?? []) as InvoiceListRow[]} total={totalInvoices} />
     </div>
   );
 }
