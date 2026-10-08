@@ -12,7 +12,8 @@ backend.
 - **Backend:** Supabase (Postgres + Auth + Storage), row-level security
 - **Mobile:** Expo (SDK 54), Expo Router — see [`mobile/`](mobile/)
 - **Integrations:** Xero (invoicing), Google Calendar, Resend (email),
-  OpenAI (voice transcription/notes), Anthropic (backflow data-plate scanning)
+  OpenAI (Whisper voice transcription), Anthropic (note polish, backflow
+  data-plate scanning)
 - **Hosting:** Vercel (auto-deploys `main` to production)
 
 ## Prerequisites

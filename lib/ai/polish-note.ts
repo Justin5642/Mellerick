@@ -1,5 +1,8 @@
-// Shared OpenAI helpers for turning technician-dictated text into clean job-
-// record prose. Used by both /api/ai/polish-note (cleans up text the tech
+import Anthropic from "@anthropic-ai/sdk";
+
+// Shared helpers for turning technician-dictated text into clean job-record
+// prose. The polish pass runs on Claude; Whisper (OpenAI) is still used only
+// for audio transcription in /api/ai/transcribe-note. Used by both /api/ai/polish-note (cleans up text the tech
 // already typed or dictated via the OS keyboard) and /api/ai/transcribe-note
 // (records audio in-app, transcribes via Whisper, then runs the SAME polish
 // pass) so the two paths can never drift apart on wording rules — a note
@@ -24,35 +27,36 @@ Rules:
 export const TRANSCRIBE_TRADE_TERM_PROMPT =
   "Plumbing and hydraulic services job note, dictated by a technician on site. May include terms such as: backflow, backflow prevention, RPZ valve, reduced pressure zone, testable, non-testable, double check valve, air gap, DN15, DN20, DN25, DN32, DN40, DN50, PRV, pressure limiting valve, TMV, tempering valve, thermostatic mixing valve, trap, floor waste, gully trap, inspection point, vent stack, stack, cross-connection, water hammer, expansion valve, hydraulic, isolation valve, stop tap, rough-in, fit-off.";
 
-// Calls OpenAI chat completion with the shared system prompt and returns the
-// polished text. Throws on any failure (missing/empty result, non-OK
-// response) — callers decide how to degrade (transcribe-note falls back to
-// the raw transcript rather than failing the whole request).
+// Calls Claude with the shared system prompt and returns the polished text.
+// Throws on any failure (API error, refusal, empty result) — callers decide
+// how to degrade (transcribe-note falls back to the raw transcript rather
+// than failing the whole request).
+const POLISH_MODEL = "claude-opus-5-5";
+
+let client: Anthropic | null = null;
+
 export async function polishNoteText(text: string): Promise<string> {
-  const openaiRes = await fetch("https://api.openai.com/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      model: "gpt-4o-mini",
-      temperature: 0.3,
-      messages: [
-        { role: "system", content: POLISH_SYSTEM_PROMPT },
-        { role: "user", content: text },
-      ],
-    }),
+  // Lazily constructed so a missing ANTHROPIC_API_KEY surfaces as a request
+  // error rather than crashing module load for every route that imports this.
+  client ??= new Anthropic();
+  const response = await client.beta.messages.create({
+    model: POLISH_MODEL,
+    max_tokens: 4000,
+    // A light copy-edit: low effort keeps it fast and cheap.
+    output_config: { effort: "low" },
+    // On a safety decline, Anthropic re-runs the request on its recommended
+    // fallback model instead of returning a refusal.
+    betas: ["server-side-fallback-2026-07-01"],
+    fallbacks: "default",
+    system: POLISH_SYSTEM_PROMPT,
+    messages: [{ role: "user", content: text }],
   });
 
-  if (!openaiRes.ok) {
-    const errText = await openaiRes.text().catch(() => "");
-    console.error("OpenAI polish-note error:", openaiRes.status, errText);
-    throw new Error("AI polish failed");
-  }
-
-  const data = await openaiRes.json();
-  const polished: string | undefined = data.choices?.[0]?.message?.content?.trim();
+  if (response.stop_reason === "refusal") throw new Error("AI polish was declined");
+  const polished = response.content
+    .flatMap((block) => (block.type === "text" ? [block.text] : []))
+    .join("")
+    .trim();
   if (!polished) throw new Error("AI polish returned no result");
   return polished;
 }
