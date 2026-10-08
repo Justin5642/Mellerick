@@ -1136,6 +1136,7 @@ export type Database = {
           created_at: string | null
           id: string
           job_id: string
+          source: string | null
         }
         Insert: {
           author_id?: string | null
@@ -1143,6 +1144,7 @@ export type Database = {
           created_at?: string | null
           id?: string
           job_id: string
+          source?: string | null
         }
         Update: {
           author_id?: string | null
@@ -1150,6 +1152,7 @@ export type Database = {
           created_at?: string | null
           id?: string
           job_id?: string
+          source?: string | null
         }
         Relationships: [
           {

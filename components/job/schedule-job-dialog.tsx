@@ -225,7 +225,7 @@ export function ScheduleJobDialog({
     if (trimmed) {
       const { error: noteError } = await supabaseClient
         .from("job_notes")
-        .insert({ job_id: jobId, author_id: currentUserId, content: trimmed });
+        .insert({ job_id: jobId, author_id: currentUserId, content: trimmed, source: "schedule" });
       if (noteError) toast.warning("Job scheduled — note could not be saved");
     }
 

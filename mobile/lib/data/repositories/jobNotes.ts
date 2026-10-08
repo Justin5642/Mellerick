@@ -16,7 +16,7 @@ export class JobNotesRepository {
   ) {}
 
   /** Queue a note. Returns the new row id for the optimistic row. */
-  async add(input: { jobId: string; authorId: string; content: string }): Promise<string> {
+  async add(input: { jobId: string; authorId: string; content: string; source?: string }): Promise<string> {
     const rowId = this.ids.newId();
     const write: WriteOperation = {
       kind: "write",
@@ -29,6 +29,7 @@ export class JobNotesRepository {
         job_id: input.jobId,
         author_id: input.authorId,
         content: input.content,
+        ...(input.source ? { source: input.source } : {}),
       },
       status: "pending",
       attempts: 0,

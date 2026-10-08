@@ -229,6 +229,7 @@ const job_notes = new Table({
   author_id: column.text,
   content: column.text,
   created_at: column.text,
+  source: column.text,
 });
 
 const job_photos = new Table({
