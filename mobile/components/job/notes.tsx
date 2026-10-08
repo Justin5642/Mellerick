@@ -25,6 +25,7 @@ interface Note {
   content: string;
   created_at: string;
   profiles: { full_name: string } | null;
+  source?: string | null;
 }
 
 interface StageNote extends Note {
@@ -424,6 +425,11 @@ export function JobNotesTab({ jobId, currentUserId }: { jobId: string; currentUs
                 {new Date(item.created_at).toLocaleTimeString("en-AU", { hour: "2-digit", minute: "2-digit" })}
               </Text>
             </View>
+            {item.source === "schedule" && (
+              <View style={styles.scheduleTag}>
+                <Text style={styles.scheduleTagText}>Scheduling note — also shown on Overview</Text>
+              </View>
+            )}
             <Text style={styles.noteContent}>{item.content}</Text>
           </View>
         )}
@@ -485,6 +491,8 @@ const styles = StyleSheet.create({
   addButtonText: { color: "#fff", fontWeight: "600", fontSize: 14 },
   noteCard: { backgroundColor: colors.card, borderWidth: 1, borderColor: colors.border, borderRadius: 10, padding: 12, marginBottom: 8 },
   noteHeader: { flexDirection: "row", justifyContent: "space-between", marginBottom: 4 },
+  scheduleTag: { alignSelf: "flex-start", backgroundColor: colors.blue100, borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2, marginBottom: 4 },
+  scheduleTagText: { fontSize: 10, fontWeight: "700", color: colors.blue600 },
   noteAuthor: { fontSize: 12, fontWeight: "700", color: colors.slate700 },
   noteDate: { fontSize: 11, color: colors.slate400 },
   noteContent: { fontSize: 14, color: colors.slate700 },

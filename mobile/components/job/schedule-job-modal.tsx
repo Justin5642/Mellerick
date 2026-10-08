@@ -188,7 +188,7 @@ export function ScheduleJobModal({
     const trimmed = noteText.trim();
     if (trimmed) {
       try {
-        await addNote({ jobId, authorId: currentUserId, content: trimmed });
+        await addNote({ jobId, authorId: currentUserId, content: trimmed, source: "schedule" });
       } catch {
         noteFailed = true;
       }

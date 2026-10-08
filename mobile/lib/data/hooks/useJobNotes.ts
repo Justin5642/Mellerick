@@ -7,7 +7,7 @@ import { useFlush } from "./useFlush";
 // optimistic row and whether it synced.
 export interface NotesComposer {
   ready: boolean;
-  addNote(input: { jobId: string; authorId: string; content: string }): Promise<{ id: string; synced: boolean }>;
+  addNote(input: { jobId: string; authorId: string; content: string; source?: string }): Promise<{ id: string; synced: boolean }>;
 }
 
 export function useJobNotes(): NotesComposer {

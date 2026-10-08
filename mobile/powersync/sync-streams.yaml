@@ -114,7 +114,7 @@ streams:
   tech_job_notes:
     auto_subscribe: true
     query: |
-      SELECT id, job_id, content, author_id, created_at
+      SELECT id, job_id, content, author_id, created_at, source
       FROM job_notes
       WHERE job_id IN (SELECT job_id FROM job_assignments WHERE staff_id = auth.user_id())
 

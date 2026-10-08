@@ -6,6 +6,7 @@ import { useJobEdit } from "../../lib/data/hooks/useJobEdit";
 import { colors } from "../../lib/theme";
 import { openExternalUrl, openNavigation } from "../../lib/open-external-url";
 import { JobHoursScoreboard } from "./hours-scoreboard";
+import { ScheduleNoteBanner } from "./schedule-note-banner";
 
 const API_BASE_URL = process.env.EXPO_PUBLIC_API_BASE_URL;
 
@@ -167,6 +168,7 @@ export function JobOverviewTab({ job, currentUserId }: { job: Job; currentUserId
 
   return (
     <View style={styles.container}>
+      <ScheduleNoteBanner jobId={job.id} />
       <JobHoursScoreboard job={job} currentUserId={currentUserId} />
 
       <Text style={styles.sectionTitle}>Status & Priority</Text>

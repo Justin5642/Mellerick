@@ -63,6 +63,16 @@ uptime with low CPU is normal and healthy.
 **Two separate npm projects.** Root and `mobile/` have their own lockfiles and no
 workspace linking them. Install in the right directory.
 
+**Scheduling notes surface on the mobile Overview tab, not just in Notes.**
+`job_notes` has a `source` column (migration `0062`); both the web and mobile
+"Schedule job" flows tag their note `source: "schedule"`. `mobile/components/
+job/schedule-note-banner.tsx` reads the latest one and renders it at the top of
+the Overview tab so a technician sees it on opening the job, instead of it
+sitting unlabeled among other entries on the 6th-of-7 Notes tab. The same note
+still also appears in Notes & Activity, badged "Scheduling note". `tech_job_notes`
+in `sync-streams.yaml` had to be updated to explicitly select the new column —
+it's a technician-visible stream, so columns are listed, never `.*`.
+
 ---
 
 ## 2. The one rule that must never break
