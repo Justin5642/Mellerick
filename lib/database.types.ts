@@ -929,6 +929,7 @@ export type Database = {
           file_type: string | null
           id: string
           job_id: string
+          office_only: boolean
           simpro_file_id: string | null
           storage_path: string
           uploaded_by: string | null
@@ -940,6 +941,7 @@ export type Database = {
           file_type?: string | null
           id?: string
           job_id: string
+          office_only?: boolean
           simpro_file_id?: string | null
           storage_path: string
           uploaded_by?: string | null
@@ -951,6 +953,7 @@ export type Database = {
           file_type?: string | null
           id?: string
           job_id?: string
+          office_only?: boolean
           simpro_file_id?: string | null
           storage_path?: string
           uploaded_by?: string | null

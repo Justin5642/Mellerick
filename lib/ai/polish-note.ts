@@ -31,26 +31,37 @@ export const TRANSCRIBE_TRADE_TERM_PROMPT =
 // Throws on any failure (API error, refusal, empty result) — callers decide
 // how to degrade (transcribe-note falls back to the raw transcript rather
 // than failing the whole request).
-const POLISH_MODEL = "claude-opus-5-5";
+//
+// Haiku handles a short copy-edit well at a fraction of Opus's price. Haiku
+// has no server-side refusal fallback, so a declined note is retried once on
+// Opus instead.
+const POLISH_MODEL = "claude-haiku-5-5";
+
+// Job notes are a few sentences; this cap stops a signed-in user sending
+// arbitrarily large text through a paid API. Voice transcripts are already
+// bounded by the platform's request-size limit on the uploaded audio.
+export const POLISH_MAX_CHARS = 5000;
+const REFUSAL_FALLBACK_MODEL = "claude-opus-5-5";
 
 let client: Anthropic | null = null;
 
-export async function polishNoteText(text: string): Promise<string> {
+async function polishWith(model: Anthropic.Model, text: string): Promise<Anthropic.Message> {
   // Lazily constructed so a missing ANTHROPIC_API_KEY surfaces as a request
   // error rather than crashing module load for every route that imports this.
   client ??= new Anthropic();
-  const response = await client.beta.messages.create({
-    model: POLISH_MODEL,
+  return client.messages.create({
+    model,
     max_tokens: 4000,
     // A light copy-edit: low effort keeps it fast and cheap.
     output_config: { effort: "low" },
-    // On a safety decline, Anthropic re-runs the request on its recommended
-    // fallback model instead of returning a refusal.
-    betas: ["server-side-fallback-2026-07-01"],
-    fallbacks: "default",
     system: POLISH_SYSTEM_PROMPT,
     messages: [{ role: "user", content: text }],
   });
+}
+
+export async function polishNoteText(text: string): Promise<string> {
+  let response = await polishWith(POLISH_MODEL, text);
+  if (response.stop_reason === "refusal") response = await polishWith(REFUSAL_FALLBACK_MODEL, text);
 
   if (response.stop_reason === "refusal") throw new Error("AI polish was declined");
   const polished = response.content

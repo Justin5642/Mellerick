@@ -737,5 +737,19 @@ FK-failing delete can be queued.
 must be redeployed with `sites` selecting `is_active`, or devices never receive
 the archived flag (they treat a missing value as active).
 
+**Site write permissions (migration `0064`, draft, not yet applied):** RLS on
+`sites` now lets every signed-in user read and add sites, but only office/admin
+update (edit/archive) or delete them. Apply `0064` to production; it drops the
+old policies by enumeration and asserts the end state. `tests/rls/sites.test.ts`
+proves it on the CI stack.
+
+**Office-only job documents (migration `0065`, draft, not yet applied):**
+`job_documents.office_only` hides a document — row and file — from technicians;
+office/admin toggle it on the web Documents tab (lock icon). The same migration
+fixes mobile expense receipts (`<job>/expense-<id>.jpg`), which 0047's path
+check missed. After applying it, run `scripts/audit-job-documents.mjs` (dry run
+first, then `--commit`) to flag the ~3.9k imported Simpro attachments that show
+prices; review the CSV it writes to `scripts/data/`.
+
 All 21 other open questions are resolved, each with its reasoning recorded in
 `mobile/DECISIONS-FOR-AVI.md`.

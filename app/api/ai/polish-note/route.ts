@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createClient as createSupabaseClient } from "@supabase/supabase-js";
-import { polishNoteText } from "@/lib/ai/polish-note";
+import { polishNoteText, POLISH_MAX_CHARS } from "@/lib/ai/polish-note";
 
 // Cleans up rough, often voice-dictated technician job notes into clear,
 // professional wording before they're saved to the job's permanent record.
@@ -39,6 +39,9 @@ export async function POST(request: NextRequest) {
   const body = await request.json().catch(() => ({}));
   const text = typeof body.text === "string" ? body.text.trim() : "";
   if (!text) return NextResponse.json({ error: "text is required" }, { status: 400 });
+  if (text.length > POLISH_MAX_CHARS) {
+    return NextResponse.json({ error: `Note is too long to polish (max ${POLISH_MAX_CHARS.toLocaleString()} characters).` }, { status: 413 });
+  }
 
   try {
     const polished = await polishNoteText(text);

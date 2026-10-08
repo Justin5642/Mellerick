@@ -48,13 +48,15 @@ interface Props {
   equipmentOptions: any[];
   equipmentUsage: any[];
   isAdmin: boolean;
+  // office or admin — may hide documents from technicians (Office only).
+  isOffice: boolean;
   staffCostProfiles: any[];
   jobInvoices: any[];
   minMarginPct: number;
   currentAssignedIds: string[];
 }
 
-export function JobDetailClient({ job, currentUserId, photos: initialPhotos, documents: initialDocuments, notes: initialNotes, stageNotes: initialStageNotes, lineItems: initialLineItems, pricingItems, staff, purchaseOrders: initialPOs, vendorOrders: initialVendorOrders, timeEntries: initialTimeEntries, variations: initialVariations, variationTypes, expenses: initialExpenses, equipmentOptions, equipmentUsage: initialEquipmentUsage, isAdmin, staffCostProfiles, jobInvoices, minMarginPct, currentAssignedIds }: Props) {
+export function JobDetailClient({ job, currentUserId, photos: initialPhotos, documents: initialDocuments, notes: initialNotes, stageNotes: initialStageNotes, lineItems: initialLineItems, pricingItems, staff, purchaseOrders: initialPOs, vendorOrders: initialVendorOrders, timeEntries: initialTimeEntries, variations: initialVariations, variationTypes, expenses: initialExpenses, equipmentOptions, equipmentUsage: initialEquipmentUsage, isAdmin, isOffice, staffCostProfiles, jobInvoices, minMarginPct, currentAssignedIds }: Props) {
   // Deep-links like /dashboard/jobs/[id]?tab=variations&variation=[id]
   // (used by the Approvals page's "Price & review" link) land here — read
   // them once on mount so the right tab opens and the right variation is
@@ -263,7 +265,7 @@ export function JobDetailClient({ job, currentUserId, photos: initialPhotos, doc
               </TabsContent>
             )}
             <TabsContent value="documents" className="m-0 h-full">
-              <JobDocuments jobId={job.id} documents={documents} onUpdate={setDocuments} currentUserId={currentUserId} />
+              <JobDocuments jobId={job.id} documents={documents} onUpdate={setDocuments} currentUserId={currentUserId} isOffice={isOffice} />
             </TabsContent>
             <TabsContent value="photos" className="m-0 h-full">
               <JobPhotos jobId={job.id} photos={photos} onUpdate={setPhotos} currentUserId={currentUserId} />

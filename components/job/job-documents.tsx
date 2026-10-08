@@ -5,7 +5,7 @@ import { createClient } from "@/lib/supabase/client";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { FileText, Upload, Trash2, Download, File } from "lucide-react";
+import { FileText, Upload, Trash2, Download, File, Lock, LockOpen } from "lucide-react";
 import { formatDate } from "@/lib/date";
 
 const fileIcons: Record<string, string> = {
@@ -27,9 +27,10 @@ interface Props {
   documents: any[];
   onUpdate: (docs: any[]) => void;
   currentUserId: string;
+  isOffice: boolean;
 }
 
-export function JobDocuments({ jobId, documents, onUpdate, currentUserId }: Props) {
+export function JobDocuments({ jobId, documents, onUpdate, currentUserId, isOffice }: Props) {
   const supabase = createClient();
   const inputRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
@@ -117,6 +118,20 @@ export function JobDocuments({ jobId, documents, onUpdate, currentUserId }: Prop
     setDeleting(null);
   }
 
+  // Office only = hidden from technicians (row and file) once migration 0065,
+  // a draft not yet applied, is in production.
+  // Purchase orders, invoices, quotes and anything else with prices.
+  async function handleToggleOfficeOnly(doc: any) {
+    const next = !doc.office_only;
+    const { error, count } = await supabase.from("job_documents").update({ office_only: next }, { count: "exact" }).eq("id", doc.id);
+    if (error || count === 0) {
+      toast.error(error?.message ?? "Couldn't update the document");
+      return;
+    }
+    onUpdate(documents.map((d) => (d.id === doc.id ? { ...d, office_only: next } : d)));
+    toast.success(next ? "Hidden from technicians" : "Visible to technicians");
+  }
+
   async function handleDownload(doc: any) {
     const { data } = await supabase.storage.from("job-documents").createSignedUrl(doc.storage_path, 60);
     if (data?.signedUrl) window.open(data.signedUrl, "_blank");
@@ -167,12 +182,30 @@ export function JobDocuments({ jobId, documents, onUpdate, currentUserId }: Prop
                   {fileIcons[doc.file_type] ?? <File className="w-4 h-4" />}
                 </div>
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium text-slate-900 truncate">{doc.file_name}</p>
+                  <p className="text-sm font-medium text-slate-900 truncate">
+                    {doc.file_name}
+                    {doc.office_only && (
+                      <span className="ml-2 inline-flex items-center gap-1 rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-800 align-middle">
+                        <Lock className="w-3 h-3" /> Office only
+                      </span>
+                    )}
+                  </p>
                   <p className="text-xs text-slate-500">
                     {doc.file_size ? formatBytes(doc.file_size) : ""} · {doc.profiles?.full_name ?? "Unknown"} · {formatDate(doc.created_at)}
                   </p>
                 </div>
                 <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                  {isOffice && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => handleToggleOfficeOnly(doc)}
+                      className="h-8 w-8 p-0 text-slate-500 hover:text-amber-600"
+                      title={doc.office_only ? "Show to technicians" : "Hide from technicians (office only)"}
+                    >
+                      {doc.office_only ? <LockOpen className="w-4 h-4" /> : <Lock className="w-4 h-4" />}
+                    </Button>
+                  )}
                   <Button variant="ghost" size="sm" onClick={() => handleDownload(doc)} className="h-8 w-8 p-0 text-slate-500 hover:text-blue-600">
                     <Download className="w-4 h-4" />
                   </Button>
