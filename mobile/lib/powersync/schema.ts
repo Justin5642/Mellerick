@@ -404,6 +404,7 @@ const sites = new Table({
   notes: column.text,
   site_lat: column.real,
   site_lng: column.real,
+  is_active: column.integer,
 });
 
 const time_entries = new Table({

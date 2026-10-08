@@ -61,8 +61,13 @@ export class CustomersRepository {
     await this.write("site", "update", "sites", id, this.sitePayload(input));
   }
 
-  async removeSite(id: string): Promise<void> {
-    await this.write("site", "delete", "sites", id, {});
+  /**
+   * Soft-delete: archive (false) or restore (true) a site. Sites are never
+   * hard-deleted — jobs/quotes reference them, so a queued delete would fail
+   * the FK on replay and leave a dead sync op (Q17).
+   */
+  async setSiteActive(id: string, isActive: boolean): Promise<void> {
+    await this.write("site", "update", "sites", id, { is_active: isActive });
   }
 
   private customerPayload(input: CustomerInput, isNew: boolean): Record<string, unknown> {

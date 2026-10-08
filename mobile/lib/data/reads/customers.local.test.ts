@@ -90,8 +90,8 @@ describe("getCustomer (local)", () => {
       is_active: 1, is_favorite: 0,
     });
     const siteRows = [
-      { id: "s1", name: "Head office", address_line1: "1 Main St", address_line2: null, suburb: "Richmond", state: "VIC", postcode: "3121", notes: "Dog on site" },
-      { id: "s2", name: "Warehouse", address_line1: "9 Dock Rd", address_line2: "Unit 2", suburb: "Port Melbourne", state: "VIC", postcode: "3207", notes: null },
+      { id: "s1", name: "Head office", address_line1: "1 Main St", address_line2: null, suburb: "Richmond", state: "VIC", postcode: "3121", notes: "Dog on site", is_active: 1 },
+      { id: "s2", name: "Warehouse", address_line1: "9 Dock Rd", address_line2: "Unit 2", suburb: "Port Melbourne", state: "VIC", postcode: "3207", notes: null, is_active: 0 },
     ];
     const getAll = jest.fn().mockResolvedValue(siteRows);
     setLocalReads(fakeReads({ getOptional, getAll }));
@@ -102,7 +102,10 @@ describe("getCustomer (local)", () => {
       id: "c1", name: "Acme Plumbing", company: "Acme Pty Ltd", email: "acme@example.com",
       phone: "0400 000 000", mobile: null, abn: "12 345 678 901", notes: "Gate code 4321",
       is_active: true, is_favorite: false,
-      sites: siteRows,
+      sites: [
+        { ...siteRows[0], is_active: true },
+        { ...siteRows[1], is_active: false },
+      ],
     });
     const [custSql, custParams] = getOptional.mock.calls[0];
     expect(norm(custSql)).toBe(norm(`
@@ -111,7 +114,7 @@ describe("getCustomer (local)", () => {
     expect(custParams).toEqual(["c1"]);
     const [sitesSql, sitesParams] = getAll.mock.calls[0];
     expect(norm(sitesSql)).toBe(norm(`
-      SELECT id, name, address_line1, address_line2, suburb, state, postcode, notes
+      SELECT id, name, address_line1, address_line2, suburb, state, postcode, notes, is_active
       FROM sites WHERE customer_id = ?`));
     expect(sitesParams).toEqual(["c1"]);
   });

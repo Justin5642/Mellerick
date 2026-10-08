@@ -67,9 +67,16 @@ describe("CustomersRepository", () => {
     expect(ops[0].payload).toEqual({ customer_id: "c1", name: "HQ", address_line1: "1 Main St", address_line2: null, suburb: "Richmond", state: "VIC", postcode: "3121", notes: null });
   });
 
-  it("removeSite enqueues a delete", async () => {
+  it("setSiteActive(false) archives with an update, never a delete", async () => {
     const { outbox, ops } = captureOutbox();
-    await new CustomersRepository(outbox, seqIds(), fixedTime()).removeSite("s1");
-    expect(ops[0]).toMatchObject({ table: "sites", op: "delete", rowId: "s1" });
+    await new CustomersRepository(outbox, seqIds(), fixedTime()).setSiteActive("s1", false);
+    expect(ops[0]).toMatchObject({ table: "sites", op: "update", rowId: "s1" });
+    expect(ops[0].payload).toEqual({ is_active: false });
+  });
+
+  it("setSiteActive(true) restores an archived site", async () => {
+    const { outbox, ops } = captureOutbox();
+    await new CustomersRepository(outbox, seqIds(), fixedTime()).setSiteActive("s1", true);
+    expect(ops[0].payload).toEqual({ is_active: true });
   });
 });

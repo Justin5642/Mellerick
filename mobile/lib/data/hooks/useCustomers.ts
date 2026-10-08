@@ -26,6 +26,6 @@ export function useCustomers() {
     setFavorite: useCallback((id: string, fav: boolean) => run((r) => r.setFavorite(id, fav)), [run]),
     createSite: useCallback((i: SiteInput) => run((r) => r.createSite(i)), [run]),
     updateSite: useCallback((id: string, i: SiteInput) => run((r) => r.updateSite(id, i)), [run]),
-    removeSite: useCallback((id: string) => run((r) => r.removeSite(id)), [run]),
+    setSiteActive: useCallback((id: string, active: boolean) => run((r) => r.setSiteActive(id, active)), [run]),
   };
 }

@@ -84,6 +84,9 @@ export default function CustomerDetailScreen() {
     );
   }
 
+  const activeSites = customer.sites.filter((s) => s.is_active);
+  const archivedSites = customer.sites.filter((s) => !s.is_active);
+
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
       <Stack.Screen
@@ -164,19 +167,20 @@ export default function CustomerDetailScreen() {
       )}
 
       <View style={styles.sitesHead}>
-        <Text style={styles.sectionTitle}>Sites ({customer.sites.length})</Text>
+        <Text style={styles.sectionTitle}>Sites ({activeSites.length})</Text>
         <TouchableOpacity onPress={() => setSiteDraft("new")} style={styles.addSite}>
           <Ionicons name="add" size={16} color={colors.blue600} />
           <Text style={styles.addSiteText}>Add site</Text>
         </TouchableOpacity>
       </View>
-      {customer.sites.length === 0 ? (
+      {activeSites.length === 0 && archivedSites.length === 0 ? (
         <Text style={styles.mutedPad}>No sites yet.</Text>
       ) : (
-        customer.sites.map((s) => (
-          <TouchableOpacity key={s.id} style={styles.siteCard} onPress={() => setSiteDraft(s)}>
+        // Archived sites sort last, dimmed, so they can be opened and restored.
+        [...activeSites, ...archivedSites].map((s) => (
+          <TouchableOpacity key={s.id} style={[styles.siteCard, !s.is_active && styles.siteArchived]} onPress={() => setSiteDraft(s)}>
             <View style={{ flex: 1 }}>
-              <Text style={styles.siteName}>{s.name}</Text>
+              <Text style={styles.siteName}>{s.name}{s.is_active ? "" : " · Archived"}</Text>
               <Text style={styles.siteAddr}>
                 {[s.address_line1, s.address_line2, `${s.suburb} ${s.state} ${s.postcode}`].filter(Boolean).join(", ")}
               </Text>
@@ -193,8 +197,6 @@ export default function CustomerDetailScreen() {
       )}
 
       <CustomerFormSheet visible={editing} existing={customer} onClose={() => setEditing(false)} onSaved={() => { setEditing(false); void load(); }} />
-      {/* No onRemoved: sites can't be hard-deleted (jobs/quotes FK RESTRICT) and
-          have no is_active column for a soft-delete — see Q17. Edit only. */}
       <SiteFormSheet
         visible={siteDraft !== null}
         customerId={customer.id}
@@ -292,6 +294,7 @@ const styles = StyleSheet.create({
   addSite: { flexDirection: "row", alignItems: "center", gap: 4 },
   addSiteText: { fontSize: 13, color: colors.blue600, fontWeight: "600" },
   siteCard: { flexDirection: "row", alignItems: "center", gap: 12, backgroundColor: colors.card, borderWidth: 1, borderColor: colors.border, borderRadius: 12, padding: 14 },
+  siteArchived: { opacity: 0.55 },
   siteName: { fontSize: 14, fontWeight: "600", color: colors.slate900 },
   siteAddr: { fontSize: 12, color: colors.slate500, marginTop: 2 },
 });

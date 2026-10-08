@@ -42,7 +42,7 @@ streams:
 
   sites:
     auto_subscribe: true
-    query: SELECT id, customer_id, name, address_line1, address_line2, suburb, state, postcode, site_lat, site_lng, notes FROM sites
+    query: SELECT id, customer_id, name, address_line1, address_line2, suburb, state, postcode, site_lat, site_lng, notes, is_active FROM sites
 
   # RATE-STRIPPED: the base table's preset `rate` must never reach a device.
   variation_types:

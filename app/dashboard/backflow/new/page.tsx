@@ -48,7 +48,7 @@ export default function NewBackflowDevicePage() {
 
   useEffect(() => {
     if (!form.customer_id) { setSites([]); return; }
-    supabase.from("sites").select("id, name, suburb").eq("customer_id", form.customer_id).then(({ data }) => setSites(data ?? []));
+    supabase.from("sites").select("id, name, suburb").eq("customer_id", form.customer_id).eq("is_active", true).then(({ data }) => setSites(data ?? []));
   }, [form.customer_id]);
 
   function set(field: string, value: string) {

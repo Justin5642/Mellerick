@@ -724,12 +724,19 @@ Things that have already cost time, roughly in order of how likely you are to hi
 
 ## 11. Open question
 
-One remains, deliberately parked:
+None. **Q17 is resolved in code, pending migration `0063`.**
 
-**Q17** — `sites` has no `is_active` column, and `jobs.site_id` / `quotes.site_id`
-block deletion. Mobile therefore offers edit-only for sites, with no delete or
-deactivate. Correct given the current schema. Adding soft-delete needs a
-migration and a decision about what happens to jobs at a deactivated site.
+**Q17** — sites can now be **archived** (soft-delete), on web (customer page)
+and mobile (site sheet), and restored. Decision: jobs and quotes at an archived
+site are untouched and keep showing it; archived sites are only hidden from the
+site pickers for new jobs and backflow devices (the job-edit picker still shows
+the job's own site). Sites are never hard-deleted — `removeSite` is gone, so no
+FK-failing delete can be queued.
+
+**Before merging that code:** apply `supabase/migrations/0063_add_sites_is_active.sql`
+to production (it is a draft, not yet applied), then redeploy the PowerSync sync
+streams (`sites` now selects `is_active`). The app filters on that column, so
+deploying first breaks site pickers.
 
 All 21 other open questions are resolved, each with its reasoning recorded in
 `mobile/DECISIONS-FOR-AVI.md`.
