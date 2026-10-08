@@ -12,7 +12,8 @@ import { Plus, Trash2, List, RefreshCw } from "lucide-react";
 interface Props {
   jobId: string;
   lineItems: any[];
-  pricingItems: any[];
+  // null while the catalogue is still loading (fetched on first open of this tab).
+  pricingItems: any[] | null;
   onUpdate: (items: any[]) => void;
 }
 
@@ -56,7 +57,7 @@ export function JobLineItems({ jobId, lineItems, pricingItems, onUpdate }: Props
   }
 
   function selectPricingItem(id: string) {
-    const item = pricingItems.find((p) => p.id === id);
+    const item = pricingItems?.find((p) => p.id === id);
     if (item) {
       setForm((prev) => ({
         ...prev,
@@ -132,9 +133,9 @@ export function JobLineItems({ jobId, lineItems, pricingItems, onUpdate }: Props
             <div className="space-y-1">
               <label className="text-xs text-slate-500 font-medium">From Pricing Catalogue</label>
               <Select value={form.pricing_item_id} onValueChange={(v) => selectPricingItem(v ?? "")}>
-                <SelectTrigger className="text-sm"><SelectValue placeholder="Pick from catalogue (optional)" /></SelectTrigger>
+                <SelectTrigger className="text-sm"><SelectValue placeholder={pricingItems ? "Pick from catalogue (optional)" : "Loading catalogue..."} /></SelectTrigger>
                 <SelectContent>
-                  {pricingItems.map((p) => (
+                  {(pricingItems ?? []).map((p) => (
                     <SelectItem key={p.id} value={p.id}>{p.name} — ${p.unit_price}</SelectItem>
                   ))}
                 </SelectContent>
