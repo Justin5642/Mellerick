@@ -724,7 +724,7 @@ Things that have already cost time, roughly in order of how likely you are to hi
 
 ## 11. Open question
 
-None. **Q17 is resolved in code, pending migration `0063`.**
+None. **Q17 is resolved** (migration `0063` applied 2026-10-08).
 
 **Q17** — sites can now be **archived** (soft-delete), on web (customer page)
 and mobile (site sheet), and restored. Decision: jobs and quotes at an archived
@@ -733,10 +733,9 @@ site pickers for new jobs and backflow devices (the job-edit picker still shows
 the job's own site). Sites are never hard-deleted — `removeSite` is gone, so no
 FK-failing delete can be queued.
 
-**Before merging that code:** apply `supabase/migrations/0063_add_sites_is_active.sql`
-to production (it is a draft, not yet applied), then redeploy the PowerSync sync
-streams (`sites` now selects `is_active`). The app filters on that column, so
-deploying first breaks site pickers.
+`0063` (`sites.is_active`) is applied in production. The PowerSync sync streams
+must be redeployed with `sites` selecting `is_active`, or devices never receive
+the archived flag (they treat a missing value as active).
 
 All 21 other open questions are resolved, each with its reasoning recorded in
 `mobile/DECISIONS-FOR-AVI.md`.
