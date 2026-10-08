@@ -14,6 +14,10 @@ interface Document {
   file_type: string | null;
   created_at: string;
   profiles: { full_name: string } | null;
+  // Hidden from technicians by RLS once migration 0065 (draft, not yet
+  // applied) is in production — then only office/admin ever
+  // receive these rows, so the label is only ever seen by them.
+  office_only?: boolean;
 }
 
 function formatBytes(bytes: number | null) {
@@ -117,7 +121,7 @@ export function JobDocumentsTab({ jobId }: { jobId: string }) {
             </View>
             <View style={styles.rowContent}>
               <Text style={styles.fileName} numberOfLines={1}>
-                {item.file_name}
+                {item.office_only ? "🔒 " : ""}{item.file_name}
               </Text>
               <Text style={styles.fileMeta}>
                 {[formatBytes(item.file_size), item.profiles?.full_name, new Date(item.created_at).toLocaleDateString("en-AU")]

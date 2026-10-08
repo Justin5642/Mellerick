@@ -83,12 +83,14 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
   // it's only fetched and rendered for admins — same gating pattern as the
   // Reports page's staff efficiency section.
   let isAdmin = false;
+  let isOffice = false;
   let staffCostProfiles: any[] = [];
   let jobInvoices: any[] = [];
   let minMarginPct = 30;
   if (user) {
     const { data: viewerProfile } = await supabase.from("profiles").select("role").eq("id", user.id).single();
     isAdmin = viewerProfile?.role === "admin";
+    isOffice = isAdmin || viewerProfile?.role === "office";
   }
   if (isAdmin) {
     const [{ data: costProfiles }, { data: invoicesForJob }, { data: rateConfig }] = await Promise.all([
@@ -121,6 +123,7 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
       equipmentOptions={equipmentOptions ?? []}
       equipmentUsage={equipmentUsage ?? []}
       isAdmin={isAdmin}
+      isOffice={isOffice}
       staffCostProfiles={staffCostProfiles}
       jobInvoices={jobInvoices}
       minMarginPct={minMarginPct}
