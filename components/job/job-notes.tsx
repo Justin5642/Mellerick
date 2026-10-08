@@ -54,8 +54,8 @@ export function JobNotes({ jobId, notes, onUpdate, currentUserId, stageNotes, on
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ text: content }),
       });
-      const data = await res.json();
-      if (!res.ok) { toast.error(data.error ?? "AI polish failed"); return; }
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.polished) { toast.error(data.error ?? `AI polish failed (${res.status})`); return; }
       setContent(data.polished);
     } catch {
       toast.error("AI polish failed");

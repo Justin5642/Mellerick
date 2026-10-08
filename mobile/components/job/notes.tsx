@@ -235,22 +235,40 @@ export function JobNotesTab({ jobId, currentUserId }: { jobId: string; currentUs
   // tapping Add.
   async function handlePolish() {
     if (!content.trim() || polishing) return;
-    if (!API_BASE_URL) return;
+    // Every failure path below alerts rather than returning silently — a
+    // silent no-op made a misconfigured or failing server look like a dead
+    // button. The draft is always left untouched on failure.
+    if (!API_BASE_URL) {
+      Alert.alert("Not configured", "App isn't configured to reach the office server.");
+      return;
+    }
+    if (!(await netInfoConnectivity.isOnline())) {
+      Alert.alert("No internet connection", "Polish needs an internet connection. You can still add the note as typed.");
+      return;
+    }
     setPolishing(true);
     try {
       const { data: sessionData } = await supabase.auth.getSession();
       const accessToken = sessionData.session?.access_token;
-      if (!accessToken) return;
+      if (!accessToken) {
+        Alert.alert("Polish failed", "Your session has expired. Sign out and back in, then try again.");
+        return;
+      }
       const res = await fetch(`${API_BASE_URL}/api/ai/polish-note`, {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
         body: JSON.stringify({ text: content }),
       });
-      const data = await res.json();
-      if (res.ok && data.polished) setContent(data.polished);
+      // A non-JSON body (e.g. a platform error page) must still surface the
+      // HTTP status rather than throwing into the generic catch.
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data.polished) {
+        setContent(data.polished);
+      } else {
+        Alert.alert("Polish failed", data.error ?? `Server returned ${res.status}. Try again.`);
+      }
     } catch {
-      // Silently leave the draft as-is — same low-stakes failure mode as a
-      // failed voice report upload elsewhere in the app.
+      Alert.alert("Polish failed", "Check your connection and try again.");
     } finally {
       setPolishing(false);
     }
