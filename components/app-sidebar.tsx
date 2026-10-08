@@ -187,6 +187,11 @@ export function AppSidebar({ userEmail, userName, userRole }: AppSidebarProps) {
               <Link
                 key={href}
                 href={href}
+                // No background prefetch: with ~15 links, prefetching fired ~15
+                // server renders (each running middleware's auth + role lookup)
+                // on every dashboard open, competing with the page actually
+                // being loaded. Pages are fully dynamic, so prefetch saved little.
+                prefetch={false}
                 onClick={() => setMobileOpen(false)}
                 className={cn(
                   "flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors",

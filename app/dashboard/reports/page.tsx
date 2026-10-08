@@ -1,5 +1,6 @@
 export const dynamic = "force-dynamic";
 
+import { getViewer } from "@/lib/auth/viewer";
 import { createClient } from "@/lib/supabase/server";
 import { ReportsDashboard } from "@/components/reports/reports-dashboard";
 import { computeLoadedCost } from "@/lib/staff-cost";
@@ -41,7 +42,7 @@ export default async function ReportsPage() {
   equipmentTwelveMonthsAgo.setFullYear(equipmentTwelveMonthsAgo.getFullYear() - 1);
   const equipmentCutoffDate = equipmentTwelveMonthsAgo.toISOString().slice(0, 10);
 
-  const [invoicesResult, quotesResult, jobsResult, profilesResult, equipmentResult, equipmentUsageResult, { data: { user } }] = await Promise.all([
+  const [invoicesResult, quotesResult, jobsResult, profilesResult, equipmentResult, equipmentUsageResult, viewer] = await Promise.all([
     fetchAllRows(supabase.from("invoices").select("id, total, status, created_at, customer_id, customers(name)")),
     fetchAllRows(supabase.from("quotes").select("id, total, status, created_at")),
     fetchAllRows(supabase.from("jobs").select("id, status, assigned_to, created_at")),
@@ -53,7 +54,7 @@ export default async function ReportsPage() {
         .select("equipment_id, hours, usage_date")
         .gte("usage_date", equipmentCutoffDate)
     ),
-    supabase.auth.getUser(),
+    getViewer(),
   ]);
 
   // A report that cannot read all its rows must say so rather than render a
@@ -84,8 +85,9 @@ export default async function ReportsPage() {
   // an admin -- everyone else gets `staffEfficiency: null` and the
   // dashboard component simply doesn't render that section.
   let isAdmin = false;
+  const user = viewer?.user;
   if (user) {
-    const { data: viewerProfile } = await supabase.from("profiles").select("role").eq("id", user.id).single();
+    const viewerProfile = viewer?.profile;
     isAdmin = viewerProfile?.role === "admin";
   }
 
