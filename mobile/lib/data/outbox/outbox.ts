@@ -64,6 +64,31 @@ export class Outbox {
     private onDeadLetter?: (op: Operation, reason: string) => void
   ) {}
 
+  private changeListeners = new Set<() => void>();
+
+  /**
+   * Told after the queue gains work (enqueue) or dead work is re-queued
+   * (retryDead). The sync badge refreshes its counts on this instead of
+   * polling SQLite every few seconds forever; a drain's progress reaches it
+   * through SyncEngine.onSettled. Returns an unsubscribe fn.
+   */
+  onChange(cb: () => void): () => void {
+    this.changeListeners.add(cb);
+    return () => {
+      this.changeListeners.delete(cb);
+    };
+  }
+
+  private notifyChange(): void {
+    for (const cb of [...this.changeListeners]) {
+      try {
+        cb();
+      } catch {
+        // A status listener must never fail a write.
+      }
+    }
+  }
+
   private notifyDead(op: Operation, reason: string): void {
     if (!this.onDeadLetter) return;
     try {
@@ -88,6 +113,7 @@ export class Outbox {
           status: "pending",
           nextAttemptAt: this.clock.now(),
         });
+        this.notifyChange();
         return;
       }
     }
@@ -112,6 +138,7 @@ export class Outbox {
       if (pendingInsert) op = { ...op, dependsOn: pendingInsert.id };
     }
     await this.store.insert(op);
+    this.notifyChange();
   }
 
   // Reset ops stranded in "inflight" by a crash/force-quit mid-dispatch back to
@@ -168,6 +195,7 @@ export class Outbox {
         await this.store.update(o.id, { status: "pending", attempts: 0, nextAttemptAt: 0, error: null });
       }
     }
+    this.notifyChange();
   }
 
   // Every operation, for read-only callers that need to reason over what is
