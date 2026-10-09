@@ -1,6 +1,7 @@
 import { Outbox, systemClock, type Clock } from "./outbox/outbox";
 import { Processor } from "./outbox/processor";
 import type { OutboxStore } from "./outbox/store";
+import type { Operation } from "./outbox/types";
 import type { SupabaseGateway, ApiBridge } from "./gateway";
 import type { Connectivity } from "./net/connectivity";
 import { SyncEngine } from "./syncEngine";
@@ -58,13 +59,15 @@ export interface DataLayerDeps {
   ensureSession?: () => Promise<unknown>;
   /** Where a background drain's failure goes instead of an unhandled rejection. */
   onSyncError?: (error: unknown) => void;
+  /** Told when an outbox operation dead-letters — see Outbox. */
+  onDeadLetter?: (op: Operation, reason: string) => void;
 }
 
 // Composition root, injectable end-to-end so the whole stack can be integration-
 // tested with fakes (no native SQLite/netinfo). DataProvider calls this with the
 // real adapters.
 export function createDataLayer(deps: DataLayerDeps): DataLayer {
-  const outbox = new Outbox(deps.store, deps.clock ?? systemClock);
+  const outbox = new Outbox(deps.store, deps.clock ?? systemClock, deps.onDeadLetter);
   const processor = new Processor(outbox, deps.gateway, deps.api, deps.connectivity);
   const engine = new SyncEngine(processor, deps.connectivity, deps.ensureSession, deps.onSyncError);
   const ids = deps.ids ?? cryptoIdGen;

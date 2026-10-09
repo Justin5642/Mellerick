@@ -4,6 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { requireAdmin } from "@/lib/api/guards";
 import { isValidOAuthState, XERO_STATE_COOKIE } from "@/lib/oauth-state";
 import { replaceSingletonToken } from "@/lib/oauth-token-store";
+import { reportError } from "@/lib/monitoring";
 
 export async function GET(request: NextRequest) {
   // Re-check admin at the callback, not just at initiation: the callback is
@@ -60,6 +61,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.redirect(new URL("/dashboard/settings?xero=connected", request.url));
   } catch (err) {
     console.error("Xero callback error:", err);
+    reportError(err, { route: "api/xero/callback", integration: "xero" });
     return NextResponse.redirect(new URL("/dashboard/settings?xero=error", request.url));
   }
 }

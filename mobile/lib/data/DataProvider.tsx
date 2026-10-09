@@ -4,6 +4,7 @@ import { supabaseGateway, apiBridge } from "./gateway.supabase";
 import { supabase } from "../supabase";
 import { netInfoConnectivity } from "./net/connectivity";
 import { createDataLayer, type DataLayer } from "./createDataLayer";
+import { reportDeadLetter, reportSyncError } from "../monitoring";
 
 // Nullable while the SQLite outbox opens (a few ms on cold start). Consumers
 // guard on null; write hooks stay disabled until the layer is ready.
@@ -31,9 +32,14 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
         // a handle torn down by a dev reload. Without a sink it would surface as
         // an unhandled rejection, i.e. a full-screen red box over a working app.
         // The queue is durable, so the next drain picks the work back up.
+        // Reported (once per distinct failure, no-op without a Sentry DSN) so a
+        // drain that fails for a REAL reason is not invisible to the office.
         onSyncError: (e) => {
           if (__DEV__) console.warn("[sync] drain failed:", e);
+          reportSyncError(e, "sync-engine");
         },
+        // A write that exhausted its retries. Tags only, never the payload.
+        onDeadLetter: reportDeadLetter,
         // Q4: after a long offline workday the access token has expired. Refresh
         // it BEFORE replaying queued writes, so the reconnect drain doesn't race
         // the background refresh and 401 every op. getSession() is a no-op read

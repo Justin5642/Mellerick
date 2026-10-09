@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 import { polishNoteText, POLISH_MAX_CHARS } from "@/lib/ai/polish-note";
+import { reportError, reportFailure } from "@/lib/monitoring";
 
 // Cleans up rough, often voice-dictated technician job notes into clear,
 // professional wording before they're saved to the job's permanent record.
@@ -33,6 +34,7 @@ export async function POST(request: NextRequest) {
   if (!userId) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
 
   if (!process.env.ANTHROPIC_API_KEY) {
+    reportFailure("ANTHROPIC_API_KEY is not configured", { route: "api/ai/polish-note", integration: "anthropic" });
     return NextResponse.json({ error: "ANTHROPIC_API_KEY is not configured on the server" }, { status: 500 });
   }
 
@@ -48,6 +50,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ polished });
   } catch (err: any) {
     console.error("Polish note error:", err);
+    reportError(err, { route: "api/ai/polish-note", integration: "anthropic" });
     return NextResponse.json({ error: err.message ?? "AI polish failed" }, { status: 502 });
   }
 }

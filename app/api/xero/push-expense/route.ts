@@ -3,6 +3,7 @@ import { getRefreshedXero, describeXeroError } from "@/lib/xero";
 import { requireOfficeOrAdmin } from "@/lib/api/guards";
 import { callerClient } from "@/lib/api/caller-client";
 import { Invoice, LineItem, Contact, LineAmountTypes } from "xero-node";
+import { reportError } from "@/lib/monitoring";
 
 // Manual, per-expense "push to Xero" action — same pattern/UX as the
 // existing /api/xero/push-invoice (manual button, never automatic). Creates
@@ -118,6 +119,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ success: true, xeroBillId: created?.invoiceID });
   } catch (err: any) {
     console.error("Push expense to Xero error:", err.response?.body ?? err);
+    reportError(err, { route: "api/xero/push-expense", integration: "xero" });
     return NextResponse.json({ error: describeXeroError(err) }, { status: 500 });
   }
 }

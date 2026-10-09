@@ -3,6 +3,7 @@ import { createDataLayer } from "./data/createDataLayer";
 import { supabaseGateway, apiBridge } from "./data/gateway.supabase";
 import { netInfoConnectivity } from "./data/net/connectivity";
 import { supabase } from "./supabase";
+import { initMonitoring, reportDeadLetter, reportSyncError } from "./monitoring";
 import {
   shouldRegisterBackgroundSync,
   backgroundSyncOutcome,
@@ -74,6 +75,9 @@ if (TaskManager && BackgroundFetch) {
   TaskManager.defineTask(BACKGROUND_SYNC_TASK, async () => {
   let drained = 0;
   let error: unknown = null;
+  // The OS can run this task headless, without the root layout (which normally
+  // initialises monitoring) ever loading. Idempotent; a no-op without a DSN.
+  initMonitoring();
 
   try {
     // A session must exist AND be valid. getSession() refreshes an expired
@@ -98,6 +102,7 @@ if (TaskManager && BackgroundFetch) {
       onSyncError: (e) => {
         error = e;
       },
+      onDeadLetter: reportDeadLetter,
     });
 
     const pendingBefore = await layer.outbox.pendingCount();
@@ -107,6 +112,9 @@ if (TaskManager && BackgroundFetch) {
   } catch (e) {
     error = e;
   }
+  // Nobody is looking at the screen when this runs, so a failure here is the
+  // most invisible of all. No-op without a Sentry DSN.
+  if (error) reportSyncError(error, "background-sync");
 
     switch (backgroundSyncOutcome({ drained, error })) {
       case "new-data":

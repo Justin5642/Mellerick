@@ -5,6 +5,7 @@ import { createClient } from "@/lib/supabase/server";
 import { requireAdmin } from "@/lib/api/guards";
 import { isValidOAuthState, GOOGLE_STATE_COOKIE } from "@/lib/oauth-state";
 import { replaceSingletonToken } from "@/lib/oauth-token-store";
+import { reportError } from "@/lib/monitoring";
 
 export async function GET(request: NextRequest) {
   // Re-check admin at the callback (see xero/callback for the rationale): this
@@ -63,6 +64,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.redirect(new URL("/dashboard/settings?google=connected", request.url));
   } catch (err) {
     console.error("Google callback error:", err);
+    reportError(err, { route: "api/google/callback", integration: "google-calendar" });
     return NextResponse.redirect(new URL("/dashboard/settings?google=error", request.url));
   }
 }

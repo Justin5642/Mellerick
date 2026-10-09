@@ -1,4 +1,5 @@
 import type { NextConfig } from "next";
+import { withSentryConfig } from "@sentry/nextjs/config";
 import { assertRequiredEnv } from "./lib/env";
 
 // Fail fast, and legibly, on a misconfigured deployment.
@@ -59,6 +60,14 @@ const nextConfig: NextConfig = {
   // Removes the `X-Powered-By: Next.js` version advertisement.
   poweredByHeader: false,
 
+  // Always define the Sentry DSN at build time, as "" when unset. Next only
+  // inlines NEXT_PUBLIC_* variables that EXIST; an unset one is left as a
+  // runtime lookup, which the bundler cannot fold — so every
+  // `if (process.env.NEXT_PUBLIC_SENTRY_DSN)` guard stayed live and the whole
+  // SDK (~85 kB) shipped to every browser even with monitoring off. Defined as
+  // "", those branches are dead code and the SDK is dropped from the bundle.
+  env: { NEXT_PUBLIC_SENTRY_DSN: process.env.NEXT_PUBLIC_SENTRY_DSN ?? "" },
+
   async headers() {
     return [{ source: "/:path*", headers: securityHeaders }];
   },
@@ -71,4 +80,36 @@ const nextConfig: NextConfig = {
   },
 };
 
-export default nextConfig;
+// Error monitoring (Sentry) — optional, see HANDOVER §12.
+//
+// Only wrapped when NEXT_PUBLIC_SENTRY_DSN is set, so a deployment without it
+// (local dev, CI, a Vercel environment that has not opted in) builds with
+// exactly the config above and nothing else. Source maps are uploaded only when
+// SENTRY_AUTH_TOKEN, SENTRY_ORG and SENTRY_PROJECT are ALL present; otherwise
+// the upload step is disabled outright rather than warning on every build.
+// Maps are deleted from the output after upload, so they are never served.
+function withMonitoring(config: NextConfig): NextConfig {
+  if (!process.env.NEXT_PUBLIC_SENTRY_DSN) return config;
+  const canUpload = Boolean(
+    process.env.SENTRY_AUTH_TOKEN && process.env.SENTRY_ORG && process.env.SENTRY_PROJECT
+  );
+  return withSentryConfig(config, {
+    org: process.env.SENTRY_ORG,
+    project: process.env.SENTRY_PROJECT,
+    authToken: process.env.SENTRY_AUTH_TOKEN,
+    silent: !process.env.CI,
+    telemetry: false,
+    sourcemaps: { disable: !canUpload, deleteSourcemapsAfterUpload: true },
+    // Without a token there is nothing to create a release against.
+    release: { create: canUpload },
+    widenClientFileUpload: canUpload,
+    // The plugin's default is to FAIL THE BUILD when an upload errors (bad
+    // token, Sentry outage). Monitoring must never be the reason a production
+    // deploy does not ship, so log and carry on.
+    errorHandler: (err) => {
+      console.warn(`[sentry] source-map upload failed, continuing build: ${err.message}`);
+    },
+  });
+}
+
+export default withMonitoring(nextConfig);

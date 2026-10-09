@@ -52,8 +52,26 @@ function isDue(nextAttemptAt: number, now: number): boolean {
 export class Outbox {
   constructor(
     private store: OutboxStore,
-    private clock: Clock = systemClock
+    private clock: Clock = systemClock,
+    /**
+     * Told whenever an operation enters the terminal "dead" state, by any of the
+     * three routes there (retries exhausted, repeated mid-dispatch crashes, a
+     * dead dependency). A dead write is technician work that will not reach the
+     * server until someone presses Retry; the badge shows it on the phone, and
+     * this is how the office hears about it (lib/monitoring). Must not throw —
+     * and if it does, the outbox carries on regardless.
+     */
+    private onDeadLetter?: (op: Operation, reason: string) => void
   ) {}
+
+  private notifyDead(op: Operation, reason: string): void {
+    if (!this.onDeadLetter) return;
+    try {
+      this.onDeadLetter(op, reason);
+    } catch {
+      // Reporting is best-effort; the queue's own state is what matters.
+    }
+  }
 
   // Add an operation. Side-effects with an existing pending coalesceKey update
   // that op's payload instead of adding a duplicate (only the latest matters).
@@ -112,6 +130,7 @@ export class Outbox {
         const attempts = o.attempts + 1;
         if (attempts >= MAX_ATTEMPTS) {
           await this.store.update(o.id, { status: "dead", attempts, error: "crashed repeatedly mid-dispatch" });
+          this.notifyDead({ ...o, status: "dead", attempts }, "crashed repeatedly mid-dispatch");
         } else {
           await this.store.update(o.id, { status: "pending", attempts, nextAttemptAt: 0 });
         }
@@ -132,6 +151,7 @@ export class Outbox {
       for (const o of all) {
         if ((o.status === "pending" || o.status === "failed") && o.dependsOn && deadIds.has(o.dependsOn)) {
           await this.store.update(o.id, { status: "dead", error: "dependency failed" });
+          this.notifyDead({ ...o, status: "dead" }, "dependency failed");
           changed = true;
         }
       }
@@ -253,6 +273,7 @@ export class Outbox {
       nextAttemptAt: this.clock.now() + backoffMs(attempts),
       error,
     });
+    if (status === "dead") this.notifyDead({ ...op, status, attempts }, error);
   }
 
   /**

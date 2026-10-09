@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { requireCronSecret } from "@/lib/api/guards";
 import { pollXeroInvoicePayments } from "@/lib/xero";
+import { reportError } from "@/lib/monitoring";
 
 // Cron-triggered reverse sync: pulls invoice payment status back from Xero
 // so invoices paid outside the app (bank feed reconciliation, manual entry
@@ -18,6 +19,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json(result);
   } catch (err: any) {
     console.error("Xero invoice poll-sync error:", err);
+    reportError(err, { route: "api/xero/poll-invoices", integration: "xero", cron: true });
     return NextResponse.json({ error: err.message ?? "Xero invoice sync failed" }, { status: 500 });
   }
 }

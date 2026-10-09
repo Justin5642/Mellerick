@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getCallerId } from "@/lib/api/guards";
 import { canManageJobBilling } from "@/lib/api/job-authz";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { reportError, reportFailure } from "@/lib/monitoring";
 
 // Uses the service-role key (not the cookie-based server client) because
 // this route is called from the mobile app with no browser session/cookies
@@ -24,6 +25,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   }
 
   if (!process.env.OPENAI_API_KEY) {
+    reportFailure("OPENAI_API_KEY is not configured", { route: "api/jobs/transcribe-voice-report", integration: "openai" });
     return NextResponse.json({ error: "OPENAI_API_KEY is not configured on the server" }, { status: 500 });
   }
 
@@ -85,6 +87,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     if (!openaiRes.ok) {
       const errText = await openaiRes.text().catch(() => "");
       console.error("OpenAI transcription error:", openaiRes.status, errText);
+      reportFailure("OpenAI transcription request failed", { route: "api/jobs/transcribe-voice-report", integration: "openai", status: openaiRes.status });
       return NextResponse.json({ error: "Transcription failed" }, { status: 502 });
     }
 
@@ -111,6 +114,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     return NextResponse.json({ transcript });
   } catch (err: any) {
     console.error("Voice report transcription error:", err);
+    reportError(err, { route: "api/jobs/transcribe-voice-report", integration: "openai" });
     return NextResponse.json({ error: err.message ?? "Transcription failed" }, { status: 500 });
   }
 }

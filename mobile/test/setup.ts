@@ -7,3 +7,12 @@ jest.mock("react-native-reanimated", () => {
   Reanimated.default.call = () => {};
   return Reanimated;
 });
+
+// The Sentry SDK is a native module; no unit test may load it. This stand-in
+// records calls so lib/monitoring tests can assert what WOULD be sent.
+jest.mock("@sentry/react-native", () => ({
+  init: jest.fn(),
+  wrap: jest.fn((component: unknown) => component),
+  captureException: jest.fn(),
+  captureMessage: jest.fn(),
+}));

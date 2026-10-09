@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
+import * as Sentry from "@sentry/nextjs";
 import { AlertTriangle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
@@ -11,6 +12,8 @@ import { Button } from "@/components/ui/button";
 export default function DashboardError({ error, reset }: { error: Error & { digest?: string }; reset: () => void }) {
   useEffect(() => {
     console.error("Dashboard error:", error);
+    // Error boundaries swallow the error, so report it explicitly (no-op without a DSN).
+    if (process.env.NEXT_PUBLIC_SENTRY_DSN) Sentry.captureException(error, { tags: { boundary: "dashboard" } });
   }, [error]);
 
   return (

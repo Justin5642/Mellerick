@@ -7,6 +7,7 @@ import { businessInfo } from "@/lib/business-info";
 import { getResend, getFromAddress } from "@/lib/resend";
 import { getWaterAuthorityEmail, getWaterAuthorityLabel } from "@/lib/backflow";
 import { escapeHtml } from "@/lib/html";
+import { reportError } from "@/lib/monitoring";
 
 // Called from both the dashboard (browser session, cookies) and the mobile
 // app (no cookies -- Bearer access token instead, same pattern as
@@ -152,6 +153,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     return NextResponse.json({ success: true, sentTo: to });
   } catch (err: any) {
     console.error("Submit backflow test error:", err);
+    reportError(err, { route: "api/backflow/tests/submit", integration: "resend" });
     return NextResponse.json({ error: err.message ?? "Failed to submit backflow test" }, { status: 500 });
   }
 }

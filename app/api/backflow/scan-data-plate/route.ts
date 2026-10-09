@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient as createServiceClient } from "@supabase/supabase-js";
 import { createClient as createServerClient } from "@/lib/supabase/server";
 import { DEVICE_TYPES } from "@/lib/backflow";
+import { reportError, reportFailure } from "@/lib/monitoring";
 
 // Reads a photographed backflow device data plate with Claude vision and
 // drags out as much structured data as the plate actually has printed on
@@ -57,6 +58,7 @@ export async function POST(request: NextRequest) {
   }
 
   if (!process.env.ANTHROPIC_API_KEY) {
+    reportFailure("ANTHROPIC_API_KEY is not configured", { route: "api/backflow/scan-data-plate", integration: "anthropic" });
     return NextResponse.json({ error: "ANTHROPIC_API_KEY is not configured on the server" }, { status: 500 });
   }
 
@@ -131,6 +133,7 @@ export async function POST(request: NextRequest) {
     if (!anthropicRes.ok) {
       const errText = await anthropicRes.text().catch(() => "");
       console.error("Anthropic data plate scan error:", anthropicRes.status, errText);
+      reportFailure("Anthropic data plate scan request failed", { route: "api/backflow/scan-data-plate", integration: "anthropic", status: anthropicRes.status });
       return NextResponse.json({ error: "Failed to read data plate" }, { status: 502 });
     }
 
@@ -161,6 +164,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ result: parsed });
   } catch (err: any) {
     console.error("Data plate scan error:", err);
+    reportError(err, { route: "api/backflow/scan-data-plate", integration: "anthropic" });
     return NextResponse.json({ error: err.message ?? "Failed to read data plate" }, { status: 500 });
   }
 }
