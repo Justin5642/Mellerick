@@ -24,7 +24,8 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
-import { Navigation, Users, LayoutList, ChevronLeft, ChevronRight, GripVertical, CalendarDays, CalendarRange } from "lucide-react";
+import { TodoListPanel, type TodoJob } from "./todo-list-panel";
+import { Navigation, Users, LayoutList, ListTodo, ChevronLeft, ChevronRight, GripVertical, CalendarDays, CalendarRange } from "lucide-react";
 import {
   formatTime,
   formatDate,
@@ -292,10 +293,14 @@ export function TeamScheduleView({
   todayJobs,
   upcomingJobs,
   staff,
+  todoJobs,
+  todoError,
 }: {
   todayJobs: Job[];
   upcomingJobs: Job[];
   staff: StaffMember[];
+  todoJobs: TodoJob[];
+  todoError: string | null;
 }) {
   // Narrowed to the three methods the dispatcher uses. Not cosmetic: matching
   // the fully-generic typed client against the dispatcher's structural
@@ -514,6 +519,9 @@ export function TeamScheduleView({
       <TabsList variant="line">
         <TabsTrigger value="team" className="gap-1.5"><Users className="w-3.5 h-3.5" />Team</TabsTrigger>
         <TabsTrigger value="list" className="gap-1.5"><LayoutList className="w-3.5 h-3.5" />List</TabsTrigger>
+        <TabsTrigger value="todo" className="gap-1.5">
+          <ListTodo className="w-3.5 h-3.5" />To-do list{todoJobs.length > 0 ? ` (${todoJobs.length})` : ""}
+        </TabsTrigger>
       </TabsList>
 
       <TabsContent value="team" className="mt-4">
@@ -785,6 +793,10 @@ export function TeamScheduleView({
             </CardContent>
           </Card>
         )}
+      </TabsContent>
+
+      <TabsContent value="todo" className="mt-4">
+        <TodoListPanel jobs={todoJobs} error={todoError} />
       </TabsContent>
     </Tabs>
   );

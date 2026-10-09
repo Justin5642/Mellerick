@@ -767,5 +767,27 @@ office/admin read and delete everything; anon nothing.
 `tests/rls/backflow-certificates.test.ts` proves it on the CI stack. Confirm
 on a device that a signed test logged from the mobile app settles.
 
+**Job to-do list (migration `0067`, draft, not yet applied):** office can set
+jobs aside to fill a schedule gap. Web job page header (office/admin only) →
+"Add to to-do list", asking for optional estimated hours (prefilled from the
+job's estimate or its PO allocated hours); a listed job shows "On to-do list ·
+Xh" with a remove button. Schedule page → **To-do list** tab: listed jobs sorted
+urgent→low then longest-waiting, hours = estimate else PO `total_hours` (read
+from `purchase_orders_public`, hours only), a "Fits in [__] h" filter (jobs with
+no estimate always stay visible), and a Schedule button that opens the job page
+with `?schedule=1`, which auto-opens the schedule wizard. The Jobs list shows a
+"To-do" badge. A job **leaves the list by itself** once scheduled: trigger
+`jobs_todo_list_autoclear` clears `todo_listed_at` when `scheduled_start` is set
+or changed, or status is scheduled/in_progress/completed/cancelled — so web,
+mobile, board drags and the calendar poll all behave the same. The trigger also
+stamps `todo_listed_at` with the database clock and `todo_listed_by` with
+`auth.uid()`. Pure logic in `lib/todo-list.ts`; trigger proven by
+`tests/rls/job-todo-list.test.ts` on the CI stack. **Safe to merge before
+applying:** the job page hides the control when the columns are absent, the
+Jobs list retries without `todo_listed_at` on `42703`, and the Schedule tab
+shows a load error on its own panel only. `mobile/lib/powersync/schema.ts` gained
+the three columns by hand (exactly what the generator emits after the apply —
+`office_jobs` syncs `jobs.*`); regenerate once `0067` is live. No mobile UI yet.
+
 All 21 other open questions are resolved, each with its reasoning recorded in
 `mobile/DECISIONS-FOR-AVI.md`.
