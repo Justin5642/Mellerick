@@ -12,6 +12,8 @@ import Link from "next/link";
 import { JobOverview } from "./job-overview";
 import { DeleteJobDialog } from "./delete-job-dialog";
 import { JobHoursScoreboard } from "./job-hours-scoreboard";
+import { JobTodoControl } from "./job-todo-control";
+import { sumAllocatedHours } from "@/lib/hours-scoreboard";
 
 // Overview is the default tab, so it ships in the page bundle. Every other
 // tab is its own chunk, fetched the first time it is shown — Base UI only
@@ -107,8 +109,19 @@ export function JobDetailClient({ job, currentUserId, photos: initialPhotos, doc
   );
   const highlightVariationId = searchParams.get("variation");
   const [deleteOpen, setDeleteOpen] = useState(false);
-  const [scheduleOpen, setScheduleOpen] = useState(false);
-  const [scheduleMounted, setScheduleMounted] = useState(false);
+  // `?schedule=1` (the Schedule page's To-do list "Schedule" action) opens the
+  // schedule wizard straight away. Office/admin only — the same people that
+  // list reaches; a technician following the link just gets the job page.
+  const autoOpenSchedule = isOffice && searchParams.get("schedule") === "1";
+  const [scheduleOpen, setScheduleOpen] = useState(autoOpenSchedule);
+  const [scheduleMounted, setScheduleMounted] = useState(autoOpenSchedule);
+  // Drop the param once honoured, so a reload or Back doesn't reopen the wizard.
+  useEffect(() => {
+    if (!autoOpenSchedule) return;
+    const url = new URL(window.location.href);
+    url.searchParams.delete("schedule");
+    window.history.replaceState(null, "", url.pathname + url.search + url.hash);
+  }, [autoOpenSchedule]);
   const assignedStaff = staff.find((s: any) => s.id === job.assigned_to) ?? null;
 
   const [photos, setPhotos] = useState(initialPhotos);
@@ -211,6 +224,19 @@ export function JobDetailClient({ job, currentUserId, photos: initialPhotos, doc
             </div>
           </div>
           <div className="flex items-center gap-2 shrink-0">
+            {/* To-do list (office/admin). Absent key = the jobs columns are not
+                in this database yet, so the control stays hidden rather than
+                offering a write that would fail. */}
+            {isOffice && "todo_listed_at" in job && (
+              <JobTodoControl
+                jobId={job.id}
+                currentUserId={currentUserId}
+                status={job.status}
+                todoListedAt={job.todo_listed_at}
+                estimatedHours={job.estimated_hours}
+                poAllocatedHours={sumAllocatedHours(purchaseOrders)}
+              />
+            )}
             <Button size="sm" className="gap-1.5" onClick={() => { setScheduleMounted(true); setScheduleOpen(true); }}>
               <CalendarClock className="w-4 h-4" />
               Schedule Job

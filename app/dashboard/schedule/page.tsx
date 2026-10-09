@@ -4,10 +4,12 @@ import { Plus } from "lucide-react";
 import Link from "next/link";
 import { TeamScheduleView } from "@/components/schedule/team-schedule-view";
 import { isTodayInBusinessTZ, BUSINESS_TIME_ZONE } from "@/lib/date";
+import type { TodoJob } from "@/components/schedule/todo-list-panel";
+import { allocatedHoursByJob } from "@/lib/todo-list";
 
 export default async function SchedulePage() {
   const supabase = await createClient();
-  const [{ data: jobs }, { data: staff }, { count: unscheduledCount }] = await Promise.all([
+  const [{ data: jobs }, { data: staff }, { count: unscheduledCount }, { data: todoRows, error: todoError }] = await Promise.all([
     supabase
       .from("jobs")
       // jobs has multiple FK columns to profiles (assigned_to, created_by,
@@ -53,7 +55,38 @@ export default async function SchedulePage() {
       .select("*", { count: "exact", head: true })
       .is("scheduled_start", null)
       .not("status", "in", '("completed","cancelled")'),
+    // The office To-do list: jobs set aside to fill a gap. A trigger takes a
+    // job off once it is scheduled, so "listed" is the whole filter. Its own
+    // query so a database without the to-do columns yet fails this panel
+    // alone (todoError) and the board above still renders.
+    supabase
+      .from("jobs")
+      .select("id, job_number, title, priority, status, todo_listed_at, estimated_hours, customers(name), sites(suburb)")
+      .not("todo_listed_at", "is", null)
+      .order("todo_listed_at", { ascending: true }),
   ]);
+
+  // Fallback hours for listed jobs with no estimate: the PO allocation. Read
+  // from the money-free purchase_orders_public view (0038) — hours only, so
+  // this page never holds a PO value even though office could read one.
+  const todoIds = (todoRows ?? []).filter((j) => j.estimated_hours == null).map((j) => j.id);
+  let poHours = new Map<string, number>();
+  if (todoIds.length > 0) {
+    const { data: poRows } = await supabase.from("purchase_orders_public").select("job_id, total_hours").in("job_id", todoIds);
+    poHours = allocatedHoursByJob(poRows ?? []);
+  }
+  const todoJobs: TodoJob[] = (todoRows ?? []).map((j) => ({
+    id: j.id,
+    job_number: j.job_number,
+    title: j.title,
+    priority: j.priority,
+    status: j.status,
+    todo_listed_at: j.todo_listed_at as string,
+    estimated_hours: j.estimated_hours,
+    po_allocated_hours: poHours.get(j.id) ?? null,
+    customer_name: j.customers?.name ?? null,
+    suburb: j.sites?.suburb ?? null,
+  }));
 
   const today = new Date();
 
@@ -109,6 +142,8 @@ export default async function SchedulePage() {
         todayJobs={todayJobs}
         upcomingJobs={upcomingJobs}
         staff={staffForDisplay}
+        todoJobs={todoJobs}
+        todoError={todoError?.message ?? null}
       />
     </div>
   );

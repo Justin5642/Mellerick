@@ -15,7 +15,11 @@ import { getJobStageLabel } from "@/lib/job-stages";
 const PAGE_SIZE = 50;
 // Only what the list renders. The old select("*") pulled every column of
 // every job (transcripts, notes, descriptions) for ~825+ jobs up front.
-const LIST_COLUMNS = "id, job_number, title, status, priority, scheduled_start, customers(name)";
+const BASE_COLUMNS = "id, job_number, title, status, priority, scheduled_start, customers(name)";
+// todo_listed_at drives the "To-do" badge. Until the to-do columns exist in the
+// database PostgREST rejects the whole select with 42703 (undefined column), so
+// the list retries once without it — the badge is optional, the list is not.
+const LIST_COLUMNS = `${BASE_COLUMNS}, todo_listed_at`;
 
 type StageInfo = { stage: string; created_at: string };
 
@@ -47,7 +51,7 @@ export default function JobsPage() {
   // job's own columns.
   const fetchPage = useCallback(
     async (q: string, from: number) => {
-      let builder = supabase.from("jobs").select(LIST_COLUMNS, { count: "exact" });
+      let filter: string | null = null;
       if (q) {
         const [{ data: customers }, { data: sites }] = await Promise.all([
           supabase.from("customers").select("id").ilike("name", `%${q}%`).limit(200),
@@ -58,9 +62,15 @@ export default function JobsPage() {
         if (/^\d+$/.test(num)) ors.push(`job_number.eq.${num}`);
         if (customers?.length) ors.push(`customer_id.in.(${customers.map((c) => c.id).join(",")})`);
         if (sites?.length) ors.push(`site_id.in.(${sites.map((s) => s.id).join(",")})`);
-        builder = builder.or(ors.join(","));
+        filter = ors.join(",");
       }
-      return builder.order("created_at", { ascending: false }).range(from, from + PAGE_SIZE - 1);
+      const run = (columns: string) => {
+        let builder = supabase.from("jobs").select(columns, { count: "exact" });
+        if (filter) builder = builder.or(filter);
+        return builder.order("created_at", { ascending: false }).range(from, from + PAGE_SIZE - 1);
+      };
+      const result = await run(LIST_COLUMNS);
+      return result.error?.code === "42703" ? run(BASE_COLUMNS) : result;
     },
     [supabase]
   );
@@ -209,6 +219,11 @@ export default function JobsPage() {
                     <span className={`text-xs px-2 py-0.5 rounded-full font-medium capitalize ${jobStatusColors[job.status] ?? ""}`}>
                       {job.status?.replace("_", " ")}
                     </span>
+                    {job.todo_listed_at && (
+                      <span className="text-xs px-2 py-0.5 rounded-full font-medium bg-indigo-100 text-indigo-700" title="On the office to-do list">
+                        To-do
+                      </span>
+                    )}
                     {currentStageByJob.get(job.id) && (
                       <span className="text-xs px-2 py-0.5 rounded-full font-medium bg-cyan-100 text-cyan-800">
                         {getJobStageLabel(currentStageByJob.get(job.id)!.stage)}
