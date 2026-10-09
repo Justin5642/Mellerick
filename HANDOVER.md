@@ -767,7 +767,7 @@ office/admin read and delete everything; anon nothing.
 `tests/rls/backflow-certificates.test.ts` proves it on the CI stack. Confirm
 on a device that a signed test logged from the mobile app settles.
 
-**Job to-do list (migration `0067`, draft, not yet applied):** office can set
+**Job to-do list (migration `0067`, applied 2026-10-09):** office can set
 jobs aside to fill a schedule gap. Web job page header (office/admin only) →
 "Add to to-do list", asking for optional estimated hours (prefilled from the
 job's estimate or its PO allocated hours); a listed job shows "On to-do list ·
@@ -787,7 +787,8 @@ applying:** the job page hides the control when the columns are absent, the
 Jobs list retries without `todo_listed_at` on `42703`, and the Schedule tab
 shows a load error on its own panel only. `mobile/lib/powersync/schema.ts` gained
 the three columns by hand (exactly what the generator emits after the apply —
-`office_jobs` syncs `jobs.*`); regenerate once `0067` is live. No mobile UI yet.
+`office_jobs` syncs `jobs.*`); regenerating it is optional now that `0067` is live.
+No mobile UI yet.
 
 All 21 other open questions are resolved, each with its reasoning recorded in
 `mobile/DECISIONS-FOR-AVI.md`.
