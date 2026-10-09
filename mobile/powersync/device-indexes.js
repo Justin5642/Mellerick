@@ -43,6 +43,12 @@ module.exports = {
   quote_items: { quote: ['quote_id'] },
   sites: { customer: ['customer_id'] },
   backflow_tests: { device: ['device_id'] },
-  // lib/location-tracking.tsx findOpenEntry: job_id = ? AND staff_id = ?
-  time_entries: { job_staff: ['job_id', 'staff_id'] },
+  // lib/location-tracking.tsx findOpenEntry: job_id = ? AND staff_id = ?;
+  // clock.ts SQL_LATEST_OPEN_WORK_ENTRY: staff_id = ? (any job).
+  time_entries: { job_staff: ['job_id', 'staff_id'], staff: ['staff_id'] },
+  // Crew membership (reads/assignedJobs.ts): `j.id IN (SELECT job_id FROM
+  // job_assignments WHERE staff_id = ?)` in my-jobs lists and schedule counts.
+  job_assignments: { staff: ['staff_id'] },
+  // reads/jobPhotos.ts: job_id = ?
+  job_photos: { job: ['job_id'] },
 };

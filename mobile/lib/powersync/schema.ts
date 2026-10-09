@@ -49,7 +49,10 @@ const backflow_tests = new Table({
   test_type: column.text,
   test_date: column.text,
   result: column.text,
+  tester_name: column.text,
   tested_by: column.text,
+  submitted_to_water_authority_at: column.text,
+  certificate_storage_path: column.text,
   created_at: column.text,
 }, {
   indexes: {
@@ -197,6 +200,10 @@ const job_assignments = new Table({
   staff_id: column.text,
   assigned_by: column.text,
   created_at: column.text,
+}, {
+  indexes: {
+    staff: ['staff_id'],
+  },
 });
 
 const job_expenses = new Table({
@@ -262,6 +269,10 @@ const job_photos = new Table({
   created_at: column.text,
   simpro_file_id: column.text,
   sync_office: column.integer,
+}, {
+  indexes: {
+    job: ['job_id'],
+  },
 });
 
 const job_stage_notes = new Table({
@@ -500,6 +511,7 @@ const time_entries = new Table({
 }, {
   indexes: {
     job_staff: ['job_id', 'staff_id'],
+    staff: ['staff_id'],
   },
 });
 

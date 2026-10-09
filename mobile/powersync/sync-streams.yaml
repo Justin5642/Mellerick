@@ -140,14 +140,16 @@ streams:
       WHERE is_active = true
 
   # Last 24 months plus each device's latest PASS (sync_recent, 0068) — exactly
-  # what computeBackflowRows needs to derive the next-due date. Only the
-  # columns a device reads: the full certificate (test_results JSON, readings,
-  # signature/certificate paths, tester details) is read from Supabase by the
-  # device detail screen, never from the mirror.
+  # what computeBackflowRows needs to derive the next-due date, plus the few
+  # columns the device detail's test list shows (reads/backflow.ts
+  # SQL_LIST_DEVICE_TESTS — local only while no window is in force, since the
+  # list spans all history). The full certificate (test_results JSON,
+  # readings, signature path, licence details) is read from Supabase.
   backflow_tests:
     auto_subscribe: true
     query: |
-      SELECT id, device_id, job_id, test_type, test_date, result, tested_by, created_at
+      SELECT id, device_id, job_id, test_type, test_date, result, tester_name, tested_by,
+             submitted_to_water_authority_at, certificate_storage_path, created_at
       FROM backflow_tests
       WHERE sync_recent IS NOT false
 

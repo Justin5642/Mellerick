@@ -257,7 +257,8 @@ describe("all-history reads", () => {
     expect(remoteTables).toEqual([]);
 
     await countOtherScheduledJobs("t1", "2023-10-10", "j1");
-    expect(remoteTables).toEqual(["jobs"]);
+    // job_assignments: the remote path resolves crew jobs first.
+    expect(remoteTables).toEqual(["job_assignments", "jobs"]);
   });
 });
 
