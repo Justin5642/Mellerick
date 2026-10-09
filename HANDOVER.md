@@ -185,6 +185,27 @@ Load-bearing properties:
   wedge the FIFO queue forever — but it logs a warning naming the table, so a
   vanished row is traceable.
 
+### Photos — size and caching
+
+- **Every picked or captured image is downscaled before it is queued**: longest
+  edge ≤1600px, JPEG 0.7, in ONE helper, `mobile/lib/imageUpload.ts`
+  (`expo-image-manipulator`, EXIF orientation baked into the pixels). Used by job
+  photos, variation photos, job and fleet expense receipts, and the backflow
+  data-plate scan (which takes its base64 from the resized JPEG, not the picker).
+  Pickers now ask for `quality: 1` so there is one compression pass, not two. A
+  resize failure queues the original rather than losing the photo. The outbox
+  semantics are unchanged — the resized file is what gets staged.
+- **The Photos tab list is a local read** (`reads/jobPhotos.ts`, `fromLocalOr`;
+  a job absent from a technician's mirror defers to Supabase rather than showing
+  an empty grid). Signed URLs come from ONE `createSignedUrls` per load, only for
+  photos not already in expo-image's disk cache.
+- **Rendered with `expo-image`, `cacheKey` = storage path.** Each signing mints a
+  new token, so keying on the URL (RN `<Image>`) re-downloaded every photo on
+  every visit. Supabase image transforms are **not** used (plan support
+  unconfirmed); thumbnails rely on resized uploads + the disk cache.
+- `expo-image-manipulator` is a native module: it reaches devices only through a
+  **new dev client / `eas build`**, never an OTA update.
+
 ### The crash class to watch for
 
 Async SQLite work that **outlives its JS context** throws

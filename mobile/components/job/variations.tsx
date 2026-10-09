@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useState } from "react";
-import { View, Text, StyleSheet, TouchableOpacity, TextInput, FlatList, Alert, Image, ActivityIndicator } from "react-native";
+import { View, Text, StyleSheet, TouchableOpacity, TextInput, FlatList, Alert, ActivityIndicator } from "react-native";
 import * as ImagePicker from "expo-image-picker";
+import { Image } from "expo-image";
+import { signJobPhotoUrls } from "../../lib/data/reads/jobPhotos";
+import { prepareImageForUpload } from "../../lib/imageUpload";
 import { unwrapRows } from "../../lib/data/reads/unwrap";
 import { supabase } from "../../lib/supabase";
 import { colors } from "../../lib/theme";
@@ -95,20 +98,17 @@ export function JobVariationsTab({ jobId, currentUserId }: { jobId: string; curr
     const rows = (v as Variation[]) ?? [];
     setVariations(rows);
     setTypes(unwrapRows(typesRes as never, "loadVariationTypes") as unknown as VariationType[]);
-    // Resolve every photo's signed URL in parallel, then commit them in ONE
-    // setUrls (a per-photo setState in the loop caused an extra re-render each).
-    const withPhotos = rows.filter((item) => !!item.photo_storage_path);
-    if (withPhotos.length > 0) {
-      const resolved = await Promise.all(
-        withPhotos.map(async (item) => {
-          const path = item.photo_storage_path as string;
-          const { data: signed } = await supabase.storage.from("job-photos").createSignedUrl(path, 3600);
-          return [path, signed?.signedUrl] as const;
-        })
-      );
-      const next: Record<string, string> = {};
-      for (const [path, url] of resolved) if (url) next[path] = url;
-      if (Object.keys(next).length > 0) setUrls((prev) => ({ ...prev, ...next }));
+    // Every photo's signed URL in ONE batched Storage request, committed in ONE
+    // setUrls. A signing failure leaves the photos unshown (as before) rather
+    // than reporting the variations themselves as unloadable.
+    const paths = rows.map((item) => item.photo_storage_path).filter((p): p is string => !!p);
+    if (paths.length > 0) {
+      try {
+        const next = await signJobPhotoUrls(paths);
+        if (Object.keys(next).length > 0) setUrls((prev) => ({ ...prev, ...next }));
+      } catch (e) {
+        if (__DEV__) console.warn("[variations] couldn't sign photo URLs:", e);
+      }
     }
   }, [jobId, isOfficeOrAdmin]);
 
@@ -137,9 +137,11 @@ export function JobVariationsTab({ jobId, currentUserId }: { jobId: string; curr
         Alert.alert("Permission needed", "Camera access is required");
         return;
       }
-      const result = await ImagePicker.launchCameraAsync({ quality: 0.7 });
+      // Full quality from the picker; prepareImageForUpload is the ONE
+      // downscale + compress pass (≤1600px, JPEG 0.7 — lib/imageUpload.ts).
+      const result = await ImagePicker.launchCameraAsync({ quality: 1 });
       if (result.canceled || !result.assets?.length) return;
-      setPhotoUri(result.assets[0].uri);
+      setPhotoUri(await prepareImageForUpload(result.assets[0].uri));
       return;
     }
     // Library pick -- lets a tech attach an existing photo (e.g. a screenshot
@@ -149,9 +151,9 @@ export function JobVariationsTab({ jobId, currentUserId }: { jobId: string; curr
       Alert.alert("Permission needed", "Photo library access is required");
       return;
     }
-    const result = await ImagePicker.launchImageLibraryAsync({ quality: 0.7 });
+    const result = await ImagePicker.launchImageLibraryAsync({ quality: 1 });
     if (result.canceled || !result.assets?.length) return;
-    setPhotoUri(result.assets[0].uri);
+    setPhotoUri(await prepareImageForUpload(result.assets[0].uri));
   }
 
   async function submit() {
@@ -317,7 +319,7 @@ export function JobVariationsTab({ jobId, currentUserId }: { jobId: string; curr
               <Text style={styles.photoButtonText}>🖼️ Choose Existing</Text>
             </TouchableOpacity>
           </View>
-          {photoUri && <Image source={{ uri: photoUri }} style={styles.photoPreview} />}
+          {photoUri && <Image source={{ uri: photoUri }} style={styles.photoPreview} contentFit="cover" cachePolicy="none" />}
 
           <View style={styles.formButtonRow}>
             <TouchableOpacity style={styles.cancelButton} onPress={() => setShowForm(false)} disabled={saving}>
@@ -353,7 +355,14 @@ export function JobVariationsTab({ jobId, currentUserId }: { jobId: string; curr
               </View>
               {item.description && <Text style={styles.cardDescription}>{item.description}</Text>}
               {item.photo_storage_path && urls[item.photo_storage_path] && (
-                <Image source={{ uri: urls[item.photo_storage_path] }} style={styles.cardPhoto} />
+                // cacheKey = storage path, so a re-signed URL (new token) is a cache hit.
+                <Image
+                  source={{ uri: urls[item.photo_storage_path], cacheKey: item.photo_storage_path }}
+                  cachePolicy="memory-disk"
+                  recyclingKey={item.photo_storage_path}
+                  contentFit="cover"
+                  style={styles.cardPhoto}
+                />
               )}
 
               {/* Priced total for approved/auto-approved (office/admin only; MoneyText

@@ -4,7 +4,6 @@ import {
   Text,
   StyleSheet,
   TouchableOpacity,
-  Image,
   ImageBackground,
   FlatList,
   Alert,
@@ -14,10 +13,10 @@ import {
   ActivityIndicator,
 } from "react-native";
 import * as ImagePicker from "expo-image-picker";
+import { Image } from "expo-image";
 import * as Location from "expo-location";
 import { Ionicons } from "@expo/vector-icons";
 import ViewShot from "react-native-view-shot";
-import { supabase } from "../../lib/supabase";
 import { colors, photoTagColors } from "../../lib/theme";
 import { describeReadFailure } from "../../design/components/ScreenError";
 import { usePhotoLibrary } from "../../lib/data/hooks/usePhotoLibrary";
@@ -25,6 +24,8 @@ import { netInfoConnectivity } from "../../lib/data/net/connectivity";
 import { useDataLayer } from "../../lib/data/DataProvider";
 import { useSyncSettled } from "../../lib/data/hooks/useSyncSettled";
 import { reconcileRows } from "../../lib/data/reconcile";
+import { listJobPhotos, signJobPhotoUrls } from "../../lib/data/reads/jobPhotos";
+import { prepareImageForUpload } from "../../lib/imageUpload";
 
 interface Photo {
   id: string;
@@ -90,53 +91,98 @@ export function JobPhotosTab({
     setUrlFailed((prev) => ({ ...prev, [path]: true }));
   }, []);
 
-  // Reads refresh from the server only when online; offline, local state (incl.
-  // optimistic photos shown from their local file) is authoritative. Even online
-  // we MERGE, so a queued photo still uploading isn't wiped by a racing reload
+  // An image that failed to load (expired URL after a long-open tab, evicted
+  // cache file) is forgotten, so the next reload signs it afresh.
+  const onImageError = useCallback(
+    (path: string) => {
+      resolvedRef.current.delete(path);
+      setUrls((prev) => {
+        const next = { ...prev };
+        delete next[path];
+        return next;
+      });
+      markUrlFailed(path);
+    },
+    [markUrlFailed]
+  );
+
+  // Storage paths whose `urls` entry is a real image source (a signed URL or a
+  // cached file), as opposed to an optimistic local file or nothing. Only paths
+  // NOT in here are resolved on a reload, so the reload after every sync drain
+  // (useSyncSettled) no longer re-signs the whole grid.
+  const resolvedRef = useRef<Set<string>>(new Set());
+
+  // Give each listed photo an image source, cheapest first:
+  //   1. expo-image's disk cache, keyed by storage path — a photo seen before
+  //      renders from the device with no network at all, offline included;
+  //   2. otherwise ONE batched createSignedUrls for the rest (online only).
+  // A signed URL is NOT a cache identity (every call mints a new token); the
+  // <Image> cacheKey is the storage path, so a fresh token never re-downloads.
+  const resolveSources = useCallback(
+    async (paths: string[]) => {
+      const todo = paths.filter((p) => !resolvedRef.current.has(p));
+      if (todo.length === 0) return;
+      const found: Record<string, string> = {};
+      await Promise.all(
+        todo.map(async (path) => {
+          try {
+            const cached = await Image.getCachePathAsync(path);
+            if (cached) found[path] = cached.startsWith("file:") ? cached : `file://${cached}`;
+          } catch {
+            // Not cached / lookup unsupported: fall through to signing.
+          }
+        })
+      );
+      const toSign = todo.filter((p) => !found[p]);
+      if (toSign.length > 0 && (await netInfoConnectivity.isOnline())) {
+        try {
+          Object.assign(found, await signJobPhotoUrls(toSign));
+        } catch {
+          // Leave them unresolved; markUrlFailed below says so per cell.
+        }
+        for (const p of toSign) if (!found[p]) markUrlFailed(p);
+      }
+      for (const p of Object.keys(found)) resolvedRef.current.add(p);
+      if (Object.keys(found).length > 0) setUrls((prev) => ({ ...prev, ...found }));
+    },
+    [markUrlFailed]
+  );
+
+  // The list comes from the device mirror (job_photos is synced for every role),
+  // with Supabase as the fallback — see lib/data/reads/jobPhotos.ts. We still
+  // MERGE, so a queued photo still uploading isn't wiped by a racing reload
   // (which would also blank its cell once the local file is cleaned up).
   const loadPhotos = useCallback(async () => {
+    let rows: Photo[];
     try {
-      if (!(await netInfoConnectivity.isOnline())) return;
-      const { data, error } = await supabase
-        .from("job_photos")
-        .select("*")
-        .eq("job_id", jobId)
-        .order("created_at", { ascending: false });
-      // A failed query hands back data: null, which would reconcile the grid down
-      // to "No photos yet" — a job's photo evidence apparently deleted itself.
-      // Throw so the catch can say the read broke instead.
-      if (error) throw error;
-      const rows = (data as unknown as Photo[]) ?? [];
-      const pendingIds = layer ? await layer.outbox.pendingRowIds() : new Set<string>();
-      setPhotos((prev) => reconcileRows(prev, rows, pendingIds));
-      setLoadError(null);
-      for (const p of rows) {
-        supabase.storage
-          .from("job-photos")
-          .createSignedUrl(p.storage_path, 3600)
-          .then(
-            ({ data: signed }) => {
-              if (signed?.signedUrl) setUrls((prev) => ({ ...prev, [p.storage_path]: signed.signedUrl }));
-              else markUrlFailed(p.storage_path);
-            },
-            () => markUrlFailed(p.storage_path)
-          );
-      }
+      rows = await listJobPhotos(jobId);
     } catch (e) {
+      // Offline with no usable mirror (first sync not done, or a job outside
+      // it): keep what's on screen, as before — not a server failure to report.
+      if (!(await netInfoConnectivity.isOnline())) return;
+      // A failed query must not reconcile the grid down to "No photos yet" — a
+      // job's photo evidence apparently deleted itself. Say the read broke.
       setLoadError(e);
+      return;
     }
-  }, [jobId, layer, markUrlFailed]);
+    const pendingIds = layer ? await layer.outbox.pendingRowIds() : new Set<string>();
+    setPhotos((prev) => reconcileRows(prev, rows, pendingIds));
+    setLoadError(null);
+    await resolveSources(rows.map((p) => p.storage_path));
+  }, [jobId, layer, resolveSources]);
 
   // Queue a photo through the offline outbox and show it immediately: the local
   // file renders under its Storage key until the real signed URL replaces it on
   // reconcile (same client id => no duplicate).
   const addPhotoFromUri = useCallback(
     async (uri: string, type: (typeof PHOTO_TYPES)[number]): Promise<void> => {
+      // ≤1600px JPEG before it is staged for the outbox (lib/imageUpload.ts).
+      const sourceUri = await prepareImageForUpload(uri);
       const { id, storagePath, localUri } = await photoLibrary.addPhoto({
         jobId,
         uploadedBy: currentUserId,
         photoType: type,
-        sourceUri: uri,
+        sourceUri,
       });
       setPhotos((prev) => [{ id, storage_path: storagePath, photo_type: type, created_at: new Date().toISOString() }, ...prev]);
       setUrls((prev) => ({ ...prev, [storagePath]: localUri }));
@@ -178,7 +224,9 @@ export function JobPhotosTab({
       Alert.alert("Permission needed", "Camera access is required");
       return;
     }
-    const result = await ImagePicker.launchCameraAsync({ quality: 0.7 });
+    // Full quality here: this frame only feeds the stamp preview, and the
+    // stamped capture is downscaled + compressed ONCE in addPhotoFromUri.
+    const result = await ImagePicker.launchCameraAsync({ quality: 1 });
     if (result.canceled || !result.assets?.length) return;
 
     const capturedAt = new Date();
@@ -197,7 +245,7 @@ export function JobPhotosTab({
       Alert.alert("Permission needed", "Photo library access is required");
       return;
     }
-    const result = await ImagePicker.launchImageLibraryAsync({ quality: 0.6, allowsMultipleSelection: true });
+    const result = await ImagePicker.launchImageLibraryAsync({ quality: 1, allowsMultipleSelection: true });
     if (result.canceled || !result.assets?.length) return;
 
     setUploading(true);
@@ -320,7 +368,18 @@ export function JobPhotosTab({
               onLongPress={() => confirmDelete(item)}
             >
               {urls[item.storage_path] ? (
-                <Image source={{ uri: urls[item.storage_path] }} style={styles.photoImage} />
+                // cacheKey = storage path: the signed URL's token changes on every
+                // sign, so keying on the URL (RN <Image>'s behaviour) re-downloaded
+                // the full image on every visit. expo-image also decodes down to
+                // the cell size, so a grid of thumbnails stays light in memory.
+                <Image
+                  source={{ uri: urls[item.storage_path], cacheKey: item.storage_path }}
+                  cachePolicy="memory-disk"
+                  recyclingKey={item.storage_path}
+                  contentFit="cover"
+                  style={styles.photoImage}
+                  onError={() => onImageError(item.storage_path)}
+                />
               ) : urlFailed[item.storage_path] ? (
                 <View style={[styles.photoImage, styles.photoFailed]}>
                   <Ionicons name="cloud-offline-outline" size={16} color={colors.slate400} />
@@ -417,9 +476,11 @@ export function JobPhotosTab({
               <TouchableOpacity style={styles.viewerBackdrop} activeOpacity={1} onPress={() => setViewingPhoto(null)} />
               {urls[viewingPhoto.storage_path] ? (
                 <Image
-                  source={{ uri: urls[viewingPhoto.storage_path] }}
+                  source={{ uri: urls[viewingPhoto.storage_path], cacheKey: viewingPhoto.storage_path }}
+                  cachePolicy="memory-disk"
                   style={styles.viewerImage}
-                  resizeMode="contain"
+                  contentFit="contain"
+                  onError={() => onImageError(viewingPhoto.storage_path)}
                 />
               ) : urlFailed[viewingPhoto.storage_path] ? (
                 <View style={[styles.viewerImage, styles.viewerFailed]}>
