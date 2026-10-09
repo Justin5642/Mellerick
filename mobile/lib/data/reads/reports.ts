@@ -1,6 +1,7 @@
 import { supabase } from "../../supabase";
 import { unwrapRows, unwrapCount } from "./unwrap";
 import { fromLocalOr } from "./source";
+import { requireCoveredSince, requireNoWindow } from "./horizon";
 import { num, numOrNull } from "./rowMap";
 import { topCustomersBySpend, revenueByMonth, jobsByStaff, type InvoiceRow, type JobStaffRow } from "../../reportsAnalytics";
 import { dateKeyInBusinessTZ } from "../../date";
@@ -57,9 +58,13 @@ interface RawJobCountRow {
   c: number | string;
 }
 
+// ALL-HISTORY: revenue, quote and job counts cover every row ever written. A
+// windowed office mirror (draft migration 0068, once applied) holds 24 months,
+// so the local path answers only while no window is in force.
 export async function getReportSummary(): Promise<ReportSummary> {
   return fromLocalOr(
     async (db) => {
+      await requireNoWindow(db, "office", "getReportSummary");
       const [paidRows, outstandingRows, quoteRows, jobCountRows] = await Promise.all([
         db.getAll<RawTotalRow>(SQL_REPORT_PAID_INVOICES),
         db.getAll<RawStatusTotalRow>(SQL_REPORT_OUTSTANDING_INVOICES),
@@ -221,6 +226,9 @@ export async function getEquipmentUtilization(): Promise<EquipUtilRow[]> {
       const cutoff = new Date();
       cutoff.setFullYear(cutoff.getFullYear() - 1);
       const cutoffDate = cutoff.toISOString().slice(0, 10);
+      // 12 months sits inside the 24-month window, so this stays local —
+      // unless the device clock (or a stale mirror) puts it outside.
+      await requireCoveredSince(db, "office", cutoffDate, "getEquipmentUtilization");
 
       const [equipRows, usageRows] = await Promise.all([
         db.getAll<RawEquipCostRow>(SQL_EQUIPMENT_UTILIZATION_EQUIPMENT),
@@ -286,9 +294,12 @@ interface RawAnalyticsJobRow {
   assignee_name: string | null;
 }
 
+// ALL-HISTORY (top customers by lifetime spend, jobs per staff member): same
+// rule as getReportSummary.
 export async function getReportAnalytics(): Promise<ReportAnalytics> {
   return fromLocalOr(
     async (db) => {
+      await requireNoWindow(db, "office", "getReportAnalytics");
       const [invRows, jobRows] = await Promise.all([
         db.getAll<RawAnalyticsInvoiceRow>(SQL_ANALYTICS_INVOICES),
         db.getAll<RawAnalyticsJobRow>(SQL_ANALYTICS_JOBS),

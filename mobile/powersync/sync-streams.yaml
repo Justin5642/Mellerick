@@ -27,6 +27,44 @@
 # `alter publication powersync add table <t>` and it silently never syncs.
 # =============================================================================
 
+# SYNC WINDOWS (migration 0068 — read its header before changing a filter)
+# -----------------------------------------------------------------------------
+# Every device used to receive every row ever written: all customers and sites,
+# every job a technician was EVER assigned plus all its children, every invoice,
+# quote and time entry for office. The dialect cannot compare a row to now()
+# (the compiler rejects it — bucket membership is computed when a row changes,
+# not when the clock moves), so the windows are boolean columns the DATABASE
+# keeps current — sync_tech / sync_office / sync_recent / sync_backflow — and
+# the streams below filter on them as plain static conditions.
+#
+#   technician  jobs open (any age) or active in the last 90 days, and only
+#               those jobs' children, customers and sites; customers/sites of
+#               ACTIVE backflow devices (the backflow register names them);
+#               active backflow devices; backflow tests from the last 24 months
+#               plus each device's latest pass (the due-date input).
+#   office      reference tables whole; jobs open/ready/active within 24 months
+#               and their children; invoices/quotes open or active within 24
+#               months and their items; time entries and equipment usage that
+#               belong to an in-window job or are themselves within 24 months.
+#
+# Filters read `<flag> IS NOT false`, never `= true`: a missing column reads
+# NULL, so deploying this file before 0068 is applied syncs EVERYTHING (today's
+# behaviour) instead of nothing. Verified by evaluating rows through
+# @powersync/service-sync-rules.
+#
+# Local reads rely on the windows being EXACT, not approximate: the cutoffs in
+# the synced `sync_horizon` row tell mobile/lib/data/reads/horizon.ts what the
+# mirror is guaranteed to hold, and a read asking for anything older goes to the
+# network. Widening a window is always safe; narrowing one without updating
+# 0068's successor AND horizon.ts makes local reads present truncated history.
+#
+# BUCKETS: a filter of the form `x IN (subquery)` creates one bucket PER VALUE
+# (per job, per customer). A subquery that does not depend on auth.user_id()
+# would therefore give every device one bucket per matching row — which is why
+# the backflow customers/sites use a row flag, not
+# `id IN (SELECT customer_id FROM backflow_devices ...)`.
+# =============================================================================
+
 config:
   edition: 3
 
@@ -36,18 +74,49 @@ streams:
     auto_subscribe: true
     query: SELECT id, full_name, role, is_active FROM profiles
 
-  customers:
+  # The cutoffs the window flags were last computed against (one row, three
+  # timestamps). Read by mobile/lib/data/reads/horizon.ts.
+  sync_horizon:
     auto_subscribe: true
-    query: SELECT id, name, company, phone, email, mobile, abn, notes, is_active, is_favorite FROM customers
-
-  sites:
-    auto_subscribe: true
-    query: SELECT id, customer_id, name, address_line1, address_line2, suburb, state, postcode, site_lat, site_lng, notes, is_active FROM sites
+    query: SELECT id, tech_cutoff, office_cutoff, backflow_cutoff, refreshed_at FROM sync_horizon
 
   # RATE-STRIPPED: the base table's preset `rate` must never reach a device.
   variation_types:
     auto_subscribe: true
     query: SELECT id, name, unit, auto_approve, is_active FROM variation_types
+
+  # ---- Customers / sites -------------------------------------------------------
+  # Was: every customer and site to every device. Technicians now get only the
+  # customers and sites of their in-window jobs, plus those that own an ACTIVE
+  # backflow device (the backflow register lists every device by customer and
+  # suburb). Office/admin get both tables whole, further down.
+  tech_customers:
+    auto_subscribe: true
+    query: |
+      SELECT id, name, company, phone, email, mobile, abn, notes, is_active, is_favorite
+      FROM customers
+      WHERE id IN (SELECT customer_id FROM jobs WHERE sync_tech IS NOT false AND id IN (SELECT job_id FROM job_assignments WHERE staff_id = auth.user_id()))
+
+  backflow_customers:
+    auto_subscribe: true
+    query: |
+      SELECT id, name, company, phone, email, mobile, abn, notes, is_active, is_favorite
+      FROM customers
+      WHERE sync_backflow IS NOT false
+
+  tech_sites:
+    auto_subscribe: true
+    query: |
+      SELECT id, customer_id, name, address_line1, address_line2, suburb, state, postcode, site_lat, site_lng, notes, is_active
+      FROM sites
+      WHERE id IN (SELECT site_id FROM jobs WHERE sync_tech IS NOT false AND id IN (SELECT job_id FROM job_assignments WHERE staff_id = auth.user_id()))
+
+  backflow_sites:
+    auto_subscribe: true
+    query: |
+      SELECT id, customer_id, name, address_line1, address_line2, suburb, state, postcode, site_lat, site_lng, notes, is_active
+      FROM sites
+      WHERE sync_backflow IS NOT false
 
   # Backflow compliance data (no money; matches the authenticated RLS posture —
   # technicians register devices and log tests in the field).
@@ -56,6 +125,9 @@ streams:
   # future migration adds — a fee or price column would reach every technician
   # device with no code change and no review. Enforced by
   # tests/unit/sync-streams-contract.test.ts.
+  #
+  # ACTIVE devices only: the only local read (reads/backflow.ts) lists active
+  # devices; a device's detail screen reads Supabase.
   backflow_devices:
     auto_subscribe: true
     query: |
@@ -65,19 +137,19 @@ streams:
              fire_service_meter_number, test_frequency_months, is_active, notes,
              created_by, created_at, updated_at
       FROM backflow_devices
+      WHERE is_active = true
 
+  # Last 24 months plus each device's latest PASS (sync_recent, 0068) — exactly
+  # what computeBackflowRows needs to derive the next-due date. Only the
+  # columns a device reads: the full certificate (test_results JSON, readings,
+  # signature/certificate paths, tester details) is read from Supabase by the
+  # device detail screen, never from the mirror.
   backflow_tests:
     auto_subscribe: true
     query: |
-      SELECT id, device_id, job_id, test_type, test_date, result, mains_pressure_kpa,
-             permission_to_turn_off_water, strainer_installed, strainer_cleaned,
-             isolating_valves_padlocked, complies_with_as_nzs_3500_1,
-             reason_for_failure, repair_scheduled_date,
-             test_kit_serial_number, test_kit_calibration_date, tester_name,
-             tester_licence_number, tester_phone, remarks, test_results,
-             signature_storage_path, certificate_storage_path,
-             submitted_to_water_authority_at, submitted_to_email, tested_by, created_at
+      SELECT id, device_id, job_id, test_type, test_date, result, tested_by, created_at
       FROM backflow_tests
+      WHERE sync_recent IS NOT false
 
   # ---- Technician: their assigned jobs + children, MONEY-STRIPPED ------------
   #
@@ -86,6 +158,11 @@ streams:
   # jobs.assigned_to happens to report as "primary". jobs.assigned_to is still
   # a plain streamed column below (devices still render it), it is just no
   # longer what gates WHICH jobs a device receives.
+  #
+  # WINDOWED (0068): sync_tech is true for every OPEN job however old, and for
+  # a closed job until 90 days after its last activity. Children follow their
+  # job through the same subquery, so a job and everything under it arrive and
+  # leave together.
   tech_jobs:
     auto_subscribe: true
     query: |
@@ -93,7 +170,9 @@ streams:
              customer_id, site_id, assigned_to, scheduled_start, scheduled_end,
              actual_start, actual_end, completion_notes, voice_report_transcript, created_at,
              scheduled_cost_center_id
-      FROM jobs WHERE id IN (SELECT job_id FROM job_assignments WHERE staff_id = auth.user_id())
+      FROM jobs
+      WHERE sync_tech IS NOT false
+        AND id IN (SELECT job_id FROM job_assignments WHERE staff_id = auth.user_id())
 
   # Every technician's current assignments for jobs they're on -- so a device
   # can render "who else is on this job", not just its own membership.
@@ -102,35 +181,40 @@ streams:
     query: |
       SELECT id, job_id, staff_id, created_at
       FROM job_assignments
-      WHERE job_id IN (SELECT job_id FROM job_assignments WHERE staff_id = auth.user_id())
+      WHERE job_id IN (SELECT id FROM jobs WHERE sync_tech IS NOT false AND id IN (SELECT job_id FROM job_assignments WHERE staff_id = auth.user_id()))
 
   tech_job_photos:
     auto_subscribe: true
     query: |
       SELECT id, job_id, storage_path, photo_type, uploaded_by, created_at
       FROM job_photos
-      WHERE job_id IN (SELECT job_id FROM job_assignments WHERE staff_id = auth.user_id())
+      WHERE job_id IN (SELECT id FROM jobs WHERE sync_tech IS NOT false AND id IN (SELECT job_id FROM job_assignments WHERE staff_id = auth.user_id()))
 
   tech_job_notes:
     auto_subscribe: true
     query: |
       SELECT id, job_id, content, author_id, created_at, source
       FROM job_notes
-      WHERE job_id IN (SELECT job_id FROM job_assignments WHERE staff_id = auth.user_id())
+      WHERE job_id IN (SELECT id FROM jobs WHERE sync_tech IS NOT false AND id IN (SELECT job_id FROM job_assignments WHERE staff_id = auth.user_id()))
 
   tech_job_stage_notes:
     auto_subscribe: true
     query: |
       SELECT id, job_id, stage, content, author_id, created_at
       FROM job_stage_notes
-      WHERE job_id IN (SELECT job_id FROM job_assignments WHERE staff_id = auth.user_id())
+      WHERE job_id IN (SELECT id FROM jobs WHERE sync_tech IS NOT false AND id IN (SELECT job_id FROM job_assignments WHERE staff_id = auth.user_id()))
 
+  # An open clock-in (looked up offline by findOpenEntry() in
+  # lib/location-tracking.tsx) always belongs to a job that is open or was
+  # touched recently, so the window keeps it. Rows are NOT widened to "my open
+  # entries on any job" — that would sync entries on jobs the technician is no
+  # longer assigned to, which the stream never did.
   tech_time_entries:
     auto_subscribe: true
     query: |
       SELECT id, job_id, staff_id, clock_in, clock_out, hours, entry_type, cost_center_id, notes, created_at
       FROM time_entries
-      WHERE job_id IN (SELECT job_id FROM job_assignments WHERE staff_id = auth.user_id())
+      WHERE job_id IN (SELECT id FROM jobs WHERE sync_tech IS NOT false AND id IN (SELECT job_id FROM job_assignments WHERE staff_id = auth.user_id()))
 
   # RATE-STRIPPED: omits rate, total_amount, admin_notes.
   tech_job_variations:
@@ -139,7 +223,7 @@ streams:
       SELECT id, job_id, variation_type_id, custom_name, description, quantity, unit,
              status, photo_storage_path, logged_by, logged_at
       FROM job_variations
-      WHERE job_id IN (SELECT job_id FROM job_assignments WHERE staff_id = auth.user_id())
+      WHERE job_id IN (SELECT id FROM jobs WHERE sync_tech IS NOT false AND id IN (SELECT job_id FROM job_assignments WHERE staff_id = auth.user_id()))
 
   # ---- Office/admin: full business set (money allowed), ROLE-GATED -----------
   # Gate: JOIN the requesting user's profiles row; the stream only yields rows
@@ -185,9 +269,24 @@ streams:
   # So: if you add a column here, regenerate, or both guards will agree with
   # each other and with nothing else:
   #   node mobile/scripts/generate-powersync-schema.mjs
+  # Reference tables, WHOLE for office/admin (customer list, pickers, quotes).
+  # Same column list as the technician streams above, so the device schema
+  # does not depend on which role connected.
+  office_customers:
+    auto_subscribe: true
+    query: SELECT customers.id, customers.name, customers.company, customers.phone, customers.email, customers.mobile, customers.abn, customers.notes, customers.is_active, customers.is_favorite FROM customers JOIN profiles ON profiles.id = auth.user_id() WHERE (profiles.role = 'office' OR profiles.role = 'admin')
+
+  office_sites:
+    auto_subscribe: true
+    query: SELECT sites.id, sites.customer_id, sites.name, sites.address_line1, sites.address_line2, sites.suburb, sites.state, sites.postcode, sites.site_lat, sites.site_lng, sites.notes, sites.is_active FROM sites JOIN profiles ON profiles.id = auth.user_id() WHERE (profiles.role = 'office' OR profiles.role = 'admin')
+
+  # WINDOWED (0068): `<table>.sync_office IS NOT false` on jobs and every
+  # history table. Unwindowed on purpose — small, current-state tables a
+  # device needs whole: job_assignments (one row per job), pricing_items,
+  # inventory, equipment, equipment_expenses, purchase_orders, po_cost_centers.
   office_jobs:
     auto_subscribe: true
-    query: SELECT jobs.* FROM jobs JOIN profiles ON profiles.id = auth.user_id() WHERE profiles.role = 'office' OR profiles.role = 'admin'
+    query: SELECT jobs.* FROM jobs JOIN profiles ON profiles.id = auth.user_id() WHERE (profiles.role = 'office' OR profiles.role = 'admin') AND jobs.sync_office IS NOT false
 
   office_job_assignments:
     auto_subscribe: true
@@ -195,39 +294,39 @@ streams:
 
   office_job_items:
     auto_subscribe: true
-    query: SELECT job_items.* FROM job_items JOIN profiles ON profiles.id = auth.user_id() WHERE profiles.role = 'office' OR profiles.role = 'admin'
+    query: SELECT job_items.* FROM job_items JOIN profiles ON profiles.id = auth.user_id() WHERE (profiles.role = 'office' OR profiles.role = 'admin') AND job_items.sync_office IS NOT false
 
   office_job_variations:
     auto_subscribe: true
-    query: SELECT job_variations.* FROM job_variations JOIN profiles ON profiles.id = auth.user_id() WHERE profiles.role = 'office' OR profiles.role = 'admin'
+    query: SELECT job_variations.* FROM job_variations JOIN profiles ON profiles.id = auth.user_id() WHERE (profiles.role = 'office' OR profiles.role = 'admin') AND job_variations.sync_office IS NOT false
 
   office_job_expenses:
     auto_subscribe: true
-    query: SELECT job_expenses.* FROM job_expenses JOIN profiles ON profiles.id = auth.user_id() WHERE profiles.role = 'office' OR profiles.role = 'admin'
+    query: SELECT job_expenses.* FROM job_expenses JOIN profiles ON profiles.id = auth.user_id() WHERE (profiles.role = 'office' OR profiles.role = 'admin') AND job_expenses.sync_office IS NOT false
 
   office_job_notes:
     auto_subscribe: true
-    query: SELECT job_notes.* FROM job_notes JOIN profiles ON profiles.id = auth.user_id() WHERE profiles.role = 'office' OR profiles.role = 'admin'
+    query: SELECT job_notes.* FROM job_notes JOIN profiles ON profiles.id = auth.user_id() WHERE (profiles.role = 'office' OR profiles.role = 'admin') AND job_notes.sync_office IS NOT false
 
   office_job_stage_notes:
     auto_subscribe: true
-    query: SELECT job_stage_notes.* FROM job_stage_notes JOIN profiles ON profiles.id = auth.user_id() WHERE profiles.role = 'office' OR profiles.role = 'admin'
+    query: SELECT job_stage_notes.* FROM job_stage_notes JOIN profiles ON profiles.id = auth.user_id() WHERE (profiles.role = 'office' OR profiles.role = 'admin') AND job_stage_notes.sync_office IS NOT false
 
   office_invoices:
     auto_subscribe: true
-    query: SELECT invoices.* FROM invoices JOIN profiles ON profiles.id = auth.user_id() WHERE profiles.role = 'office' OR profiles.role = 'admin'
+    query: SELECT invoices.* FROM invoices JOIN profiles ON profiles.id = auth.user_id() WHERE (profiles.role = 'office' OR profiles.role = 'admin') AND invoices.sync_office IS NOT false
 
   office_invoice_items:
     auto_subscribe: true
-    query: SELECT invoice_items.* FROM invoice_items JOIN profiles ON profiles.id = auth.user_id() WHERE profiles.role = 'office' OR profiles.role = 'admin'
+    query: SELECT invoice_items.* FROM invoice_items JOIN profiles ON profiles.id = auth.user_id() WHERE (profiles.role = 'office' OR profiles.role = 'admin') AND invoice_items.sync_office IS NOT false
 
   office_quotes:
     auto_subscribe: true
-    query: SELECT quotes.* FROM quotes JOIN profiles ON profiles.id = auth.user_id() WHERE profiles.role = 'office' OR profiles.role = 'admin'
+    query: SELECT quotes.* FROM quotes JOIN profiles ON profiles.id = auth.user_id() WHERE (profiles.role = 'office' OR profiles.role = 'admin') AND quotes.sync_office IS NOT false
 
   office_quote_items:
     auto_subscribe: true
-    query: SELECT quote_items.* FROM quote_items JOIN profiles ON profiles.id = auth.user_id() WHERE profiles.role = 'office' OR profiles.role = 'admin'
+    query: SELECT quote_items.* FROM quote_items JOIN profiles ON profiles.id = auth.user_id() WHERE (profiles.role = 'office' OR profiles.role = 'admin') AND quote_items.sync_office IS NOT false
 
   office_pricing_items:
     auto_subscribe: true
@@ -247,7 +346,7 @@ streams:
 
   office_equipment_usage_log:
     auto_subscribe: true
-    query: SELECT equipment_usage_log.* FROM equipment_usage_log JOIN profiles ON profiles.id = auth.user_id() WHERE profiles.role = 'office' OR profiles.role = 'admin'
+    query: SELECT equipment_usage_log.* FROM equipment_usage_log JOIN profiles ON profiles.id = auth.user_id() WHERE (profiles.role = 'office' OR profiles.role = 'admin') AND equipment_usage_log.sync_office IS NOT false
 
   office_purchase_orders:
     auto_subscribe: true
@@ -259,8 +358,8 @@ streams:
 
   office_time_entries:
     auto_subscribe: true
-    query: SELECT time_entries.* FROM time_entries JOIN profiles ON profiles.id = auth.user_id() WHERE profiles.role = 'office' OR profiles.role = 'admin'
+    query: SELECT time_entries.* FROM time_entries JOIN profiles ON profiles.id = auth.user_id() WHERE (profiles.role = 'office' OR profiles.role = 'admin') AND time_entries.sync_office IS NOT false
 
   office_job_photos:
     auto_subscribe: true
-    query: SELECT job_photos.* FROM job_photos JOIN profiles ON profiles.id = auth.user_id() WHERE profiles.role = 'office' OR profiles.role = 'admin'
+    query: SELECT job_photos.* FROM job_photos JOIN profiles ON profiles.id = auth.user_id() WHERE (profiles.role = 'office' OR profiles.role = 'admin') AND job_photos.sync_office IS NOT false

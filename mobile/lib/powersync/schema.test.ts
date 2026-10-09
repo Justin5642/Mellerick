@@ -68,6 +68,7 @@ describe("technician streams", () => {
       "jobs",
       "profiles",
       "sites",
+      "sync_horizon",
       "time_entries",
       "variation_types",
     ]);

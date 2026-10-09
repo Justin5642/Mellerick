@@ -46,25 +46,6 @@ const backflow_tests = new Table({
   test_type: column.text,
   test_date: column.text,
   result: column.text,
-  mains_pressure_kpa: column.real,
-  permission_to_turn_off_water: column.integer,
-  strainer_installed: column.integer,
-  strainer_cleaned: column.integer,
-  isolating_valves_padlocked: column.integer,
-  complies_with_as_nzs_3500_1: column.integer,
-  reason_for_failure: column.text,
-  repair_scheduled_date: column.text,
-  test_kit_serial_number: column.text,
-  test_kit_calibration_date: column.text,
-  tester_name: column.text,
-  tester_licence_number: column.text,
-  tester_phone: column.text,
-  remarks: column.text,
-  test_results: column.text,
-  signature_storage_path: column.text,
-  certificate_storage_path: column.text,
-  submitted_to_water_authority_at: column.text,
-  submitted_to_email: column.text,
   tested_by: column.text,
   created_at: column.text,
 });
@@ -128,6 +109,7 @@ const equipment_usage_log = new Table({
   notes: column.text,
   logged_by: column.text,
   created_at: column.text,
+  sync_office: column.integer,
 });
 
 const inventory = new Table({
@@ -157,6 +139,7 @@ const invoice_items = new Table({
   unit_price: column.real,
   total: column.real,
   created_at: column.text,
+  sync_office: column.integer,
 });
 
 const invoices = new Table({
@@ -180,6 +163,7 @@ const invoices = new Table({
   created_at: column.text,
   updated_at: column.text,
   work_description: column.text,
+  sync_office: column.integer,
 });
 
 const job_assignments = new Table({
@@ -206,6 +190,7 @@ const job_expenses = new Table({
   xero_bill_id: column.text,
   xero_synced_at: column.text,
   cost_center_id: column.text,
+  sync_office: column.integer,
 });
 
 const job_items = new Table({
@@ -221,6 +206,7 @@ const job_items = new Table({
   source: column.text,
   staff_id: column.text,
   time_entry_id: column.text,
+  sync_office: column.integer,
 });
 
 const job_notes = new Table({
@@ -230,6 +216,7 @@ const job_notes = new Table({
   content: column.text,
   created_at: column.text,
   source: column.text,
+  sync_office: column.integer,
 });
 
 const job_photos = new Table({
@@ -241,6 +228,7 @@ const job_photos = new Table({
   photo_type: column.text,
   created_at: column.text,
   simpro_file_id: column.text,
+  sync_office: column.integer,
 });
 
 const job_stage_notes = new Table({
@@ -250,6 +238,7 @@ const job_stage_notes = new Table({
   author_id: column.text,
   content: column.text,
   created_at: column.text,
+  sync_office: column.integer,
 });
 
 const job_variations = new Table({
@@ -273,6 +262,7 @@ const job_variations = new Table({
   invoice_id: column.text,
   attachment_storage_path: column.text,
   attachment_file_name: column.text,
+  sync_office: column.integer,
 });
 
 const jobs = new Table({
@@ -312,6 +302,8 @@ const jobs = new Table({
   todo_listed_at: column.text,
   todo_listed_by: column.text,
   estimated_hours: column.real,
+  sync_tech: column.integer,
+  sync_office: column.integer,
 });
 
 const po_cost_centers = new Table({
@@ -372,6 +364,7 @@ const quote_items = new Table({
   unit_price: column.real,
   total: column.real,
   created_at: column.text,
+  sync_office: column.integer,
 });
 
 const quotes = new Table({
@@ -393,6 +386,7 @@ const quotes = new Table({
   created_by: column.text,
   created_at: column.text,
   updated_at: column.text,
+  sync_office: column.integer,
 });
 
 const sites = new Table({
@@ -408,6 +402,14 @@ const sites = new Table({
   site_lat: column.real,
   site_lng: column.real,
   is_active: column.integer,
+});
+
+const sync_horizon = new Table({
+  // id (text) is implicit
+  tech_cutoff: column.text,
+  office_cutoff: column.text,
+  backflow_cutoff: column.text,
+  refreshed_at: column.text,
 });
 
 const time_entries = new Table({
@@ -426,6 +428,7 @@ const time_entries = new Table({
   edited_by: column.text,
   edited_at: column.text,
   rate_override: column.text,
+  sync_office: column.integer,
 });
 
 const variation_types = new Table({
@@ -461,6 +464,7 @@ export const AppSchema = new Schema({
   quote_items,
   quotes,
   sites,
+  sync_horizon,
   time_entries,
   variation_types,
 });
