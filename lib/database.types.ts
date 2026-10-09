@@ -1388,6 +1388,7 @@ export type Database = {
           created_by: string | null
           customer_id: string
           description: string | null
+          estimated_hours: number | null
           google_event_id: string | null
           id: string
           job_number: number
@@ -1406,6 +1407,8 @@ export type Database = {
           site_id: string | null
           status: string
           title: string
+          todo_listed_at: string | null
+          todo_listed_by: string | null
           updated_at: string | null
           voice_report_recorded_at: string | null
           voice_report_recorded_by: string | null
@@ -1423,6 +1426,7 @@ export type Database = {
           created_by?: string | null
           customer_id: string
           description?: string | null
+          estimated_hours?: number | null
           google_event_id?: string | null
           id?: string
           job_number?: number
@@ -1441,6 +1445,8 @@ export type Database = {
           site_id?: string | null
           status?: string
           title: string
+          todo_listed_at?: string | null
+          todo_listed_by?: string | null
           updated_at?: string | null
           voice_report_recorded_at?: string | null
           voice_report_recorded_by?: string | null
@@ -1458,6 +1464,7 @@ export type Database = {
           created_by?: string | null
           customer_id?: string
           description?: string | null
+          estimated_hours?: number | null
           google_event_id?: string | null
           id?: string
           job_number?: number
@@ -1476,6 +1483,8 @@ export type Database = {
           site_id?: string | null
           status?: string
           title?: string
+          todo_listed_at?: string | null
+          todo_listed_by?: string | null
           updated_at?: string | null
           voice_report_recorded_at?: string | null
           voice_report_recorded_by?: string | null
@@ -1530,6 +1539,13 @@ export type Database = {
             columns: ["site_id"]
             isOneToOne: false
             referencedRelation: "sites"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "jobs_todo_listed_by_fkey"
+            columns: ["todo_listed_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
             referencedColumns: ["id"]
           },
           {

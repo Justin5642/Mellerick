@@ -309,6 +309,9 @@ const jobs = new Table({
   voice_report_recorded_at: column.text,
   ready_to_invoice: column.integer,
   scheduled_cost_center_id: column.text,
+  todo_listed_at: column.text,
+  todo_listed_by: column.text,
+  estimated_hours: column.real,
 });
 
 const po_cost_centers = new Table({
