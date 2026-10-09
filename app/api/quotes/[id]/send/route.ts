@@ -6,6 +6,7 @@ import { businessInfo } from "@/lib/business-info";
 import { getResend, getFromAddress } from "@/lib/resend";
 import { formatDate } from "@/lib/date";
 import { escapeHtml } from "@/lib/html";
+import { reportError } from "@/lib/monitoring";
 
 export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
@@ -106,6 +107,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     return NextResponse.json({ success: true, sentTo: to });
   } catch (err: any) {
     console.error("Send quote error:", err);
+    reportError(err, { route: "api/quotes/send", integration: "resend" });
     return NextResponse.json({ error: err.message ?? "Failed to send quote" }, { status: 500 });
   }
 }

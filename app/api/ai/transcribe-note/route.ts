@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireUser } from "@/lib/api/guards";
 import { polishNoteText, TRANSCRIBE_TRADE_TERM_PROMPT } from "@/lib/ai/polish-note";
+import { reportError, reportFailure } from "@/lib/monitoring";
 
 // Voice-to-text for job notes (currently used by the stage-notes composer on
 // both platforms): a tech records a short clip in-app, it's uploaded here as
@@ -23,6 +24,7 @@ export async function POST(request: NextRequest) {
   if (!guard.ok) return guard.response;
 
   if (!process.env.OPENAI_API_KEY) {
+    reportFailure("OPENAI_API_KEY is not configured", { route: "api/ai/transcribe-note", integration: "openai" });
     return NextResponse.json({ error: "OPENAI_API_KEY is not configured on the server" }, { status: 500 });
   }
 
@@ -57,6 +59,7 @@ export async function POST(request: NextRequest) {
     if (!openaiRes.ok) {
       const errText = await openaiRes.text().catch(() => "");
       console.error("OpenAI transcription error:", openaiRes.status, errText);
+      reportFailure("OpenAI transcription request failed", { route: "api/ai/transcribe-note", integration: "openai", status: openaiRes.status });
       return NextResponse.json({ error: "Transcription failed" }, { status: 502 });
     }
 
@@ -73,10 +76,12 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ text: polished });
     } catch (polishErr) {
       console.error("Transcribe-note polish step failed, falling back to raw transcript:", polishErr);
+      reportError(polishErr, { route: "api/ai/transcribe-note", integration: "anthropic", step: "polish", degraded: true });
       return NextResponse.json({ text: transcript.trim() });
     }
   } catch (err: any) {
     console.error("Transcribe note error:", err);
+    reportError(err, { route: "api/ai/transcribe-note", integration: "openai" });
     return NextResponse.json({ error: err.message ?? "Transcription failed" }, { status: 500 });
   }
 }

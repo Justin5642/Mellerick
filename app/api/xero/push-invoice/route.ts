@@ -3,6 +3,7 @@ import { getRefreshedXero, describeXeroError } from "@/lib/xero";
 import { requireAdmin } from "@/lib/api/guards";
 import { callerClient } from "@/lib/api/caller-client";
 import { Invoice, LineItem, Contact, Invoices, LineAmountTypes } from "xero-node";
+import { reportError } from "@/lib/monitoring";
 
 export async function POST(request: NextRequest) {
   try {
@@ -163,6 +164,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ success: true, xeroInvoiceId: result?.invoiceID, updated: isUpdate, invoiceNumber: adoptedNumber });
   } catch (err: any) {
     console.error("Push to Xero error:", err.response?.body ?? err);
+    reportError(err, { route: "api/xero/push-invoice", integration: "xero" });
     return NextResponse.json({ error: describeXeroError(err) }, { status: 500 });
   }
 }

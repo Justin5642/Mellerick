@@ -526,6 +526,7 @@ a shippable release.
 | **Vercel Preview env vars** | Justin | Every PR's Vercel check fails on `Missing required environment variables: NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_ANON_KEY`. Proven by comparison, not inference: GitHub's `build` job runs the *identical* `next build` on the same commit and passes, because CI supplies those two. Set them on the Vercel project's Preview environment. |
 | **`max_slot_wal_keep_size`** | Justin / Avi | Supabase instance config, no SQL path. Without it a slot can be invalidated again — which cost 24 hours of silent, invisible outage on 3–4 August. `npm run check:sync` now turns that failure mode into one command. |
 | **EAS env vars** | Justin / Avi | `eas env:create` for the two `EXPO_PUBLIC_*` values, or a cloud build ships an app pointed at `undefined`. See SHIPPING.md **STEP ZERO**. The app now refuses to start in that state rather than failing mysteriously later. |
+| **Sentry (error monitoring)** | Justin | Optional, and off until a DSN is set — see §12. Create a free Sentry org with a Next.js project (and a React Native project for the app), then set the DSNs in Vercel and EAS. Without it, failures like the weeks-long silent "Polish with AI" outage are still only discovered by accident. |
 | **Maestro flow 02** | Avi | Needs `ADMIN_EMAIL` / `ADMIN_PASSWORD` in the environment. The login subflow deliberately skips when a session already exists, so a password never passes through a script — which is why flows 01/03/04 could be run and 02 could not. |
 
 ### QA fixture — do not delete
@@ -628,6 +629,7 @@ for months.
 | App Store Connect app record → `ascAppId` | **Justin** |
 | APNs `.p8` (Apple) + FCM JSON (Firebase) | **Justin** — the Apple account is his, so the `.p8` is available now |
 | Vercel Preview environment variables | **Justin** — the `mellerick` team is his |
+| Sentry account + DSNs in Vercel / EAS (§12) | **Justin** |
 | Branch protection / staging | **Justin** |
 | Screenshots, feature graphic | Whoever can run the app on a device with demo-safe data |
 | Privacy policy hosting, legal entity details, ABN | Mellerick Plumbing |
@@ -682,6 +684,7 @@ compilation. The same commit builds fine in GitHub Actions, which does set them.
 | `mobile/app/` | expo-router routes, grouped by role |
 | `mobile/.maestro/` | E2E flows. Destructive taps are opt-in behind `APPROVE_FOR_REAL` / `CLOCK_FOR_REAL`, so a suite run cannot write to production. |
 | `lib/api/` | Web auth guards, per-record authz, Bearer-aware caller client |
+| `lib/monitoring/`, `instrumentation*.ts` | Web error monitoring (Sentry) and its privacy scrubber — §12 |
 | `supabase/migrations/` | Schema, applied in filename order |
 | `tests/unit/`, `tests/rls/`, `tests/e2e/` | Web tests |
 | `mobile/DECISIONS-FOR-AVI.md` | Every decision with its rationale — **read before undoing anything that looks odd** |
@@ -792,3 +795,69 @@ No mobile UI yet.
 
 All 21 other open questions are resolved, each with its reasoning recorded in
 `mobile/DECISIONS-FOR-AVI.md`.
+
+---
+
+## 12. Error monitoring (Sentry)
+
+Added 9 October 2026 so the owner **hears** about crashes and failed background
+work instead of discovering them by accident — the "Polish with AI" button
+returned 5xx for weeks before anyone noticed.
+
+**Entirely optional.** With no DSN set, nothing initialises: `next.config.ts` is
+not wrapped, the SDK is tree-shaken out of every bundle (verified — shared
+first-load JS stays at 102 kB, middleware at 90 kB), and builds, tests and
+runtime behave exactly as before. CI has no Sentry secrets and needs none.
+
+### Web (`@sentry/nextjs` 10.76.2, pinned)
+
+| File | Role |
+|---|---|
+| `instrumentation.ts` | `register()` inits the SDK for Node and edge; `onRequestError` reports uncaught server errors |
+| `instrumentation-client.ts` | Browser init + router-transition hook |
+| `app/global-error.tsx`, `app/error.tsx`, `app/dashboard/error.tsx` | Report what the error boundaries catch |
+| `lib/monitoring/index.ts` | `reportError(err, { route, ... })` / `reportFailure(msg, { route, ... })` — no-ops without a DSN |
+| `lib/monitoring/options.ts` | Shared `Sentry.init` options for all three runtimes |
+| `lib/monitoring/scrub.ts` | `beforeSend` / `beforeBreadcrumb` privacy scrubber |
+
+Explicitly reported (route tag + integration tag): `api/ai/polish-note`,
+`api/ai/transcribe-note`, `api/jobs/transcribe-voice-report`,
+`api/backflow/scan-data-plate`, `api/backflow/tests/submit`, every Xero route
+that catches (callback, push-invoice, push-expense, poll-invoices, sync-now),
+Google Calendar (callback, poll-calendar, sync-now, jobs/sync-calendar), and
+invoice/quote email send. A **missing `ANTHROPIC_API_KEY` / `OPENAI_API_KEY`**
+in a deployment is reported too — that is the most likely cause of a silent AI
+outage.
+
+**Keep the guards literal.** Every client/server guard reads
+`process.env.NEXT_PUBLIC_SENTRY_DSN` inline, and `next.config.ts` defines it as
+`""` when unset. That is what lets the bundler drop the SDK; routing the check
+through a helper or a variable put ~85 kB back into every page.
+
+### Privacy — the money rule applies here too
+
+An error tracker is a wider audience than the app. So:
+
+- `sendDefaultPii: false`; **no session replay**; traces sampled at 10% (web).
+- The scrubber removes request bodies, cookies, query strings and every request
+  header except `user-agent`/`content-type`/`accept`; reduces `user` to an id;
+  drops `extra`; drops console breadcrumbs (they carry logged response bodies)
+  and strips query strings from URL breadcrumbs.
+- `reportError` accepts **tags only** — there is no channel for payloads. Never
+  add note text, transcripts, customer details or amounts to a report.
+- PostgREST errors (plain objects) keep only `message` and `code`; `details`,
+  which can echo row values, is not sent.
+
+### Env vars the owner must set
+
+| Variable | Where | Notes |
+|---|---|---|
+| `NEXT_PUBLIC_SENTRY_DSN` | Vercel → `mellerick-app` → Environment Variables, **Production AND Preview** | Public, write-only ingest key. Inlined at build time, so redeploy after setting. |
+| `SENTRY_AUTH_TOKEN` | Vercel, Production (+ Preview if wanted). **Secret** — never `NEXT_PUBLIC_` | Optional. Uploads source maps so stack traces are readable; maps are deleted from the output after upload. |
+| `SENTRY_ORG`, `SENTRY_PROJECT` | Vercel, alongside the token | All three must be present or the upload is skipped silently. An upload failure only warns — it never fails a deploy. |
+
+Steps: create a Sentry account (free tier is enough), create a **Next.js**
+project, copy its DSN into Vercel as above, redeploy, then trigger a test error
+and confirm it arrives. Set up an alert rule (Sentry → Alerts) to email
+justin@mellerick.com on new issues — without an alert, reports sit unread.
+

@@ -3,6 +3,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { getGoogleCalendarClient } from "@/lib/google";
 import { requireUser } from "@/lib/api/guards";
 import { canManageJobBilling } from "@/lib/api/job-authz";
+import { reportError } from "@/lib/monitoring";
 
 export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   // Any authenticated staff member can trigger a calendar sync for a job they
@@ -130,6 +131,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     return NextResponse.json({ created: true, eventId: res.data.id });
   } catch (err: any) {
     console.error("Calendar sync error:", err);
+    reportError(err, { route: "api/jobs/sync-calendar", integration: "google-calendar" });
     return NextResponse.json({ error: err.message ?? "Calendar sync failed" }, { status: 500 });
   }
 }

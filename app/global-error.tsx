@@ -1,12 +1,21 @@
 "use client";
 
+import { useEffect } from "react";
+import * as Sentry from "@sentry/nextjs";
+
 // Last-resort boundary -- only fires if the root layout itself throws
 // (app/error.tsx can't catch that, per Next.js: it's scoped below the root
 // layout). Deliberately self-contained with inline styles and no imports
 // from the rest of the app (no Tailwind classes, no shared components) --
 // if the root layout is broken, we don't want this fallback depending on
-// anything that might be broken along with it.
-export default function GlobalError({ reset }: { error: Error & { digest?: string }; reset: () => void }) {
+// anything that might be broken along with it. The one exception is the
+// Sentry SDK, which reports the crash (only when NEXT_PUBLIC_SENTRY_DSN is set;
+// otherwise nothing initialised it and captureException is a no-op).
+export default function GlobalError({ error, reset }: { error: Error & { digest?: string }; reset: () => void }) {
+  useEffect(() => {
+    if (process.env.NEXT_PUBLIC_SENTRY_DSN) Sentry.captureException(error, { tags: { boundary: "global" } });
+  }, [error]);
+
   return (
     <html lang="en">
       <body style={{ margin: 0, fontFamily: "system-ui, sans-serif", background: "#f8fafc" }}>

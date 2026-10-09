@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
+import * as Sentry from "@sentry/nextjs";
 import Link from "next/link";
 import { AlertTriangle } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -13,6 +14,8 @@ import { Button } from "@/components/ui/button";
 export default function Error({ error, reset }: { error: Error & { digest?: string }; reset: () => void }) {
   useEffect(() => {
     console.error("Unhandled error:", error);
+    // Error boundaries swallow the error, so report it explicitly (no-op without a DSN).
+    if (process.env.NEXT_PUBLIC_SENTRY_DSN) Sentry.captureException(error, { tags: { boundary: "root" } });
   }, [error]);
 
   return (

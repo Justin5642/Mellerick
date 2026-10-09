@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { requireCronSecret } from "@/lib/api/guards";
 import { pollGoogleCalendarChanges } from "@/lib/google";
+import { reportError } from "@/lib/monitoring";
 
 // Pulls changes made *directly in Google Calendar* (drag to reschedule,
 // resize, or delete an event) back onto the matching job. This is the
@@ -20,6 +21,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json(result);
   } catch (err: any) {
     console.error("Calendar poll-sync error:", err);
+    reportError(err, { route: "api/google/poll-calendar", integration: "google-calendar", cron: true });
     return NextResponse.json({ error: err.message ?? "Calendar poll sync failed" }, { status: 500 });
   }
 }

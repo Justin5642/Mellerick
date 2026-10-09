@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireOfficeOrAdmin } from "@/lib/api/guards";
 import { callerClient } from "@/lib/api/caller-client";
 import { pollXeroInvoicePayments } from "@/lib/xero";
+import { reportError } from "@/lib/monitoring";
 
 // Manual trigger for the Settings page's "Sync now" button — same logic as the
 // cron poll route. Previously auth'd by getUser() ONLY (any signed-in user,
@@ -17,6 +18,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json(result);
   } catch (err: any) {
     console.error("Xero invoice manual sync error:", err);
+    reportError(err, { route: "api/xero/sync-now", integration: "xero" });
     return NextResponse.json({ error: err.message ?? "Xero invoice sync failed" }, { status: 500 });
   }
 }
