@@ -1,6 +1,6 @@
 -- =============================================
 -- RESTRICT SITE EDIT / ARCHIVE / DELETE TO OFFICE + ADMIN
--- STATUS: DRAFT — NOT APPLIED. Apply to production, then update this line.
+-- STATUS: ✅ APPLIED IN PRODUCTION (2026-10-08, via SQL editor).
 --
 -- The baseline policy "Authenticated users can manage sites" (0000) let any
 -- signed-in user — a technician holding the anon key included — update,
