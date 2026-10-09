@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { useDataLayer } from "./DataProvider";
+import { reportSyncError } from "../monitoring";
 
 export interface SyncStatus {
   /** Operations still outstanding and being retried (pending + failed + inflight). */
@@ -35,6 +36,10 @@ export function useSyncStatus(pollMs = 3000): SyncStatus {
       } catch (e) {
         // A status badge is not worth an error screen; the next tick recovers.
         if (__DEV__) console.warn("[sync] status poll failed:", e);
+        // The released-shared-object teardown error is EXPECTED here (HANDOVER
+        // §10 trap 7) and reportSyncError skips it; anything else is reported
+        // once per session.
+        reportSyncError(e, "sync-status");
       }
     };
     void tick();
@@ -53,6 +58,7 @@ export function useSyncStatus(pollMs = 3000): SyncStatus {
         await layer.engine.flush();
       } catch (e) {
         if (__DEV__) console.warn("[sync] retry failed:", e);
+        reportSyncError(e, "sync-retry");
       }
     })();
   }, [layer]);

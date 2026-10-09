@@ -685,6 +685,7 @@ compilation. The same commit builds fine in GitHub Actions, which does set them.
 | `mobile/.maestro/` | E2E flows. Destructive taps are opt-in behind `APPROVE_FOR_REAL` / `CLOCK_FOR_REAL`, so a suite run cannot write to production. |
 | `lib/api/` | Web auth guards, per-record authz, Bearer-aware caller client |
 | `lib/monitoring/`, `instrumentation*.ts` | Web error monitoring (Sentry) and its privacy scrubber — §12 |
+| `mobile/lib/monitoring/` | Mobile crash / dead-letter reporting (Sentry) and its scrubber — §12 |
 | `supabase/migrations/` | Schema, applied in filename order |
 | `tests/unit/`, `tests/rls/`, `tests/e2e/` | Web tests |
 | `mobile/DECISIONS-FOR-AVI.md` | Every decision with its rationale — **read before undoing anything that looks odd** |
@@ -834,6 +835,44 @@ outage.
 `""` when unset. That is what lets the bundler drop the SDK; routing the check
 through a helper or a variable put ~85 kB back into every page.
 
+### Mobile (`@sentry/react-native` ~7.2.0 — the version Expo SDK 54 pins)
+
+Initialised at module scope in `mobile/app/_layout.tsx` (`initMonitoring()`),
+root component wrapped with `Sentry.wrap` — both only when
+`EXPO_PUBLIC_SENTRY_DSN` is set. Code in `mobile/lib/monitoring/`.
+
+What it reports — the failures that were silent on a technician's phone:
+
+| Failure | Tags |
+|---|---|
+| Outbox op dead-letters (retries exhausted, repeated mid-dispatch crash, or dead dependency) — `Outbox` `onDeadLetter` hook | `table`, `op`, `aggregate` (writes) or `effect` (side effects), `attempts` |
+| Sync engine background drain failure (the `onSyncError` sink) | `source: sync-engine` |
+| Background-fetch drain failure (headless — initialises monitoring itself) | `source: background-sync` |
+| `useSyncStatus` poll / retry failure | `source: sync-status` / `sync-retry` |
+
+**Not** reported: the expected `ERR_USING_RELEASED_SHARED_OBJECT` teardown
+noise (§10 trap 7). Each distinct sync failure is reported **once per app
+session**, so a broken 3-second poll cannot flood the quota. A dead-letter
+report never carries the payload; the server's error message is redacted
+(numbers and quoted values removed) before it is attached.
+
+Mobile privacy extras: no traces (`tracesSampleRate: 0` — spans would carry
+PostgREST row filters), no screenshots, no view hierarchy (both show the screen,
+including dollar figures for office users), touch breadcrumbs dropped.
+
+**Needs a new native build.** The SDK is a native module: it reaches devices
+only through a new dev client / `eas build`, never an OTA update. Since
+`runtimeVersion` follows the app version, bump `version` in `app.json` before
+publishing any OTA update that contains this code, so it is not delivered to a
+binary built without the module.
+
+The Sentry Expo config plugin (`@sentry/react-native/expo`) is deliberately
+**not** in `app.json`: it adds a source-map upload step to the native build
+that fails the iOS build when `SENTRY_AUTH_TOKEN` is absent. Crash reporting
+works without it; stack traces are just minified. To get readable mobile
+traces later, add the plugin (`organization`, `project`) and set
+`SENTRY_AUTH_TOKEN` as an EAS **secret** in the same change.
+
 ### Privacy — the money rule applies here too
 
 An error tracker is a wider audience than the app. So:
@@ -855,6 +894,8 @@ An error tracker is a wider audience than the app. So:
 | `NEXT_PUBLIC_SENTRY_DSN` | Vercel → `mellerick-app` → Environment Variables, **Production AND Preview** | Public, write-only ingest key. Inlined at build time, so redeploy after setting. |
 | `SENTRY_AUTH_TOKEN` | Vercel, Production (+ Preview if wanted). **Secret** — never `NEXT_PUBLIC_` | Optional. Uploads source maps so stack traces are readable; maps are deleted from the output after upload. |
 | `SENTRY_ORG`, `SENTRY_PROJECT` | Vercel, alongside the token | All three must be present or the upload is skipped silently. An upload failure only warns — it never fails a deploy. |
+
+| `EXPO_PUBLIC_SENTRY_DSN` | EAS: `eas env:set --scope project --environment production --name EXPO_PUBLIC_SENTRY_DSN --value <dsn> --visibility plaintext --type string`, and again with `--environment preview` | DSN of a separate **React Native** Sentry project. Inlined at build time, so it needs a new build. See `mobile/SHIPPING.md` STEP ZERO. |
 
 Steps: create a Sentry account (free tier is enough), create a **Next.js**
 project, copy its DSN into Vercel as above, redeploy, then trigger a test error

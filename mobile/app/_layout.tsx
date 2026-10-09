@@ -5,6 +5,7 @@ import "../global.css";
 // dropped — the readings are simply gone, which is the silent data loss this
 // whole feature exists to stop.
 import "../lib/backgroundClockTask";
+import { initMonitoring, wrapRoot } from "../lib/monitoring";
 import { useEffect } from "react";
 import { Stack, useRouter, useSegments } from "expo-router";
 import { StatusBar } from "expo-status-bar";
@@ -184,7 +185,12 @@ function RootNavigation() {
   );
 }
 
-export default function RootLayout() {
+// Crash reporting (Sentry). Initialised at module scope, before any component
+// renders, so a crash during the first render is caught too. A no-op unless
+// EXPO_PUBLIC_SENTRY_DSN was set at build time — see lib/monitoring.
+initMonitoring();
+
+function RootLayout() {
   return (
     <AuthProvider>
       <DataProvider>
@@ -199,6 +205,10 @@ export default function RootLayout() {
     </AuthProvider>
   );
 }
+
+// Sentry.wrap when monitoring started (error boundary + native crash context);
+// the plain component otherwise.
+export default wrapRoot(RootLayout);
 
 const styles = StyleSheet.create({
   syncOverlay: { position: "absolute", left: 0, right: 0, alignItems: "center", zIndex: 1000 },

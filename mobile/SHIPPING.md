@@ -106,6 +106,14 @@ To prove it is set correctly, do not read a log line: record a voice completion
 report on a job, then look for the transcript on the web side. No transcript and
 no error means this variable is missing.
 
+**Optional — crash reporting (Sentry).** `EXPO_PUBLIC_SENTRY_DSN` turns on error
+monitoring (`lib/monitoring/`). Unset, the app behaves exactly as without it.
+Like the others it is inlined at build time, so set it in EAS, not just in
+`mobile/.env` (`--visibility plaintext`: a DSN is a write-only ingest key, not a
+secret). `@sentry/react-native` is a native module, so it reaches devices only
+via a NEW native build (dev client or `eas build`) — an OTA update cannot add it.
+See HANDOVER §12.
+
 The build profiles in `eas.json` declare which environment they draw from
 (`production` → production, `development`/`preview` → preview). The anon key is
 public by design — it ships inside every bundle — so this is about the build
