@@ -598,6 +598,42 @@ So background tracking is now implemented (`mobile/lib/backgroundClock*.ts`,
 foreground watcher working exactly as before, and logs that drive time is not
 being recorded rather than swallowing it.
 
+**Tracking is gated (9 October 2026) — it no longer runs for everyone, all the
+time.** `mobile/lib/trackingGate.ts` decides; the foreground provider and the
+background task both call it. GPS (and the Android foreground-service
+notification) runs only when **all** of:
+
+- the role is `technician` (an unknown role — profile not loaded, offline
+  launch — counts as technician rather than switching tracking off);
+- the technician has at least one geofence-able open job (crew jobs included);
+- they are **on the clock** *or* inside `WORK_HOURS` — 06:00–19:00 Mon–Sat,
+  device-local time, one constant.
+
+**On the clock beats the hours** — that is the payroll rule. It means any of: an
+open work entry (mirror or network; open > 16 h is treated as a forgotten
+clock-out), a clock-in still queued in the outbox, the geofence placing them
+inside a site, a drive in progress (departure < 3 h old, so the travel leg is
+captured), or a wake-region hit in the last 20 min. Anything it cannot read
+counts as on the clock. It is re-decided on app foreground, every site refresh,
+every clock write queued on the device, every geofence transition and every
+5 min; when the app has been swiped away the background task re-checks itself
+after each batch.
+
+**Off hours the job sites stay registered as OS wake regions** (300 m,
+enter-only, the 20 soonest — iOS's cap). iOS cannot restart GPS from the
+background on its own, so without this a phone that is not opened in the
+morning would miss the first arrival of the day. A region entry restarts
+tracking; the clock times still come from the ordinary 150 m readings.
+
+Settings: accuracy stays Balanced (lower is 1–3 km against a 150 m geofence —
+fabricated or missed clock-ins). "Watching" (in hours, not working) samples at
+30 s; on the clock keeps the original 15 s / 25 m, with a 60 s batching
+deferral only while on site. iOS auto-pause stays **off**: expo never resumes a
+paused task, which would lose the departure and the next arrival. Rationale in
+`mobile/DECISIONS-FOR-AVI.md` D96. **Not yet verified on a device** — check an
+evening shift (clocked in past 19:00 keeps tracking; clocking out stops it and
+the notification goes) and a morning first arrival with the app unopened.
+
 **The store-review risk is real and has not gone away.** Apple and Google both
 scrutinise "Always" location. The submission needs a clear justification string
 (written, in `app.json`) and screenshots showing the Android foreground-service

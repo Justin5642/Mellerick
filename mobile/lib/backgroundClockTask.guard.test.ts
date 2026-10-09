@@ -83,7 +83,10 @@ describe("backgroundClockTask registration", () => {
 
     require("./backgroundClockTask");
 
-    expect(defineTask).toHaveBeenCalledTimes(1);
-    expect(defineTask.mock.calls[0][0]).toBe("mellerick-background-clock");
+    // Both at module scope: the OS can relaunch the app straight into either —
+    // the wake task is what restarts tracking off hours, so a wake delivered
+    // before its defineTask ran would silently miss that arrival.
+    expect(defineTask).toHaveBeenCalledTimes(2);
+    expect(defineTask.mock.calls.map((c) => c[0])).toEqual(["mellerick-background-clock", "mellerick-site-wake"]);
   });
 });

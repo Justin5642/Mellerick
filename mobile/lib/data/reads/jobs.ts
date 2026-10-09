@@ -153,15 +153,16 @@ export const SQL_LIST_MY_JOBS = `
 
 // The geofence's site list: the same "mine, open" scope as My Jobs, cut down to
 // what the auto-clock needs. A job without coordinates cannot be geofenced and
-// is filtered out in mapJobSite (shared with the remote path), not here, so the
-// two paths cannot disagree about what counts as having coordinates.
+// is filtered out in mapJobSites (shared with the remote path), not here, so the
+// two paths cannot disagree about what counts as having coordinates. Soonest
+// first: the off-hours wake regions keep only the first 20 (lib/trackingGate.ts).
 export const SQL_LIST_MY_JOB_SITES = `
   SELECT j.id, j.scheduled_cost_center_id, s.site_lat, s.site_lng
   FROM jobs j
   LEFT JOIN sites s ON s.id = j.site_id
   WHERE ${assignedOrCrewSql("j", "?1")}
     AND j.status NOT IN ('completed', 'cancelled')
-  ORDER BY j.id`;
+  ORDER BY j.scheduled_start IS NULL, j.scheduled_start, j.id`;
 
 export const SQL_GET_JOB = `
   SELECT j.id, j.job_number, j.title, j.status, j.priority, j.description, j.notes,
@@ -503,6 +504,7 @@ export async function listMyJobSites(userId: string): Promise<MyJobSite[]> {
         .select("id, scheduled_cost_center_id, sites(site_lat, site_lng)")
         .or(assignedOrCrewFilter(userId, crew))
         .not("status", "in", '("completed","cancelled")')
+        .order("scheduled_start", { ascending: true, nullsFirst: false })
         .order("id", { ascending: true });
       const rows = unwrapRows(res as never, "listMyJobSites") as unknown as {
         id: string;

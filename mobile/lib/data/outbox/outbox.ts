@@ -170,6 +170,13 @@ export class Outbox {
     }
   }
 
+  // Every operation, for read-only callers that need to reason over what is
+  // still queued — the location-tracking gate looks for an offline clock-in the
+  // server has not seen yet (lib/trackingGate.ts hasOpenWorkInOutbox).
+  async snapshot(): Promise<Operation[]> {
+    return this.store.all();
+  }
+
   // Row ids of every write still outstanding (not done/dead). A screen merges
   // this with a server read so an optimistic row that hasn't synced yet is not
   // wiped by the reload.

@@ -2,6 +2,7 @@ import type { Outbox } from "../outbox/outbox";
 import type { IdGen } from "../ids";
 import type { WriteOp, WriteOperation, SideEffectOperation } from "../outbox/types";
 import { systemTime, type TimeSource } from "../time";
+import { notifyClockChanged } from "../../clockEvents";
 
 // Re-exported for back-compat with existing importers of these from here.
 export { systemTime, type TimeSource };
@@ -162,6 +163,9 @@ export class TimeEntriesRepository {
       createdAt: this.time.nowMs(),
     };
     await this.outbox.enqueue(write);
+    // Every time-entry write can change whether the technician is on the clock,
+    // which the location-tracking gate needs to know now (lib/clockEvents.ts).
+    notifyClockChanged();
     return id;
   }
 

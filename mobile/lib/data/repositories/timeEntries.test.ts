@@ -2,6 +2,7 @@ import { TimeEntriesRepository, hoursBetween, type TimeSource } from "./timeEntr
 import type { Outbox } from "../outbox/outbox";
 import type { IdGen } from "../ids";
 import type { Operation, WriteOperation, SideEffectOperation } from "../outbox/types";
+import { onClockChanged } from "../../clockEvents";
 
 // Deterministic id sequence: id-1, id-2, ... so we can reason about which call
 // produced which id (rowId, then op id, then side-effect id).
@@ -267,5 +268,34 @@ describe("addManual — auto-clocked travel legs", () => {
     const [w] = writes(ops);
     expect(w.payload.auto_clocked).toBe(false);
     expect("travel_from_job_id" in w.payload).toBe(false);
+  });
+});
+
+// The location-tracking gate keeps GPS on while a technician is on the clock and
+// must hear about a clock-in the moment it is queued (lib/clockEvents.ts) — a
+// clock-in at 18:59 that waited for the next periodic re-check could find
+// tracking already switched off for the evening.
+describe("TimeEntriesRepository clock notifications", () => {
+  it("notifies after the write is queued, for clock-in, clock-out and manual entries", async () => {
+    const { outbox, ops } = captureOutbox();
+    const seen: number[] = [];
+    const off = onClockChanged(() => seen.push(writes(ops).length));
+    try {
+      const repo = new TimeEntriesRepository(outbox, seqIds(), fixedTime());
+      await repo.clockIn({ jobId: "j1", staffId: "s1" });
+      await repo.clockOut({ entryId: "id-1", clockInIso: "2026-07-21T08:00:00.000Z" });
+      await repo.addManual({
+        jobId: "j1",
+        staffId: "s1",
+        entryType: "work",
+        clockInIso: "2026-07-21T07:00:00.000Z",
+        clockOutIso: null,
+        costCenterId: null,
+      });
+    } finally {
+      off();
+    }
+    // Each notification fires with its write already in the queue.
+    expect(seen).toEqual([1, 2, 3]);
   });
 });
