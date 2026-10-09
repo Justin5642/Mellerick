@@ -728,6 +728,12 @@ Things that have already cost time, roughly in order of how likely you are to hi
 8. **Any route using the service-role client must authorize the caller first.**
    It bypasses RLS entirely.
 9. **Two lockfiles, two projects.** Install in the right directory.
+10. **`jobs.assigned_to` is only the crew's PRIMARY assignee** (migration 0059).
+    "My jobs" means *any* current assignee: `job_assignments` OR `assigned_to`.
+    My Jobs (web and mobile), the geofence site list and the schedule "All day"
+    count filtered on `assigned_to` alone, so the second technician on a crew job
+    had it synced to their phone but never saw it and was never auto-clocked
+    there. Use `mobile/lib/data/reads/assignedJobs.ts` for any new "mine" read.
 
 ---
 

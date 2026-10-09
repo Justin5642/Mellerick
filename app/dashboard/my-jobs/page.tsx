@@ -19,10 +19,23 @@ export default function MyJobsPage() {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
 
+      // "Mine" is ANY current assignee (job_assignments, migration 0059), not
+      // just jobs.assigned_to — that column only names the crew's primary, so
+      // filtering on it alone hid crew jobs from everyone else on the crew.
+      // Same rule as user_can_manage_job() and the mobile My Jobs list. The
+      // crew lookup is narrowed to open jobs because the ids travel back out
+      // in the URL below.
+      const { data: crew } = await supabase
+        .from("job_assignments")
+        .select("job_id, jobs!inner(status)")
+        .eq("staff_id", user.id)
+        .not("jobs.status", "in", '("completed","cancelled")');
+      const crewIds = [...new Set((crew ?? []).map((r) => r.job_id))];
+
       const { data } = await supabase
         .from("jobs")
         .select("*, customers(name), sites(name, address_line1, suburb, state, site_lat, site_lng)")
-        .eq("assigned_to", user.id)
+        .or(crewIds.length > 0 ? `assigned_to.eq.${user.id},id.in.(${crewIds.join(",")})` : `assigned_to.eq.${user.id}`)
         .not("status", "in", '("completed","cancelled")')
         .order("scheduled_start", { ascending: true, nullsFirst: false });
 

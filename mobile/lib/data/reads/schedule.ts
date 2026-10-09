@@ -1,6 +1,7 @@
 import { supabase } from "../../supabase";
 import { fromLocalOr } from "./source";
 import { unwrapRows } from "./unwrap";
+import { assignedOrCrewFilter, assignedOrCrewSql, crewJobIdsRemote } from "./assignedJobs";
 import { businessDayRange } from "../../scheduling";
 
 export interface AssignableStaff {
@@ -48,7 +49,14 @@ export async function listAssignableStaff(): Promise<AssignableStaff[]> {
 
 // How many jobs (other than `excludeJobId`) a technician already has
 // scheduled on a given business date — feeds the Schedule Job flow's "All
-// day" smart default (lib/scheduling.ts's defaultAllDay).
+// day" smart default (lib/scheduling.ts's defaultAllDay). Counts crew jobs too
+// (./assignedJobs): a technician who is the second name on a morning job is
+// not free that morning.
+export const SQL_COUNT_OTHER_SCHEDULED_JOBS = `
+  SELECT COUNT(*) AS n FROM jobs j
+  WHERE ${assignedOrCrewSql("j", "?1")}
+    AND j.id != ?2 AND j.scheduled_start >= ?3 AND j.scheduled_start < ?4`;
+
 export async function countOtherScheduledJobs(
   technicianId: string,
   dateKey: string,
@@ -58,17 +66,21 @@ export async function countOtherScheduledJobs(
   return fromLocalOr(
     async (db) => {
       const row = await db.getOptional<{ n: number }>(
-        `SELECT COUNT(*) AS n FROM jobs
-         WHERE assigned_to = ? AND id != ? AND scheduled_start >= ? AND scheduled_start < ?`,
+        SQL_COUNT_OTHER_SCHEDULED_JOBS,
         [technicianId, excludeJobId, dayStartIso, dayEndIso]
       );
       return row?.n ?? 0;
     },
     async () => {
+      const crew = await crewJobIdsRemote(
+        technicianId,
+        { kind: "scheduled", fromIso: dayStartIso, beforeIso: dayEndIso },
+        "countOtherScheduledJobs"
+      );
       const { count, error } = await supabase
         .from("jobs")
         .select("id", { count: "exact", head: true })
-        .eq("assigned_to", technicianId)
+        .or(assignedOrCrewFilter(technicianId, crew))
         .neq("id", excludeJobId)
         .gte("scheduled_start", dayStartIso)
         .lt("scheduled_start", dayEndIso);

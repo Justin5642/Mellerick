@@ -21,7 +21,7 @@ jest.mock("../../supabase", () => {
 
 import { supabase } from "../../supabase";
 import { resetSourceForTests, setLocalReads, type LocalReads, type LocalRole } from "./source";
-import { getJob, listMyJobs, listOfficeJobs, searchJobs, searchOfficeJobs } from "./jobs";
+import { getJob, listMyJobs, listMyJobSites, listOfficeJobs, searchJobs, searchOfficeJobs } from "./jobs";
 
 /** Whitespace-normalize SQL for comparison. */
 function norm(sql: string): string {
@@ -91,9 +91,10 @@ describe("listMyJobs (local)", () => {
       FROM jobs j
       LEFT JOIN customers c ON c.id = j.customer_id
       LEFT JOIN sites     s ON s.id = j.site_id
-      WHERE j.assigned_to = ?
+      WHERE (j.assigned_to = ?1 OR j.id IN (SELECT ja.job_id FROM job_assignments ja WHERE ja.staff_id = ?1))
         AND j.status NOT IN ('completed', 'cancelled')
       ORDER BY j.scheduled_start IS NULL, j.scheduled_start`));
+    // One value binds both halves of the "mine" predicate (?1 twice).
     expect(params).toEqual(["user-1"]);
     expect(supabase.from as jest.Mock).not.toHaveBeenCalled();
   });
@@ -104,6 +105,31 @@ describe("listMyJobs (local)", () => {
 
     await expect(listMyJobs("tech-1")).resolves.toEqual([]);
     expect(getAll).toHaveBeenCalledTimes(1);
+    expect(supabase.from as jest.Mock).not.toHaveBeenCalled();
+  });
+});
+
+describe("listMyJobSites (local)", () => {
+  it("scopes to the crew, not just assigned_to, and drops jobs with no usable coordinates", async () => {
+    const getAll = jest.fn().mockResolvedValue([
+      { id: "j1", scheduled_cost_center_id: "cc-1", site_lat: -37.82, site_lng: 144.99 },
+      // SQLite may hand a real back as text — still a coordinate.
+      { id: "j2", scheduled_cost_center_id: null, site_lat: "-37.9", site_lng: "145.1" },
+      { id: "j3", scheduled_cost_center_id: null, site_lat: null, site_lng: null }, // no site
+      { id: "j4", scheduled_cost_center_id: null, site_lat: 0, site_lng: 0 }, // unset pin
+    ]);
+    setLocalReads(fakeReads({ role: () => "technician", getAll }));
+
+    await expect(listMyJobSites("tech-2")).resolves.toEqual([
+      { jobId: "j1", lat: -37.82, lng: 144.99, scheduledCostCenterId: "cc-1" },
+      { jobId: "j2", lat: -37.9, lng: 145.1, scheduledCostCenterId: null },
+    ]);
+    const [sql, params] = getAll.mock.calls[0];
+    expect(norm(sql)).toContain(
+      "WHERE (j.assigned_to = ?1 OR j.id IN (SELECT ja.job_id FROM job_assignments ja WHERE ja.staff_id = ?1))"
+    );
+    expect(norm(sql)).toContain("AND j.status NOT IN ('completed', 'cancelled')");
+    expect(params).toEqual(["tech-2"]);
     expect(supabase.from as jest.Mock).not.toHaveBeenCalled();
   });
 });

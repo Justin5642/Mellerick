@@ -2,6 +2,7 @@ import { createContext, useContext, useEffect, useRef, type ReactNode } from "re
 import { Alert } from "react-native";
 import * as Location from "expo-location";
 import { supabase } from "./supabase";
+import { listMyJobSites } from "./data/reads/jobs";
 import { useAuth } from "./auth-context";
 import { useDataLayer } from "./data/DataProvider";
 import type { DataLayer } from "./data/createDataLayer";
@@ -84,32 +85,15 @@ export function LocationTrackingProvider({ children }: { children: ReactNode }) 
     let cancelled = false;
 
     async function loadSites() {
-      const { data, error } = await supabase
-        .from("jobs")
-        .select("id, status, scheduled_cost_center_id, sites(site_lat, site_lng)")
-        .eq("assigned_to", userId)
-        .not("status", "in", '("completed","cancelled")');
+      // Local-first (reads/jobs.ts listMyJobSites), and scoped to every job the
+      // technician is on — crew jobs included, not just those where they are
+      // jobs.assigned_to's primary. The assigned_to-only filter this replaces
+      // meant the second technician on a crew job never had its site
+      // geofenced, so their arrival and travel there were never auto-recorded.
+      const sites = await listMyJobSites(userId as string);
       if (cancelled) return;
 
-      // A failed refresh KEEPS the sites we already had. Blanking them on a
-      // transient network error would silently switch the auto-clock off for
-      // the rest of the shift — and because nextGeofenceState treats an empty
-      // list as "not loaded yet" (correctly, so it never fabricates a
-      // clock-out), the failure would be completely invisible: no error, no
-      // clock-in, no travel time, just quietly unpaid hours.
-      if (error) {
-        console.warn("[geofence] could not refresh job sites; keeping the previous list:", error.message);
-        return;
-      }
-
-      sitesRef.current = (data ?? [])
-        .filter((j: any) => j.sites?.site_lat && j.sites?.site_lng)
-        .map((j: any) => ({
-          jobId: j.id,
-          lat: j.sites.site_lat,
-          lng: j.sites.site_lng,
-          scheduledCostCenterId: j.scheduled_cost_center_id ?? null,
-        }));
+      sitesRef.current = sites;
 
       // Hand the same list to the background task. It runs with no React tree
       // and cannot fetch this itself, so the foreground is the only place that
@@ -120,16 +104,19 @@ export function LocationTrackingProvider({ children }: { children: ReactNode }) 
       );
     }
 
-    // A refresh that THROWS rather than returning an error gets the same policy as
-    // the error branch above — keep the list we already have — with one exception
-    // that policy cannot cover. A FIRST load that fails leaves no list at all, and
-    // an empty list reads downstream as "not loaded yet", so the auto-clock never
-    // engages for the entire shift. There is no screen anywhere that would show
+    // A failed refresh KEEPS the sites we already had. Blanking them on a
+    // transient error would silently switch the auto-clock off for the rest of
+    // the shift — and because nextGeofenceState treats an empty list as "not
+    // loaded yet" (correctly, so it never fabricates a clock-out), the failure
+    // would be completely invisible: no error, no clock-in, no travel time, just
+    // quietly unpaid hours. There is one case that policy cannot cover: a FIRST
+    // load that fails leaves no list at all, and an empty list reads downstream
+    // as "not loaded yet", so the auto-clock never engages for the entire shift. There is no screen anywhere that would show
     // that, which is precisely why it has to be said out loud.
     function refreshSites() {
       loadSites().catch((e) => {
         if (cancelled) return;
-        console.warn("[geofence] job site refresh failed:", e);
+        console.warn("[geofence] could not refresh job sites; keeping the previous list:", e);
         if (sitesRef.current.length > 0 || autoClockAlertedRef.current) return;
         autoClockAlertedRef.current = true;
         Alert.alert(
