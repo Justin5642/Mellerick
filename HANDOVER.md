@@ -268,6 +268,15 @@ proves its request is inside it, or throws `OutsideSyncWindow`, which
 | `getEquipmentUtilization`, `countOtherScheduledJobs` | local when the date bound is inside the window |
 | `listMyJobs`, `listReadyToInvoice`, `listBackflowDevices` | always complete — the windows keep every row they select |
 
+**Local indexes.** PowerSync stores each table as JSON behind a view, so an
+unindexed `WHERE job_id = ?` parses every row. The indexes the reads need are
+declared by hand in `mobile/powersync/device-indexes.js` and merged into the
+generated `schema.ts` by `generate-powersync-schema.mjs` (which refuses an
+index on a column the device does not hold). `lib/powersync/indexes.test.ts`
+reads every local SQL statement and fails when a lookup has no usable index —
+add the index there, then regenerate. Two scans are deliberate and named in
+that test.
+
 No horizon row means no window (migration or YAML not deployed) and every read
 behaves exactly as before. Consequence to tell office staff: once deployed,
 reports, customer history and search need a connection; open work does not.
@@ -847,6 +856,8 @@ compilation. The same commit builds fine in GitHub Actions, which does set them.
 | `mobile/lib/data/reads/` | Local-first read modules, one per area |
 | `mobile/lib/data/outbox/` | Durable write queue + processor |
 | `mobile/powersync/sync-streams.yaml` | **Security-critical.** Sync rules. |
+| `mobile/powersync/device-indexes.js` | Hand-maintained SQLite indexes merged into the generated device schema |
+| `mobile/lib/data/reads/horizon.ts` | What the windowed mirror is guaranteed to hold; out-of-window reads go to Supabase |
 | `mobile/design/` | Design system: tokens, primitives, `MoneyText`, `RoleGate` |
 | `mobile/app/` | expo-router routes, grouped by role |
 | `mobile/.maestro/` | E2E flows. Destructive taps are opt-in behind `APPROVE_FOR_REAL` / `CLOCK_FOR_REAL`, so a suite run cannot write to production. |

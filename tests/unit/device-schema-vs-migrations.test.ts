@@ -67,7 +67,9 @@ function migrationSql(): string {
  */
 function deviceSchema(src: string): Map<string, Map<string, string>> {
   const out = new Map<string, Map<string, string>>();
-  for (const m of src.matchAll(/const (\w+) = new Table\(\{([\s\S]*?)\n\}\);/g)) {
+  // A table with indexes closes `}, {\n  indexes: …\n});` instead of `});` —
+  // the column block is still everything up to the first `\n}`.
+  for (const m of src.matchAll(/const (\w+) = new Table\(\{([\s\S]*?)\n\}(?:, \{[\s\S]*?\n\})?\);/g)) {
     const cols = new Map<string, string>();
     for (const c of m[2].matchAll(/^\s*(\w+):\s*column\.(\w+),/gm)) cols.set(c[1], c[2]);
     out.set(m[1], cols);

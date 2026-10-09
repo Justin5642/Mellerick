@@ -63,7 +63,24 @@ function sqliteType(pgType) {
   }
 }
 
-function render(synced, byTable) {
+// Validates the hand-maintained index map (mobile/powersync/device-indexes.js)
+// against what the device will actually hold. An index on a column the view
+// does not declare fails PowerSync's schema validation at app start — loudly,
+// but on a phone; failing here moves that to the generator run.
+function checkIndexes(indexes, synced, chosenByTable) {
+  for (const [table, defs] of Object.entries(indexes)) {
+    if (!synced.has(table)) throw new Error(`index on ${table}, which no stream syncs`);
+    const cols = new Set(chosenByTable.get(table) ?? []);
+    for (const [name, columns] of Object.entries(defs)) {
+      if (!/^[a-z_][a-z0-9_]*$/.test(name)) throw new Error(`${table}: index name ${name} is not a plain identifier`);
+      if (!Array.isArray(columns) || columns.length === 0) throw new Error(`${table}.${name}: index has no columns`);
+      const unknown = columns.filter((c) => !cols.has(c));
+      if (unknown.length) throw new Error(`${table}.${name}: index column(s) ${unknown.join(', ')} not synced to the device`);
+    }
+  }
+}
+
+function render(synced, byTable, indexes = {}) {
   const tables = [...synced.keys()].sort();
   const out = [];
   out.push('// GENERATED FILE — do not edit by hand.');
@@ -81,10 +98,15 @@ function render(synced, byTable) {
   out.push('//');
   out.push('// Numeric columns are declared `real` so local reads return JS numbers,');
   out.push('// matching what the Supabase/PostgREST fallback returns.');
+  out.push('//');
+  out.push('// Indexes are merged from mobile/powersync/device-indexes.js (hand-maintained,');
+  out.push('// so regeneration keeps them). Add or change one there, then regenerate.');
   out.push('');
   out.push("import { column, Schema, Table } from '@powersync/common';");
   out.push('');
 
+  const chosenByTable = new Map();
+  const bodies = new Map();
   for (const t of tables) {
     const cols = byTable.get(t);
     if (!cols) throw new Error(`table ${t} is in sync-streams.yaml but not in the database`);
@@ -94,12 +116,26 @@ function render(synced, byTable) {
       const missing = [...want].filter((w) => w !== 'id' && !cols.some((c) => c.name === w));
       if (missing.length) throw new Error(`${t}: stream selects unknown column(s) ${missing.join(', ')}`);
     }
-    const body = chosen
-      .filter((c) => c.name !== 'id') // id is implicit in PowerSync
-      .map((c) => `  ${c.name}: column.${sqliteType(c.pg)},`);
+    const body = chosen.filter((c) => c.name !== 'id'); // id is implicit in PowerSync
+    chosenByTable.set(t, body.map((c) => c.name));
+    bodies.set(t, body.map((c) => `  ${c.name}: column.${sqliteType(c.pg)},`));
+  }
+  checkIndexes(indexes, synced, chosenByTable);
+
+  for (const t of tables) {
     out.push(`const ${t} = new Table({`);
     out.push('  // id (text) is implicit');
-    out.push(...body);
+    out.push(...bodies.get(t));
+    const defs = indexes[t];
+    if (defs && Object.keys(defs).length) {
+      // From mobile/powersync/device-indexes.js — edit there, not here.
+      out.push('}, {');
+      out.push('  indexes: {');
+      for (const [name, columns] of Object.entries(defs)) {
+        out.push(`    ${name}: [${columns.map((c) => `'${c}'`).join(', ')}],`);
+      }
+      out.push('  },');
+    }
     out.push('});');
     out.push('');
   }
@@ -113,4 +149,4 @@ function render(synced, byTable) {
   return out.join('\n');
 }
 
-module.exports = { parseStreams, sqliteType, render };
+module.exports = { parseStreams, sqliteType, render, checkIndexes };

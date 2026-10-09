@@ -13,6 +13,9 @@
 //
 // Numeric columns are declared `real` so local reads return JS numbers,
 // matching what the Supabase/PostgREST fallback returns.
+//
+// Indexes are merged from mobile/powersync/device-indexes.js (hand-maintained,
+// so regeneration keeps them). Add or change one there, then regenerate.
 
 import { column, Schema, Table } from '@powersync/common';
 
@@ -48,6 +51,10 @@ const backflow_tests = new Table({
   result: column.text,
   tested_by: column.text,
   created_at: column.text,
+}, {
+  indexes: {
+    device: ['device_id'],
+  },
 });
 
 const customers = new Table({
@@ -98,6 +105,10 @@ const equipment_expenses = new Table({
   receipt_storage_path: column.text,
   logged_by: column.text,
   created_at: column.text,
+}, {
+  indexes: {
+    equipment: ['equipment_id'],
+  },
 });
 
 const equipment_usage_log = new Table({
@@ -110,6 +121,11 @@ const equipment_usage_log = new Table({
   logged_by: column.text,
   created_at: column.text,
   sync_office: column.integer,
+}, {
+  indexes: {
+    job: ['job_id'],
+    equipment_date: ['equipment_id', 'usage_date'],
+  },
 });
 
 const inventory = new Table({
@@ -140,6 +156,10 @@ const invoice_items = new Table({
   total: column.real,
   created_at: column.text,
   sync_office: column.integer,
+}, {
+  indexes: {
+    invoice: ['invoice_id'],
+  },
 });
 
 const invoices = new Table({
@@ -164,6 +184,11 @@ const invoices = new Table({
   updated_at: column.text,
   work_description: column.text,
   sync_office: column.integer,
+}, {
+  indexes: {
+    customer: ['customer_id'],
+    created: ['created_at'],
+  },
 });
 
 const job_assignments = new Table({
@@ -191,6 +216,10 @@ const job_expenses = new Table({
   xero_synced_at: column.text,
   cost_center_id: column.text,
   sync_office: column.integer,
+}, {
+  indexes: {
+    job: ['job_id'],
+  },
 });
 
 const job_items = new Table({
@@ -207,6 +236,10 @@ const job_items = new Table({
   staff_id: column.text,
   time_entry_id: column.text,
   sync_office: column.integer,
+}, {
+  indexes: {
+    job: ['job_id'],
+  },
 });
 
 const job_notes = new Table({
@@ -239,6 +272,10 @@ const job_stage_notes = new Table({
   content: column.text,
   created_at: column.text,
   sync_office: column.integer,
+}, {
+  indexes: {
+    job_created: ['job_id', 'created_at'],
+  },
 });
 
 const job_variations = new Table({
@@ -263,6 +300,10 @@ const job_variations = new Table({
   attachment_storage_path: column.text,
   attachment_file_name: column.text,
   sync_office: column.integer,
+}, {
+  indexes: {
+    job: ['job_id'],
+  },
 });
 
 const jobs = new Table({
@@ -304,6 +345,12 @@ const jobs = new Table({
   estimated_hours: column.real,
   sync_tech: column.integer,
   sync_office: column.integer,
+}, {
+  indexes: {
+    assigned_scheduled: ['assigned_to', 'scheduled_start'],
+    customer: ['customer_id'],
+    created: ['created_at'],
+  },
 });
 
 const po_cost_centers = new Table({
@@ -316,6 +363,10 @@ const po_cost_centers = new Table({
   sort_order: column.integer,
   created_at: column.text,
   simpro_cost_center_id: column.integer,
+}, {
+  indexes: {
+    po: ['po_id'],
+  },
 });
 
 const pricing_items = new Table({
@@ -352,6 +403,10 @@ const purchase_orders = new Table({
   created_at: column.text,
   updated_at: column.text,
   simpro_job_id: column.integer,
+}, {
+  indexes: {
+    job: ['job_id'],
+  },
 });
 
 const quote_items = new Table({
@@ -365,6 +420,10 @@ const quote_items = new Table({
   total: column.real,
   created_at: column.text,
   sync_office: column.integer,
+}, {
+  indexes: {
+    quote: ['quote_id'],
+  },
 });
 
 const quotes = new Table({
@@ -387,6 +446,11 @@ const quotes = new Table({
   created_at: column.text,
   updated_at: column.text,
   sync_office: column.integer,
+}, {
+  indexes: {
+    customer: ['customer_id'],
+    created: ['created_at'],
+  },
 });
 
 const sites = new Table({
@@ -402,6 +466,10 @@ const sites = new Table({
   site_lat: column.real,
   site_lng: column.real,
   is_active: column.integer,
+}, {
+  indexes: {
+    customer: ['customer_id'],
+  },
 });
 
 const sync_horizon = new Table({
@@ -429,6 +497,10 @@ const time_entries = new Table({
   edited_at: column.text,
   rate_override: column.text,
   sync_office: column.integer,
+}, {
+  indexes: {
+    job_staff: ['job_id', 'staff_id'],
+  },
 });
 
 const variation_types = new Table({
