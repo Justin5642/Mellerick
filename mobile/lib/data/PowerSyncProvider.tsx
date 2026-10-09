@@ -3,6 +3,8 @@ import { useAuth } from "../auth-context";
 import { useDataLayer } from "./DataProvider";
 import { markWritesSettled, setLocalReads, type LocalRole } from "./reads/source";
 import { recordReadOnlyViolation, setPowerSyncStatus } from "./powersyncStatus";
+import { runTransition, type TransitionDeps, type TransitionState } from "./powersyncTransition";
+import { clearSyncMarker, readSyncMarker, writeSyncMarker } from "./syncMarker";
 import { supabase } from "../supabase";
 import { MellerickConnector } from "../../powersync/connector";
 import { makeLocalReads, powersync } from "../../powersync/db";
@@ -15,9 +17,15 @@ import { makeLocalReads, powersync } from "../../powersync/db";
 // Two hardening rules (from the phase-gate review):
 //  • Transitions are SERIALIZED through a promise chain — rapid session/role
 //    churn cannot interleave a connect with a disconnectAndClear.
-//  • The seam is registered only AFTER waitForFirstSync resolves for the new
-//    connection, so a role change can never serve the previous role's (or a
-//    partially-downloaded) row set under a stale hasSynced flag.
+//  • The CONFIRMED seam is registered only AFTER waitForFirstSync resolves for
+//    the new connection, so a role change can never serve the previous role's
+//    (or a partially-downloaded) row set under a stale hasSynced flag.
+//  • Exception, cold start only: when the persisted marker (lib/data/
+//    syncMarker) records that the mirror on disk COMPLETED a full sync for this
+//    exact user AND role, a provisional seam is registered immediately, so My
+//    Jobs' first render reads locally instead of waiting on the network. A
+//    marker for anyone else wipes the mirror first. Logic and tests:
+//    lib/data/powersyncTransition.ts.
 //
 // Reads-only integration: uploadData is a tripwire (see powersync/connector.ts)
 // and every write still goes through the outbox.
@@ -45,23 +53,24 @@ function asLocalRole(role: string | undefined | null): LocalRole {
 export function PowerSyncProvider({ children }: { children: React.ReactNode }) {
   const { session, profile } = useAuth();
   const layer = useDataLayer();
-  const role = asLocalRole(profile?.role);
-  /** The role PowerSync is CONNECTED as. Decides whether a disconnect is owed. */
-  const connectedRole = useRef<LocalRole>(null);
-  /**
-   * The role whose first sync COMPLETED and whose local reads are registered.
-   *
-   * Deliberately separate from connectedRole. Gating the early return on
-   * "connected" made a lost seam permanent: a transition superseded during
-   * waitForFirstSync skipped registration, and the next one returned early
-   * because the connection had already been recorded.
-   */
-  const syncedRole = useRef<LocalRole>(null);
+  // A DEACTIVATED account gets no role here, which routes it down the sign-out
+  // branch and wipes the mirror: app/_layout.tsx only hides the screens, and an
+  // office user switched off in staff.tsx must not keep invoice rows on disk.
+  const role = profile?.is_active === true ? asLocalRole(profile.role) : null;
+  const userId = session?.user?.id ?? null;
+  // Who is connected / synced / vouched-for — see lib/data/powersyncTransition.
+  const state = useRef<TransitionState>({ connected: null, synced: null, trusted: null });
   // All connect/disconnect work appends here — one transition at a time.
   const transitions = useRef<Promise<void>>(Promise.resolve());
   // Bumped on every transition; a queued setLocalReads only applies if its
   // generation is still current when the first sync completes.
   const generation = useRef(0);
+  // Aborts the previous transition's waitForFirstSync. Without it a transition
+  // waiting OFFLINE for a first sync that never comes blocked the chain
+  // forever — every later transition (a sign-out's wipe included) queued
+  // behind it. Aborting resolves the wait; the generation check then stops the
+  // superseded transition from registering anything.
+  const waitAbort = useRef<AbortController | null>(null);
 
   // Route reads remotely for a beat after each outbox drain — the local mirror
   // lags a confirmed write by one download round-trip.
@@ -78,65 +87,40 @@ export function PowerSyncProvider({ children }: { children: React.ReactNode }) {
     });
   }, []);
 
+  // Keyed on the USER and ROLE, not the session object. Every TOKEN_REFRESHED
+  // hands auth-context a new session object; keying on it re-ran this
+  // transition hourly for an identity that had not changed.
   useEffect(() => {
     const gen = ++generation.current;
+    waitAbort.current?.abort();
+    const abort = new AbortController();
+    waitAbort.current = abort;
+    const deps: TransitionDeps = {
+      connect: () => powersync.connect(connector),
+      disconnectAndClear: () => powersync.disconnectAndClear(),
+      waitForFirstSync: () => powersync.waitForFirstSync(abort.signal),
+      makeLocalReads,
+      setLocalReads,
+      readMarker: readSyncMarker,
+      writeMarker: writeSyncMarker,
+      clearMarker: clearSyncMarker,
+    };
     transitions.current = transitions.current.then(async () => {
       if (gen !== generation.current) return; // superseded while queued
       try {
-        if (session && role) {
-          // GATED ON THE ROLE THAT FINISHED SYNCING, not the one we started
-          // connecting for.
-          //
-          // These used to be the same ref, set immediately after connect() and
-          // before waitForFirstSync(). That made a lost seam PERMANENT for the
-          // app session: a TOKEN_REFRESHED landing mid-sync bumps the
-          // generation, so transition #1 skipped setLocalReads — and transition
-          // #2 then returned early here, because the ref already said "we are
-          // on this role". Local reads were never registered again, and every
-          // read fell back to the network for the rest of the session. On a
-          // technician's phone in a basement that is not a slowdown, it is a
-          // dead app. auth-context re-emits on every token refresh, so the
-          // trigger was routine rather than exotic.
-          if (syncedRole.current === role) return;
-
-          // Any previous connection's rows are for the wrong role now.
-          setLocalReads(null);
-          if (connectedRole.current !== null) {
-            await powersync.disconnectAndClear();
-          }
-          await powersync.connect(connector);
-          // Tracked separately from syncedRole, and ONLY so the next transition
-          // knows a disconnect is owed. It must not gate the early return.
-          connectedRole.current = role;
-
-          // Register the seam only once THIS connection has fully synced — a
-          // persisted hasSynced from the previous role must not count.
-          const frozen = role;
-          await powersync.waitForFirstSync();
-          if (gen === generation.current && connectedRole.current === frozen) {
-            syncedRole.current = frozen;
-            setLocalReads(makeLocalReads(() => frozen));
-          }
-        } else {
-          if (connectedRole.current === null && syncedRole.current === null) return;
-          connectedRole.current = null;
-          syncedRole.current = null;
-          setLocalReads(null);
-          // Sign-out (or unknown role): wipe the mirror. Financial rows must
-          // not survive on a device with no authenticated user.
-          await powersync.disconnectAndClear();
-        }
+        await runTransition(deps, state.current, { userId, role }, () => gen === generation.current);
       } catch (e) {
         if (__DEV__) console.warn("[powersync] connect/disconnect failed:", e);
       }
     });
-  }, [session, role]);
+  }, [userId, role]);
 
   // Final unmount: stop syncing. (Data is wiped on sign-out, not here — an
   // app restart with a live session should reuse the mirror, not re-download.)
   useEffect(() => {
     return () => {
       generation.current++;
+      waitAbort.current?.abort();
       setLocalReads(null);
       transitions.current = transitions.current.then(() => powersync.disconnect());
     };
