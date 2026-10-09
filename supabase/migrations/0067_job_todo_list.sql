@@ -1,6 +1,6 @@
 -- =============================================
 -- JOB TO-DO LIST: JOBS OFFICE CAN PULL IN TO FILL A SCHEDULE GAP
--- STATUS: DRAFT — NOT APPLIED. Apply to production, then update this line.
+-- STATUS: ✅ APPLIED IN PRODUCTION (2026-10-09, via SQL editor).
 --
 -- Asked for by the owner: "add jobs to a to do list so that they can be
 -- assigned when we have a hole to fill." Decisions already made:
