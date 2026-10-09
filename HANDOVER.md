@@ -144,7 +144,7 @@ received every invoice, quote, time entry and usage log ever written. After:
 | `tech_customers` / `tech_sites` | technician | only those of the jobs above |
 | `backflow_customers` / `backflow_sites` | all | those owning an **active** backflow device (the register names them) |
 | `backflow_devices` | all | active devices only |
-| `backflow_tests` | all | last 24 months **plus each device's latest pass** (due-date input); 8 columns, no `test_results` JSON |
+| `backflow_tests` | all | last 24 months **plus each device's latest pass** (due-date input); 11 columns, no `test_results` JSON |
 | `office_jobs` + job children, `office_time_entries`, `office_equipment_usage_log` | office/admin | open / ready-to-invoice / unbilled-approved-variation / active within **24 months**; children follow their job |
 | `office_invoices`/`_items`, `office_quotes`/`_items` | office/admin | open, or active within 24 months; items follow |
 | `office_customers`, `office_sites`, pricing, inventory, equipment, POs, assignments | office/admin | whole (reference / one-row-per-job tables) |
@@ -264,7 +264,7 @@ proves its request is inside it, or throws `OutsideSyncWindow`, which
 | `listOfficeJobs`, `searchOfficeJobs`, `searchJobs`, `listInvoices`, `listQuotes` | local only if the page is full and its oldest `created_at` is inside the window |
 | `getInvoice`, `getQuote`, `getJob` | local miss → network |
 | `getJobBilling`, `getJobEquipment`, `getJobVariationsForApproval`, `getInvoiceJobPrefill` | local only if the job is on the device (children travel with it) |
-| `getCustomerOverview`, `getReportSummary`, `getReportAnalytics`, `listEquipmentUsage` | all-history: network whenever a window is in force |
+| `getCustomerOverview`, `getReportSummary`, `getReportAnalytics`, `listEquipmentUsage`, backflow device test history | all-history: network whenever a window is in force |
 | `getEquipmentUtilization`, `countOtherScheduledJobs` | local when the date bound is inside the window |
 | `listMyJobs`, `listReadyToInvoice`, `listBackflowDevices` | always complete — the windows keep every row they select |
 
