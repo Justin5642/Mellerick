@@ -4,6 +4,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { supabase } from "../../lib/supabase";
 import { colors } from "../../lib/theme";
 import { describeReadFailure } from "../../design/components/ScreenError";
+import { getJobAllocatedHours, listJobWorkTimeEntries } from "../../lib/data/reads/hoursScoreboard";
 
 // Mirrors the web "Hours Scoreboard" in components/job/job-po.tsx — shows
 // technicians how many hours have been allocated to this job (set manually
@@ -31,16 +32,10 @@ interface JobLite {
   overtime_category?: string | null;
 }
 
-// The supabase client is untyped, so these name the two row shapes this
-// component reads rather than leaving the reducers on `any`.
-interface PurchaseOrderHoursRow {
-  total_hours: number | string | null;
-}
-interface TimeEntryRow {
-  hours: number | string | null;
-  clock_in: string | null;
-  clock_out: string | null;
-}
+// How often the live "time used" figure re-renders while someone is clocked
+// in. It is shown to 0.1h (6 minutes) and a whole percent, so a 1-second tick
+// re-rendered the card ~60 times per visible change.
+const LIVE_TICK_MS = 15_000;
 
 export function JobHoursScoreboard({ job, currentUserId }: { job: JobLite; currentUserId: string | null }) {
   const jobId = job.id;
@@ -66,18 +61,16 @@ export function JobHoursScoreboard({ job, currentUserId }: { job: JobLite; curre
   const load = useCallback(async () => {
     try {
       setError(null);
-      const [{ data: pos, error: poError }, { data: entries, error: entryError }] = await Promise.all([
-        supabase.from("purchase_orders_public").select("total_hours").eq("job_id", jobId),
+      // Local-first (lib/data/reads/hoursScoreboard): readable offline from
+      // the mirror where the caller's stream carries the data, Supabase
+      // otherwise. Both throw on failure rather than defaulting to zero.
+      const [totalAllocated, timeRows] = await Promise.all([
+        getJobAllocatedHours(jobId),
         // Only "work" entries count against the allocated-hours budget — travel
         // time between jobs is tracked separately and shouldn't eat into it.
-        supabase.from("time_entries").select("hours, clock_in, clock_out").eq("job_id", jobId).eq("entry_type", "work"),
+        listJobWorkTimeEntries(jobId, currentUserId),
       ]);
-      if (poError) throw new Error(`purchase_orders_public: ${poError.message}`);
-      if (entryError) throw new Error(`time_entries: ${entryError.message}`);
-      const poRows: PurchaseOrderHoursRow[] = pos ?? [];
-      const timeRows: TimeEntryRow[] = entries ?? [];
-      const totalAllocated = poRows.reduce((sum, p) => sum + (Number(p.total_hours) || 0), 0);
-      const closed = timeRows.filter((e) => e.clock_out).reduce((sum, e) => sum + (e.hours ? Number(e.hours) : 0), 0);
+      const closed = timeRows.filter((e) => e.clock_out).reduce((sum, e) => sum + (e.hours ?? 0), 0);
       const open = timeRows.find((e) => !e.clock_out);
       setAllocatedHours(totalAllocated);
       setClosedHours(closed);
@@ -87,17 +80,18 @@ export function JobHoursScoreboard({ job, currentUserId }: { job: JobLite; curre
     } finally {
       setLoading(false);
     }
-  }, [jobId]);
+  }, [jobId, currentUserId]);
 
   useEffect(() => {
     void load();
   }, [load]);
 
-  // Tick every second while someone is clocked in on this job, so the
-  // countdown is genuinely live rather than only updating on clock-out.
+  // Tick while someone is clocked in on this job, so the countdown is live
+  // rather than only updating on clock-out — at LIVE_TICK_MS, not every second.
   useEffect(() => {
     if (!openClockIn) return;
-    const interval = setInterval(() => setNow(Date.now()), 1000);
+    setNow(Date.now());
+    const interval = setInterval(() => setNow(Date.now()), LIVE_TICK_MS);
     return () => clearInterval(interval);
   }, [openClockIn]);
 

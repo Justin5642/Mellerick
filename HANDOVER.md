@@ -163,6 +163,45 @@ otherwise runs a byte-identical Supabase query. Fallback reasons, each logged:
 The local and remote implementations must return **identical shapes**. Each read
 module has a test for this; change one side, change both.
 
+### Startup — nothing on the first screen waits for the network
+
+A cold start used to block twice: a full-screen spinner until a **network** read
+of `profiles` returned (offline with nothing loaded → the profile-error screen,
+not the technician's jobs), and then no local reads until **this** connection's
+first PowerSync sync finished, so My Jobs' first render went to Supabase.
+
+- **Profile cache** — `mobile/lib/profileCache.ts`. The signed-in user's own
+  `id / full_name / email / role / is_active` in AsyncStorage, keyed **and
+  checked** by user id (a record never answers for another user). `auth-context`
+  paints from it immediately and revalidates in the background. Policy
+  (`decideProfileResult`, pure, tested): the server's answer **always** replaces
+  the cache once it arrives (a changed role re-gates the routes and
+  PowerSyncProvider wipes the old role's mirror; `is_active=false` shows the
+  deactivated screen and wipes the mirror); `PGRST116` (no profile row) clears
+  it — fail closed; a transient failure keeps what is shown. Cleared on sign-out.
+  **The cached role is a UI hint, not an authorization**: RLS still runs as the
+  real user and the sync streams gate on the server-side `profiles` row, so
+  editing the cache on a rooted phone grants no data.
+- **Full-sync marker** — `mobile/lib/data/syncMarker.ts`, logic in
+  `powersyncTransition.ts` (tested with fakes). Written only after
+  `waitForFirstSync()` for `{userId, role}`; cleared **before** every
+  `disconnectAndClear()`. On cold start: marker for this exact user+role → a
+  provisional local-read seam is registered at once (`fromLocalOr`'s `role`,
+  `write-echo`, `stale-db` fallbacks still apply); no marker → today's
+  behaviour (wait); marker for anyone else → wipe the mirror first.
+- A transition's `waitForFirstSync` is aborted when a newer transition is
+  queued — previously one waiting offline blocked the chain, including a
+  sign-out's wipe, indefinitely. Transitions key on user id + role, not the
+  session object, so an hourly token refresh no longer re-runs them.
+
+Reads moved local in the same change: office dashboard (`reads/dashboard.ts`,
+office/admin only — was 7 network calls), backflow device detail, technician
+variations + the variation-type picker (rate-stripped streams; no money column on
+either path, asserted by test), and time entries on the hours scoreboard (the
+technician query reproduces RLS's own-rows filter). **Still remote, by design:**
+a technician's allocated PO hours (`purchase_orders` is not in their stream;
+`purchase_orders_public` is a server view), and signed photo URLs.
+
 ### Writes — always through the outbox, never direct
 
 Every mutation is enqueued in a durable SQLite outbox
@@ -184,6 +223,27 @@ Load-bearing properties:
   replay — deliberate, because throwing would dead-letter a legitimate replay and
   wedge the FIFO queue forever — but it logs a warning naming the table, so a
   vanished row is traceable.
+
+### Photos — size and caching
+
+- **Every picked or captured image is downscaled before it is queued**: longest
+  edge ≤1600px, JPEG 0.7, in ONE helper, `mobile/lib/imageUpload.ts`
+  (`expo-image-manipulator`, EXIF orientation baked into the pixels). Used by job
+  photos, variation photos, job and fleet expense receipts, and the backflow
+  data-plate scan (which takes its base64 from the resized JPEG, not the picker).
+  Pickers now ask for `quality: 1` so there is one compression pass, not two. A
+  resize failure queues the original rather than losing the photo. The outbox
+  semantics are unchanged — the resized file is what gets staged.
+- **The Photos tab list is a local read** (`reads/jobPhotos.ts`, `fromLocalOr`;
+  a job absent from a technician's mirror defers to Supabase rather than showing
+  an empty grid). Signed URLs come from ONE `createSignedUrls` per load, only for
+  photos not already in expo-image's disk cache.
+- **Rendered with `expo-image`, `cacheKey` = storage path.** Each signing mints a
+  new token, so keying on the URL (RN `<Image>`) re-downloaded every photo on
+  every visit. Supabase image transforms are **not** used (plan support
+  unconfirmed); thumbnails rely on resized uploads + the disk cache.
+- `expo-image-manipulator` is a native module: it reaches devices only through a
+  **new dev client / `eas build`**, never an OTA update.
 
 ### The crash class to watch for
 
@@ -598,6 +658,42 @@ So background tracking is now implemented (`mobile/lib/backgroundClock*.ts`,
 foreground watcher working exactly as before, and logs that drive time is not
 being recorded rather than swallowing it.
 
+**Tracking is gated (9 October 2026) — it no longer runs for everyone, all the
+time.** `mobile/lib/trackingGate.ts` decides; the foreground provider and the
+background task both call it. GPS (and the Android foreground-service
+notification) runs only when **all** of:
+
+- the role is `technician` (an unknown role — profile not loaded, offline
+  launch — counts as technician rather than switching tracking off);
+- the technician has at least one geofence-able open job (crew jobs included);
+- they are **on the clock** *or* inside `WORK_HOURS` — 06:00–19:00 Mon–Sat,
+  device-local time, one constant.
+
+**On the clock beats the hours** — that is the payroll rule. It means any of: an
+open work entry (mirror or network; open > 16 h is treated as a forgotten
+clock-out), a clock-in still queued in the outbox, the geofence placing them
+inside a site, a drive in progress (departure < 3 h old, so the travel leg is
+captured), or a wake-region hit in the last 20 min. Anything it cannot read
+counts as on the clock. It is re-decided on app foreground, every site refresh,
+every clock write queued on the device, every geofence transition and every
+5 min; when the app has been swiped away the background task re-checks itself
+after each batch.
+
+**Off hours the job sites stay registered as OS wake regions** (300 m,
+enter-only, the 20 soonest — iOS's cap). iOS cannot restart GPS from the
+background on its own, so without this a phone that is not opened in the
+morning would miss the first arrival of the day. A region entry restarts
+tracking; the clock times still come from the ordinary 150 m readings.
+
+Settings: accuracy stays Balanced (lower is 1–3 km against a 150 m geofence —
+fabricated or missed clock-ins). "Watching" (in hours, not working) samples at
+30 s; on the clock keeps the original 15 s / 25 m, with a 60 s batching
+deferral only while on site. iOS auto-pause stays **off**: expo never resumes a
+paused task, which would lose the departure and the next arrival. Rationale in
+`mobile/DECISIONS-FOR-AVI.md` D96. **Not yet verified on a device** — check an
+evening shift (clocked in past 19:00 keeps tracking; clocking out stops it and
+the notification goes) and a morning first arrival with the app unopened.
+
 **The store-review risk is real and has not gone away.** Apple and Google both
 scrutinise "Always" location. The submission needs a clear justification string
 (written, in `app.json`) and screenshots showing the Android foreground-service
@@ -717,9 +813,11 @@ Things that have already cost time, roughly in order of how likely you are to hi
    weeks before being removed. Those pages are statically prerendered — which is
    why the build needs the Supabase env vars at compile time.
 7. **`[sync] status poll failed: … ERR_USING_RELEASED_SHARED_OBJECT` in the dev
-   log is EXPECTED, not a crash.** The sync badge polls SQLite every 3s. A tick
-   already in flight when the JS context is torn down — which every Fast Refresh
-   does — resumes against a released native handle. It is caught in
+   log is EXPECTED, not a crash.** The sync badge re-reads the outbox counts on
+   outbox/drain events, every 3s only while writes are pending, and on a 30s
+   heartbeat otherwise (`lib/data/syncStatusCadence.ts` — it used to be every 3s
+   forever). A read already in flight when the JS context is torn down — which
+   every Fast Refresh does — resumes against a released native handle. It is caught in
    `useSyncStatus`, logged under `__DEV__` only, and the next tick recovers.
    Production exposure is a poll in flight during sign-out: caught the same way,
    the badge skips one update. It looks alarming in logcat and is not. I chased
@@ -728,6 +826,12 @@ Things that have already cost time, roughly in order of how likely you are to hi
 8. **Any route using the service-role client must authorize the caller first.**
    It bypasses RLS entirely.
 9. **Two lockfiles, two projects.** Install in the right directory.
+10. **`jobs.assigned_to` is only the crew's PRIMARY assignee** (migration 0059).
+    "My jobs" means *any* current assignee: `job_assignments` OR `assigned_to`.
+    My Jobs (web and mobile), the geofence site list and the schedule "All day"
+    count filtered on `assigned_to` alone, so the second technician on a crew job
+    had it synced to their phone but never saw it and was never auto-clocked
+    there. Use `mobile/lib/data/reads/assignedJobs.ts` for any new "mine" read.
 
 ---
 
@@ -852,7 +956,7 @@ What it reports — the failures that were silent on a technician's phone:
 
 **Not** reported: the expected `ERR_USING_RELEASED_SHARED_OBJECT` teardown
 noise (§10 trap 7). Each distinct sync failure is reported **once per app
-session**, so a broken 3-second poll cannot flood the quota. A dead-letter
+session**, so a broken status poll cannot flood the quota. A dead-letter
 report never carries the payload; the server's error message is redacted
 (numbers and quoted values removed) before it is attached.
 

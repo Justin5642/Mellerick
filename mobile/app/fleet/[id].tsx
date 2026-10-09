@@ -3,6 +3,7 @@ import { View, Text, ScrollView, StyleSheet, ActivityIndicator, TouchableOpacity
 import { Stack, useLocalSearchParams } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import * as ImagePicker from "expo-image-picker";
+import { prepareImageForUpload } from "../../lib/imageUpload";
 import { colors } from "../../lib/theme";
 import { MoneyText } from "../../design/components/MoneyText";
 import { ScreenError } from "../../design/components/ScreenError";
@@ -108,9 +109,12 @@ export default function EquipmentDetailScreen() {
   async function pickReceipt(fromCamera: boolean) {
     const perm = fromCamera ? await ImagePicker.requestCameraPermissionsAsync() : await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (!perm.granted) { Alert.alert("Permission needed", fromCamera ? "Camera access is required." : "Photo library access is required."); return; }
-    const result = fromCamera ? await ImagePicker.launchCameraAsync({ quality: 0.6 }) : await ImagePicker.launchImageLibraryAsync({ quality: 0.6 });
+    // Full quality from the picker; prepareImageForUpload is the ONE downscale +
+    // compress pass (≤1600px, JPEG 0.7 — still legible for a receipt).
+    const result = fromCamera ? await ImagePicker.launchCameraAsync({ quality: 1 }) : await ImagePicker.launchImageLibraryAsync({ quality: 1 });
     if (result.canceled || !result.assets?.length) return;
-    setDraft((d) => d && { ...d, receiptUri: result.assets[0].uri });
+    const receiptUri = await prepareImageForUpload(result.assets[0].uri);
+    setDraft((d) => d && { ...d, receiptUri });
   }
 
   async function addExpense() {

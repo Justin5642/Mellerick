@@ -17,9 +17,21 @@ export const powersync = new PowerSyncDatabase({
  * under that role, so reads must be judged against it, not against whatever
  * the profile changes to later.
  */
-export function makeLocalReads(role: () => LocalRole): LocalReads {
+export function makeLocalReads(
+  role: () => LocalRole,
+  opts: {
+    /**
+     * Cold start over a mirror that lib/data/syncMarker records as FULLY synced
+     * for this user+role: trust it before this connection's first sync lands.
+     * Only PowerSyncProvider sets this, and only on decideColdStart's
+     * "serve-local"; it is replaced by a plain seam once waitForFirstSync()
+     * resolves.
+     */
+    assumeSynced?: boolean;
+  } = {}
+): LocalReads {
   return {
-    hasSynced: () => powersync.currentStatus.hasSynced === true,
+    hasSynced: () => opts.assumeSynced === true || powersync.currentStatus.hasSynced === true,
     role,
     getAll: (sql, params) => powersync.getAll(sql, params as unknown[]),
     getOptional: (sql, params) => powersync.getOptional(sql, params as unknown[]),

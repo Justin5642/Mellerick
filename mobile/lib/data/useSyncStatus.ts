@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useDataLayer } from "./DataProvider";
 import { reportSyncError } from "../monitoring";
+import { nextPollDelay, type OutboxCounts } from "./syncStatusCadence";
 
 export interface SyncStatus {
   /** Operations still outstanding and being retried (pending + failed + inflight). */
@@ -13,26 +14,45 @@ export interface SyncStatus {
   retry: () => void;
 }
 
-// Polls the outbox so a badge can show pending/failed sync state and offer a
-// retry. Cheap COUNT queries; the interval is coarse because this only drives a
-// status pill.
-export function useSyncStatus(pollMs = 3000): SyncStatus {
+// Drives the sync badge's pending/failed counts. Event-driven, with an adaptive
+// poll as the safety net — see lib/data/syncStatusCadence.ts for the cadence
+// (3s while work is outstanding, 30s idle heartbeat) and why.
+export function useSyncStatus(): SyncStatus {
   const layer = useDataLayer();
   const [counts, setCounts] = useState<{ pending: number; failed: number }>({ pending: 0, failed: 0 });
 
   useEffect(() => {
     if (!layer) return;
     let active = true;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    let running = false;
+    let again = false;
+
+    const schedule = (last: OutboxCounts | null) => {
+      if (!active) return;
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => void tick(), nextPollDelay(last));
+    };
+
     const tick = async () => {
       // Re-check after every await: a tick that began before teardown must not
       // keep querying SQLite afterwards. On a dev reload the native handles are
       // gone with the JS context, and touching one throws "Cannot use shared
-      // object that was already released" — as an UNHANDLED rejection out of an
-      // interval, which React Native puts on screen as a red error box.
+      // object that was already released" — as an UNHANDLED rejection out of a
+      // timer, which React Native puts on screen as a red error box.
       if (!active) return;
+      // Coalesce: an event landing mid-read re-runs once afterwards, rather
+      // than stacking parallel COUNT queries.
+      if (running) {
+        again = true;
+        return;
+      }
+      running = true;
+      let last: OutboxCounts | null = null;
       try {
         const [pending, dead] = await Promise.all([layer.outbox.pendingCount(), layer.outbox.deadCount()]);
-        if (active) setCounts({ pending, failed: dead });
+        last = { pending, failed: dead };
+        if (active) setCounts(last);
       } catch (e) {
         // A status badge is not worth an error screen; the next tick recovers.
         if (__DEV__) console.warn("[sync] status poll failed:", e);
@@ -40,15 +60,30 @@ export function useSyncStatus(pollMs = 3000): SyncStatus {
         // §10 trap 7) and reportSyncError skips it; anything else is reported
         // once per session.
         reportSyncError(e, "sync-status");
+      } finally {
+        running = false;
       }
+      if (!active) return;
+      if (again) {
+        again = false;
+        void tick();
+        return;
+      }
+      schedule(last);
     };
+
+    // Refresh at once when the counts are known to have changed.
+    const onEvent = () => void tick();
+    const offChange = layer.outbox.onChange(onEvent);
+    const offSettled = layer.engine.onSettled(onEvent);
     void tick();
-    const iv = setInterval(tick, pollMs);
     return () => {
       active = false;
-      clearInterval(iv);
+      if (timer) clearTimeout(timer);
+      offChange();
+      offSettled();
     };
-  }, [layer, pollMs]);
+  }, [layer]);
 
   const retry = useCallback(() => {
     if (!layer) return;

@@ -1,7 +1,18 @@
-import { createContext, useContext, useEffect, useRef, type ReactNode } from "react";
-import { Alert } from "react-native";
+import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
+import { Alert, AppState } from "react-native";
 import * as Location from "expo-location";
 import { supabase } from "./supabase";
+import { listMyJobSites } from "./data/reads/jobs";
+import { getOpenWorkEntry } from "./data/reads/clock";
+import { onClockChanged } from "./clockEvents";
+import {
+  GATE_RECHECK_MS,
+  decideTracking,
+  hasOpenWorkInOutbox,
+  isOnTheClock,
+  trackingSettings,
+  type TrackingSettings,
+} from "./trackingGate";
 import { useAuth } from "./auth-context";
 import { useDataLayer } from "./data/DataProvider";
 import type { DataLayer } from "./data/createDataLayer";
@@ -15,7 +26,15 @@ import {
 } from "./geofenceTransition";
 import { netInfoConnectivity } from "./data/net/connectivity";
 import { powersync } from "../powersync/db";
-import { startBackgroundClock, stopBackgroundClock, publishBackgroundClockContext } from "./backgroundClock";
+import {
+  startBackgroundClock,
+  stopBackgroundClock,
+  publishBackgroundClockContext,
+  publishOnTheClock,
+  readBackgroundGeofenceState,
+  startSiteWake,
+  stopSiteWake,
+} from "./backgroundClock";
 import { startBackgroundSync, stopBackgroundSync } from "./backgroundSync";
 
 // GEOFENCE_RADIUS_METERS and the distance maths now live in ./geofenceState,
@@ -34,6 +53,7 @@ import { startBackgroundSync, stopBackgroundSync } from "./backgroundSync";
 // being called by the time the writes moved to the outbox, and was removed
 // rather than left as a second, non-durable path someone might revive.
 
+/** `enabled`: the gate currently has location tracking running. */
 const LocationTrackingContext = createContext<{ enabled: boolean }>({ enabled: false });
 
 /**
@@ -56,7 +76,7 @@ const LocationTrackingContext = createContext<{ enabled: boolean }>({ enabled: f
  * not being recorded" is something someone must be able to discover.
  */
 export function LocationTrackingProvider({ children }: { children: ReactNode }) {
-  const { session } = useAuth();
+  const { session, profile } = useAuth();
   // The geofence writes through the SAME durable outbox as the manual clock
   // button. Before this it wrote straight to Supabase, so an automatic clock-in
   // or clock-out made with no signal was discarded silently — the one path that
@@ -64,6 +84,7 @@ export function LocationTrackingProvider({ children }: { children: ReactNode }) 
   // being offline.
   const layer = useDataLayer();
   const userId = session?.user.id ?? null;
+  const role = profile?.role ?? null;
 
   const sitesRef = useRef<TrackedSite[]>([]);
   const insideJobIdRef = useRef<string | null>(null);
@@ -75,8 +96,37 @@ export function LocationTrackingProvider({ children }: { children: ReactNode }) 
   // to dismiss without reading.
   const autoClockAlertedRef = useRef(false);
 
+  // ---------------------------------------------------------------------------
+  // THE GATE: whether tracking runs at all, and how hard (lib/trackingGate.ts).
+  //
+  // Tracking used to start for every signed-in user and run until sign-out —
+  // office phones, technicians with nothing scheduled, nights and weekends. It
+  // now runs only for a technician with a geofence-able site who is on the clock
+  // or inside work hours, and is re-decided on app foreground, on every site
+  // refresh, on every clock-in/out queued on this device, after every geofence
+  // transition, and every GATE_RECHECK_MS in case the hour boundary passes.
+  //
+  // Being on the clock overrides the hours. That is the payroll rule: a job
+  // that runs late still gets its departure and its drive recorded.
+  // ---------------------------------------------------------------------------
+  const subscriptionRef = useRef<Location.LocationSubscription | null>(null);
+  const foregroundKeyRef = useRef<string | null>(null);
+  const askedForegroundRef = useRef(false);
+  const backgroundOffLoggedRef = useRef(false);
+  const evaluateRef = useRef<() => void>(() => {});
+  // The gate reads these from async callbacks; refs keep them current there.
+  const layerRef = useRef(layer);
+  layerRef.current = layer;
+  const [tracking, setTracking] = useState(false);
+  // False until the first site load succeeds. "No sites" stops tracking, but
+  // "not loaded yet" must not: at launch that would stop a background task that
+  // is mid-shift, only to restart it a moment later — and a stop discards any
+  // readings the OS is still holding.
+  const sitesLoadedRef = useRef(false);
+
   // Keep the list of this tech's active job sites fresh.
   useEffect(() => {
+    sitesLoadedRef.current = false;
     if (!userId) {
       sitesRef.current = [];
       return;
@@ -84,32 +134,16 @@ export function LocationTrackingProvider({ children }: { children: ReactNode }) 
     let cancelled = false;
 
     async function loadSites() {
-      const { data, error } = await supabase
-        .from("jobs")
-        .select("id, status, scheduled_cost_center_id, sites(site_lat, site_lng)")
-        .eq("assigned_to", userId)
-        .not("status", "in", '("completed","cancelled")');
+      // Local-first (reads/jobs.ts listMyJobSites), and scoped to every job the
+      // technician is on — crew jobs included, not just those where they are
+      // jobs.assigned_to's primary. The assigned_to-only filter this replaces
+      // meant the second technician on a crew job never had its site
+      // geofenced, so their arrival and travel there were never auto-recorded.
+      const sites = await listMyJobSites(userId as string);
       if (cancelled) return;
 
-      // A failed refresh KEEPS the sites we already had. Blanking them on a
-      // transient network error would silently switch the auto-clock off for
-      // the rest of the shift — and because nextGeofenceState treats an empty
-      // list as "not loaded yet" (correctly, so it never fabricates a
-      // clock-out), the failure would be completely invisible: no error, no
-      // clock-in, no travel time, just quietly unpaid hours.
-      if (error) {
-        console.warn("[geofence] could not refresh job sites; keeping the previous list:", error.message);
-        return;
-      }
-
-      sitesRef.current = (data ?? [])
-        .filter((j: any) => j.sites?.site_lat && j.sites?.site_lng)
-        .map((j: any) => ({
-          jobId: j.id,
-          lat: j.sites.site_lat,
-          lng: j.sites.site_lng,
-          scheduledCostCenterId: j.scheduled_cost_center_id ?? null,
-        }));
+      sitesRef.current = sites;
+      sitesLoadedRef.current = true;
 
       // Hand the same list to the background task. It runs with no React tree
       // and cannot fetch this itself, so the foreground is the only place that
@@ -118,18 +152,25 @@ export function LocationTrackingProvider({ children }: { children: ReactNode }) 
       publishBackgroundClockContext(userId, sitesRef.current).catch((e) =>
         console.warn("[geofence] could not publish background context:", e)
       );
+
+      // Whether there is any site at all is one of the gate's inputs.
+      evaluateRef.current();
     }
 
-    // A refresh that THROWS rather than returning an error gets the same policy as
-    // the error branch above — keep the list we already have — with one exception
-    // that policy cannot cover. A FIRST load that fails leaves no list at all, and
-    // an empty list reads downstream as "not loaded yet", so the auto-clock never
-    // engages for the entire shift. There is no screen anywhere that would show
-    // that, which is precisely why it has to be said out loud.
+    // A failed refresh KEEPS the sites we already had. Blanking them on a
+    // transient error would silently switch the auto-clock off for the rest of
+    // the shift — and because nextGeofenceState treats an empty list as "not
+    // loaded yet" (correctly, so it never fabricates a clock-out), the failure
+    // would be completely invisible: no error, no clock-in, no travel time, just
+    // quietly unpaid hours. There is one case that policy cannot cover: a FIRST
+    // load that fails leaves no list at all, and an empty list reads downstream
+    // as "not loaded yet", so the auto-clock never engages for the entire shift.
+    // There is no screen anywhere that would show that, which is precisely why
+    // it has to be said out loud.
     function refreshSites() {
       loadSites().catch((e) => {
         if (cancelled) return;
-        console.warn("[geofence] job site refresh failed:", e);
+        console.warn("[geofence] could not refresh job sites; keeping the previous list:", e);
         if (sitesRef.current.length > 0 || autoClockAlertedRef.current) return;
         autoClockAlertedRef.current = true;
         Alert.alert(
@@ -141,57 +182,134 @@ export function LocationTrackingProvider({ children }: { children: ReactNode }) 
 
     refreshSites();
     const interval = setInterval(refreshSites, 10 * 60 * 1000);
+    // A job assigned while the app was in the background should be geofenced
+    // as soon as the technician looks at the phone, not up to ten minutes later.
+    // Cheap now that the read is local-first.
+    const appState = AppState.addEventListener("change", (state) => {
+      if (state === "active") refreshSites();
+    });
     return () => {
       cancelled = true;
       clearInterval(interval);
+      appState.remove();
     };
   }, [userId]);
 
-  // Watch position and drive the geofence state machine.
   useEffect(() => {
     if (!userId) return;
-    let subscription: Location.LocationSubscription | null = null;
-    let cancelled = false;
+    const staffId = userId;
+    let disposed = false;
+    // Evaluations are serialised: two overlapping ones could interleave a start
+    // and a stop and leave the watcher in whichever state lost the race.
+    let chain = Promise.resolve();
 
-    // The whole body is guarded before the promise is voided. Declining the
-    // permission is a return, not a throw, so this catch only fires when the
-    // watcher genuinely could not start — and that is the total loss of the
-    // auto-clock, not the partial one the background gap causes below.
-    void (async () => {
-      try {
-        const { status } = await Location.requestForegroundPermissionsAsync();
-        if (status !== "granted" || cancelled) return;
-        subscription = await Location.watchPositionAsync(
-          { accuracy: Location.Accuracy.Balanced, timeInterval: 15000, distanceInterval: 25 },
-          (position) => handlePosition(position, userId)
+    function stopForeground() {
+      subscriptionRef.current?.remove();
+      subscriptionRef.current = null;
+      foregroundKeyRef.current = null;
+    }
+
+    async function readOnTheClock(now: Date): Promise<{ onTheClock: boolean; onSite: boolean }> {
+      let storageFailed = false;
+      const [openWorkEntry, ops, background] = await Promise.all([
+        getOpenWorkEntry(staffId).catch(() => "unknown" as const),
+        (layerRef.current?.outbox.snapshot() ?? Promise.resolve([])).catch(() => []),
+        readBackgroundGeofenceState().catch(() => {
+          storageFailed = true;
+          return { insideJobId: null, pendingDeparture: null, siteWakeAt: null };
+        }),
+      ]);
+      // Either watcher's view counts: the foreground cursor and the background
+      // task's persisted one are separate state machines over the same sites.
+      const insideJobId = insideJobIdRef.current ?? background.insideJobId;
+      const foregroundDeparture = departureRef.current
+        ? { jobId: departureRef.current.jobId, at: departureRef.current.timeIso }
+        : null;
+      const signals = {
+        openWorkEntry,
+        openWorkInOutbox: hasOpenWorkInOutbox(ops, staffId),
+        insideJobId,
+        siteWakeAt: background.siteWakeAt,
+        nowMs: now.getTime(),
+      };
+      const onTheClock =
+        storageFailed ||
+        isOnTheClock({ ...signals, pendingDeparture: foregroundDeparture }) ||
+        isOnTheClock({ ...signals, pendingDeparture: background.pendingDeparture });
+      return { onTheClock, onSite: insideJobId !== null };
+    }
+
+    async function startForeground(settings: TrackingSettings): Promise<boolean> {
+      const options = {
+        accuracy: Location.Accuracy.Balanced,
+        timeInterval: settings.timeIntervalMs,
+        distanceInterval: settings.distanceIntervalM,
+      };
+      const key = JSON.stringify(options);
+      if (subscriptionRef.current && key === foregroundKeyRef.current) return true;
+
+      // Asked once per session, then only read: this runs every few minutes,
+      // and a permission prompt on a timer is one people stop reading.
+      const { status } = askedForegroundRef.current
+        ? await Location.getForegroundPermissionsAsync()
+        : await Location.requestForegroundPermissionsAsync();
+      askedForegroundRef.current = true;
+      if (status !== "granted" || disposed) return false;
+
+      const subscription = await Location.watchPositionAsync(options, (position) => handlePosition(position, staffId));
+      if (disposed) {
+        subscription.remove();
+        return false;
+      }
+      stopForeground();
+      subscriptionRef.current = subscription;
+      foregroundKeyRef.current = key;
+      return true;
+    }
+
+    async function applyGate() {
+      // No decision until the site list has loaded once — see sitesLoadedRef.
+      if (disposed || !sitesLoadedRef.current) return;
+      const now = new Date();
+      const { onTheClock, onSite } = await readOnTheClock(now);
+      if (disposed) return;
+      const decision = decideTracking({ userId: staffId, role, siteCount: sitesRef.current.length, onTheClock, now });
+
+      // For the background task's own stop check, which runs headless and
+      // cannot see the mirror, the outbox or the foreground cursor.
+      publishOnTheClock(onTheClock).catch((e) => console.warn("[geofence] could not publish clock state:", e));
+
+      if (!decision.track) {
+        stopForeground();
+        setTracking(false);
+        await stopBackgroundClock().catch((e) => console.warn("[geofence] could not stop background tracking:", e));
+        // Off hours the wake regions are what bring tracking back for the next
+        // arrival, even if the app is never opened (trackingGate.ts). For any
+        // other reason there is nothing to wake for.
+        await (decision.reason === "off-hours" ? startSiteWake(sitesRef.current) : stopSiteWake()).catch((e) =>
+          console.warn("[geofence] could not update wake regions:", e)
         );
+        return;
+      }
 
-        // Ask for background tracking too. Declining is fine and expected — the
-        // foreground watcher above still works, so the app degrades to exactly
-        // the behaviour it had before. What it must never do is fail silently,
-        // hence the log: a technician who declined "Always" is not having their
-        // drive time recorded, and somebody should be able to find out why.
-        if (cancelled) return;
-        const started = await startBackgroundClock().catch((e) => {
-          console.warn("[geofence] background clock failed to start:", e);
-          return false;
-        });
-        if (!started) {
-          console.warn(
-            "[geofence] background tracking NOT active — travel time is only recorded while the app is open."
-          );
+      const settings = trackingSettings(decision.mode, onSite);
+
+      // The whole start is guarded. Declining the permission is a return, not a
+      // throw, so this catch only fires when the watcher genuinely could not
+      // start — and that is the total loss of the auto-clock, not the partial
+      // one the background gap causes below.
+      try {
+        if (!(await startForeground(settings))) {
+          setTracking(false);
+          return;
         }
-
-        // Separately from location: drain the outbox periodically while the app
-        // is CLOSED. Queued writes otherwise wait for someone to reopen the app,
-        // which after a late job may be the next morning.
-        startBackgroundSync(true).catch((e) => console.warn("[sync] background drain not registered:", e));
+        setTracking(true);
       } catch (e) {
-        // Nothing on screen changes when this throws: no spinner, no empty state,
-        // just hours that quietly never get recorded and are missed a fortnight
-        // later on a payslip. A log line does not reach a technician in a
-        // basement, so the one available surface gets used instead.
-        if (cancelled) return;
+        // Nothing on screen changes when this throws: no spinner, no empty
+        // state, just hours that quietly never get recorded and are missed a
+        // fortnight later on a payslip. A log line does not reach a technician
+        // in a basement, so the one available surface gets used instead.
+        if (disposed) return;
         console.warn("[geofence] foreground watcher failed to start:", e);
         if (autoClockAlertedRef.current) return;
         autoClockAlertedRef.current = true;
@@ -201,13 +319,64 @@ export function LocationTrackingProvider({ children }: { children: ReactNode }) 
             e instanceof Error && e.message ? `\n\n${e.message}` : ""
           }`
         );
+        return;
       }
-    })();
+
+      // Background tracking too. Declining "Always" is fine and expected — the
+      // foreground watcher above still works, so the app degrades to exactly
+      // the behaviour it had before. What it must never do is fail silently,
+      // hence the log: a technician who declined "Always" is not having their
+      // drive time recorded, and somebody should be able to find out why. Once
+      // per session, now that this re-runs every few minutes.
+      if (disposed) return;
+      const started = await startBackgroundClock(settings).catch((e) => {
+        console.warn("[geofence] background clock failed to start:", e);
+        return false;
+      });
+      if (!started && !backgroundOffLoggedRef.current) {
+        backgroundOffLoggedRef.current = true;
+        console.warn(
+          "[geofence] background tracking NOT active — travel time is only recorded while the app is open."
+        );
+      }
+
+      // Registered while tracking too (after the "Always" prompt above), so
+      // they are already in place when the gate next stops — see startSiteWake
+      // for why they are not toggled with tracking.
+      if (disposed) return;
+      await startSiteWake(sitesRef.current).catch((e) => console.warn("[geofence] could not update wake regions:", e));
+    }
+
+    const evaluate = () => {
+      chain = chain.then(applyGate).catch((e) => console.warn("[geofence] tracking gate failed:", e));
+    };
+    evaluateRef.current = evaluate;
+
+    evaluate();
+    const interval = setInterval(evaluate, GATE_RECHECK_MS);
+    const appState = AppState.addEventListener("change", (state) => {
+      if (state === "active") evaluate();
+    });
+    const unsubscribeClock = onClockChanged(evaluate);
 
     return () => {
-      cancelled = true;
-      subscription?.remove();
+      disposed = true;
+      evaluateRef.current = () => {};
+      clearInterval(interval);
+      appState.remove();
+      unsubscribeClock();
+      stopForeground();
+      setTracking(false);
     };
+  }, [userId, role]);
+
+  // Separately from location: drain the outbox periodically while the app is
+  // CLOSED. Queued writes otherwise wait for someone to reopen the app, which
+  // after a late job may be the next morning. Not gated on tracking — an office
+  // user's queued writes need delivering too.
+  useEffect(() => {
+    if (!userId) return;
+    startBackgroundSync(true).catch((e) => console.warn("[sync] background drain not registered:", e));
   }, [userId]);
 
   // Signing out stops background tracking and clears the cached context. Leaving
@@ -215,6 +384,7 @@ export function LocationTrackingProvider({ children }: { children: ReactNode }) 
   useEffect(() => {
     if (userId) return;
     stopBackgroundClock().catch(() => {});
+    stopSiteWake().catch(() => {});
     stopBackgroundSync().catch(() => {});
     publishBackgroundClockContext(null, []).catch(() => {});
   }, [userId]);
@@ -229,6 +399,9 @@ export function LocationTrackingProvider({ children }: { children: ReactNode }) 
     // insideJobIdRef untouched, so the next position update re-derives the same
     // transition. Bailing after the cursor advanced would consume the arrival
     // and never write it — losing the visit rather than delaying it.
+    // Read through the ref: the watcher's callback outlives the render that
+    // created it, and a captured null would make this bail for the whole session.
+    const layer = layerRef.current;
     if (!layer) return;
 
     // Same decision the background task uses (lib/geofenceState.ts) — the two
@@ -275,6 +448,9 @@ export function LocationTrackingProvider({ children }: { children: ReactNode }) 
 
       if (result.clearPendingDeparture) departureRef.current = null;
       if (result.setPendingDeparture) departureRef.current = result.setPendingDeparture;
+      // Arriving or leaving changes the tracking profile (on site vs between
+      // sites); the clock write itself also re-triggers via clockEvents.
+      evaluateRef.current();
     } finally {
       busyRef.current = false;
     }
@@ -344,7 +520,7 @@ export function LocationTrackingProvider({ children }: { children: ReactNode }) 
   }
 
 
-  return <LocationTrackingContext.Provider value={{ enabled: !!userId }}>{children}</LocationTrackingContext.Provider>;
+  return <LocationTrackingContext.Provider value={{ enabled: tracking }}>{children}</LocationTrackingContext.Provider>;
 }
 
 export function useLocationTracking() {

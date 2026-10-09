@@ -3,6 +3,13 @@ import { plausibleAutoClockHours, MAX_PLAUSIBLE_TRAVEL_HOURS, MAX_PLAUSIBLE_WORK
 import {
   BACKGROUND_CLOCK_TASK,
   applyBackgroundBatch,
+  SITE_WAKE_TASK,
+  backgroundGateDeps,
+  backgroundTrackingDecision,
+  handleSiteWake,
+  siteWakeDeps,
+  stopBackgroundClock,
+  stopSiteWake,
   storageDeps,
   type BackgroundClockDeps,
 } from "./backgroundClock";
@@ -146,11 +153,50 @@ async function handleDelivery({ data, error }: LocationTaskBody): Promise<void> 
     // of the shift. State was not persisted (applyBackgroundBatch persists only
     // after its writes), so the next delivery re-derives the same transition.
     console.warn("[backgroundClock] batch failed; will re-derive on next delivery:", e);
+    // Not followed by the stop check below: the re-derivation this comment
+    // promises needs a next delivery, and a stopped task gets none.
+    return;
+  }
+
+  // Headless, nothing else would ever switch tracking off (see
+  // backgroundTrackingDecision). Checked only AFTER a batch has been applied
+  // and its state persisted, so the readings that prompted the stop have
+  // already been recorded. Off hours the wake regions stay registered, which is
+  // what brings tracking back for the next arrival.
+  try {
+    const decision = await backgroundTrackingDecision(backgroundGateDeps, new Date());
+    if (!decision.track) {
+      await stopBackgroundClock();
+      if (decision.reason !== "off-hours") await stopSiteWake();
+    }
+  } catch (e) {
+    // Unsure → keep tracking. Battery is the only cost of being wrong this way.
+    console.warn("[backgroundClock] stop check failed; tracking continues:", e);
+  }
+}
+
+/** What expo-location hands a geofencing task on each region event. */
+interface GeofenceTaskBody {
+  data?: { eventType?: number };
+  error?: { message: string } | null;
+}
+
+async function handleWakeDelivery({ data, error }: GeofenceTaskBody): Promise<void> {
+  if (error) {
+    console.warn("[backgroundClock] site wake error:", error.message);
+    return;
+  }
+  // Swallowed for the same reason as the location task: an exception escaping
+  // a TaskManager task can stop the OS delivering to it at all.
+  try {
+    await handleSiteWake(data?.eventType ?? 0, siteWakeDeps);
+  } catch (e) {
+    console.warn("[backgroundClock] site wake failed:", e);
   }
 }
 
 interface TaskManagerModule {
-  defineTask(name: string, body: (payload: LocationTaskBody) => Promise<void>): void;
+  defineTask<T>(name: string, body: (payload: T) => Promise<void>): void;
 }
 
 // GUARDED, NOT STATIC — and this was not caution, it was a bug found on a device.
@@ -171,6 +217,7 @@ try {
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const TaskManager = require("expo-task-manager") as TaskManagerModule;
   TaskManager.defineTask(BACKGROUND_CLOCK_TASK, handleDelivery);
+  TaskManager.defineTask(SITE_WAKE_TASK, handleWakeDelivery);
 } catch (e) {
   console.warn(
     "[backgroundClock] expo-task-manager unavailable — background tracking is OFF for this build. " +

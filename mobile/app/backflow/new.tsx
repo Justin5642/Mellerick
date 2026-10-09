@@ -16,6 +16,7 @@ import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import * as ImagePicker from "expo-image-picker";
 import { supabase } from "../../lib/supabase";
+import { prepareImage } from "../../lib/imageUpload";
 import { colors } from "../../lib/theme";
 import { WATER_AUTHORITIES, DEVICE_TYPES, PROTECTION_TYPES } from "../../lib/backflow";
 import { useBackflow } from "../../lib/data/hooks/useBackflow";
@@ -142,17 +143,23 @@ export default function NewBackflowDeviceScreen() {
       Alert.alert("Permission needed", "Camera access is required");
       return;
     }
-    const result = await ImagePicker.launchCameraAsync({ quality: 0.7, base64: true });
-    if (result.canceled || !result.assets?.length || !result.assets[0].base64) return;
+    // No base64 from the picker: that put the full-resolution original (several
+    // MB, ~1.33x again as base64) into JS memory and onto the wire. The scan API
+    // does need base64 JSON, so it is taken from the downscaled JPEG instead —
+    // ≤1600px is ample for Claude's vision read of a plate (lib/imageUpload.ts).
+    const result = await ImagePicker.launchCameraAsync({ quality: 1 });
+    if (result.canceled || !result.assets?.length) return;
 
     setScanning(true);
     try {
+      const { base64: imageBase64 } = await prepareImage(result.assets[0].uri, { base64: true });
+      if (!imageBase64) throw new Error("Couldn't prepare the photo — please try again.");
       const { data: sessionData } = await supabase.auth.getSession();
       const accessToken = sessionData.session?.access_token;
       const res = await fetch(`${API_BASE_URL}/api/backflow/scan-data-plate`, {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
-        body: JSON.stringify({ imageBase64: result.assets[0].base64, mimeType: "image/jpeg" }),
+        body: JSON.stringify({ imageBase64, mimeType: "image/jpeg" }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data?.error ?? "Failed to read data plate");

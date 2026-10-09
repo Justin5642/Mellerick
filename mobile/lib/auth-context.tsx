@@ -1,16 +1,17 @@
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import type { Session } from "@supabase/supabase-js";
 import { supabase } from "./supabase";
+import {
+  clearCachedProfile,
+  decideProfileResult,
+  readCachedProfile,
+  writeCachedProfile,
+  type CachedProfile,
+} from "./profileCache";
 
 const API_BASE_URL = process.env.EXPO_PUBLIC_API_BASE_URL;
 
-interface Profile {
-  id: string;
-  full_name: string;
-  email: string;
-  role: string;
-  is_active: boolean;
-}
+type Profile = CachedProfile;
 
 interface AuthContextValue {
   session: Session | null;
@@ -41,6 +42,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // Mirrors `profile` for use inside the auth listener, which closes over the
   // first render's state and would otherwise always see null.
   const profileRef = useRef<Profile | null>(null);
+  // The user whose profile we are currently resolving. A read that comes back
+  // for anyone else (a sign-out and a different sign-in raced it) is dropped,
+  // so one user's profile can never be shown — or cached — under another's
+  // session.
+  const activeUserRef = useRef<string | null>(null);
 
   useEffect(() => {
     supabase.auth.getSession().then(
@@ -82,9 +88,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         const quiet = event === "TOKEN_REFRESHED" && profileRef.current !== null;
         void loadProfile(session.user.id, { quiet });
       } else {
+        const previous = activeUserRef.current;
+        activeUserRef.current = null;
         setProfile(null);
         profileRef.current = null;
+        setProfileError(null);
         setLoading(false);
+        // Signed out: the cached profile must not outlive the session. Cleared
+        // for the user who just left (or every cached profile, if we never
+        // learned who that was). Only on a real SIGNED_OUT — a null
+        // INITIAL_SESSION is "no session yet", not a reason to forget anyone,
+        // and the cache is keyed per user so it can never answer for another.
+        if (event === "SIGNED_OUT") void clearCachedProfile(previous ?? undefined);
       }
     });
 
@@ -92,32 +107,82 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   async function loadProfile(userId: string, opts: { quiet?: boolean } = {}) {
+    // A different user from the one on screen: drop the old profile first, so
+    // nothing about the previous person survives into this session.
+    if (profileRef.current && profileRef.current.id !== userId) {
+      profileRef.current = null;
+      setProfile(null);
+    }
+    activeUserRef.current = userId;
+    let quiet = opts.quiet === true || profileRef.current?.id === userId;
+
+    // OPTIMISTIC START FROM THE DEVICE CACHE. Before this, a cold start held
+    // the full-screen spinner until a NETWORK read of `profiles` returned — and
+    // offline, with nothing loaded, that read failed into the profile-error
+    // screen instead of the technician's jobs. A profile cached for THIS user
+    // (lib/profileCache: keyed and checked by id) paints the right role's
+    // screens immediately; the server read below then revalidates it, and the
+    // server's answer always wins once it arrives.
+    if (!quiet) {
+      const cached = await readCachedProfile(userId);
+      if (cached && activeUserRef.current === userId && !profileRef.current) {
+        profileRef.current = cached;
+        setProfile(cached);
+        setProfileError(null);
+        setLoading(false);
+        quiet = true;
+      }
+    }
+
     // Raise loading for the whole fetch so the root layout shows the splash — not
     // the fail-closed "no role" screen — during the post-login profile round-trip
     // (onAuthStateChange(SIGNED_IN) doesn't otherwise re-enter the loading state).
     //
-    // QUIET skips that, and is used for a token refresh: the profile is already
-    // loaded, the person has not changed, and raising `loading` would unmount
-    // every screen mid-shift.
+    // QUIET skips that, and is used for a token refresh and for a revalidation
+    // behind a cached profile: the person has not changed, and raising
+    // `loading` would unmount every screen mid-shift.
     try {
-      if (!opts.quiet) setLoading(true);
+      if (!quiet) setLoading(true);
 
       const { data, error } = await supabase.from("profiles").select("*").eq("id", userId).single();
+      if (activeUserRef.current !== userId) return; // superseded by a sign-out / other user
 
-      // A failed read must not blank an already-loaded profile. Doing so drops the
-      // technician onto the fail-closed "no role" screen because of one bad
-      // request, mid-job. Keep what we have and let the next refresh correct it.
-      if (error && profileRef.current) {
-        console.warn("[auth] profile refresh failed; keeping the loaded profile:", error.message);
-      } else if (error) {
-        // A failure with NOTHING already loaded. Falling through to
-        // setProfile(null) here is what produced "No role assigned" for a read
-        // that simply broke.
-        setProfileError(error);
-      } else {
-        setProfileError(null);
-        setProfile(data);
-        profileRef.current = data;
+      // decideProfileResult (lib/profileCache) is the whole policy, pure and
+      // unit-tested:
+      //  • the server answered → apply it and cache it. A changed role or
+      //    is_active=false REPLACES the cached one at once; app/_layout.tsx
+      //    re-gates the routes and PowerSyncProvider wipes a mirror synced for
+      //    the old role.
+      //  • the server said "no such profile" (PGRST116) → clear, fail closed.
+      //  • a transient failure with a profile already shown → keep it. Blanking
+      //    it would drop a technician onto the "no role" screen mid-job for one
+      //    bad request.
+      //  • a failure with NOTHING shown → profileError. Falling through to
+      //    setProfile(null) is what used to produce "No role assigned" for a
+      //    read that simply broke.
+      const decision = decideProfileResult({ shown: profileRef.current, data, error });
+      switch (decision.kind) {
+        case "apply":
+          setProfileError(null);
+          setProfile(decision.profile);
+          profileRef.current = decision.profile;
+          void writeCachedProfile(decision.profile);
+          break;
+        case "clear":
+          setProfileError(null);
+          setProfile(null);
+          profileRef.current = null;
+          void clearCachedProfile(userId);
+          break;
+        case "keep":
+          console.warn(
+            "[auth] profile refresh failed; keeping the loaded profile:",
+            (error as { message?: string } | null)?.message ?? String(error)
+          );
+          break;
+        case "error":
+          setProfileError(decision.error);
+          break;
       }
     } catch (e) {
       // Same rule as the `error` branch, for the case where the read THROWS
@@ -132,9 +197,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // the person holding the phone. Without it the throw reaches the user as
       // "No role assigned", which is a statement about their account rather
       // than about the request that failed.
-      if (!profileRef.current) setProfileError(e);
+      if (!profileRef.current && activeUserRef.current === userId) setProfileError(e);
     } finally {
-      if (!opts.quiet) setLoading(false);
+      if (!quiet) setLoading(false);
     }
   }
 
@@ -178,6 +243,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   async function signOut() {
+    // Cleared here as well as in the SIGNED_OUT handler: a sign-out that fails
+    // half-way (offline revoke) must still not leave this person's role on the
+    // device for whoever opens the app next.
+    await clearCachedProfile(activeUserRef.current ?? undefined);
     await supabase.auth.signOut();
   }
 

@@ -2,6 +2,7 @@ import { supabase } from "../../supabase";
 import { fromLocalOr, type LocalReads } from "./source";
 import { nestOne, num, numOrNull } from "./rowMap";
 import { unwrap, unwrapRows } from "./unwrap";
+import { assignedOrCrewFilter, assignedOrCrewSql, crewJobIdsRemote } from "./assignedJobs";
 
 // Read-repository layer for the job screens (phase 2 of the PowerSync read
 // integration — design §6 step 6). Each exported function owns one screen's
@@ -9,9 +10,11 @@ import { unwrap, unwrapRows } from "./unwrap";
 // Supabase fallback stays byte-identical to the pre-extraction behaviour.
 //
 // Role routing (per stream scoping in powersync/sync-streams.yaml):
-//   • listMyJobs — NO role gate. The tech_jobs stream scopes a technician's
-//     mirror to `assigned_to = auth.user_id()`; an office/admin mirror has
-//     ALL jobs and the WHERE narrows it identically. Both are faithful.
+//   • listMyJobs / listMyJobSites — NO role gate. The tech_jobs stream scopes
+//     a technician's mirror through job_assignments (0059); an office/admin
+//     mirror has ALL jobs and assignments, and the WHERE narrows it
+//     identically. Both are faithful. "Mine" means ANY current assignee, not
+//     just jobs.assigned_to's primary — see ./assignedJobs.
 //   • getJob — NO role gate, but a local MISS falls back to remote():
 //     job/[id] is a shared route, and a technician opening a job NOT
 //     assigned to them has no local row — a miss is not proof of absence.
@@ -144,9 +147,22 @@ export const SQL_LIST_MY_JOBS = `
   FROM jobs j
   LEFT JOIN customers c ON c.id = j.customer_id
   LEFT JOIN sites     s ON s.id = j.site_id
-  WHERE j.assigned_to = ?
+  WHERE ${assignedOrCrewSql("j", "?1")}
     AND j.status NOT IN ('completed', 'cancelled')
   ORDER BY j.scheduled_start IS NULL, j.scheduled_start`;
+
+// The geofence's site list: the same "mine, open" scope as My Jobs, cut down to
+// what the auto-clock needs. A job without coordinates cannot be geofenced and
+// is filtered out in mapJobSites (shared with the remote path), not here, so the
+// two paths cannot disagree about what counts as having coordinates. Soonest
+// first: the off-hours wake regions keep only the first 20 (lib/trackingGate.ts).
+export const SQL_LIST_MY_JOB_SITES = `
+  SELECT j.id, j.scheduled_cost_center_id, s.site_lat, s.site_lng
+  FROM jobs j
+  LEFT JOIN sites s ON s.id = j.site_id
+  WHERE ${assignedOrCrewSql("j", "?1")}
+    AND j.status NOT IN ('completed', 'cancelled')
+  ORDER BY j.scheduled_start IS NULL, j.scheduled_start, j.id`;
 
 export const SQL_GET_JOB = `
   SELECT j.id, j.job_number, j.title, j.status, j.priority, j.description, j.notes,
@@ -411,10 +427,11 @@ function escapeLike(s: string): string {
 // ---------------------------------------------------------------------------
 
 /**
- * The technician "My Jobs" list: open jobs assigned to the user, soonest
- * first, unscheduled last. No role gate — every role's mirror answers this
- * faithfully (a technician's contains exactly their jobs; an office/admin
- * mirror contains all jobs and the WHERE narrows identically).
+ * The technician "My Jobs" list: open jobs the user is on (any current
+ * assignee — see ./assignedJobs), soonest first, unscheduled last. No role
+ * gate — every role's mirror answers this faithfully (a technician's contains
+ * exactly their jobs; an office/admin mirror contains all jobs and the WHERE
+ * narrows identically).
  */
 export async function listMyJobs(userId: string): Promise<MyJob[]> {
   return fromLocalOr(
@@ -422,18 +439,86 @@ export async function listMyJobs(userId: string): Promise<MyJob[]> {
       const rows = await db.getAll<RawMyJobRow>(SQL_LIST_MY_JOBS, [userId]);
       return rows.map(mapMyJob);
     },
-    // Unchanged Supabase body (components/jobs/my-jobs-screen.tsx loadJobs).
+    // components/jobs/my-jobs-screen.tsx's original loadJobs body, with the
+    // assigned_to-only filter widened to the crew (same rule as the SQL above).
     async () => {
+      const crew = await crewJobIdsRemote(userId, { kind: "open" }, "listMyJobs");
       const res = await supabase
         .from("jobs")
         .select("id, job_number, title, status, scheduled_start, scheduled_end, customers(name), sites(name, address_line1, suburb, site_lat, site_lng)")
-        .eq("assigned_to", userId)
+        .or(assignedOrCrewFilter(userId, crew))
         .not("status", "in", '("completed","cancelled")')
         .order("scheduled_start", { ascending: true, nullsFirst: false });
       // The single most dangerous read in the app: a discarded error here
       // renders "No jobs assigned" to a technician standing on site, who then
       // goes home. Failing loudly is the only honest answer.
       return unwrapRows(res as never, "listMyJobs") as unknown as MyJob[];
+    }
+  );
+}
+
+/** One geofence-able job: what the auto-clock draws a circle round. */
+export interface MyJobSite {
+  jobId: string;
+  lat: number;
+  lng: number;
+  scheduledCostCenterId: string | null;
+}
+
+interface RawJobSiteRow {
+  id: string;
+  scheduled_cost_center_id: string | null;
+  site_lat: number | string | null;
+  site_lng: number | string | null;
+}
+
+// Shared by both paths. Truthiness, not `!= null`, is the rule the geofence has
+// always applied: a 0/0 coordinate is an unset pin, not a site in the Atlantic.
+function mapJobSites(rows: RawJobSiteRow[]): MyJobSite[] {
+  const out: MyJobSite[] = [];
+  for (const r of rows) {
+    const lat = numOrNull(r.site_lat);
+    const lng = numOrNull(r.site_lng);
+    if (!lat || !lng) continue;
+    out.push({ jobId: r.id, lat, lng, scheduledCostCenterId: r.scheduled_cost_center_id ?? null });
+  }
+  return out;
+}
+
+/**
+ * The auto-clock's site list: the user's open jobs (same scope as listMyJobs)
+ * that have coordinates.
+ *
+ * Local-first, unlike the network query it replaces. That query ran every ten
+ * minutes all shift, and offline it failed — which kept the previous list (by
+ * design) but meant a job assigned while the technician was out of signal could
+ * never be geofenced until signal came back, even once PowerSync had it.
+ */
+export async function listMyJobSites(userId: string): Promise<MyJobSite[]> {
+  return fromLocalOr(
+    async (db) => mapJobSites(await db.getAll<RawJobSiteRow>(SQL_LIST_MY_JOB_SITES, [userId])),
+    async () => {
+      const crew = await crewJobIdsRemote(userId, { kind: "open" }, "listMyJobSites");
+      const res = await supabase
+        .from("jobs")
+        .select("id, scheduled_cost_center_id, sites(site_lat, site_lng)")
+        .or(assignedOrCrewFilter(userId, crew))
+        .not("status", "in", '("completed","cancelled")')
+        .order("scheduled_start", { ascending: true, nullsFirst: false })
+        .order("id", { ascending: true });
+      const rows = unwrapRows(res as never, "listMyJobSites") as unknown as {
+        id: string;
+        scheduled_cost_center_id: string | null;
+        sites: { site_lat: number | null; site_lng: number | null } | null;
+      }[];
+      return mapJobSites(
+        rows.map((r) => ({
+          id: r.id,
+          scheduled_cost_center_id: r.scheduled_cost_center_id,
+          site_lat: r.sites?.site_lat ?? null,
+          site_lng: r.sites?.site_lng ?? null,
+        }))
+      );
     }
   );
 }

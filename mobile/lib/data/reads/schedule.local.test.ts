@@ -24,7 +24,9 @@ import {
   type LocalRole,
 } from "./source";
 import {
+  countOtherScheduledJobs,
   listAssignableStaff,
+  SQL_COUNT_OTHER_SCHEDULED_JOBS,
   SQL_LIST_ASSIGNABLE_STAFF,
   type AssignableStaff,
 } from "./schedule";
@@ -102,5 +104,30 @@ describe("listAssignableStaff (local path)", () => {
     expect(getAll).not.toHaveBeenCalled(); // local rows would be silently scoped/empty
     expect(supabase.from as jest.Mock).toHaveBeenCalledWith("profiles"); // RLS stays the loud gate
     expect(result).toEqual([]);
+  });
+});
+
+describe("countOtherScheduledJobs (local path)", () => {
+  afterEach(() => {
+    resetSourceForTests();
+    jest.clearAllMocks();
+  });
+
+  it("counts crew jobs (job_assignments) as well as jobs.assigned_to, binding the id once", async () => {
+    const getOptional = jest.fn().mockResolvedValue({ n: 2 });
+    setLocalReads(fakeReads({ getOptional }));
+
+    await expect(countOtherScheduledJobs("tech-2", "2026-10-09", "this-job")).resolves.toBe(2);
+
+    const [sql, params] = getOptional.mock.calls[0];
+    expect(sql).toBe(SQL_COUNT_OTHER_SCHEDULED_JOBS);
+    expect(norm(sql)).toContain(
+      "WHERE (j.assigned_to = ?1 OR j.id IN (SELECT ja.job_id FROM job_assignments ja WHERE ja.staff_id = ?1))"
+    );
+    expect(norm(sql)).toContain("AND j.id != ?2 AND j.scheduled_start >= ?3 AND j.scheduled_start < ?4");
+    expect(params[0]).toBe("tech-2");
+    expect(params[1]).toBe("this-job");
+    expect(params).toHaveLength(4);
+    expect(supabase.from as jest.Mock).not.toHaveBeenCalled();
   });
 });
