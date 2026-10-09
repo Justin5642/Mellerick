@@ -6,7 +6,11 @@ import { Ionicons } from "@expo/vector-icons";
 import { supabase } from "../../lib/supabase";
 import { colors } from "../../lib/theme";
 import { ScreenError } from "../../design/components/ScreenError";
-import { unwrap, unwrapRows } from "../../lib/data/reads/unwrap";
+import {
+  getBackflowDeviceWithTests,
+  type BackflowDeviceDetail,
+  type BackflowTestSummary,
+} from "../../lib/data/reads/backflow";
 import {
   computeNextDueDate,
   getDueStatus,
@@ -21,8 +25,8 @@ const API_BASE_URL = process.env.EXPO_PUBLIC_API_BASE_URL;
 export default function BackflowDeviceScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
-  const [device, setDevice] = useState<any>(null);
-  const [tests, setTests] = useState<any[]>([]);
+  const [device, setDevice] = useState<BackflowDeviceDetail | null>(null);
+  const [tests, setTests] = useState<BackflowTestSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [openingId, setOpeningId] = useState<string | null>(null);
   const [error, setError] = useState<unknown>(null);
@@ -34,16 +38,12 @@ export default function BackflowDeviceScreen() {
   const load = useCallback(async () => {
     try {
       setError(null);
-      const [deviceRes, testsRes] = await Promise.all([
-        supabase.from("backflow_devices").select("*, customers(name), sites(name, address_line1, suburb, state, postcode)").eq("id", id).single(),
-        supabase
-          .from("backflow_tests")
-          .select("*, profiles!backflow_tests_tested_by_fkey(full_name)")
-          .eq("device_id", id)
-          .order("test_date", { ascending: false }),
-      ]);
-      setDevice(unwrap(deviceRes as never, "BackflowDeviceScreen.device"));
-      setTests(unwrapRows(testsRes as never, "BackflowDeviceScreen.tests"));
+      // Local-first (lib/data/reads/backflow): the tester standing at this
+      // device is often in a plant room with no signal, and every column here
+      // is in the money-free backflow streams every role syncs.
+      const { device: d, tests: t } = await getBackflowDeviceWithTests(id);
+      setDevice(d);
+      setTests(t);
     } catch (e) {
       setError(e);
     } finally {

@@ -163,6 +163,45 @@ otherwise runs a byte-identical Supabase query. Fallback reasons, each logged:
 The local and remote implementations must return **identical shapes**. Each read
 module has a test for this; change one side, change both.
 
+### Startup — nothing on the first screen waits for the network
+
+A cold start used to block twice: a full-screen spinner until a **network** read
+of `profiles` returned (offline with nothing loaded → the profile-error screen,
+not the technician's jobs), and then no local reads until **this** connection's
+first PowerSync sync finished, so My Jobs' first render went to Supabase.
+
+- **Profile cache** — `mobile/lib/profileCache.ts`. The signed-in user's own
+  `id / full_name / email / role / is_active` in AsyncStorage, keyed **and
+  checked** by user id (a record never answers for another user). `auth-context`
+  paints from it immediately and revalidates in the background. Policy
+  (`decideProfileResult`, pure, tested): the server's answer **always** replaces
+  the cache once it arrives (a changed role re-gates the routes and
+  PowerSyncProvider wipes the old role's mirror; `is_active=false` shows the
+  deactivated screen and wipes the mirror); `PGRST116` (no profile row) clears
+  it — fail closed; a transient failure keeps what is shown. Cleared on sign-out.
+  **The cached role is a UI hint, not an authorization**: RLS still runs as the
+  real user and the sync streams gate on the server-side `profiles` row, so
+  editing the cache on a rooted phone grants no data.
+- **Full-sync marker** — `mobile/lib/data/syncMarker.ts`, logic in
+  `powersyncTransition.ts` (tested with fakes). Written only after
+  `waitForFirstSync()` for `{userId, role}`; cleared **before** every
+  `disconnectAndClear()`. On cold start: marker for this exact user+role → a
+  provisional local-read seam is registered at once (`fromLocalOr`'s `role`,
+  `write-echo`, `stale-db` fallbacks still apply); no marker → today's
+  behaviour (wait); marker for anyone else → wipe the mirror first.
+- A transition's `waitForFirstSync` is aborted when a newer transition is
+  queued — previously one waiting offline blocked the chain, including a
+  sign-out's wipe, indefinitely. Transitions key on user id + role, not the
+  session object, so an hourly token refresh no longer re-runs them.
+
+Reads moved local in the same change: office dashboard (`reads/dashboard.ts`,
+office/admin only — was 7 network calls), backflow device detail, technician
+variations + the variation-type picker (rate-stripped streams; no money column on
+either path, asserted by test), and time entries on the hours scoreboard (the
+technician query reproduces RLS's own-rows filter). **Still remote, by design:**
+a technician's allocated PO hours (`purchase_orders` is not in their stream;
+`purchase_orders_public` is a server view), and signed photo URLs.
+
 ### Writes — always through the outbox, never direct
 
 Every mutation is enqueued in a durable SQLite outbox
@@ -774,9 +813,11 @@ Things that have already cost time, roughly in order of how likely you are to hi
    weeks before being removed. Those pages are statically prerendered — which is
    why the build needs the Supabase env vars at compile time.
 7. **`[sync] status poll failed: … ERR_USING_RELEASED_SHARED_OBJECT` in the dev
-   log is EXPECTED, not a crash.** The sync badge polls SQLite every 3s. A tick
-   already in flight when the JS context is torn down — which every Fast Refresh
-   does — resumes against a released native handle. It is caught in
+   log is EXPECTED, not a crash.** The sync badge re-reads the outbox counts on
+   outbox/drain events, every 3s only while writes are pending, and on a 30s
+   heartbeat otherwise (`lib/data/syncStatusCadence.ts` — it used to be every 3s
+   forever). A read already in flight when the JS context is torn down — which
+   every Fast Refresh does — resumes against a released native handle. It is caught in
    `useSyncStatus`, logged under `__DEV__` only, and the next tick recovers.
    Production exposure is a poll in flight during sign-out: caught the same way,
    the badge skips one update. It looks alarming in logcat and is not. I chased
@@ -915,7 +956,7 @@ What it reports — the failures that were silent on a technician's phone:
 
 **Not** reported: the expected `ERR_USING_RELEASED_SHARED_OBJECT` teardown
 noise (§10 trap 7). Each distinct sync failure is reported **once per app
-session**, so a broken 3-second poll cannot flood the quota. A dead-letter
+session**, so a broken status poll cannot flood the quota. A dead-letter
 report never carries the payload; the server's error message is redacted
 (numbers and quoted values removed) before it is attached.
 

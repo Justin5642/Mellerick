@@ -3,32 +3,16 @@ import { View, Text, ScrollView, StyleSheet, RefreshControl, TouchableOpacity } 
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
-import { supabase } from "../../lib/supabase";
 import { colors } from "../../lib/theme";
 import { useAuth } from "../../lib/auth-context";
-import { computeNextDueDate, getDueStatus } from "../../lib/backflow";
 import { isTodayInBusinessTZ, formatBusinessTime, businessHour } from "../../lib/date";
 import { StatCard } from "../../design/components/StatCard";
 import { JobListRow } from "../../design/components/JobListRow";
 import { ScreenError } from "../../design/components/ScreenError";
-import { unwrapRows, unwrapCount } from "../../lib/data/reads/unwrap";
+import { getOfficeDashboard, type DashboardJob } from "../../lib/data/reads/dashboard";
+import { listBackflowDevices } from "../../lib/data/reads/backflow";
 
-interface DashJob {
-  id: string;
-  job_number: number;
-  title: string;
-  status: string;
-  priority: string;
-  scheduled_start: string | null;
-  scheduled_end: string | null;
-  customers: { name: string } | null;
-  profiles?: { full_name: string } | null;
-  assigned_profile?: { full_name: string } | null;
-}
-interface DashDevice {
-  test_frequency_months: number;
-  backflow_tests: { test_date: string; result: string }[] | null;
-}
+type DashJob = DashboardJob;
 interface Counts {
   total: number;
   active: number;
@@ -55,45 +39,17 @@ export default function DashboardScreen() {
   const load = useCallback(async () => {
     try {
       setError(null);
-      const [totalRes, activeRes, custRes, overdueRes, recentRes, scheduledRes, devicesRes] = await Promise.all([
-        supabase.from("jobs").select("*", { count: "exact", head: true }),
-        supabase.from("jobs").select("*", { count: "exact", head: true }).in("status", ["pending", "scheduled", "in_progress"]),
-        supabase.from("customers").select("*", { count: "exact", head: true }).eq("is_active", true),
-        supabase.from("invoices").select("*", { count: "exact", head: true }).eq("status", "overdue"),
-        supabase
-          .from("jobs")
-          // jobs has multiple FKs to profiles — the FK hint + alias are required.
-          .select("*, customers(name), assigned_profile:profiles!jobs_assigned_to_fkey(full_name)")
-          .order("created_at", { ascending: false })
-          .limit(8),
-        supabase
-          .from("jobs")
-          .select("*, customers(name), profiles!jobs_assigned_to_fkey(full_name)")
-          .not("scheduled_start", "is", null)
-          .not("status", "in", '("completed","cancelled")')
-          .order("scheduled_start"),
-        supabase.from("backflow_devices").select("test_frequency_months, backflow_tests(test_date, result)").eq("is_active", true),
-      ]);
+      // Local-first (lib/data/reads/dashboard + reads/backflow): the office
+      // mirror carries every table these figures are computed from, so the
+      // dashboard opens without SEVEN network round-trips — the last of which
+      // used to download every active backflow device with its full test
+      // history just to count the ones falling due.
+      const [dash, backflowRows] = await Promise.all([getOfficeDashboard(), listBackflowDevices()]);
+      const backflowDue = backflowRows.filter((r) => r.status === "overdue" || r.status === "due_soon").length;
 
-      const devices = unwrapRows(devicesRes as never, "DashboardScreen.devices") as unknown as DashDevice[];
-      const backflowDue = devices.filter((device) => {
-        const passing = (device.backflow_tests ?? []).filter((t) => t.result === "pass");
-        const lastPass = passing.sort((a, b) => (a.test_date < b.test_date ? 1 : -1))[0];
-        const next = computeNextDueDate(lastPass?.test_date, Number(device.test_frequency_months));
-        const status = getDueStatus(next);
-        return status === "overdue" || status === "due_soon";
-      }).length;
-
-      setCounts({
-        total: unwrapCount(totalRes, "DashboardScreen.totalJobs"),
-        active: unwrapCount(activeRes, "DashboardScreen.activeJobs"),
-        customers: unwrapCount(custRes, "DashboardScreen.customers"),
-        overdue: unwrapCount(overdueRes, "DashboardScreen.overdueInvoices"),
-        backflowDue,
-      });
-      setRecent(unwrapRows(recentRes as never, "DashboardScreen.recentJobs") as unknown as DashJob[]);
-      const scheduled = unwrapRows(scheduledRes as never, "DashboardScreen.scheduledJobs") as unknown as DashJob[];
-      setToday(scheduled.filter((j) => j.scheduled_start != null && isTodayInBusinessTZ(j.scheduled_start)));
+      setCounts({ ...dash.counts, backflowDue });
+      setRecent(dash.recent);
+      setToday(dash.scheduled.filter((j) => j.scheduled_start != null && isTodayInBusinessTZ(j.scheduled_start)));
     } catch (e) {
       setError(e);
     }
@@ -153,7 +109,7 @@ export default function DashboardScreen() {
                 key={job.id}
                 jobNumber={job.job_number}
                 title={job.title}
-                subtitle={`${job.customers?.name ?? "—"}${job.profiles?.full_name ? ` · ${job.profiles.full_name}` : " · Unassigned"}`}
+                subtitle={`${job.customers?.name ?? "—"}${job.assigned_profile?.full_name ? ` · ${job.assigned_profile.full_name}` : " · Unassigned"}`}
                 status={job.status}
                 leading={
                   <View style={styles.timeCol}>
@@ -181,7 +137,7 @@ export default function DashboardScreen() {
                 title={job.title}
                 subtitle={`${job.customers?.name ?? "—"}${job.assigned_profile?.full_name ? ` · ${job.assigned_profile.full_name}` : ""}`}
                 status={job.status}
-                priority={job.priority}
+                priority={job.priority ?? undefined}
                 onPress={() => router.push(`/job/${job.id}`)}
               />
             ))

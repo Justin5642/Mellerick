@@ -4,13 +4,15 @@ import * as ImagePicker from "expo-image-picker";
 import { Image } from "expo-image";
 import { signJobPhotoUrls } from "../../lib/data/reads/jobPhotos";
 import { prepareImageForUpload } from "../../lib/imageUpload";
-import { unwrapRows } from "../../lib/data/reads/unwrap";
-import { supabase } from "../../lib/supabase";
 import { colors } from "../../lib/theme";
 import { MoneyText } from "../../design/components/MoneyText";
 import { useIsOfficeOrAdmin } from "../../design/guards/useRole";
 import { useVariations } from "../../lib/data/hooks/useVariations";
-import { getJobVariationsForApproval } from "../../lib/data/reads/variations";
+import {
+  getJobVariationsForApproval,
+  listActiveVariationTypes,
+  listJobVariationsForTechnician,
+} from "../../lib/data/reads/variations";
 
 // Mobile side of CRM spec items "Variations — Auto Approve" and
 // "Variations — Manual Approval". Crew picks a standard variation type
@@ -40,7 +42,9 @@ interface Variation {
   unit: string;
   photo_storage_path: string | null;
   status: "auto_approved" | "pending_approval" | "approved" | "rejected";
-  created_at: string;
+  // Present on the office/admin approval path only; the technician read orders
+  // by logged_at, because created_at is not in the technician sync stream.
+  created_at?: string;
   // Office/admin-only money columns (present only when read from the base table
   // via the approval path; the technician public view never returns them).
   rate?: number | null;
@@ -83,21 +87,17 @@ export function JobVariationsTab({ jobId, currentUserId }: { jobId: string; curr
     // job that genuinely has none — and an empty type picker, which silently
     // makes it impossible to log one. A technician then does the work with no
     // record that it was ever authorised.
-    const variationsP = isOfficeOrAdmin
+    //
+    // Both now read local-first (lib/data/reads/variations): the technician
+    // path from the rate-stripped tech_job_variations stream, the type picker
+    // from the rate-stripped variation_types stream.
+    const variationsP: Promise<Variation[]> = isOfficeOrAdmin
       ? getJobVariationsForApproval(jobId)
-      : supabase
-          .from("job_variations_public")
-          .select("*")
-          .eq("job_id", jobId)
-          .order("created_at", { ascending: false })
-          .then((res) => unwrapRows(res as never, "loadVariations(technician)") as unknown as Variation[]);
-    const [v, typesRes] = await Promise.all([
-      variationsP,
-      supabase.from("variation_types_public").select("*").eq("is_active", true).order("name"),
-    ]);
+      : listJobVariationsForTechnician(jobId);
+    const [v, typeRows] = await Promise.all([variationsP, listActiveVariationTypes()]);
     const rows = (v as Variation[]) ?? [];
     setVariations(rows);
-    setTypes(unwrapRows(typesRes as never, "loadVariationTypes") as unknown as VariationType[]);
+    setTypes(typeRows);
     // Every photo's signed URL in ONE batched Storage request, committed in ONE
     // setUrls. A signing failure leaves the photos unshown (as before) rather
     // than reporting the variations themselves as unloadable.
