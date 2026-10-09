@@ -1,6 +1,6 @@
 -- =============================================
 -- OFFICE-ONLY JOB DOCUMENTS (+ mobile expense-receipt path fix)
--- STATUS: DRAFT — NOT APPLIED. Apply to production, then update this line.
+-- STATUS: ✅ APPLIED IN PRODUCTION (2026-10-08, via SQL editor).
 --
 -- WHY
 -- job_documents (incl. ~3.9k files imported from Simpro) is readable by every

@@ -1,6 +1,6 @@
 -- =============================================
 -- BACKFLOW-CERTIFICATES STORAGE: CONVERGE THE POLICIES, FIX MOBILE SIGNATURE UPSERT
--- STATUS: DRAFT — NOT APPLIED. Apply to production, then update this line.
+-- STATUS: ✅ APPLIED IN PRODUCTION (2026-10-08, via SQL editor).
 --
 -- WHERE THIS STARTS. 0047's "DELIBERATELY DOES NOT DO" item 2 says this bucket
 -- has RLS on and no policy, so the browser signature upload is refused. That

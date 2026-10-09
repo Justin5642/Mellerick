@@ -118,8 +118,7 @@ export function JobDocuments({ jobId, documents, onUpdate, currentUserId, isOffi
     setDeleting(null);
   }
 
-  // Office only = hidden from technicians (row and file) once migration 0065,
-  // a draft not yet applied, is in production.
+  // Office only = hidden from technicians (row and file) — migration 0065.
   // Purchase orders, invoices, quotes and anything else with prices.
   async function handleToggleOfficeOnly(doc: any) {
     const next = !doc.office_only;

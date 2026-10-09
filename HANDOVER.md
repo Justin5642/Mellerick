@@ -742,21 +742,21 @@ FK-failing delete can be queued.
 must be redeployed with `sites` selecting `is_active`, or devices never receive
 the archived flag (they treat a missing value as active).
 
-**Site write permissions (migration `0064`, draft, not yet applied):** RLS on
+**Site write permissions (migration `0064`, applied 2026-10-08):** RLS on
 `sites` now lets every signed-in user read and add sites, but only office/admin
-update (edit/archive) or delete them. Apply `0064` to production; it drops the
-old policies by enumeration and asserts the end state. `tests/rls/sites.test.ts`
+update (edit/archive) or delete them. It drops the old policies by enumeration
+and asserts the end state. `tests/rls/sites.test.ts`
 proves it on the CI stack.
 
-**Office-only job documents (migration `0065`, draft, not yet applied):**
+**Office-only job documents (migration `0065`, applied 2026-10-08):**
 `job_documents.office_only` hides a document — row and file — from technicians;
 office/admin toggle it on the web Documents tab (lock icon). The same migration
 fixes mobile expense receipts (`<job>/expense-<id>.jpg`), which 0047's path
-check missed. After applying it, run `scripts/audit-job-documents.mjs` (dry run
+check missed. Run `scripts/audit-job-documents.mjs` (dry run
 first, then `--commit`) to flag the ~3.9k imported Simpro attachments that show
 prices; review the CSV it writes to `scripts/data/`.
 
-**Backflow signature storage (migration `0066`, draft, not yet applied):**
+**Backflow signature storage (migration `0066`, applied 2026-10-08):**
 0047's note that `backflow-certificates` has no policy is stale — 0048 added
 INSERT for `<deviceId>/signatures/…`, which fixed the web upload. But the mobile
 outbox uploads with `upsert: true`, which storage needs SELECT + UPDATE for, so a
@@ -764,8 +764,8 @@ technician's signed test from the phone is refused and dead-letters. `0066`
 re-creates the bucket's policies by enumeration: signatures only, under an
 existing device; SELECT/UPDATE only on a signature you uploaded yourself;
 office/admin read and delete everything; anon nothing.
-`tests/rls/backflow-certificates.test.ts` proves it on the CI stack. After
-applying, log a signed test from the mobile app and confirm it settles.
+`tests/rls/backflow-certificates.test.ts` proves it on the CI stack. Confirm
+on a device that a signed test logged from the mobile app settles.
 
 **Job to-do list (migration `0067`, draft, not yet applied):** office can set
 jobs aside to fill a schedule gap. Web job page header (office/admin only) →

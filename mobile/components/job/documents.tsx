@@ -14,8 +14,7 @@ interface Document {
   file_type: string | null;
   created_at: string;
   profiles: { full_name: string } | null;
-  // Hidden from technicians by RLS once migration 0065 (draft, not yet
-  // applied) is in production — then only office/admin ever
+  // Hidden from technicians by RLS (migration 0065) — only office/admin ever
   // receive these rows, so the label is only ever seen by them.
   office_only?: boolean;
 }
