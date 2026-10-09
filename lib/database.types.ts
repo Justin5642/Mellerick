@@ -138,6 +138,7 @@ export type Database = {
           strainer_installed: boolean | null
           submitted_to_email: string | null
           submitted_to_water_authority_at: string | null
+          sync_recent: boolean
           test_date: string
           test_kit_calibration_date: string | null
           test_kit_serial_number: string | null
@@ -167,6 +168,7 @@ export type Database = {
           strainer_installed?: boolean | null
           submitted_to_email?: string | null
           submitted_to_water_authority_at?: string | null
+          sync_recent?: boolean
           test_date?: string
           test_kit_calibration_date?: string | null
           test_kit_serial_number?: string | null
@@ -196,6 +198,7 @@ export type Database = {
           strainer_installed?: boolean | null
           submitted_to_email?: string | null
           submitted_to_water_authority_at?: string | null
+          sync_recent?: boolean
           test_date?: string
           test_kit_calibration_date?: string | null
           test_kit_serial_number?: string | null
@@ -320,6 +323,7 @@ export type Database = {
           notes: string | null
           phone: string | null
           simpro_customer_id: number | null
+          sync_backflow: boolean
           updated_at: string | null
         }
         Insert: {
@@ -337,6 +341,7 @@ export type Database = {
           notes?: string | null
           phone?: string | null
           simpro_customer_id?: number | null
+          sync_backflow?: boolean
           updated_at?: string | null
         }
         Update: {
@@ -354,6 +359,7 @@ export type Database = {
           notes?: string | null
           phone?: string | null
           simpro_customer_id?: number | null
+          sync_backflow?: boolean
           updated_at?: string | null
         }
         Relationships: [
@@ -593,6 +599,7 @@ export type Database = {
           job_id: string | null
           logged_by: string | null
           notes: string | null
+          sync_office: boolean
           usage_date: string
         }
         Insert: {
@@ -603,6 +610,7 @@ export type Database = {
           job_id?: string | null
           logged_by?: string | null
           notes?: string | null
+          sync_office?: boolean
           usage_date?: string
         }
         Update: {
@@ -613,6 +621,7 @@ export type Database = {
           job_id?: string | null
           logged_by?: string | null
           notes?: string | null
+          sync_office?: boolean
           usage_date?: string
         }
         Relationships: [
@@ -735,6 +744,7 @@ export type Database = {
           name: string
           pricing_item_id: string | null
           quantity: number | null
+          sync_office: boolean
           total: number | null
           unit_price: number
         }
@@ -746,6 +756,7 @@ export type Database = {
           name: string
           pricing_item_id?: string | null
           quantity?: number | null
+          sync_office?: boolean
           total?: number | null
           unit_price: number
         }
@@ -757,6 +768,7 @@ export type Database = {
           name?: string
           pricing_item_id?: string | null
           quantity?: number | null
+          sync_office?: boolean
           total?: number | null
           unit_price?: number
         }
@@ -792,6 +804,7 @@ export type Database = {
           quote_id: string | null
           status: string
           subtotal: number | null
+          sync_office: boolean
           tax_amount: number | null
           tax_rate: number | null
           title: string
@@ -814,6 +827,7 @@ export type Database = {
           quote_id?: string | null
           status?: string
           subtotal?: number | null
+          sync_office?: boolean
           tax_amount?: number | null
           tax_rate?: number | null
           title: string
@@ -836,6 +850,7 @@ export type Database = {
           quote_id?: string | null
           status?: string
           subtotal?: number | null
+          sync_office?: boolean
           tax_amount?: number | null
           tax_rate?: number | null
           title?: string
@@ -990,6 +1005,7 @@ export type Database = {
           job_id: string
           receipt_storage_path: string | null
           supplier_name: string
+          sync_office: boolean
           xero_bill_id: string | null
           xero_synced_at: string | null
         }
@@ -1007,6 +1023,7 @@ export type Database = {
           job_id: string
           receipt_storage_path?: string | null
           supplier_name: string
+          sync_office?: boolean
           xero_bill_id?: string | null
           xero_synced_at?: string | null
         }
@@ -1024,6 +1041,7 @@ export type Database = {
           job_id?: string
           receipt_storage_path?: string | null
           supplier_name?: string
+          sync_office?: boolean
           xero_bill_id?: string | null
           xero_synced_at?: string | null
         }
@@ -1069,6 +1087,7 @@ export type Database = {
           quantity: number | null
           source: string
           staff_id: string | null
+          sync_office: boolean
           time_entry_id: string | null
           total: number | null
           unit_price: number
@@ -1083,6 +1102,7 @@ export type Database = {
           quantity?: number | null
           source?: string
           staff_id?: string | null
+          sync_office?: boolean
           time_entry_id?: string | null
           total?: number | null
           unit_price: number
@@ -1097,6 +1117,7 @@ export type Database = {
           quantity?: number | null
           source?: string
           staff_id?: string | null
+          sync_office?: boolean
           time_entry_id?: string | null
           total?: number | null
           unit_price?: number
@@ -1140,6 +1161,7 @@ export type Database = {
           id: string
           job_id: string
           source: string | null
+          sync_office: boolean
         }
         Insert: {
           author_id?: string | null
@@ -1148,6 +1170,7 @@ export type Database = {
           id?: string
           job_id: string
           source?: string | null
+          sync_office?: boolean
         }
         Update: {
           author_id?: string | null
@@ -1156,6 +1179,7 @@ export type Database = {
           id?: string
           job_id?: string
           source?: string | null
+          sync_office?: boolean
         }
         Relationships: [
           {
@@ -1183,6 +1207,7 @@ export type Database = {
           photo_type: string | null
           simpro_file_id: string | null
           storage_path: string
+          sync_office: boolean
           uploaded_by: string | null
         }
         Insert: {
@@ -1193,6 +1218,7 @@ export type Database = {
           photo_type?: string | null
           simpro_file_id?: string | null
           storage_path: string
+          sync_office?: boolean
           uploaded_by?: string | null
         }
         Update: {
@@ -1203,6 +1229,7 @@ export type Database = {
           photo_type?: string | null
           simpro_file_id?: string | null
           storage_path?: string
+          sync_office?: boolean
           uploaded_by?: string | null
         }
         Relationships: [
@@ -1230,6 +1257,7 @@ export type Database = {
           id: string
           job_id: string
           stage: string
+          sync_office: boolean
         }
         Insert: {
           author_id?: string | null
@@ -1238,6 +1266,7 @@ export type Database = {
           id?: string
           job_id: string
           stage: string
+          sync_office?: boolean
         }
         Update: {
           author_id?: string | null
@@ -1246,6 +1275,7 @@ export type Database = {
           id?: string
           job_id?: string
           stage?: string
+          sync_office?: boolean
         }
         Relationships: [
           {
@@ -1283,6 +1313,7 @@ export type Database = {
           quantity: number
           rate: number | null
           status: string
+          sync_office: boolean
           total_amount: number | null
           unit: string
           variation_type_id: string | null
@@ -1305,6 +1336,7 @@ export type Database = {
           quantity?: number
           rate?: number | null
           status?: string
+          sync_office?: boolean
           total_amount?: number | null
           unit?: string
           variation_type_id?: string | null
@@ -1327,6 +1359,7 @@ export type Database = {
           quantity?: number
           rate?: number | null
           status?: string
+          sync_office?: boolean
           total_amount?: number | null
           unit?: string
           variation_type_id?: string | null
@@ -1406,6 +1439,8 @@ export type Database = {
           simpro_job_id: number | null
           site_id: string | null
           status: string
+          sync_office: boolean
+          sync_tech: boolean
           title: string
           todo_listed_at: string | null
           todo_listed_by: string | null
@@ -1444,6 +1479,8 @@ export type Database = {
           simpro_job_id?: number | null
           site_id?: string | null
           status?: string
+          sync_office?: boolean
+          sync_tech?: boolean
           title: string
           todo_listed_at?: string | null
           todo_listed_by?: string | null
@@ -1482,6 +1519,8 @@ export type Database = {
           simpro_job_id?: number | null
           site_id?: string | null
           status?: string
+          sync_office?: boolean
+          sync_tech?: boolean
           title?: string
           todo_listed_at?: string | null
           todo_listed_by?: string | null
@@ -1769,6 +1808,7 @@ export type Database = {
           pricing_item_id: string | null
           quantity: number | null
           quote_id: string
+          sync_office: boolean
           total: number | null
           unit_price: number
         }
@@ -1780,6 +1820,7 @@ export type Database = {
           pricing_item_id?: string | null
           quantity?: number | null
           quote_id: string
+          sync_office?: boolean
           total?: number | null
           unit_price: number
         }
@@ -1791,6 +1832,7 @@ export type Database = {
           pricing_item_id?: string | null
           quantity?: number | null
           quote_id?: string
+          sync_office?: boolean
           total?: number | null
           unit_price?: number
         }
@@ -1824,6 +1866,7 @@ export type Database = {
           site_id: string | null
           status: string
           subtotal: number | null
+          sync_office: boolean
           tax_amount: number | null
           tax_rate: number | null
           title: string
@@ -1844,6 +1887,7 @@ export type Database = {
           site_id?: string | null
           status?: string
           subtotal?: number | null
+          sync_office?: boolean
           tax_amount?: number | null
           tax_rate?: number | null
           title: string
@@ -1864,6 +1908,7 @@ export type Database = {
           site_id?: string | null
           status?: string
           subtotal?: number | null
+          sync_office?: boolean
           tax_amount?: number | null
           tax_rate?: number | null
           title?: string
@@ -1919,6 +1964,7 @@ export type Database = {
           site_lng: number | null
           state: string
           suburb: string
+          sync_backflow: boolean
           updated_at: string | null
         }
         Insert: {
@@ -1936,6 +1982,7 @@ export type Database = {
           site_lng?: number | null
           state: string
           suburb: string
+          sync_backflow?: boolean
           updated_at?: string | null
         }
         Update: {
@@ -1953,6 +2000,7 @@ export type Database = {
           site_lng?: number | null
           state?: string
           suburb?: string
+          sync_backflow?: boolean
           updated_at?: string | null
         }
         Relationships: [
@@ -2073,6 +2121,30 @@ export type Database = {
           },
         ]
       }
+      sync_horizon: {
+        Row: {
+          backflow_cutoff: string
+          id: string
+          office_cutoff: string
+          refreshed_at: string
+          tech_cutoff: string
+        }
+        Insert: {
+          backflow_cutoff: string
+          id?: string
+          office_cutoff: string
+          refreshed_at?: string
+          tech_cutoff: string
+        }
+        Update: {
+          backflow_cutoff?: string
+          id?: string
+          office_cutoff?: string
+          refreshed_at?: string
+          tech_cutoff?: string
+        }
+        Relationships: []
+      }
       time_entries: {
         Row: {
           auto_clocked: boolean | null
@@ -2089,6 +2161,7 @@ export type Database = {
           notes: string | null
           rate_override: string | null
           staff_id: string
+          sync_office: boolean
           travel_from_job_id: string | null
         }
         Insert: {
@@ -2106,6 +2179,7 @@ export type Database = {
           notes?: string | null
           rate_override?: string | null
           staff_id: string
+          sync_office?: boolean
           travel_from_job_id?: string | null
         }
         Update: {
@@ -2123,6 +2197,7 @@ export type Database = {
           notes?: string | null
           rate_override?: string | null
           staff_id?: string
+          sync_office?: boolean
           travel_from_job_id?: string | null
         }
         Relationships: [

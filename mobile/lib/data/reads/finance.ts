@@ -1,5 +1,6 @@
 import { supabase } from "../../supabase";
 import { fromLocalOr, type RouteOptions } from "./source";
+import { requireCompletePage, requireJobOnDevice } from "./horizon";
 import { nestOne, num, numOrNull } from "./rowMap";
 import { unwrap, unwrapRows } from "./unwrap";
 
@@ -19,6 +20,15 @@ import { unwrap, unwrapRows } from "./unwrap";
 // NULL. Every local statement over those tables computes
 // ROUND(quantity * unit_price, 2) AS total and never selects the bare column.
 // (invoices.total / quotes.total are plain decimals and replicate fine.)
+//
+// SYNC WINDOW (draft migration 0068, once applied): office devices hold
+// invoices/quotes that are open or active within 24 months, and jobs that are
+// open, ready to invoice, carry an unbilled approved variation, or were active
+// within 24 months — each with all of its items. Hence:
+//   • list pages answer locally only when full and inside the window;
+//   • a by-id read that misses locally asks Supabase (out-of-window ≠ absent);
+//   • listReadyToInvoice is complete by construction: every row it selects
+//     belongs to a job the window always keeps.
 
 export interface InvoiceListRow {
   id: string;
@@ -120,13 +130,13 @@ const OFFICE_ADMIN: RouteOptions = { roles: ["office", "admin"] };
 // ---------------------------------------------------------------------------
 
 export const SQL_LIST_INVOICES = `
-  SELECT i.id, i.invoice_number, i.title, i.total, i.status, i.due_date, c.name AS customer_name
+  SELECT i.id, i.invoice_number, i.title, i.total, i.status, i.due_date, i.created_at, c.name AS customer_name
   FROM invoices i LEFT JOIN customers c ON c.id = i.customer_id
   ORDER BY i.created_at DESC, i.id DESC
   LIMIT ? OFFSET ?`;
 
 export const SQL_LIST_QUOTES = `
-  SELECT q.id, q.quote_number, q.title, q.total, q.status, q.valid_until, c.name AS customer_name
+  SELECT q.id, q.quote_number, q.title, q.total, q.status, q.valid_until, q.created_at, c.name AS customer_name
   FROM quotes q LEFT JOIN customers c ON c.id = q.customer_id
   ORDER BY q.created_at DESC, q.id DESC
   LIMIT ? OFFSET ?`;
@@ -211,6 +221,7 @@ type RawInvoiceListRow = {
   total: number | string | null;
   status: string;
   due_date: string | null;
+  created_at: string | null; // window check only; not mapped
   customer_name: string | null;
 };
 
@@ -221,6 +232,7 @@ type RawQuoteListRow = {
   total: number | string | null;
   status: string;
   valid_until: string | null;
+  created_at: string | null; // window check only; not mapped
   customer_name: string | null;
 };
 
@@ -352,6 +364,7 @@ export async function listInvoices(offset: number, limit: number): Promise<Invoi
   return fromLocalOr(
     async (db) => {
       const rows = await db.getAll<RawInvoiceListRow>(SQL_LIST_INVOICES, [limit, offset]);
+      await requireCompletePage(db, "office", rows, limit, "listInvoices");
       return rows.map((r) => ({
         id: r.id,
         invoice_number: r.invoice_number,
@@ -376,10 +389,20 @@ export async function listInvoices(offset: number, limit: number): Promise<Invoi
 }
 
 export async function getInvoice(id: string): Promise<InvoiceDetail | null> {
+  const remote = async (): Promise<InvoiceDetail | null> => {
+    const res = await supabase
+      .from("invoices")
+      .select("*, customers(name, email, phone), invoice_items(*)")
+      .eq("id", id)
+      .single();
+    return unwrap(res as never, "getInvoice") as unknown as InvoiceDetail | null;
+  };
   return fromLocalOr(
     async (db) => {
       const inv = await db.getOptional<RawInvoiceDetailRow>(SQL_GET_INVOICE, [id]);
-      if (!inv) return null;
+      // A local miss is not proof of absence: the invoice may be older than
+      // the sync window. Ask the server.
+      if (!inv) return remote();
       const items = await db.getAll<RawItemRow>(SQL_GET_INVOICE_ITEMS, [id]);
       return {
         id: inv.id,
@@ -402,14 +425,7 @@ export async function getInvoice(id: string): Promise<InvoiceDetail | null> {
         invoice_items: items.map(mapItemRow),
       };
     },
-    async () => {
-      const res = await supabase
-        .from("invoices")
-        .select("*, customers(name, email, phone), invoice_items(*)")
-        .eq("id", id)
-        .single();
-      return unwrap(res as never, "getInvoice") as unknown as InvoiceDetail | null;
-    },
+    remote,
     OFFICE_ADMIN
   );
 }
@@ -474,6 +490,9 @@ export interface InvoiceJobPrefill {
 export async function getInvoiceJobPrefill(jobId: string): Promise<InvoiceJobPrefill | null> {
   return fromLocalOr(
     async (db) => {
+      // Job on the device ⇒ all its items and variations are (they travel
+      // together); job not on the device ⇒ out of window, ask the server.
+      await requireJobOnDevice(db, "office", jobId);
       const [job, itemRows, varRows] = await Promise.all([
         db.getOptional<RawPrefillJobRow>(SQL_PREFILL_JOB, [jobId]),
         db.getAll<RawPrefillItemRow>(SQL_PREFILL_JOB_ITEMS, [jobId]),
@@ -541,6 +560,7 @@ export async function listQuotes(offset: number, limit: number): Promise<QuoteLi
   return fromLocalOr(
     async (db) => {
       const rows = await db.getAll<RawQuoteListRow>(SQL_LIST_QUOTES, [limit, offset]);
+      await requireCompletePage(db, "office", rows, limit, "listQuotes");
       return rows.map((r) => ({
         id: r.id,
         quote_number: r.quote_number,
@@ -565,10 +585,19 @@ export async function listQuotes(offset: number, limit: number): Promise<QuoteLi
 }
 
 export async function getQuote(id: string): Promise<QuoteDetail | null> {
+  const remote = async (): Promise<QuoteDetail | null> => {
+    const res = await supabase
+      .from("quotes")
+      .select("*, customers(name, email, phone), quote_items(*)")
+      .eq("id", id)
+      .single();
+    return unwrap(res as never, "getQuote") as unknown as QuoteDetail | null;
+  };
   return fromLocalOr(
     async (db) => {
       const q = await db.getOptional<RawQuoteDetailRow>(SQL_GET_QUOTE, [id]);
-      if (!q) return null;
+      // Local miss → server: the quote may be older than the sync window.
+      if (!q) return remote();
       const items = await db.getAll<RawItemRow>(SQL_GET_QUOTE_ITEMS, [id]);
       return {
         id: q.id,
@@ -592,14 +621,7 @@ export async function getQuote(id: string): Promise<QuoteDetail | null> {
         quote_items: items.map(mapItemRow),
       };
     },
-    async () => {
-      const res = await supabase
-        .from("quotes")
-        .select("*, customers(name, email, phone), quote_items(*)")
-        .eq("id", id)
-        .single();
-      return unwrap(res as never, "getQuote") as unknown as QuoteDetail | null;
-    },
+    remote,
     OFFICE_ADMIN
   );
 }

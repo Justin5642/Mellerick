@@ -1,5 +1,6 @@
 import { supabase } from "../../supabase";
 import { computeEquipmentCost, type EquipmentCostInputs } from "../../costing";
+import { requireJobOnDevice } from "./horizon";
 import { fromLocalOr } from "./source";
 import { groupByKey, num, numOrNull } from "./rowMap";
 import { unwrap, unwrapRows } from "./unwrap";
@@ -201,6 +202,10 @@ export interface JobBilling {
 export async function getJobBilling(jobId: string): Promise<JobBilling | null> {
   return fromLocalOr(
     async (db) => {
+      // Children travel with their job through the sync window (draft
+      // migration 0068, once applied): a job missing locally may simply be
+      // older than the window, so ask the server rather than report null.
+      await requireJobOnDevice(db, "office", jobId);
       const [job, itemRows, expenseRows, poRows, ccRows] = await Promise.all([
         db.getOptional<RawJobRow>(SQL_JOB_BILLING_JOB, [jobId]),
         db.getAll<RawJobItemRow>(SQL_JOB_BILLING_ITEMS, [jobId]),
@@ -304,6 +309,9 @@ export interface JobEquipment {
 export async function getJobEquipment(jobId: string): Promise<JobEquipment> {
   return fromLocalOr(
     async (db) => {
+      // Usage rows travel with their job through the sync window; a job not
+      // on the device may have older usage only the server holds.
+      await requireJobOnDevice(db, "office", jobId);
       const [usageRows, optionRaw] = await Promise.all([
         db.getAll<RawEquipUsageRow>(SQL_JOB_EQUIPMENT_USAGE, [jobId]),
         db.getAll<RawEquipOptionRow>(SQL_JOB_EQUIPMENT_OPTIONS),

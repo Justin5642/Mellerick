@@ -119,7 +119,8 @@ describe("countOtherScheduledJobs (local path)", () => {
 
     await expect(countOtherScheduledJobs("tech-2", "2026-10-09", "this-job")).resolves.toBe(2);
 
-    const [sql, params] = getOptional.mock.calls[0];
+    // calls[0] is the sync_horizon lookup (./horizon); the count follows.
+    const [sql, params] = getOptional.mock.calls[getOptional.mock.calls.length - 1];
     expect(sql).toBe(SQL_COUNT_OTHER_SCHEDULED_JOBS);
     expect(norm(sql)).toContain(
       "WHERE (j.assigned_to = ?1 OR j.id IN (SELECT ja.job_id FROM job_assignments ja WHERE ja.staff_id = ?1))"

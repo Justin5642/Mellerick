@@ -236,7 +236,7 @@ describe("listOfficeJobs (local)", () => {
     ]);
     const [sql, params] = getAll.mock.calls[0];
     expect(norm(sql)).toBe(norm(`
-      SELECT j.id, j.job_number, j.title, j.status, j.priority,
+      SELECT j.id, j.job_number, j.title, j.status, j.priority, j.created_at,
              c.name AS customer_name,
              p.full_name AS assigned_profile_full_name,
              (SELECT n.stage FROM job_stage_notes n WHERE n.job_id = j.id ORDER BY n.created_at DESC LIMIT 1) AS current_stage
@@ -259,7 +259,7 @@ describe("searchOfficeJobs (local)", () => {
 
     const [sql, params] = getAll.mock.calls[0];
     expect(norm(sql)).toBe(norm(`
-      SELECT j.id, j.job_number, j.title, j.status, j.priority,
+      SELECT j.id, j.job_number, j.title, j.status, j.priority, j.created_at,
              c.name AS customer_name,
              p.full_name AS assigned_profile_full_name,
              (SELECT n.stage FROM job_stage_notes n WHERE n.job_id = j.id ORDER BY n.created_at DESC LIMIT 1) AS current_stage
@@ -344,7 +344,7 @@ describe("searchJobs (local)", () => {
     ]);
     const [sql, params] = getAll.mock.calls[0];
     expect(norm(sql)).toBe(norm(`
-      SELECT j.id, j.job_number, j.title, j.status, j.scheduled_start,
+      SELECT j.id, j.job_number, j.title, j.status, j.scheduled_start, j.created_at,
              c.name AS customer_name,
              s.name AS site_name, s.address_line1 AS site_address_line1,
              s.suburb AS site_suburb, s.site_lat, s.site_lng

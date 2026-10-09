@@ -65,7 +65,23 @@ export type ReadOriginReason =
   | "write-echo"
   | "role"
   | "local-threw"
-  | "stale-db";
+  | "stale-db"
+  | "out-of-window";
+
+/**
+ * Thrown by a local read that has established its answer lies (partly) outside
+ * what the device mirror is guaranteed to hold — see reads/horizon.ts. Not a
+ * failure: fromLocalOr routes it to the network quietly, under its own reason,
+ * so it is never confused with a broken local query.
+ */
+export class OutsideSyncWindow extends Error {
+  constructor(detail: string) {
+    super(`outside the device sync window: ${detail}`);
+    this.name = "OutsideSyncWindow";
+    // Transpiled `extends Error` can lose the prototype; keep instanceof true.
+    Object.setPrototypeOf(this, OutsideSyncWindow.prototype);
+  }
+}
 
 type OriginListener = (origin: ReadOrigin, reason?: ReadOriginReason) => void;
 const originListeners = new Set<OriginListener>();
@@ -135,6 +151,13 @@ export async function fromLocalOr<T>(
     emit("local");
     return result;
   } catch (e) {
+    // The read itself established that the mirror cannot answer completely
+    // (older history is not synced) — the network is the right source, not a
+    // degraded one, so no warning.
+    if (e instanceof OutsideSyncWindow) {
+      emit("remote", "out-of-window");
+      return remote();
+    }
     // A local read must never take a screen down — degrade and report.
     emit("remote", "local-threw");
     if (__DEV__) console.warn("[reads] local query failed, fell back to Supabase:", e);

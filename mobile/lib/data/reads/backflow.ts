@@ -1,6 +1,7 @@
 import { supabase } from "../../supabase";
 import { computeNextDueDate, getDueStatus, type DueStatus } from "../../backflow";
 import { fromLocalOr, type LocalReads } from "./source";
+import { requireNoWindow } from "./horizon";
 import { groupByKey, nestOne, num, numOrNull } from "./rowMap";
 import { unwrap, unwrapRows } from "./unwrap";
 
@@ -309,6 +310,10 @@ export async function getBackflowDeviceWithTests(id: string): Promise<BackflowDe
   return fromLocalOr(async (db) => {
     const row = await db.getOptional<RawDeviceDetailRow>(SQL_GET_BACKFLOW_DEVICE, [id]);
     if (!row) return remote();
+    // A device's whole test history: the mirror keeps only the backflow
+    // window (24 months + latest pass), so once a window is in force the
+    // list must come from the server.
+    await requireNoWindow(db, "backflow", "getBackflowDeviceWithTests.tests");
     const tests = await db.getAll<RawDeviceTestRow>(SQL_LIST_DEVICE_TESTS, [id]);
     return { device: mapDeviceDetail(row), tests: tests.map(mapDeviceTest) };
   }, remote);
