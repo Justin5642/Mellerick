@@ -17,25 +17,49 @@ function captureOutbox(): { outbox: Outbox; ops: Operation[] } {
 }
 
 describe("VoiceReportRepository", () => {
-  it("record enqueues an upload-only op then a transcribe side-effect that depends on it", async () => {
+  it("saves the text first with NO dependency, then uploads and attaches the audio", async () => {
     const { outbox, ops } = captureOutbox();
     const repo = new VoiceReportRepository(outbox, seqIds(), fixedTime());
-    const { storagePath } = await repo.record({ jobId: "j1", recordedBy: "u1", localUri: "file:///doc/outbox/v.m4a" });
+    const { storagePath } = await repo.record({
+      jobId: "j1",
+      recordedBy: "u1",
+      transcript: "Replaced the TMV.",
+      localUri: "file:///doc/outbox/v.wav",
+      audioExt: "wav",
+    });
 
     // Stable per-job key so a re-record overwrites rather than orphaning the object.
-    expect(storagePath).toBe("j1/voice-report.m4a");
+    expect(storagePath).toBe("j1/voice-report.wav");
+    expect(ops).toHaveLength(3);
 
-    const upload = ops[0] as WriteOperation;
+    // The words must reach the office even if the recording never uploads.
+    const saveText = ops[0] as SideEffectOperation;
+    expect(saveText.kind).toBe("side_effect");
+    expect(saveText.effect).toBe("transcribe-voice-report");
+    expect(saveText.payload).toEqual({ jobId: "j1", transcript: "Replaced the TMV." });
+    expect(saveText.dependsOn).toBeUndefined();
+    expect(saveText.coalesceKey).toBe("voice-report-text:j1");
+
+    const upload = ops[1] as WriteOperation;
     expect(upload.kind).toBe("write");
     expect(upload.op).toBe("upload"); // no metadata row is written by the client
-    expect(upload.attachmentLocalPath).toBe("file:///doc/outbox/v.m4a");
-    expect(upload.payload).toEqual({ bucket: "job-audio", storage_path: "j1/voice-report.m4a" });
+    expect(upload.attachmentLocalPath).toBe("file:///doc/outbox/v.wav");
+    expect(upload.payload).toEqual({ bucket: "job-audio", storage_path: "j1/voice-report.wav" });
 
-    const transcribe = ops[1] as SideEffectOperation;
-    expect(transcribe.kind).toBe("side_effect");
-    expect(transcribe.effect).toBe("transcribe-voice-report");
-    expect(transcribe.coalesceKey).toBe("transcribe-voice-report:j1");
-    expect(transcribe.payload).toEqual({ jobId: "j1", storagePath: "j1/voice-report.m4a", recordedBy: "u1" });
-    expect(transcribe.dependsOn).toBe(upload.id); // never transcribe before the object exists
+    const attach = ops[2] as SideEffectOperation;
+    expect(attach.payload).toEqual({ jobId: "j1", storagePath: "j1/voice-report.wav" });
+    expect(attach.dependsOn).toBe(upload.id); // never point the job at a missing object
+    expect(attach.coalesceKey).toBe("voice-report-audio:j1");
+    expect(attach.coalesceKey).not.toBe(saveText.coalesceKey); // must not coalesce away the text
+  });
+
+  it("saves text only when the phone kept no recording", async () => {
+    const { outbox, ops } = captureOutbox();
+    const repo = new VoiceReportRepository(outbox, seqIds(), fixedTime());
+    const { storagePath } = await repo.record({ jobId: "j1", recordedBy: "u1", transcript: "Done.", localUri: null });
+
+    expect(storagePath).toBeNull();
+    expect(ops).toHaveLength(1);
+    expect((ops[0] as SideEffectOperation).payload).toEqual({ jobId: "j1", transcript: "Done." });
   });
 });

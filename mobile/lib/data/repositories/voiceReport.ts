@@ -8,16 +8,32 @@ const AUDIO_BUCKET = "job-audio";
 export interface VoiceReportInput {
   jobId: string;
   recordedBy: string;
-  /** A durable local m4a file (the recording). */
-  localUri: string;
+  /** What the technician said, recognised on the phone (lib/dictation.ts). */
+  transcript: string;
+  /**
+   * A durable local copy of the recording, when the phone kept one (iOS and
+   * Android 13+). Null on older Android: the report is saved as text only.
+   */
+  localUri: string | null;
+  /** Extension of the recording ("wav", "caf", "m4a"). */
+  audioExt?: string;
 }
 
-// Offline-first voice report: the recording uploads durably to the private
-// job-audio bucket, then a transcribe side-effect calls the server route (which
-// writes jobs.voice_report_* under service-role). The upload has NO metadata row
-// of its own (op: "upload"), and the transcribe depends on it so the route never
-// runs before its object exists. Coalesced per job — the latest recording wins,
-// which matches the route's last-write-wins overwrite of the transcript.
+// Offline-first voice report, in up to three queued steps:
+//
+//   1. SAVE THE TEXT — no dependency, so the transcript reaches the office even
+//      if the audio never uploads (a bucket that rejects the file type, a
+//      dead-lettered upload). Losing the words because the recording failed
+//      would be the worst outcome; the words are what the office reads.
+//   2. UPLOAD the recording, when the phone kept one (upload-only — no
+//      client-written row).
+//   3. ATTACH THE AUDIO — sets the job's recording path, and depends on (2) so
+//      the job never points at an object that is not there yet.
+//
+// The transcript is made on the phone (lib/dictation.ts); the server route only
+// saves (/api/jobs/[id]/transcribe-voice-report — the path keeps its old name
+// because operations already queued on phones call it). Steps 1 and 3 coalesce
+// per job under separate keys, so the latest report wins for each.
 export class VoiceReportRepository {
   constructor(
     private outbox: Outbox,
@@ -25,19 +41,29 @@ export class VoiceReportRepository {
     private time: TimeSource = systemTime
   ) {}
 
-  async record(input: VoiceReportInput): Promise<{ storagePath: string }> {
-    const uploadRowId = this.ids.newId();
-    // Stable per-job object key: a re-record upserts over the same object instead
-    // of orphaning the prior one in the private bucket (matches the per-job
-    // transcribe coalescing — latest recording wins).
-    const storagePath = `${input.jobId}/voice-report.m4a`;
+  async record(input: VoiceReportInput): Promise<{ storagePath: string | null }> {
+    const saveText: SideEffectOperation = {
+      kind: "side_effect",
+      id: this.ids.newId(),
+      effect: "transcribe-voice-report",
+      coalesceKey: `voice-report-text:${input.jobId}`,
+      payload: { jobId: input.jobId, transcript: input.transcript },
+      status: "pending",
+      attempts: 0,
+      nextAttemptAt: 0,
+      createdAt: this.time.nowMs(),
+    };
+    await this.outbox.enqueue(saveText);
 
-    // 1) upload the audio (upload-only — no client-written row).
-    const uploadOpId = this.ids.newId();
+    if (!input.localUri) return { storagePath: null };
+
+    // Stable per-job object key: a re-record upserts over the same object
+    // instead of orphaning the prior one in the private bucket.
+    const storagePath = `${input.jobId}/voice-report.${input.audioExt ?? "m4a"}`;
     const uploadOp: WriteOperation = {
       kind: "write",
-      id: uploadOpId,
-      rowId: uploadRowId, // unused for an upload-only op, but kept unique
+      id: this.ids.newId(),
+      rowId: this.ids.newId(), // unused for an upload-only op, but kept unique
       aggregate: "job",
       op: "upload",
       table: "", // unused for an upload-only op
@@ -50,22 +76,19 @@ export class VoiceReportRepository {
     };
     await this.outbox.enqueue(uploadOp);
 
-    // 2) transcribe once the object exists (online-only route; degrades to a
-    //    queued retry when offline). storagePath is `${jobId}/...` so it passes
-    //    the route's path-prefix guard.
-    const transcribeOp: SideEffectOperation = {
+    const attachAudio: SideEffectOperation = {
       kind: "side_effect",
       id: this.ids.newId(),
       effect: "transcribe-voice-report",
-      coalesceKey: `transcribe-voice-report:${input.jobId}`,
-      payload: { jobId: input.jobId, storagePath, recordedBy: input.recordedBy },
-      dependsOn: uploadOpId,
+      coalesceKey: `voice-report-audio:${input.jobId}`,
+      payload: { jobId: input.jobId, storagePath },
+      dependsOn: uploadOp.id,
       status: "pending",
       attempts: 0,
       nextAttemptAt: 0,
       createdAt: this.time.nowMs(),
     };
-    await this.outbox.enqueue(transcribeOp);
+    await this.outbox.enqueue(attachAudio);
 
     return { storagePath };
   }

@@ -71,7 +71,6 @@ const params = Promise.resolve({ id: "job-1" });
 
 beforeEach(() => {
   vi.clearAllMocks();
-  process.env.OPENAI_API_KEY = "test-key";
   process.env.NEXT_PUBLIC_SUPABASE_URL = "https://x.supabase.co";
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY = "anon";
   process.env.SUPABASE_SERVICE_ROLE_KEY = "service";
@@ -109,7 +108,7 @@ describe("transcribe-voice-report — attribution", () => {
     canManageJobBilling.mockResolvedValue(true);
     const { POST } = await import("@/app/api/jobs/[id]/transcribe-voice-report/route");
 
-    await POST(post({ storagePath: "job-1/a.m4a", recordedBy: "someone-else" }), { params });
+    await POST(post({ transcript: "Replaced the TMV.", recordedBy: "someone-else" }), { params });
 
     expect(updateSpy).toHaveBeenCalled();
     const payload = updateSpy.mock.calls[0][0] as Record<string, unknown>;
@@ -121,10 +120,55 @@ describe("transcribe-voice-report — attribution", () => {
     canManageJobBilling.mockResolvedValue(true);
     const { POST } = await import("@/app/api/jobs/[id]/transcribe-voice-report/route");
 
-    await POST(post({ storagePath: "job-1/a.m4a" }), { params });
+    await POST(post({ transcript: "Replaced the TMV." }), { params });
 
     const payload = updateSpy.mock.calls[0][0] as Record<string, unknown>;
     expect(payload.voice_report_recorded_by).toBe("caller-1");
+  });
+});
+
+// The transcript is made on the phone now; the route only saves. Text and audio
+// arrive as two independent calls so the words survive a failed upload.
+describe("transcribe-voice-report — saving", () => {
+  it("saves the transcript and clears the previous recording's path", async () => {
+    canManageJobBilling.mockResolvedValue(true);
+    const { POST } = await import("@/app/api/jobs/[id]/transcribe-voice-report/route");
+
+    const res = await POST(post({ transcript: "  Replaced the TMV.  " }), { params });
+
+    expect(res.status).toBe(200);
+    const payload = updateSpy.mock.calls[0][0] as Record<string, unknown>;
+    expect(payload.voice_report_transcript).toBe("Replaced the TMV.");
+    expect(payload.voice_report_storage_path).toBeNull();
+  });
+
+  it("attaching the audio touches only the path — never the transcript or author", async () => {
+    canManageJobBilling.mockResolvedValue(true);
+    const { POST } = await import("@/app/api/jobs/[id]/transcribe-voice-report/route");
+
+    await POST(post({ storagePath: "job-1/voice-report.wav" }), { params });
+
+    expect(updateSpy.mock.calls[0][0]).toEqual({ voice_report_storage_path: "job-1/voice-report.wav" });
+  });
+
+  it("never calls out to a transcription service", async () => {
+    canManageJobBilling.mockResolvedValue(true);
+    const { POST } = await import("@/app/api/jobs/[id]/transcribe-voice-report/route");
+
+    await POST(post({ storagePath: "job-1/a.m4a" }), { params });
+
+    expect(fetch).not.toHaveBeenCalled();
+    expect(downloadSpy).not.toHaveBeenCalled();
+  });
+
+  it("rejects an oversized transcript without writing", async () => {
+    canManageJobBilling.mockResolvedValue(true);
+    const { POST } = await import("@/app/api/jobs/[id]/transcribe-voice-report/route");
+
+    const res = await POST(post({ transcript: "x".repeat(20_001) }), { params });
+
+    expect(res.status).toBe(413);
+    expect(updateSpy).not.toHaveBeenCalled();
   });
 });
 

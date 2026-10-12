@@ -6,10 +6,9 @@ import { NextRequest } from "next/server";
 //
 // transcribe-voice-report carries the more interesting one: the caller supplies
 // `storagePath` in the request body, and the route must prove that path belongs
-// to the job in the URL. Without that check a technician could name any other
-// job's audio and have the route download it for them under the service-role
-// key — a classic IDOR, plus `..` traversal out of the bucket prefix. It is
-// implemented correctly and had no test.
+// to the job in the URL. Without that check a technician could point their job
+// at another job's audio (the route stores the path under the service-role
+// key) — a classic IDOR, plus `..` traversal out of the bucket prefix.
 //
 // The certificate route is deliberately readable by ANY authenticated staff
 // member — its own comment says so, because office needs to see tests they did
@@ -95,11 +94,6 @@ beforeEach(() => {
   process.env.NEXT_PUBLIC_SUPABASE_URL = "https://unit-test.supabase.co";
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY = "anon";
   process.env.SUPABASE_SERVICE_ROLE_KEY = "svc";
-  // transcribe-voice-report short-circuits with 500 when this is unset, before
-  // it reaches the path-ownership check. That ordering is deliberate — it sits
-  // AFTER the 401, so an anonymous caller learns nothing about server config —
-  // but it means these tests must set it to exercise the checks beyond it.
-  process.env.OPENAI_API_KEY = "test-key";
   single.mockResolvedValue({ data: null, error: null });
 });
 
@@ -152,7 +146,7 @@ describe("POST /api/jobs/[id]/transcribe-voice-report — path ownership", () =>
   });
 
   // THE IDOR. The caller supplies storagePath; without this check a technician
-  // could name another job's audio and have the service-role key fetch it.
+  // could attach another job's audio to theirs.
   it("refuses a storagePath belonging to a DIFFERENT job", async () => {
     validUser();
     const res = await transcribePOST(bearerPost({ storagePath: "job-999/secret.m4a" }), params("job-1"));
@@ -179,7 +173,7 @@ describe("POST /api/jobs/[id]/transcribe-voice-report — path ownership", () =>
     expect(download).not.toHaveBeenCalled();
   });
 
-  it("returns 400 when storagePath is missing entirely", async () => {
+  it("returns 400 when both transcript and storagePath are missing", async () => {
     validUser();
     const res = await transcribePOST(bearerPost({}), params("job-1"));
     expect(res.status).toBe(400);

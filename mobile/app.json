@@ -126,9 +126,10 @@
         }
       ],
       [
-        "expo-audio",
+        "expo-speech-recognition",
         {
-          "microphonePermission": "Mellerick Field uses your microphone to record job completion voice reports."
+          "microphonePermission": "Mellerick Field uses your microphone to dictate job notes and record job completion voice reports.",
+          "speechRecognitionPermission": "Mellerick Field turns what you say into text for job notes and voice reports."
         }
       ],
       "expo-asset",

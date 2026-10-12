@@ -185,6 +185,8 @@ function guessContentType(path: string): string {
   if (/\.png$/i.test(path)) return "image/png";
   if (/\.jpe?g$/i.test(path)) return "image/jpeg";
   if (/\.(m4a|mp4|aac)$/i.test(path)) return "audio/mp4";
+  if (/\.wav$/i.test(path)) return "audio/wav";
+  if (/\.caf$/i.test(path)) return "audio/x-caf";
   return "application/octet-stream";
 }
 
