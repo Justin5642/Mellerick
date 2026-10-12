@@ -194,7 +194,7 @@ export interface CustomerOverview {
 // area is not reachable by technicians.
 //
 // ALL-HISTORY: the counts and the total-invoiced figure cover the customer's
-// whole record, and a windowed mirror (draft migration 0068, once applied)
+// whole record, and a windowed mirror (migration 0068)
 // drops jobs, quotes and invoices that closed more than 24 months ago. So the
 // local path answers only while no window is in force; otherwise Supabase.
 export async function getCustomerOverview(customerId: string): Promise<CustomerOverview> {

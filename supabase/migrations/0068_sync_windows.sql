@@ -1,7 +1,7 @@
 -- =============================================
 -- SYNC WINDOWS: STOP REPLICATING ALL OF HISTORY TO EVERY DEVICE
--- STATUS: DRAFT — NOT APPLIED. Apply BEFORE deploying the matching
--- mobile/powersync/sync-streams.yaml (ORDER below).
+-- STATUS: ✅ APPLIED IN PRODUCTION (2026-10-12, via SQL editor). Deploy the
+-- matching mobile/powersync/sync-streams.yaml to complete it (ORDER below).
 --
 -- WHY
 -- PowerSync stream filters cannot call now() and cannot compare a row to a

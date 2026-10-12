@@ -21,7 +21,7 @@ import { unwrap, unwrapRows } from "./unwrap";
 // ROUND(quantity * unit_price, 2) AS total and never selects the bare column.
 // (invoices.total / quotes.total are plain decimals and replicate fine.)
 //
-// SYNC WINDOW (draft migration 0068, once applied): office devices hold
+// SYNC WINDOW (migration 0068): office devices hold
 // invoices/quotes that are open or active within 24 months, and jobs that are
 // open, ready to invoice, carry an unbilled approved variation, or were active
 // within 24 months — each with all of its items. Hence:

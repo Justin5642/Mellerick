@@ -129,10 +129,11 @@ silently the moment a migration added it. Both now list columns explicitly, and
 technician-visible stream, no money-named column in one, and every `office_*`
 stream gated on the caller's own profile row.
 
-### Sync windows — devices no longer receive all of history (draft `0068`)
+### Sync windows — devices no longer receive all of history (`0068`)
 
-**Status: written, verified offline, NOT deployed.** Needs migration `0068`
-applied and the stream file redeployed — owner steps in §7.
+**Status: `0068` applied in production 2026-10-12** (`sync_horizon` row and
+`sync-window-refresh` cron job confirmed). **Stream file NOT yet redeployed** —
+until it is, devices still receive everything (owner step in §7).
 
 Before: every device received every customer and site; a technician received
 every job they were EVER assigned plus all of its children, forever; office
@@ -666,7 +667,7 @@ a shippable release.
 | **`max_slot_wal_keep_size`** | Justin / Avi | Supabase instance config, no SQL path. Without it a slot can be invalidated again — which cost 24 hours of silent, invisible outage on 3–4 August. `npm run check:sync` now turns that failure mode into one command. |
 | **EAS env vars** | Justin / Avi | `eas env:create` for the two `EXPO_PUBLIC_*` values, or a cloud build ships an app pointed at `undefined`. See SHIPPING.md **STEP ZERO**. The app now refuses to start in that state rather than failing mysteriously later. |
 | **Sentry (error monitoring)** | Justin | Optional, and off until a DSN is set — see §12. Create a free Sentry org with a Next.js project (and a React Native project for the app), then set the DSNs in Vercel and EAS. Without it, failures like the weeks-long silent "Polish with AI" outage are still only discovered by accident. |
-| **Sync windows: apply `0068`, then redeploy the PowerSync streams** | Justin | Run `supabase/migrations/0068_sync_windows.sql` in the Supabase SQL editor (NOT `supabase db push`, which would also apply the deliberately-unapplied `0053`) and insert its ledger row, then check `select * from sync_horizon;` (one row) and `select jobname from cron.job;` (`sync-window-refresh`; if pg_cron is missing the migration only WARNS and nothing ages out). Then PowerSync dashboard → paste `mobile/powersync/sync-streams.yaml` → **Validate** → **Deploy**. Order matters only for savings, not safety: the YAML fails open without the migration. Devices re-sync and drop old rows; the app needs no new build. |
+| **Sync windows: redeploy the PowerSync streams** | Avi (PowerSync account owner) | `0068` is applied (2026-10-12). PowerSync dashboard → paste `mobile/powersync/sync-streams.yaml` → **Validate** → **Deploy**. Devices re-sync and drop old rows; the app needs no new build. Justin has no login to the PowerSync account — worth adding him as an owner. |
 | **Maestro flow 02** | Avi | Needs `ADMIN_EMAIL` / `ADMIN_PASSWORD` in the environment. The login subflow deliberately skips when a session already exists, so a password never passes through a script — which is why flows 01/03/04 could be run and 02 could not. |
 
 ### QA fixture — do not delete

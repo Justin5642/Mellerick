@@ -136,9 +136,8 @@ describe("time_entries reads must name columns explicitly (migration 0045)", () 
     }
 
     known.delete("rate_override"); // revoked by 0045, deliberately not fetched
-    // Sync-window bookkeeping maintained by the database (drafted migration
-    // 0068, not applied yet). No screen reads it, and fetching it before
-    // 0068 is applied would fail every time_entries query with 42703.
+    // Sync-window bookkeeping maintained by the database (migration 0068).
+    // No screen reads it.
     known.delete("sync_office");
 
     const listed = new Set(TIME_ENTRY_COLUMNS.split(", "));

@@ -312,7 +312,7 @@ describe("PowerSync sync rules — technician streams", () => {
 });
 
 // ============================================================================
-// SYNC WINDOWS (migration 0068 — drafted, not applied until the owner runs it).
+// SYNC WINDOWS (migration 0068, applied 2026-10-12).
 //
 // The windows narrow what devices receive; they must never narrow it in a way
 // that (a) drops a technician's CURRENT work, (b) lets a job's children drift

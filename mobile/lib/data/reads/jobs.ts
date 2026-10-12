@@ -23,7 +23,7 @@ import { assignedOrCrewFilter, assignedOrCrewSql, crewJobIdsRemote } from "./ass
 //     group is role-guarded; only those mirrors carry the full jobs table).
 //   • listOfficeJobs / searchOfficeJobs / searchJobs page newest-first over
 //     ALL jobs, and an office mirror holds only jobs inside the sync window
-//     (draft migration 0068, once applied: open, ready, or active in the last
+//     (migration 0068: open, ready, or active in the last
 //     24 months). A page is answered locally only when it is full and its
 //     oldest row is inside the window (reads/horizon.ts requireCompletePage);
 //     otherwise older jobs may be missing, so it goes to Supabase.
