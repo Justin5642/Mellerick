@@ -95,15 +95,17 @@ each sufficient alone. Do not remove any of them because another covers it.
 replication stream with its own credentials. Any column in a technician's stream
 lands in **plaintext SQLite on that technician's phone**, whatever RLS says.
 
-Treat `sync-streams.yaml` as security code. Re-audited 29 July 2026 — all 11
-technician-visible streams are money-free:
+Treat `sync-streams.yaml` as security code. Re-audited 9 October 2026 (sync
+windows) — all 16 technician-visible streams are money-free:
 
 - `tech_jobs` — 19 named columns, none monetary
 - `tech_job_variations` — omits `rate`, `total_amount`, `admin_notes`
 - `variation_types` — omits the preset `rate`
 - `tech_time_entries` — omits `rate`
-- `profiles`, `customers`, `sites`, `backflow_devices`, `backflow_tests`,
-  `tech_job_photos`, `tech_job_notes` — no monetary column in the selected sets
+- `profiles`, `sync_horizon`, `tech_customers` / `backflow_customers`,
+  `tech_sites` / `backflow_sites`, `backflow_devices`, `backflow_tests`,
+  `tech_job_assignments`, `tech_job_photos`, `tech_job_notes`,
+  `tech_job_stage_notes` — no monetary column in the selected sets
 
 Office/admin streams gate on the caller's own profile row:
 
@@ -126,6 +128,54 @@ silently the moment a migration added it. Both now list columns explicitly, and
 `tests/unit/sync-streams-contract.test.ts` enforces all of it: no `SELECT *` in a
 technician-visible stream, no money-named column in one, and every `office_*`
 stream gated on the caller's own profile row.
+
+### Sync windows — devices no longer receive all of history (draft `0068`)
+
+**Status: written, verified offline, NOT deployed.** Needs migration `0068`
+applied and the stream file redeployed — owner steps in §7.
+
+Before: every device received every customer and site; a technician received
+every job they were EVER assigned plus all of its children, forever; office
+received every invoice, quote, time entry and usage log ever written. After:
+
+| Stream(s) | Who | Now syncs |
+|---|---|---|
+| `tech_jobs` + 6 `tech_job_*`/`tech_time_entries` | technician | jobs **open (any age)** or active in the last **90 days**; children follow their job through the same subquery |
+| `tech_customers` / `tech_sites` | technician | only those of the jobs above |
+| `backflow_customers` / `backflow_sites` | all | those owning an **active** backflow device (the register names them) |
+| `backflow_devices` | all | active devices only |
+| `backflow_tests` | all | last 24 months **plus each device's latest pass** (due-date input); 11 columns, no `test_results` JSON |
+| `office_jobs` + job children, `office_time_entries`, `office_equipment_usage_log` | office/admin | open / ready-to-invoice / unbilled-approved-variation / active within **24 months**; children follow their job |
+| `office_invoices`/`_items`, `office_quotes`/`_items` | office/admin | open, or active within 24 months; items follow |
+| `office_customers`, `office_sites`, pricing, inventory, equipment, POs, assignments | office/admin | whole (reference / one-row-per-job tables) |
+
+PowerSync cannot compare a row to `now()` (the compiler rejects it), so the
+windows are boolean columns the **database** keeps current: `jobs.sync_tech`,
+`*.sync_office`, `backflow_tests.sync_recent`, `customers/sites.sync_backflow`.
+Triggers mark any real write as recent (and bring a job's children back with
+it); only the nightly `sync_window_refresh()` (pg_cron, 16:17 UTC) ever sets a
+flag false, in the same transaction that writes the `sync_horizon` row naming
+the cutoffs. Clients cannot set a flag — their writes always count as activity.
+Every stream filter is `<flag> IS NOT false`, so deploying the YAML before the
+migration syncs everything (today's behaviour), not nothing.
+
+Checked before handover: the full migration chain incl. `0068` applied to a
+scratch Postgres 16 (Supabase roles/auth shimmed) and the triggers were
+exercised with seeded rows — open 3-year-old job stays in both windows; a
+technician's note on an out-of-window job brings the job and its time entries
+back to office devices without touching `jobs.updated_at`; a client writing
+`sync_office = false` is ignored; deleting a device's latest pass flags the
+previous pass in; deactivating a device clears its customer's/site's
+`sync_backflow` with `updated_at` preserved; a second refresh is a no-op. Not
+yet run against production data or the CI `rls` stack.
+
+Validate any change to these filters with the real compiler, not by eye —
+`@powersync/service-sync-rules` (needs `node --js-explicit-resource-management`
+on Node 22) both validates and evaluates rows; that is how every filter above
+was checked. `tests/unit/sync-streams-contract.test.ts` pins the shapes: no
+strict `= true` on a flag, no status filter on `tech_jobs`, every technician
+child stream scoped through the same windowed job set, the office role gate
+never ORed with a filter.
 
 ### Web-side equivalent
 
@@ -158,7 +208,8 @@ Reads and writes take different paths. Understand this before touching
 from the on-device SQLite mirror **only when that mirror is trustworthy**, and
 otherwise runs a byte-identical Supabase query. Fallback reasons, each logged:
 
-`no-local` · `not-synced` · `write-echo` · `role` · `local-threw` · `stale-db`
+`no-local` · `not-synced` · `write-echo` · `role` · `local-threw` · `stale-db` ·
+`out-of-window`
 
 The local and remote implementations must return **identical shapes**. Each read
 module has a test for this; change one side, change both.
@@ -201,6 +252,34 @@ either path, asserted by test), and time entries on the hours scoreboard (the
 technician query reproduces RLS's own-rows filter). **Still remote, by design:**
 a technician's allocated PO hours (`purchase_orders` is not in their stream;
 `purchase_orders_public` is a server view), and signed photo URLs.
+
+**A local miss is not proof of absence once sync windows are live (§2).** The
+mirror holds a window, not history. `reads/horizon.ts` reads the synced
+`sync_horizon` row (server cutoffs — no device clock involved) and each read
+proves its request is inside it, or throws `OutsideSyncWindow`, which
+`fromLocalOr` sends to Supabase as `out-of-window`:
+
+| Read | Rule |
+|---|---|
+| `listOfficeJobs`, `searchOfficeJobs`, `searchJobs`, `listInvoices`, `listQuotes` | local only if the page is full and its oldest `created_at` is inside the window |
+| `getInvoice`, `getQuote`, `getJob` | local miss → network |
+| `getJobBilling`, `getJobEquipment`, `getJobVariationsForApproval`, `getInvoiceJobPrefill` | local only if the job is on the device (children travel with it) |
+| `getCustomerOverview`, `getReportSummary`, `getReportAnalytics`, `listEquipmentUsage`, backflow device test history | all-history: network whenever a window is in force |
+| `getEquipmentUtilization`, `countOtherScheduledJobs` | local when the date bound is inside the window |
+| `listMyJobs`, `listReadyToInvoice`, `listBackflowDevices` | always complete — the windows keep every row they select |
+
+**Local indexes.** PowerSync stores each table as JSON behind a view, so an
+unindexed `WHERE job_id = ?` parses every row. The indexes the reads need are
+declared by hand in `mobile/powersync/device-indexes.js` and merged into the
+generated `schema.ts` by `generate-powersync-schema.mjs` (which refuses an
+index on a column the device does not hold). `lib/powersync/indexes.test.ts`
+reads every local SQL statement and fails when a lookup has no usable index —
+add the index there, then regenerate. Two scans are deliberate and named in
+that test.
+
+No horizon row means no window (migration or YAML not deployed) and every read
+behaves exactly as before. Consequence to tell office staff: once deployed,
+reports, customer history and search need a connection; open work does not.
 
 ### Writes — always through the outbox, never direct
 
@@ -587,6 +666,7 @@ a shippable release.
 | **`max_slot_wal_keep_size`** | Justin / Avi | Supabase instance config, no SQL path. Without it a slot can be invalidated again — which cost 24 hours of silent, invisible outage on 3–4 August. `npm run check:sync` now turns that failure mode into one command. |
 | **EAS env vars** | Justin / Avi | `eas env:create` for the two `EXPO_PUBLIC_*` values, or a cloud build ships an app pointed at `undefined`. See SHIPPING.md **STEP ZERO**. The app now refuses to start in that state rather than failing mysteriously later. |
 | **Sentry (error monitoring)** | Justin | Optional, and off until a DSN is set — see §12. Create a free Sentry org with a Next.js project (and a React Native project for the app), then set the DSNs in Vercel and EAS. Without it, failures like the weeks-long silent "Polish with AI" outage are still only discovered by accident. |
+| **Sync windows: apply `0068`, then redeploy the PowerSync streams** | Justin | Run `supabase/migrations/0068_sync_windows.sql` in the Supabase SQL editor (NOT `supabase db push`, which would also apply the deliberately-unapplied `0053`) and insert its ledger row, then check `select * from sync_horizon;` (one row) and `select jobname from cron.job;` (`sync-window-refresh`; if pg_cron is missing the migration only WARNS and nothing ages out). Then PowerSync dashboard → paste `mobile/powersync/sync-streams.yaml` → **Validate** → **Deploy**. Order matters only for savings, not safety: the YAML fails open without the migration. Devices re-sync and drop old rows; the app needs no new build. |
 | **Maestro flow 02** | Avi | Needs `ADMIN_EMAIL` / `ADMIN_PASSWORD` in the environment. The login subflow deliberately skips when a session already exists, so a password never passes through a script — which is why flows 01/03/04 could be run and 02 could not. |
 
 ### QA fixture — do not delete
@@ -776,6 +856,8 @@ compilation. The same commit builds fine in GitHub Actions, which does set them.
 | `mobile/lib/data/reads/` | Local-first read modules, one per area |
 | `mobile/lib/data/outbox/` | Durable write queue + processor |
 | `mobile/powersync/sync-streams.yaml` | **Security-critical.** Sync rules. |
+| `mobile/powersync/device-indexes.js` | Hand-maintained SQLite indexes merged into the generated device schema |
+| `mobile/lib/data/reads/horizon.ts` | What the windowed mirror is guaranteed to hold; out-of-window reads go to Supabase |
 | `mobile/design/` | Design system: tokens, primitives, `MoneyText`, `RoleGate` |
 | `mobile/app/` | expo-router routes, grouped by role |
 | `mobile/.maestro/` | E2E flows. Destructive taps are opt-in behind `APPROVE_FOR_REAL` / `CLOCK_FOR_REAL`, so a suite run cannot write to production. |

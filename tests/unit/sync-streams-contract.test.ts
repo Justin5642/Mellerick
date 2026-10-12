@@ -310,3 +310,98 @@ describe("PowerSync sync rules — technician streams", () => {
     expect(ungated).toEqual([]);
   });
 });
+
+// ============================================================================
+// SYNC WINDOWS (migration 0068 — drafted, not applied until the owner runs it).
+//
+// The windows narrow what devices receive; they must never narrow it in a way
+// that (a) drops a technician's CURRENT work, (b) lets a job's children drift
+// from the job they belong to, or (c) syncs NOTHING when this file is deployed
+// before the migration. Each of those is a property of the YAML text, so each
+// is pinned here rather than trusted to review.
+// ============================================================================
+describe("PowerSync sync windows", () => {
+  const streams = loadStreams();
+  const query = (name: string) => (streams[name]?.query ?? "").replace(/\s+/g, " ").trim();
+
+  // The one shape a technician's job scope may take: assigned through
+  // job_assignments AND inside the technician window.
+  const TECH_JOB_SCOPE =
+    "SELECT id FROM jobs WHERE sync_tech IS NOT false AND id IN (SELECT job_id FROM job_assignments WHERE staff_id = auth.user_id())";
+
+  it("filters on a window flag only with `IS NOT false` (fail-open when the column is absent)", () => {
+    // `= true` against a column the database does not have yet reads NULL and
+    // syncs nothing — a whole fleet of empty phones. `IS NOT false` reads NULL
+    // as "in", which is today's behaviour.
+    const strict = Object.entries(streams)
+      .filter(([, def]) => /\bsync_(tech|office|recent|backflow)\s*(=|!=|<>)/i.test(def.query ?? ""))
+      .map(([name]) => name);
+    expect(strict).toEqual([]);
+  });
+
+  it("gates tech_jobs on assignment and the window flag only — no status filter", () => {
+    // A status predicate here is the easiest way to drop an open job from the
+    // phone of the technician standing in front of it. Openness is folded into
+    // sync_tech by the database (open jobs are always in, whatever their age).
+    const q = query("tech_jobs");
+    const where = q.slice(q.search(/\bWHERE\b/i));
+    expect(where).toBe(
+      "WHERE sync_tech IS NOT false AND id IN (SELECT job_id FROM job_assignments WHERE staff_id = auth.user_id())"
+    );
+  });
+
+  it("scopes every technician job-child stream through the same windowed job set", () => {
+    const children = Object.keys(streams).filter((n) => n.startsWith("tech_job_") || n === "tech_time_entries");
+    expect(children.length).toBeGreaterThanOrEqual(6);
+    const drifted = children.filter((n) => !query(n).includes(`job_id IN (${TECH_JOB_SCOPE})`));
+    expect(drifted).toEqual([]);
+  });
+
+  it("gives technicians only the customers/sites of their windowed jobs or of active backflow devices", () => {
+    // Was: every customer and every site to every device.
+    for (const [table, fk] of [["customers", "customer_id"], ["sites", "site_id"]] as const) {
+      const techVisible = Object.entries(streams).filter(
+        ([, def]) => def.query && isTechnicianVisible(def.query) && new RegExp(`\\bFROM ${table}\\b`, "i").test(def.query)
+      );
+      expect(techVisible.length).toBe(2);
+      for (const [name] of techVisible) {
+        const q = query(name);
+        const ok =
+          q.includes(`WHERE id IN (SELECT ${fk} FROM jobs WHERE sync_tech IS NOT false AND id IN (SELECT job_id FROM job_assignments WHERE staff_id = auth.user_id()))`) ||
+          q.endsWith("WHERE sync_backflow IS NOT false");
+        expect({ name, ok }).toEqual({ name, ok: true });
+      }
+    }
+  });
+
+  it("ANDs any window filter onto the office role gate, never ORs it", () => {
+    // `WHERE <gate> OR x` would hand every row matching x to a technician.
+    // The gate must be the whole WHERE, or a parenthesised term ANDed with
+    // filters that contain no OR of their own.
+    const GATE = "(profiles.role = 'office' OR profiles.role = 'admin')";
+    const loose = Object.entries(streams)
+      .filter(([name]) => name.startsWith("office_"))
+      .filter(([name]) => {
+        const where = query(name).replace(/^[\s\S]*?\bWHERE\s+/i, "");
+        if (where === "profiles.role = 'office' OR profiles.role = 'admin'") return false;
+        if (where === GATE) return false;
+        if (!where.startsWith(`${GATE} AND `)) return true;
+        return /\bOR\b/i.test(where.slice(GATE.length));
+      })
+      .map(([name]) => name);
+    expect(loose).toEqual([]);
+  });
+
+  it("windows every office history stream and nothing else", () => {
+    const WINDOWED = [
+      "jobs", "job_items", "job_variations", "job_expenses", "job_notes", "job_stage_notes",
+      "job_photos", "time_entries", "equipment_usage_log", "invoices", "invoice_items", "quotes", "quote_items",
+    ];
+    const office = Object.entries(streams).filter(([name]) => name.startsWith("office_"));
+    for (const [name, def] of office) {
+      const table = (def.query ?? "").match(/\bFROM\s+(\w+)/i)?.[1] ?? "";
+      const windowed = new RegExp(`\\b${table}\\.sync_office IS NOT false\\b`).test(def.query ?? "");
+      expect({ name, windowed }).toEqual({ name, windowed: WINDOWED.includes(table) });
+    }
+  });
+});

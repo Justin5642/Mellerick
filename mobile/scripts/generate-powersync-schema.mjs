@@ -3,6 +3,7 @@
 //
 //   1. mobile/powersync/sync-streams.yaml  — WHICH tables/columns are synced
 //   2. the live Postgres schema             — what TYPE each column is
+//   3. mobile/powersync/device-indexes.js   — local SQLite indexes (by hand)
 //
 // Hand-writing the client schema guarantees drift: a column added to a stream,
 // or a Postgres type change, silently produces a device table that cannot hold
@@ -23,6 +24,8 @@ import { fileURLToPath } from 'node:url';
 // CommonJS on purpose: jest transforms .js but not .mjs, so the pure logic
 // lives in a .js module both this ESM script and the test suite can load.
 import schemaLib from './powersync-schema-lib.js';
+// Hand-maintained device indexes, merged in so regeneration never drops them.
+import deviceIndexes from '../powersync/device-indexes.js';
 const { parseStreams, render } = schemaLib;
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -55,5 +58,5 @@ const offlineFlag = process.argv.indexOf('--offline');
 const synced = parseStreams(readFileSync(STREAMS, 'utf8'));
 const byTable = loadColumns(offlineFlag > -1 ? process.argv[offlineFlag + 1] : null);
 mkdirSync(dirname(OUT), { recursive: true });
-writeFileSync(OUT, render(synced, byTable));
+writeFileSync(OUT, render(synced, byTable, deviceIndexes));
 console.log(`wrote ${OUT} — ${synced.size} tables`);

@@ -1,5 +1,6 @@
 import { supabase } from "../../supabase";
 import { fromLocalOr, type LocalReads } from "./source";
+import { requireCompletePage } from "./horizon";
 import { nestOne, num, numOrNull } from "./rowMap";
 import { unwrap, unwrapRows } from "./unwrap";
 import { assignedOrCrewFilter, assignedOrCrewSql, crewJobIdsRemote } from "./assignedJobs";
@@ -20,6 +21,14 @@ import { assignedOrCrewFilter, assignedOrCrewSql, crewJobIdsRemote } from "./ass
 //     assigned to them has no local row — a miss is not proof of absence.
 //   • listOfficeJobs / searchOfficeJobs — office/admin only (the (office)
 //     group is role-guarded; only those mirrors carry the full jobs table).
+//   • listOfficeJobs / searchOfficeJobs / searchJobs page newest-first over
+//     ALL jobs, and an office mirror holds only jobs inside the sync window
+//     (draft migration 0068, once applied: open, ready, or active in the last
+//     24 months). A page is answered locally only when it is full and its
+//     oldest row is inside the window (reads/horizon.ts requireCompletePage);
+//     otherwise older jobs may be missing, so it goes to Supabase.
+//   • listMyJobs reads OPEN jobs only, which every window keeps whatever
+//     their age — always complete locally.
 //   • searchJobs — office/admin only, even though the screen is currently
 //     technician-only: the screen exists to find ANY job in the system, and
 //     a technician's mirror holds only their assigned jobs. Serving it
@@ -185,7 +194,7 @@ export const SQL_GET_JOB = `
 // stage_created_at_idx index (0057 migration) to grab just the most recent
 // note's stage per job, without pulling the full note history for a list row.
 export const SQL_LIST_OFFICE_JOBS = `
-  SELECT j.id, j.job_number, j.title, j.status, j.priority,
+  SELECT j.id, j.job_number, j.title, j.status, j.priority, j.created_at,
          c.name AS customer_name,
          p.full_name AS assigned_profile_full_name,
          (SELECT n.stage FROM job_stage_notes n WHERE n.job_id = j.id ORDER BY n.created_at DESC LIMIT 1) AS current_stage
@@ -199,7 +208,7 @@ export const SQL_LIST_OFFICE_JOBS = `
 // (NULL unless the whole query is digits) — mirrors the screen's
 // `.or(title.ilike…, job_number.eq…)`. The bare LIMIT ? binds as ?3.
 export const SQL_SEARCH_OFFICE_JOBS = `
-  SELECT j.id, j.job_number, j.title, j.status, j.priority,
+  SELECT j.id, j.job_number, j.title, j.status, j.priority, j.created_at,
          c.name AS customer_name,
          p.full_name AS assigned_profile_full_name,
          (SELECT n.stage FROM job_stage_notes n WHERE n.job_id = j.id ORDER BY n.created_at DESC LIMIT 1) AS current_stage
@@ -216,7 +225,7 @@ export const SQL_SEARCH_OFFICE_JOBS = `
 // created_at-DESC list. SQLite LIKE is ASCII-case-insensitive, matching the
 // screen's toLowerCase() for ASCII (documented divergence on non-ASCII).
 export const SQL_SEARCH_JOBS = `
-  SELECT j.id, j.job_number, j.title, j.status, j.scheduled_start,
+  SELECT j.id, j.job_number, j.title, j.status, j.scheduled_start, j.created_at,
          c.name AS customer_name,
          s.name AS site_name, s.address_line1 AS site_address_line1,
          s.suburb AS site_suburb, s.site_lat, s.site_lng
@@ -231,6 +240,7 @@ export const SQL_SEARCH_JOBS = `
      OR s.suburb LIKE '%'||?1||'%' ESCAPE '\\'
   ORDER BY j.created_at DESC
   LIMIT 50`;
+const SEARCH_JOBS_LIMIT = 50; // the LIMIT above
 
 // ---------------------------------------------------------------------------
 // SQLite-shaped rows (booleans would be 1/0; numerics are numbers via the
@@ -292,6 +302,8 @@ interface RawOfficeJobRow {
   title: string;
   status: string;
   priority: string;
+  created_at: string | null; // window check only; not mapped
+
   customer_name: string | null;
   assigned_profile_full_name: string | null;
   current_stage: string | null;
@@ -303,6 +315,7 @@ interface RawJobSearchRow {
   title: string;
   status: string;
   scheduled_start: string | null;
+  created_at: string | null; // window check only; not mapped
   customer_name: string | null;
   site_name: string | null;
   site_address_line1: string | null;
@@ -562,6 +575,7 @@ export async function listOfficeJobs(offset: number, limit: number): Promise<Off
   return fromLocalOr(
     async (db) => {
       const rows = await db.getAll<RawOfficeJobRow>(SQL_LIST_OFFICE_JOBS, [limit, offset]);
+      await requireCompletePage(db, "office", rows, limit, "listOfficeJobs");
       return rows.map(mapOfficeJob);
     },
     // Base body is app/(office)/jobs.tsx's original loadMore query, plus the
@@ -599,6 +613,7 @@ export async function searchOfficeJobs(query: string, limit: number): Promise<Of
         numeric ? Number(safe) : null,
         limit,
       ]);
+      await requireCompletePage(db, "office", rows, limit, "searchOfficeJobs");
       return rows.map(mapOfficeJob);
     },
     // Base body is app/(office)/jobs.tsx's original runSearch query, plus the
@@ -636,6 +651,7 @@ export async function searchJobs(query: string): Promise<JobSearchRow[]> {
   return fromLocalOr(
     async (db) => {
       const rows = await db.getAll<RawJobSearchRow>(SQL_SEARCH_JOBS, [escapeLike(query.trim())]);
+      await requireCompletePage(db, "office", rows, SEARCH_JOBS_LIMIT, "searchJobs");
       return rows.map(mapJobSearchRow);
     },
     async () => {

@@ -1,5 +1,6 @@
 import { supabase } from "../../supabase";
 import { computeEquipmentCost } from "../../costing";
+import { requireNoWindow } from "./horizon";
 import { fromLocalOr, type RouteOptions } from "./source";
 import { nestOne, num } from "./rowMap";
 import { unwrap, unwrapRows } from "./unwrap";
@@ -221,10 +222,16 @@ function mapEquipmentUsage(r: RawEquipmentUsageRow): EquipmentUsage {
   };
 }
 
+// The item's WHOLE usage log. Once the sync window (draft migration 0068) is
+// applied, an office device holds only usage from the last 24 months or on an
+// in-window job, so the full log is answered locally only while no window is
+// in force.
 export async function listEquipmentUsage(equipmentId: string): Promise<EquipmentUsage[]> {
   return fromLocalOr(
-    async (db) =>
-      (await db.getAll<RawEquipmentUsageRow>(SQL_LIST_EQUIPMENT_USAGE, [equipmentId])).map(mapEquipmentUsage),
+    async (db) => {
+      await requireNoWindow(db, "office", "listEquipmentUsage");
+      return (await db.getAll<RawEquipmentUsageRow>(SQL_LIST_EQUIPMENT_USAGE, [equipmentId])).map(mapEquipmentUsage);
+    },
     async () => {
       const res = await supabase
         .from("equipment_usage_log")

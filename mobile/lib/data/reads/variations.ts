@@ -1,5 +1,6 @@
 import { supabase } from "../../supabase";
 import { fromLocalOr } from "./source";
+import { requireJobOnDevice } from "./horizon";
 import { bool, nestOne, num, numOrNull } from "./rowMap";
 import { unwrapRows } from "./unwrap";
 
@@ -74,10 +75,12 @@ function mapVariationRow(r: RawVariationRow): VariationForApproval {
 
 export async function getJobVariationsForApproval(jobId: string): Promise<VariationForApproval[]> {
   return fromLocalOr(
-    async (db) =>
-      (await db.getAll<RawVariationRow>(SQL_JOB_VARIATIONS_FOR_APPROVAL, [jobId])).map(
-        mapVariationRow
-      ),
+    async (db) => {
+      // A job's variations travel with it through the sync window; a job not
+      // on the device may have variations only the server holds.
+      await requireJobOnDevice(db, "office", jobId);
+      return (await db.getAll<RawVariationRow>(SQL_JOB_VARIATIONS_FOR_APPROVAL, [jobId])).map(mapVariationRow);
+    },
     async () => {
       // ← unchanged pre-PowerSync Supabase body (byte-identical fallback).
       const res = await supabase

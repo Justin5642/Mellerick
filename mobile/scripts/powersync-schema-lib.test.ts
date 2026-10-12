@@ -113,3 +113,34 @@ describe("render", () => {
     expect(() => render(new Map([["ghosts", "ALL"]]), byTable)).toThrow(/not in the database/);
   });
 });
+
+describe("render — device indexes (mobile/powersync/device-indexes.js)", () => {
+  const byTable = new Map([
+    [
+      "jobs",
+      [
+        { name: "id", pg: "uuid" },
+        { name: "assigned_to", pg: "uuid" },
+        { name: "scheduled_start", pg: "timestamp with time zone" },
+      ],
+    ],
+  ]);
+  const synced = new Map([["jobs", new Set(["id", "assigned_to", "scheduled_start"])]]);
+
+  it("emits the index map as the Table's second argument", () => {
+    const out = render(synced, byTable, { jobs: { assigned: ["assigned_to", "scheduled_start"] } });
+    expect(out).toContain("}, {\n  indexes: {\n    assigned: ['assigned_to', 'scheduled_start'],\n  },\n});");
+  });
+
+  it("emits a plain `});` for a table with no indexes (regeneration without the map is unchanged)", () => {
+    expect(render(synced, byTable)).toContain("  scheduled_start: column.text,\n});");
+  });
+
+  it("refuses an index on a column the device does not hold", () => {
+    expect(() => render(synced, byTable, { jobs: { bad: ["customer_id"] } })).toThrow(/not synced to the device/);
+  });
+
+  it("refuses an index on a table no stream syncs", () => {
+    expect(() => render(synced, byTable, { ghosts: { x: ["id"] } })).toThrow(/no stream syncs/);
+  });
+});

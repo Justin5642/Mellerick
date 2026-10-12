@@ -18,6 +18,7 @@ jest.mock("../../supabase", () => {
   return { supabase: { from: jest.fn(() => builder) } };
 });
 
+import { SQL_SYNC_HORIZON } from "./horizon";
 import { supabase } from "../../supabase";
 import {
   resetSourceForTests,
@@ -222,8 +223,11 @@ describe("getJobBilling (local path)", () => {
     };
     expect(result).toEqual(expected);
 
-    expect(getOptional).toHaveBeenCalledTimes(1);
-    const [jobSql, jobParams] = getOptional.mock.calls[0];
+    // [0] is the sync-horizon probe (reads/horizon.ts); this fake answers it
+    // with a job row, which carries no cutoff, so no window is in force.
+    expect(getOptional).toHaveBeenCalledTimes(2);
+    expect(norm(getOptional.mock.calls[0][0])).toBe(norm(SQL_SYNC_HORIZON));
+    const [jobSql, jobParams] = getOptional.mock.calls[1];
     expect(norm(jobSql)).toBe(EXPECTED_JOB);
     expect(norm(SQL_JOB_BILLING_JOB)).toBe(EXPECTED_JOB);
     expect(jobParams).toEqual(["job-1"]);

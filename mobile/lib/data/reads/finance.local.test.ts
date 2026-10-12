@@ -84,7 +84,7 @@ describe("listInvoices (local)", () => {
 
     const [sql, params] = (fake.getAll as jest.Mock).mock.calls[0];
     expect(norm(sql)).toBe(
-      "SELECT i.id, i.invoice_number, i.title, i.total, i.status, i.due_date, c.name AS customer_name " +
+      "SELECT i.id, i.invoice_number, i.title, i.total, i.status, i.due_date, i.created_at, c.name AS customer_name " +
         "FROM invoices i LEFT JOIN customers c ON c.id = i.customer_id " +
         "ORDER BY i.created_at DESC, i.id DESC LIMIT ? OFFSET ?"
     );
@@ -247,7 +247,7 @@ describe("listQuotes / getQuote (local)", () => {
 
     const [sql, params] = (fake.getAll as jest.Mock).mock.calls[0];
     expect(norm(sql)).toBe(
-      "SELECT q.id, q.quote_number, q.title, q.total, q.status, q.valid_until, c.name AS customer_name " +
+      "SELECT q.id, q.quote_number, q.title, q.total, q.status, q.valid_until, q.created_at, c.name AS customer_name " +
         "FROM quotes q LEFT JOIN customers c ON c.id = q.customer_id " +
         "ORDER BY q.created_at DESC, q.id DESC LIMIT ? OFFSET ?"
     );

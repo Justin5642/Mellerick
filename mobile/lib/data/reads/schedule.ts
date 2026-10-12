@@ -1,5 +1,6 @@
 import { supabase } from "../../supabase";
 import { fromLocalOr } from "./source";
+import { requireCoveredSince } from "./horizon";
 import { unwrapRows } from "./unwrap";
 import { assignedOrCrewFilter, assignedOrCrewSql, crewJobIdsRemote } from "./assignedJobs";
 import { businessDayRange } from "../../scheduling";
@@ -65,10 +66,16 @@ export async function countOtherScheduledJobs(
   const { dayStartIso, dayEndIso } = businessDayRange(dateKey);
   return fromLocalOr(
     async (db) => {
-      const row = await db.getOptional<{ n: number }>(
-        SQL_COUNT_OTHER_SCHEDULED_JOBS,
-        [technicianId, excludeJobId, dayStartIso, dayEndIso]
-      );
+      // Every job scheduled on or after the window cutoff is on the device;
+      // a day further back than that (rare — scheduling is forward-looking)
+      // asks the server.
+      await requireCoveredSince(db, "office", dayStartIso, "countOtherScheduledJobs");
+      const row = await db.getOptional<{ n: number }>(SQL_COUNT_OTHER_SCHEDULED_JOBS, [
+        technicianId,
+        excludeJobId,
+        dayStartIso,
+        dayEndIso,
+      ]);
       return row?.n ?? 0;
     },
     async () => {
