@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { View, Text, StyleSheet, TextInput, TouchableOpacity, FlatList, ActivityIndicator, Alert } from "react-native";
-import { useAudioRecorder, useAudioRecorderState, AudioModule, RecordingPresets, setAudioModeAsync } from "expo-audio";
 import { Ionicons } from "@expo/vector-icons";
 import { supabase } from "../../lib/supabase";
 import { colors } from "../../lib/theme";
@@ -13,12 +12,35 @@ import { netInfoConnectivity } from "../../lib/data/net/connectivity";
 import { useDataLayer } from "../../lib/data/DataProvider";
 import { useSyncSettled } from "../../lib/data/hooks/useSyncSettled";
 import { reconcileRows } from "../../lib/data/reconcile";
+import { joinSegments, useDictation } from "../../lib/dictation";
 
-// Same "office server" the voice report recorder calls
-// (see components/job/voice-report.tsx) — /api/ai/polish-note on the web
-// app cleans up grammar/voice-to-text artifacts via OpenAI, without
-// requiring the OpenAI SDK on-device.
+// The "office server": /api/ai/polish-note on the web app cleans up grammar
+// and voice-to-text artifacts with Claude.
 const API_BASE_URL = process.env.EXPO_PUBLIC_API_BASE_URL;
+
+// Calls the polish route and returns the cleaned text. Throws an Error whose
+// message is fit to show the technician.
+async function polishOnServer(text: string): Promise<string> {
+  if (!API_BASE_URL) throw new Error("App isn't configured to reach the office server.");
+  const { data: sessionData } = await supabase.auth.getSession();
+  const accessToken = sessionData.session?.access_token;
+  if (!accessToken) throw new Error("Your session has expired. Sign out and back in, then try again.");
+  let res: Response;
+  try {
+    res = await fetch(`${API_BASE_URL}/api/ai/polish-note`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
+      body: JSON.stringify({ text }),
+    });
+  } catch {
+    throw new Error("Check your connection and try again.");
+  }
+  // A non-JSON body (e.g. a platform error page) must still surface the HTTP
+  // status rather than throwing a parse error.
+  const data = await res.json().catch(() => ({}));
+  if (res.ok && data.polished) return data.polished as string;
+  throw new Error(data.error ?? `Server returned ${res.status}. Try again.`);
+}
 
 interface Note {
   id: string;
@@ -59,67 +81,34 @@ export function JobNotesTab({ jobId, currentUserId }: { jobId: string; currentUs
   const [stageSaving, setStageSaving] = useState(false);
   const [stageError, setStageError] = useState<unknown>(null);
   const [stageTranscribing, setStageTranscribing] = useState(false);
-  const stageAudioRecorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
-  const stageRecorderState = useAudioRecorderState(stageAudioRecorder);
   const stageNotesComposer = useJobStageNotes();
 
-  // Voice-to-text for stage notes: record in-app -> upload -> the office
-  // server transcribes via Whisper and runs the same AI polish pass as
-  // "Polish with AI" below, in one round trip. The result drops straight
-  // into stageContent, ready to glance at and tap "Add stage note" — never
-  // auto-saved, so a bad transcription can just be edited or re-recorded.
-  async function startStageRecording() {
-    if (!(await netInfoConnectivity.isOnline())) {
-      Alert.alert("No internet connection", "Voice notes need an internet connection to transcribe. You can still type the note directly.");
+  // Voice-to-text for stage notes, on the phone itself (lib/dictation.ts):
+  // words appear in the box as the technician talks; on Stop the dictated
+  // part gets the same AI polish as "Polish with AI" below when online (raw
+  // dictation otherwise — it is still a usable note). Never auto-saved, so a
+  // bad transcription can just be edited or re-dictated.
+  const stageDictation = useDictation(async ({ text }) => {
+    if (!text) {
+      Alert.alert("Didn't catch that", "No speech was recognised. Try again, or type the note.");
       return;
     }
-    const perm = await AudioModule.requestRecordingPermissionsAsync();
-    if (!perm.granted) {
-      Alert.alert("Microphone permission needed", "Enable microphone access in Settings to dictate a note.");
-      return;
-    }
-    await setAudioModeAsync({ playsInSilentMode: true, allowsRecording: true });
-    await stageAudioRecorder.prepareToRecordAsync();
-    stageAudioRecorder.record();
-  }
-
-  async function stopStageRecording() {
-    await stageAudioRecorder.stop();
-    const uri = stageAudioRecorder.uri;
-    if (!uri) return;
-    await transcribeStageRecording(uri);
-  }
-
-  async function transcribeStageRecording(uri: string) {
-    if (!API_BASE_URL) return;
-    setStageTranscribing(true);
-    try {
-      const { data: sessionData } = await supabase.auth.getSession();
-      const accessToken = sessionData.session?.access_token;
-      if (!accessToken) return;
-      const formData = new FormData();
-      // React Native's fetch accepts this { uri, name, type } shape for a
-      // FormData file field — the same pattern used to upload the job-level
-      // voice report (see lib/data/repositories/voiceReport.ts), just
-      // uploaded directly here instead of going through the outbox, since
-      // this call is inherently online-only (it needs OpenAI either way).
-      formData.append("audio", { uri, name: "note.m4a", type: "audio/m4a" } as unknown as Blob);
-      const res = await fetch(`${API_BASE_URL}/api/ai/transcribe-note`, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${accessToken}` },
-        body: formData,
-      });
-      const data = await res.json();
-      if (res.ok && data.text) {
-        setStageContent(data.text);
-      } else {
-        Alert.alert("Transcription failed", data.error ?? "Try again.");
+    let finalText = text;
+    if (await netInfoConnectivity.isOnline()) {
+      setStageTranscribing(true);
+      try {
+        finalText = await polishOnServer(text);
+      } catch {
+        // Keep the raw dictation; the tech can still tap Polish later.
+      } finally {
+        setStageTranscribing(false);
       }
-    } catch {
-      Alert.alert("Transcription failed", "Check your connection and try again.");
-    } finally {
-      setStageTranscribing(false);
     }
+    setStageContent((prev) => joinSegments(prev, finalText));
+  });
+
+  async function startStageDictation() {
+    await stageDictation.start({ online: await netInfoConnectivity.isOnline() });
   }
 
   const loadStageNotes = useCallback(async () => {
@@ -235,40 +224,18 @@ export function JobNotesTab({ jobId, currentUserId }: { jobId: string; currentUs
   // tapping Add.
   async function handlePolish() {
     if (!content.trim() || polishing) return;
-    // Every failure path below alerts rather than returning silently — a
-    // silent no-op made a misconfigured or failing server look like a dead
-    // button. The draft is always left untouched on failure.
-    if (!API_BASE_URL) {
-      Alert.alert("Not configured", "App isn't configured to reach the office server.");
-      return;
-    }
+    // Every failure path alerts rather than returning silently — a silent
+    // no-op made a misconfigured or failing server look like a dead button.
+    // The draft is always left untouched on failure.
     if (!(await netInfoConnectivity.isOnline())) {
       Alert.alert("No internet connection", "Polish needs an internet connection. You can still add the note as typed.");
       return;
     }
     setPolishing(true);
     try {
-      const { data: sessionData } = await supabase.auth.getSession();
-      const accessToken = sessionData.session?.access_token;
-      if (!accessToken) {
-        Alert.alert("Polish failed", "Your session has expired. Sign out and back in, then try again.");
-        return;
-      }
-      const res = await fetch(`${API_BASE_URL}/api/ai/polish-note`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
-        body: JSON.stringify({ text: content }),
-      });
-      // A non-JSON body (e.g. a platform error page) must still surface the
-      // HTTP status rather than throwing into the generic catch.
-      const data = await res.json().catch(() => ({}));
-      if (res.ok && data.polished) {
-        setContent(data.polished);
-      } else {
-        Alert.alert("Polish failed", data.error ?? `Server returned ${res.status}. Try again.`);
-      }
-    } catch {
-      Alert.alert("Polish failed", "Check your connection and try again.");
+      setContent(await polishOnServer(content));
+    } catch (e) {
+      Alert.alert("Polish failed", e instanceof Error ? e.message : "Try again.");
     } finally {
       setPolishing(false);
     }
@@ -324,30 +291,34 @@ export function JobNotesTab({ jobId, currentUserId }: { jobId: string; currentUs
       <View style={styles.composer}>
         <TextInput
           style={styles.input}
-          value={stageContent}
+          value={stageDictation.listening ? joinSegments(stageContent, stageDictation.text) : stageContent}
           onChangeText={setStageContent}
-          placeholder={selectedStage ? `Add a note for the ${getJobStageLabel(selectedStage)} stage, or tap Record to dictate...` : "Pick a stage above first..."}
+          editable={!stageDictation.listening}
+          placeholder={selectedStage ? `Add a note for the ${getJobStageLabel(selectedStage)} stage${stageDictation.available ? ", or tap Record note" : ""}...` : "Pick a stage above first..."}
           multiline
         />
+        {stageDictation.error && <Text style={styles.dictationError}>{stageDictation.error}</Text>}
         <View style={styles.buttonRow}>
-          <TouchableOpacity
-            style={[styles.polishButton, stageRecorderState.isRecording && styles.recordButtonActive]}
-            onPress={stageRecorderState.isRecording ? stopStageRecording : startStageRecording}
-            disabled={stageTranscribing}
-          >
-            {stageTranscribing ? (
-              <ActivityIndicator size="small" color={colors.blue600} />
-            ) : (
-              <Ionicons
-                name={stageRecorderState.isRecording ? "stop-circle" : "mic"}
-                size={14}
-                color={stageRecorderState.isRecording ? "#fff" : colors.blue600}
-              />
-            )}
-            <Text style={[styles.polishButtonText, stageRecorderState.isRecording && styles.recordButtonTextActive]}>
-              {stageTranscribing ? "Transcribing..." : stageRecorderState.isRecording ? "Stop" : "Record note"}
-            </Text>
-          </TouchableOpacity>
+          {stageDictation.available && (
+            <TouchableOpacity
+              style={[styles.polishButton, stageDictation.listening && styles.recordButtonActive]}
+              onPress={stageDictation.listening ? stageDictation.stop : startStageDictation}
+              disabled={stageTranscribing}
+            >
+              {stageTranscribing ? (
+                <ActivityIndicator size="small" color={colors.blue600} />
+              ) : (
+                <Ionicons
+                  name={stageDictation.listening ? "stop-circle" : "mic"}
+                  size={14}
+                  color={stageDictation.listening ? "#fff" : colors.blue600}
+                />
+              )}
+              <Text style={[styles.polishButtonText, stageDictation.listening && styles.recordButtonTextActive]}>
+                {stageTranscribing ? "Polishing..." : stageDictation.listening ? "Stop" : "Record note"}
+              </Text>
+            </TouchableOpacity>
+          )}
           <TouchableOpacity
             style={styles.addButton}
             onPress={handleAddStageNote}
@@ -505,6 +476,7 @@ const styles = StyleSheet.create({
   polishButtonText: { color: colors.slate700, fontWeight: "600", fontSize: 13 },
   recordButtonActive: { backgroundColor: colors.red600, borderColor: colors.red600 },
   recordButtonTextActive: { color: "#fff" },
+  dictationError: { color: colors.red600, fontSize: 12, marginTop: 6 },
   addButton: { backgroundColor: colors.blue600, borderRadius: 10, paddingHorizontal: 16, paddingVertical: 12 },
   addButtonText: { color: "#fff", fontWeight: "600", fontSize: 14 },
   noteCard: { backgroundColor: colors.card, borderWidth: 1, borderColor: colors.border, borderRadius: 10, padding: 12, marginBottom: 8 },

@@ -1,12 +1,9 @@
 import Anthropic from "@anthropic-ai/sdk";
 
-// Shared helpers for turning technician-dictated text into clean job-record
-// prose. The polish pass runs on Claude; Whisper (OpenAI) is still used only
-// for audio transcription in /api/ai/transcribe-note. Used by both /api/ai/polish-note (cleans up text the tech
-// already typed or dictated via the OS keyboard) and /api/ai/transcribe-note
-// (records audio in-app, transcribes via Whisper, then runs the SAME polish
-// pass) so the two paths can never drift apart on wording rules — a note
-// should read the same regardless of which input path produced it.
+// Turns technician-dictated text into clean job-record prose with Claude.
+// Used by /api/ai/polish-note, which both "Polish with AI" and "Record note"
+// call (dictation itself happens on the phone or in the browser — no audio is
+// sent to the server), so a note reads the same whichever way it was entered.
 
 export const POLISH_SYSTEM_PROMPT = `You clean up plumbing technician job notes that are often dictated via voice-to-text on a phone. Rewrite the note so it reads as clear, professional, concise English suitable for a permanent job record that other staff and customers may read.
 
@@ -19,18 +16,9 @@ Rules:
 - Keep it roughly the same length and keep the same meaning — polish it, don't rewrite it. Don't pad it out or add new sentences.
 - Return only the rewritten note text, with no preamble, quotes, or labels.`;
 
-// Passed as Whisper's optional `prompt` param on the transcription request
-// (not the chat prompt above) to bias its decoding toward the trade
-// vocabulary a plumbing job note is likely to contain, so terms like "RPZ"
-// or "TMV" are less likely to come out as a garbled homophone in the first
-// place. Whisper uses this as decoding context, not as instructions.
-export const TRANSCRIBE_TRADE_TERM_PROMPT =
-  "Plumbing and hydraulic services job note, dictated by a technician on site. May include terms such as: backflow, backflow prevention, RPZ valve, reduced pressure zone, testable, non-testable, double check valve, air gap, DN15, DN20, DN25, DN32, DN40, DN50, PRV, pressure limiting valve, TMV, tempering valve, thermostatic mixing valve, trap, floor waste, gully trap, inspection point, vent stack, stack, cross-connection, water hammer, expansion valve, hydraulic, isolation valve, stop tap, rough-in, fit-off.";
-
 // Calls Claude with the shared system prompt and returns the polished text.
 // Throws on any failure (API error, refusal, empty result) — callers decide
-// how to degrade (transcribe-note falls back to the raw transcript rather
-// than failing the whole request).
+// how to degrade.
 //
 // Haiku handles a short copy-edit well at a fraction of Opus's price. Haiku
 // has no server-side refusal fallback, so a declined note is retried once on
@@ -38,8 +26,7 @@ export const TRANSCRIBE_TRADE_TERM_PROMPT =
 const POLISH_MODEL = "claude-haiku-5-5";
 
 // Job notes are a few sentences; this cap stops a signed-in user sending
-// arbitrarily large text through a paid API. Voice transcripts are already
-// bounded by the platform's request-size limit on the uploaded audio.
+// arbitrarily large text through a paid API.
 export const POLISH_MAX_CHARS = 5000;
 const REFUSAL_FALLBACK_MODEL = "claude-opus-5-5";
 

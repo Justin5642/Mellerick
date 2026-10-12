@@ -304,6 +304,36 @@ Load-bearing properties:
   wedge the FIFO queue forever — but it logs a warning naming the table, so a
   vanished row is traceable.
 
+### Voice-to-text — on the device, no OpenAI (12 October 2026)
+
+"Record note" (stage notes, mobile and web) and the job **voice report** no
+longer upload audio to OpenAI Whisper. Speech is recognised where it is spoken:
+
+- **Mobile** — `mobile/lib/dictation.ts`, wrapping `expo-speech-recognition`
+  (Apple / Google speech recognition, the keyboard-dictation engine). Words
+  appear as the technician talks. Offline, recognition is forced on-device where
+  the phone supports it; otherwise the mic explains a connection is needed.
+  `en-AU`, trade terms passed as recognition hints (`TRADE_TERMS`).
+- **Web** — `lib/use-browser-dictation.ts`, the Web Speech API. Chrome, Edge and
+  Safari; the button is hidden where unsupported (Firefox).
+- **Record note** then runs the dictated text through `/api/ai/polish-note`
+  (Claude Haiku) when online — same polish as "Polish with AI"; raw text if that
+  fails. Never auto-saved.
+- **Voice report** — the technician reviews and can correct the text before
+  saving. Queued as up to three outbox steps
+  (`repositories/voiceReport.ts`): save the text (no dependency, so the words
+  survive a failed upload) → upload the recording if the phone kept one (iOS,
+  Android 13+; `.wav`/`.caf`) → attach the audio path. The route
+  `/api/jobs/[id]/transcribe-voice-report` keeps its name for queued operations
+  on phones, but now only saves; `/api/ai/transcribe-note` is deleted.
+- **`expo-audio` is removed** and `expo-speech-recognition` added — both
+  native, so this reaches devices only through a **new build** (13). The module
+  is loaded lazily: an OTA update reaching an older binary hides the mic instead
+  of crashing the job screen. `OPENAI_API_KEY` is no longer used anywhere — it
+  can be deleted from Vercel and the OpenAI account closed.
+- **Check on a device:** the first use asks for microphone *and* speech
+  recognition permission; a saved voice report shows on the web job page.
+
 ### Photos — size and caching
 
 - **Every picked or captured image is downscaled before it is queued**: longest
@@ -1009,11 +1039,11 @@ runtime behave exactly as before. CI has no Sentry secrets and needs none.
 | `lib/monitoring/scrub.ts` | `beforeSend` / `beforeBreadcrumb` privacy scrubber |
 
 Explicitly reported (route tag + integration tag): `api/ai/polish-note`,
-`api/ai/transcribe-note`, `api/jobs/transcribe-voice-report`,
+`api/jobs/transcribe-voice-report`,
 `api/backflow/scan-data-plate`, `api/backflow/tests/submit`, every Xero route
 that catches (callback, push-invoice, push-expense, poll-invoices, sync-now),
 Google Calendar (callback, poll-calendar, sync-now, jobs/sync-calendar), and
-invoice/quote email send. A **missing `ANTHROPIC_API_KEY` / `OPENAI_API_KEY`**
+invoice/quote email send. A **missing `ANTHROPIC_API_KEY`**
 in a deployment is reported too — that is the most likely cause of a silent AI
 outage.
 

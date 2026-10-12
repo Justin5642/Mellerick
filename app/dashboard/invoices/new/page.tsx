@@ -191,7 +191,7 @@ function NewInvoiceForm() {
   useEffect(() => {
     // Pre-fill "Description of Works" from the linked job's on-site record so
     // the office starts from what the technician actually wrote rather than a
-    // blank box: prefer the typed completion notes, fall back to the Whisper
+    // blank box: prefer the typed completion notes, fall back to the
     // voice-report transcript. Stops once the office has edited the field
     // (workDescTouched) so a re-selected job can't clobber their wording.
     async function prefillWorkDescription() {

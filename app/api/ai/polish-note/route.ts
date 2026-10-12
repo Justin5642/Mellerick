@@ -6,9 +6,9 @@ import { reportError, reportFailure } from "@/lib/monitoring";
 
 // Cleans up rough, often voice-dictated technician job notes into clear,
 // professional wording before they're saved to the job's permanent record.
-// The prompt + Claude call live in lib/ai/polish-note.ts, shared with
-// /api/ai/transcribe-note (record-in-app voice notes), so both input paths
-// polish identically.
+// The prompt + Claude call live in lib/ai/polish-note.ts. "Record note"
+// dictation (on the phone or in the browser) calls this same route after
+// recognition, so typed and dictated notes polish identically.
 
 // Called both from the web dashboard (cookie-based session, handled by
 // lib/supabase/server) and from the mobile app (no cookies — instead
