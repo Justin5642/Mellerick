@@ -1,7 +1,7 @@
 // What the device mirror is GUARANTEED to hold, and the checks local reads use
 // to stay inside it.
 //
-// Migration 0068 (drafted, not applied until the owner runs it) stops
+// Migration 0068 (applied 2026-10-12; live once the stream file is deployed) stops
 // PowerSync replicating all of history: rows leave a device once they are
 // closed and older than a window (office: 24 months; technician jobs: 90 days;
 // backflow tests: 24 months plus each device's latest pass). Before that, a
@@ -136,7 +136,7 @@ export async function requireCompletePage(
 
 /**
  * For reads of ONE job's children (billing lines, variations, equipment).
- * Children travel with their job (invariant O1 of draft migration 0068), so a job on the device
+ * Children travel with their job (invariant O1 of migration 0068), so a job on the device
  * means all of its children are; a job that is not means it fell out of the
  * window and its children may be partial. Only checked when a window is in
  * force — without one an absent job is genuinely absent, as before.

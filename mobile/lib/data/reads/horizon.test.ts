@@ -1,5 +1,5 @@
-// The sync window: once old rows stop syncing (draft migration 0068, not yet
-// applied), a local read must never present a truncated answer as complete.
+// The sync window: once old rows stop syncing (migration 0068), a
+// local read must never present a truncated answer as complete.
 // These tests drive the real read functions through a fake mirror that HAS a
 // horizon row, and assert which source answered.
 //

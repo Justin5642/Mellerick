@@ -222,7 +222,7 @@ function mapEquipmentUsage(r: RawEquipmentUsageRow): EquipmentUsage {
   };
 }
 
-// The item's WHOLE usage log. Once the sync window (draft migration 0068) is
+// The item's WHOLE usage log. Once the sync window (migration 0068) is
 // applied, an office device holds only usage from the last 24 months or on an
 // in-window job, so the full log is answered locally only while no window is
 // in force.

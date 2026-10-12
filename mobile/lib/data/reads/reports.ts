@@ -59,7 +59,7 @@ interface RawJobCountRow {
 }
 
 // ALL-HISTORY: revenue, quote and job counts cover every row ever written. A
-// windowed office mirror (draft migration 0068, once applied) holds 24 months,
+// windowed office mirror (migration 0068) holds 24 months,
 // so the local path answers only while no window is in force.
 export async function getReportSummary(): Promise<ReportSummary> {
   return fromLocalOr(
