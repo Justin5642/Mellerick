@@ -824,6 +824,18 @@ scrutinise "Always" location. The submission needs a clear justification string
 (written, in `app.json`) and screenshots showing the Android foreground-service
 notification.
 
+**Prominent disclosure (13 October 2026).** Google Play rejects background
+location without an in-app screen shown *before* the OS prompt. The tracking
+gate now awaits `components/LocationDisclosure.tsx` before requesting either
+location permission (`locationConsent()` in `lib/location-tracking.tsx`, logic
+in `lib/locationDisclosure.ts`). Shown only when tracking is wanted and a prompt
+could follow; "Continue" is remembered on the device, "No thanks" stops the
+auto-clock for that session only. The wording is pinned by
+`locationDisclosure.test.ts` — keep "location", "even when the app is closed or
+not in use" and the purpose if editing. The Play declaration video must show
+this screen, then both OS prompts. Native-free, but it reaches devices only in a
+build made after it merged.
+
 **To revert to when-in-use for v1.0** — a config change, no code change: in
 `mobile/app.json`, set `isIosBackgroundLocationEnabled`,
 `isAndroidBackgroundLocationEnabled` and `isAndroidForegroundServiceEnabled` to

@@ -36,6 +36,13 @@ import {
   stopSiteWake,
 } from "./backgroundClock";
 import { startBackgroundSync, stopBackgroundSync } from "./backgroundSync";
+import {
+  needsDisclosure,
+  readDisclosureAccepted,
+  recordDisclosureAccepted,
+  type DisclosureConsent,
+} from "./locationDisclosure";
+import { LocationDisclosure } from "../components/LocationDisclosure";
 
 // GEOFENCE_RADIUS_METERS and the distance maths now live in ./geofenceState,
 // shared with the background task so the two paths cannot disagree about what
@@ -118,6 +125,18 @@ export function LocationTrackingProvider({ children }: { children: ReactNode }) 
   const layerRef = useRef(layer);
   layerRef.current = layer;
   const [tracking, setTracking] = useState(false);
+  // The Play Store prominent disclosure (lib/locationDisclosure.ts). The gate
+  // awaits the technician's choice before anything may request a location
+  // permission; the modal resolves it.
+  const consentRef = useRef<DisclosureConsent | null>(null);
+  const [disclosureOpen, setDisclosureOpen] = useState(false);
+  const disclosureResolveRef = useRef<((choice: DisclosureConsent) => void) | null>(null);
+  function answerDisclosure(choice: DisclosureConsent) {
+    setDisclosureOpen(false);
+    const resolve = disclosureResolveRef.current;
+    disclosureResolveRef.current = null;
+    resolve?.(choice);
+  }
   // False until the first site load succeeds. "No sites" stops tracking, but
   // "not loaded yet" must not: at launch that would stop a background task that
   // is mid-shift, only to restart it a moment later — and a stop discards any
@@ -199,6 +218,7 @@ export function LocationTrackingProvider({ children }: { children: ReactNode }) 
     if (!userId) return;
     const staffId = userId;
     let disposed = false;
+    consentRef.current = null;
     // Evaluations are serialised: two overlapping ones could interleave a start
     // and a stop and leave the watcher in whichever state lost the race.
     let chain = Promise.resolve();
@@ -237,6 +257,34 @@ export function LocationTrackingProvider({ children }: { children: ReactNode }) 
         isOnTheClock({ ...signals, pendingDeparture: foregroundDeparture }) ||
         isOnTheClock({ ...signals, pendingDeparture: background.pendingDeparture });
       return { onTheClock, onSite: insideJobId !== null };
+    }
+
+    // Whether tracking may proceed to the OS permission prompts. Shows the
+    // disclosure when a prompt could follow and it has not been accepted on
+    // this device. Declining is remembered for this session only.
+    async function locationConsent(): Promise<DisclosureConsent> {
+      if (consentRef.current) return consentRef.current;
+      const granted = async (read: () => Promise<{ status: string }>) =>
+        (await read().catch(() => ({ status: "undetermined" }))).status === "granted";
+      const [acceptedOnDevice, foregroundGranted, backgroundGranted] = await Promise.all([
+        readDisclosureAccepted(),
+        granted(Location.getForegroundPermissionsAsync),
+        granted(Location.getBackgroundPermissionsAsync),
+      ]);
+      if (disposed) return "declined";
+      if (!needsDisclosure({ acceptedOnDevice, foregroundGranted, backgroundGranted })) {
+        consentRef.current = "accepted";
+        return "accepted";
+      }
+      const choice = await new Promise<DisclosureConsent>((resolve) => {
+        disclosureResolveRef.current = resolve;
+        setDisclosureOpen(true);
+      });
+      // A sign-out while the screen was up: not an answer for the next user.
+      if (disposed) return "declined";
+      consentRef.current = choice;
+      if (choice === "accepted") await recordDisclosureAccepted();
+      return choice;
     }
 
     async function startForeground(settings: TrackingSettings): Promise<boolean> {
@@ -291,6 +339,19 @@ export function LocationTrackingProvider({ children }: { children: ReactNode }) 
         );
         return;
       }
+
+      // No OS location prompt before the disclosure has been answered. "No
+      // thanks" means no automatic clock at all this session — not a quieter
+      // version of it — so everything stops as if the gate had said no.
+      if ((await locationConsent()) === "declined") {
+        if (disposed) return;
+        stopForeground();
+        setTracking(false);
+        await stopBackgroundClock().catch((e) => console.warn("[geofence] could not stop background tracking:", e));
+        await stopSiteWake().catch((e) => console.warn("[geofence] could not update wake regions:", e));
+        return;
+      }
+      if (disposed) return;
 
       const settings = trackingSettings(decision.mode, onSite);
 
@@ -361,6 +422,7 @@ export function LocationTrackingProvider({ children }: { children: ReactNode }) 
 
     return () => {
       disposed = true;
+      answerDisclosure("declined");
       evaluateRef.current = () => {};
       clearInterval(interval);
       appState.remove();
@@ -520,7 +582,16 @@ export function LocationTrackingProvider({ children }: { children: ReactNode }) 
   }
 
 
-  return <LocationTrackingContext.Provider value={{ enabled: tracking }}>{children}</LocationTrackingContext.Provider>;
+  return (
+    <LocationTrackingContext.Provider value={{ enabled: tracking }}>
+      {children}
+      <LocationDisclosure
+        visible={disclosureOpen}
+        onAccept={() => answerDisclosure("accepted")}
+        onDecline={() => answerDisclosure("declined")}
+      />
+    </LocationTrackingContext.Provider>
+  );
 }
 
 export function useLocationTracking() {
