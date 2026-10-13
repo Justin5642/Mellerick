@@ -131,9 +131,9 @@ stream gated on the caller's own profile row.
 
 ### Sync windows — devices no longer receive all of history (`0068`)
 
-**Status: `0068` applied in production 2026-10-12** (`sync_horizon` row and
-`sync-window-refresh` cron job confirmed). **Stream file NOT yet redeployed** —
-until it is, devices still receive everything (owner step in §7).
+**Status: live.** `0068` applied in production 2026-10-12 (`sync_horizon` row
+and `sync-window-refresh` cron job confirmed); the stream file was deployed to
+instance `6a5f0bf6367771958b496c5e` as sync rules **v4** on 2026-10-12.
 
 Before: every device received every customer and site; a technician received
 every job they were EVER assigned plus all of its children, forever; office
@@ -648,6 +648,21 @@ sweep too.
 | Maestro flow 02 | needs `ADMIN_EMAIL`/`ADMIN_PASSWORD` — not held by us |
 | Money boundary, populated technician device | job #833 carried 18 columns, **none financial**; no money-named column in any synced table |
 
+**Second replication outage — found 12 October 2026.** The app's PowerSync
+instance (`6a5f0bf6367771958b496c5e`, sync rules v3) had stopped replicating:
+its slot was `wal_status = lost`, 32 GB behind, while every client signal looked
+normal. The dashboard log named the cause — `password authentication failed for
+user "powersync_role"`. A **second PowerSync instance** (`6a5f0bf73ab36f9f81820437`,
+not referenced anywhere in the code) has its own active slot; the likeliest
+story is that `powersync_role`'s password was reset while setting that one up,
+locking the app's instance out. Fixed by setting a new password, entering it in
+the app instance's connection settings, and redeploying (v4, new slot
+`…_4_fc97`, active, 0 bytes behind). **Open:** find out what the second
+instance is — if unused, delete it and drop its slot; if used, it needs the new
+password too. Lesson repeated from August: **read the PowerSync dashboard log
+first** — it says exactly why, and `npm run check:sync` (or the slot query) only
+says that something is wrong.
+
 **Three things found on 4 August that had been silently wrong:**
 
 1. **PowerSync replication had been dead for 24 hours.** The slot was invalidated
@@ -697,7 +712,6 @@ a shippable release.
 | **`max_slot_wal_keep_size`** | Justin / Avi | Supabase instance config, no SQL path. Without it a slot can be invalidated again — which cost 24 hours of silent, invisible outage on 3–4 August. `npm run check:sync` now turns that failure mode into one command. |
 | **EAS env vars** | Justin / Avi | `eas env:create` for the two `EXPO_PUBLIC_*` values, or a cloud build ships an app pointed at `undefined`. See SHIPPING.md **STEP ZERO**. The app now refuses to start in that state rather than failing mysteriously later. |
 | **Sentry (error monitoring)** | Justin | Optional, and off until a DSN is set — see §12. Create a free Sentry org with a Next.js project (and a React Native project for the app), then set the DSNs in Vercel and EAS. Without it, failures like the weeks-long silent "Polish with AI" outage are still only discovered by accident. |
-| **Sync windows: redeploy the PowerSync streams** | Avi (PowerSync account owner) | `0068` is applied (2026-10-12). PowerSync dashboard → paste `mobile/powersync/sync-streams.yaml` → **Validate** → **Deploy**. Devices re-sync and drop old rows; the app needs no new build. Justin has no login to the PowerSync account — worth adding him as an owner. |
 | **Maestro flow 02** | Avi | Needs `ADMIN_EMAIL` / `ADMIN_PASSWORD` in the environment. The login subflow deliberately skips when a session already exists, so a password never passes through a script — which is why flows 01/03/04 could be run and 02 could not. |
 
 ### QA fixture — do not delete
@@ -721,7 +735,7 @@ BAS & More.
 | | Status |
 |---|---|
 | **Apple Developer Program** | ✅ **Exists.** Team ID `864FRPRM47` is in `mobile/eas.json` |
-| **D-U-N-S number** | ❌ Still needed for Google Play. Free, but **1–14 days** — the long pole |
+| **D-U-N-S number** | ✅ **758246453** (MELLERICK PTY LTD, 405 Doctors Gully Road, Nutfield VIC 3099). Use these details exactly on Google Play |
 | **Google Play Console** | ❌ USD 25 once, needs the D-U-N-S first |
 
 **iOS builds are now unblocked.** They cannot be compiled on Windows — Xcode is

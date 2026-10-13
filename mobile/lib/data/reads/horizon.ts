@@ -1,7 +1,7 @@
 // What the device mirror is GUARANTEED to hold, and the checks local reads use
 // to stay inside it.
 //
-// Migration 0068 (applied 2026-10-12; live once the stream file is deployed) stops
+// Migration 0068 (applied and its stream file deployed 2026-10-12) stops
 // PowerSync replicating all of history: rows leave a device once they are
 // closed and older than a window (office: 24 months; technician jobs: 90 days;
 // backflow tests: 24 months plus each device's latest pass). Before that, a
