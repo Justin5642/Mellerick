@@ -7,6 +7,8 @@ import { colors } from "../../lib/theme";
 import { openExternalUrl, openNavigation } from "../../lib/open-external-url";
 import { JobHoursScoreboard } from "./hours-scoreboard";
 import { ScheduleNoteBanner } from "./schedule-note-banner";
+import { dateRangeLabel } from "../../lib/scheduleDisplay";
+import { scheduleDays } from "../../lib/scheduling";
 
 const API_BASE_URL = process.env.EXPO_PUBLIC_API_BASE_URL;
 
@@ -88,6 +90,8 @@ interface Job {
   job_type: string | null;
   created_at: string;
   scheduled_start: string | null;
+  scheduled_end?: string | null;
+  schedule_daily?: boolean | null;
   actual_start: string | null;
   actual_end: string | null;
   customers: { name: string; phone: string | null; mobile: string | null; email: string | null } | null;
@@ -244,7 +248,15 @@ export function JobOverviewTab({ job, currentUserId }: { job: Job; currentUserId
         {job.scheduled_start && (
           <View style={styles.timelineRow}>
             <Text style={styles.meta}>Scheduled</Text>
-            <Text style={styles.meta}>{new Date(job.scheduled_start).toLocaleDateString("en-AU")}</Text>
+            <Text style={styles.meta}>
+              {job.schedule_daily
+                ? // Multi-day (0071): first to last booked day, not just the first.
+                  (() => {
+                    const days = scheduleDays({ scheduled_start: job.scheduled_start, scheduled_end: job.scheduled_end ?? null, schedule_daily: true });
+                    return days.length > 0 ? dateRangeLabel(days[0].dateKey, days[days.length - 1].dateKey) : "";
+                  })()
+                : new Date(job.scheduled_start).toLocaleDateString("en-AU")}
+            </Text>
           </View>
         )}
         {job.actual_start && (

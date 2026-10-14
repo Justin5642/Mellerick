@@ -31,13 +31,15 @@ import {
 
 const SQLITE_JOB = {
   id: "j1", job_number: 833, title: "Leak", status: "scheduled", priority: "high",
-  scheduled_start: "2026-10-09T23:00:00Z", scheduled_end: null, customer_name: "Acme", assigned_full_name: "Jake H",
+  scheduled_start: "2026-10-09T23:00:00Z", scheduled_end: null, schedule_daily: 1 as number | boolean,
+  customer_name: "Acme", assigned_full_name: "Jake H",
 };
 const SQLITE_UNASSIGNED = { ...SQLITE_JOB, id: "j2", job_number: "834", customer_name: null, assigned_full_name: null };
 
 const remoteJob = ({ customer_name, assigned_full_name, ...j }: typeof SQLITE_JOB) => ({
   ...j,
   job_number: Number(j.job_number),
+  schedule_daily: j.schedule_daily === 1 || j.schedule_daily === true, // SQLite 1 ⇄ PostgREST true
   customers: customer_name ? { name: customer_name } : null,
   assigned_profile: assigned_full_name ? { full_name: assigned_full_name } : null,
 });

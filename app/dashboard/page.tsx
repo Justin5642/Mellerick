@@ -6,7 +6,9 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Briefcase, Users, Receipt, AlertCircle, CheckCircle2, Clock, DollarSign, Droplets } from "lucide-react";
 import Link from "next/link";
-import { businessDateParts, dateKeyInBusinessTZ, formatDate, formatTime, fromBusinessInputValue, shiftDateKey } from "@/lib/date";
+import { businessDateParts, dateKeyInBusinessTZ, formatDate, formatTime } from "@/lib/date";
+import { businessDayRange, type ScheduleDay } from "@/lib/scheduling";
+import { formatScheduleDates, scheduleDayOn, scheduleOverlapOrFilter } from "@/lib/schedule-form";
 import { jobStatusColors, jobPriorityColors } from "@/lib/badge-colors";
 import { computeNextDueDate, getDueStatus } from "@/lib/backflow";
 import { redirect } from "next/navigation";
@@ -44,12 +46,15 @@ export default async function DashboardPage() {
   if (!user) redirect("/login");
 
   // Today as a [Melbourne midnight, next Melbourne midnight) window, so the
-  // database returns only today's jobs instead of every open scheduled job
-  // for JS to filter. Same set isTodayInBusinessTZ used to pick (DST changes
-  // happen at 2-3am, never at midnight, so both ends are real instants).
+  // database returns only jobs that can touch today instead of every open
+  // scheduled job (DST changes happen at 2-3am, never at midnight, so both
+  // ends are real instants). "Touch" is an overlap, not "starts today": a
+  // multi-day job (schedule_daily, 0071) that began on Monday is still on
+  // today's list on Wednesday. occupiesDay() then drops the rows whose span
+  // only crosses today — a weekend inside a range, or the tail of a legacy
+  // block that ran past midnight.
   const todayKey = dateKeyInBusinessTZ(new Date());
-  const todayStart = fromBusinessInputValue(`${todayKey}T00:00`);
-  const tomorrowStart = fromBusinessInputValue(`${shiftDateKey(todayKey, 1)}T00:00`);
+  const { dayStartIso: todayStart, dayEndIso: tomorrowStart } = businessDayRange(todayKey);
 
   const [
     { count: totalJobs },
@@ -76,9 +81,9 @@ export default async function DashboardPage() {
       .order("created_at", { ascending: false })
       .limit(8),
     supabase.from("jobs")
-      .select("id, job_number, title, status, scheduled_start, scheduled_end, customers(name), profiles!jobs_assigned_to_fkey(full_name)")
-      .gte("scheduled_start", todayStart)
+      .select("id, job_number, title, status, scheduled_start, scheduled_end, schedule_daily, customers(name), profiles!jobs_assigned_to_fkey(full_name)")
       .lt("scheduled_start", tomorrowStart)
+      .or(scheduleOverlapOrFilter(todayStart))
       // Exclude only completed/cancelled (matching "My Jobs" and the Team
       // Schedule) instead of allow-listing specific statuses, so an on_hold
       // job scheduled for today still shows up here.
@@ -96,7 +101,12 @@ export default async function DashboardPage() {
       .limit(1, { referencedTable: "backflow_tests" }),
   ]);
 
-  const todaysJobs = scheduledJobs ?? [];
+  // Each job's block TODAY — a multi-day job's times are today's, and the
+  // list is ordered by them rather than by the day the job first started.
+  const todaysJobs = (scheduledJobs ?? [])
+    .map((job: any) => ({ job, today: scheduleDayOn(job, todayKey) }))
+    .filter((row): row is { job: any; today: ScheduleDay } => row.today !== null)
+    .sort((a, b) => new Date(a.today.startIso).getTime() - new Date(b.today.startIso).getTime());
 
   const backflowDueCount = (backflowDevices ?? []).filter((device: any) => {
     const lastPass = (device.backflow_tests ?? [])[0];
@@ -140,11 +150,11 @@ export default async function DashboardPage() {
             </div>
           ) : (
             <div className="divide-y">
-              {todaysJobs.map((job: any) => (
+              {todaysJobs.map(({ job, today }) => (
                 <Link prefetch={false} key={job.id} href={`/dashboard/jobs/${job.id}`} className="flex items-center gap-4 px-6 py-4 hover:bg-slate-50 transition-colors group">
                   <div className="text-center w-16 flex-shrink-0">
-                    <p className="text-xs font-bold text-blue-600">{formatTime(job.scheduled_start)}</p>
-                    {job.scheduled_end && <p className="text-xs text-slate-400">{formatTime(job.scheduled_end)}</p>}
+                    <p className="text-xs font-bold text-blue-600">{formatTime(today.startIso)}</p>
+                    {job.scheduled_end && <p className="text-xs text-slate-400">{formatTime(today.endIso)}</p>}
                   </div>
                   <div className="flex-1 min-w-0">
                     <p className="font-medium text-sm text-slate-900 group-hover:text-blue-600 transition-colors truncate">
@@ -153,6 +163,7 @@ export default async function DashboardPage() {
                     <p className="text-xs text-slate-500 mt-0.5 truncate">
                       {job.customers?.name}
                       {job.profiles?.full_name ? ` · ${job.profiles.full_name}` : " · Unassigned"}
+                      {job.schedule_daily ? ` · ${formatScheduleDates(job)}` : ""}
                     </p>
                   </div>
                   <span className={`text-xs px-2 py-0.5 rounded-full font-medium capitalize flex-shrink-0 ${jobStatusColors[job.status] ?? ""}`}>

@@ -1,6 +1,6 @@
 import { supabase } from "../../supabase";
 import { fromLocalOr, type LocalReads } from "./source";
-import { nestOne, num } from "./rowMap";
+import { bool, nestOne, num } from "./rowMap";
 import { unwrapCount, unwrapRows } from "./unwrap";
 
 // The office dashboard (app/(office)/dashboard.tsx): four stat counts, the
@@ -28,6 +28,8 @@ export interface DashboardJob {
   priority: string | null;
   scheduled_start: string | null;
   scheduled_end: string | null;
+  /** Migration 0071 — the screen asks occupiesDay(), never the start date alone. */
+  schedule_daily: boolean;
   customers: { name: string } | null;
   assigned_profile: { full_name: string } | null;
 }
@@ -42,7 +44,7 @@ export interface DashboardCounts {
 export interface OfficeDashboard {
   counts: DashboardCounts;
   recent: DashboardJob[];
-  /** Open jobs with a scheduled start, earliest first (all dates — the screen filters to today). */
+  /** Open jobs with a scheduled start, earliest first (all dates — the screen keeps those occupying today). */
   scheduled: DashboardJob[];
 }
 
@@ -58,7 +60,7 @@ export const SQL_DASHBOARD_COUNTS = `
     (SELECT COUNT(*) FROM invoices i WHERE i.status = 'overdue') AS overdue`;
 
 export const SQL_DASHBOARD_RECENT_JOBS = `
-  SELECT j.id, j.job_number, j.title, j.status, j.priority, j.scheduled_start, j.scheduled_end,
+  SELECT j.id, j.job_number, j.title, j.status, j.priority, j.scheduled_start, j.scheduled_end, j.schedule_daily,
          c.name AS customer_name, p.full_name AS assigned_full_name
   FROM jobs j
   LEFT JOIN customers c ON c.id = j.customer_id
@@ -67,7 +69,7 @@ export const SQL_DASHBOARD_RECENT_JOBS = `
   LIMIT 8`;
 
 export const SQL_DASHBOARD_SCHEDULED_JOBS = `
-  SELECT j.id, j.job_number, j.title, j.status, j.priority, j.scheduled_start, j.scheduled_end,
+  SELECT j.id, j.job_number, j.title, j.status, j.priority, j.scheduled_start, j.scheduled_end, j.schedule_daily,
          c.name AS customer_name, p.full_name AS assigned_full_name
   FROM jobs j
   LEFT JOIN customers c ON c.id = j.customer_id
@@ -84,6 +86,7 @@ interface RawDashJobRow {
   priority: string | null;
   scheduled_start: string | null;
   scheduled_end: string | null;
+  schedule_daily: number | boolean | null;
   customer_name: string | null;
   assigned_full_name: string | null;
 }
@@ -104,6 +107,7 @@ function mapDashJob(r: RawDashJobRow): DashboardJob {
     priority: r.priority ?? null,
     scheduled_start: r.scheduled_start ?? null,
     scheduled_end: r.scheduled_end ?? null,
+    schedule_daily: bool(r.schedule_daily) ?? false,
     // customers.name / profiles.full_name: a null alias means a null FK, which
     // is when PostgREST returns a null embed.
     customers: nestOne(r.customer_name, { name: r.customer_name as string }),
@@ -124,7 +128,7 @@ const flattenRemote = ({ customers, assigned_profile, ...j }: RemoteDashJobRow):
 
 // jobs has multiple FKs to profiles — the FK hint + alias are required.
 const JOB_COLUMNS =
-  "id, job_number, title, status, priority, scheduled_start, scheduled_end, customers(name), assigned_profile:profiles!jobs_assigned_to_fkey(full_name)";
+  "id, job_number, title, status, priority, scheduled_start, scheduled_end, schedule_daily, customers(name), assigned_profile:profiles!jobs_assigned_to_fkey(full_name)";
 
 async function getOfficeDashboardLocal(db: LocalReads): Promise<OfficeDashboard> {
   const counts = await db.getOptional<RawCountsRow>(SQL_DASHBOARD_COUNTS);

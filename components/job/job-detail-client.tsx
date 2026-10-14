@@ -14,6 +14,8 @@ import { DeleteJobDialog } from "./delete-job-dialog";
 import { JobHoursScoreboard } from "./job-hours-scoreboard";
 import { JobTodoControl } from "./job-todo-control";
 import { sumAllocatedHours } from "@/lib/hours-scoreboard";
+import { formatDate } from "@/lib/date";
+import { formatScheduleDates, formatScheduleHours } from "@/lib/schedule-form";
 
 // Overview is the default tab, so it ships in the page bundle. Every other
 // tab is its own chunk, fetched the first time it is shown — Base UI only
@@ -208,14 +210,12 @@ export function JobDetailClient({ job, currentUserId, photos: initialPhotos, doc
                 {assignedStaff && job.scheduled_start ? (
                   <>
                     {assignedStaff.full_name} ·{" "}
-                    {new Date(job.scheduled_start).toLocaleString("en-AU", {
-                      weekday: "short",
-                      day: "numeric",
-                      month: "short",
-                      hour: "2-digit",
-                      minute: "2-digit",
-                      timeZone: "Australia/Melbourne",
-                    })}
+                    {/* A multi-day job reads as its range and daily hours
+                        ("Mon 19 – Wed 21 Oct · 7:00–15:30 daily"); a single
+                        block keeps its start, as before. */}
+                    {job.schedule_daily
+                      ? `${formatScheduleDates(job)} · ${formatScheduleHours(job) ?? ""} daily`
+                      : formatDate(job.scheduled_start, { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}
                   </>
                 ) : (
                   "Not scheduled"
@@ -413,6 +413,8 @@ export function JobDetailClient({ job, currentUserId, photos: initialPhotos, doc
           currentUserId={currentUserId}
           currentScheduledStart={job.scheduled_start}
           currentScheduledEnd={job.scheduled_end}
+          currentScheduleDaily={job.schedule_daily}
+          currentScheduleAllDay={job.schedule_all_day}
           costCenters={costCenters}
           currentScheduledCostCenterId={job.scheduled_cost_center_id}
         />

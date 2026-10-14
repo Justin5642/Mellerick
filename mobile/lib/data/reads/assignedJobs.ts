@@ -33,7 +33,20 @@ export function assignedOrCrewSql(alias: string, param: string): string {
 /** Narrows the crew lookup to the jobs the caller is about to filter on anyway. */
 export type CrewJobScope =
   | { kind: "open" }
-  | { kind: "scheduled"; fromIso: string; beforeIso: string };
+  // Jobs whose stored window touches [fromIso, beforeIso) — see overlapFilter.
+  | { kind: "occupying"; fromIso: string; beforeIso: string };
+
+/**
+ * PostgREST `.or()` half of a window-overlap test (migration 0071 — a daily job
+ * books every day of its range, not just the day it starts): the job ends on
+ * or after `fromIso`, or has no end and STARTS on or after it (a start with no
+ * end occupies its start day only — lib/scheduling.ts scheduleDays). Pair with
+ * `scheduled_start < beforeIso`. Values are double-quoted because an ISO
+ * instant carries `:` and `.`, which the logic-tree parser must not split.
+ */
+export function overlapFilter(fromIso: string): string {
+  return `scheduled_end.gte."${fromIso}",and(scheduled_end.is.null,scheduled_start.gte."${fromIso}")`;
+}
 
 /**
  * Remote half: the ids of jobs `staffId` is on through job_assignments.
@@ -43,11 +56,11 @@ export type CrewJobScope =
  * (0059 backfilled every job ever assigned) would not fit in one.
  */
 export async function crewJobIdsRemote(staffId: string, scope: CrewJobScope, context: string): Promise<string[]> {
-  let query = supabase.from("job_assignments").select("job_id, jobs!inner(status, scheduled_start)").eq("staff_id", staffId);
+  let query = supabase.from("job_assignments").select("job_id, jobs!inner(status, scheduled_start, scheduled_end)").eq("staff_id", staffId);
   query =
     scope.kind === "open"
       ? query.not("jobs.status", "in", '("completed","cancelled")')
-      : query.gte("jobs.scheduled_start", scope.fromIso).lt("jobs.scheduled_start", scope.beforeIso);
+      : query.lt("jobs.scheduled_start", scope.beforeIso).or(overlapFilter(scope.fromIso), { referencedTable: "jobs" });
   const rows = unwrapRows((await query) as never, context) as unknown as { job_id: string }[];
   return [...new Set(rows.map((r) => r.job_id))];
 }

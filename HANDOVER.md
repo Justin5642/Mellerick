@@ -77,6 +77,34 @@ token expires (≤1 h); RLS still authorizes every query. List-row `<Link>`s are
 `prefetch={false}`; the sidebar prefetches. If the database ever moves to Sydney,
 move `vercel.json` back to `syd1` in the same change.
 
+**Multi-day schedules (migration `0071`, applied 2026-10-14).** A job still
+stores one `scheduled_start..scheduled_end`; `jobs.schedule_daily = true` means
+the same daily hours on each booked day — weekdays between the two dates, plus
+either date itself even on a weekend — and `schedule_all_day` remembers the
+"All day" box (07:00–15:30, 8 h + 30 min break, each day). The rule lives only
+in `lib/scheduling.ts` (`scheduleDays`, `occupiesDay`, `moveSchedule`, …),
+mirrored at `mobile/lib/scheduling.ts` and pinned identical by
+`tests/unit/scheduling-multiday.test.ts`. **Never bucket a job by
+`scheduled_start` alone** — that is what showed a Mon–Wed job on Monday only.
+- **Board** (`components/schedule/`): a job shows in every crew member's row on
+  every booked day, with booked hours per tech per day. Double-click a card to
+  cut it, click a tech's day to paste (Esc cancels). Paste AND drag both move
+  the dates (`moveSchedule` — a daily job keeps its daily hours and number of
+  booked days, starting on the target day) and SWAP the source tech for the
+  target tech, keeping the rest of the crew, via `set_job_assignments` —
+  never a direct `assigned_to` write, which collapses the crew (0059). Before
+  14 Oct 2026 a drop replaced the whole crew; changing that was the office's
+  call.
+- **Google Calendar**: a daily job is ONE event with
+  `RRULE:FREQ=DAILY;UNTIL=…` + `EXDATE` for skipped weekend days
+  (`lib/calendar-event.ts`). The poll never writes an edited single occurrence
+  back to the job, and for a daily job never writes series time changes back
+  either — the app is the source of truth for multi-day schedules.
+- **Rolled out 14 Oct 2026** in the order that matters for any future column
+  like this: apply the migration → redeploy the PowerSync sync rules → merge
+  web → ship mobile. Web and the calendar poll select these columns; only the
+  Jobs list and the schedule board fall back (42703) if they are ever missing.
+
 **Load page data on the server, not in the browser.** A browser→Supabase
 query from Australia costs ~100 ms+; a server query in `sin1` costs ~2 ms. So
 My Jobs, Approvals, Staff, Fleet and Customers are server pages that pass
@@ -121,7 +149,9 @@ lands in **plaintext SQLite on that technician's phone**, whatever RLS says.
 Treat `sync-streams.yaml` as security code. Re-audited 9 October 2026 (sync
 windows) — all 16 technician-visible streams are money-free:
 
-- `tech_jobs` — 19 named columns, none monetary
+- `tech_jobs` — 21 named columns, none monetary (`schedule_daily`,
+  `schedule_all_day` added for the 0071 multi-day schedules; 0071 applied and
+  these rules redeployed 2026-10-14)
 - `tech_job_variations` — omits `rate`, `total_amount`, `admin_notes`
 - `variation_types` — omits the preset `rate`
 - `tech_time_entries` — omits `rate`
@@ -298,8 +328,9 @@ declared by hand in `mobile/powersync/device-indexes.js` and merged into the
 generated `schema.ts` by `generate-powersync-schema.mjs` (which refuses an
 index on a column the device does not hold). `lib/powersync/indexes.test.ts`
 reads every local SQL statement and fails when a lookup has no usable index —
-add the index there, then regenerate. Two scans are deliberate and named in
-that test.
+add the index there, then regenerate. Three scans are deliberate and named in
+that test (the third, `jobs.scheduled_end`, is the residual half of
+`countOtherScheduledJobs`' multi-day overlap test).
 
 No horizon row means no window (migration or YAML not deployed) and every read
 behaves exactly as before. Consequence to tell office staff: once deployed,

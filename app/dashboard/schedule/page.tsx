@@ -3,45 +3,58 @@ import { Button } from "@/components/ui/button";
 import { Plus } from "lucide-react";
 import Link from "next/link";
 import { TeamScheduleView } from "@/components/schedule/team-schedule-view";
-import { isTodayInBusinessTZ, BUSINESS_TIME_ZONE } from "@/lib/date";
+import { BUSINESS_TIME_ZONE } from "@/lib/date";
 import type { TodoJob } from "@/components/schedule/todo-list-panel";
+import { crewFromRow, type BoardJob } from "@/components/schedule/board-model";
 import { allocatedHoursByJob } from "@/lib/todo-list";
+
+const BOARD_COLUMNS =
+  "id, job_number, title, status, scheduled_start, scheduled_end, assigned_to, job_assignments(staff_id), customers(name), sites(name, address_line1, suburb, state, site_lat, site_lng)";
+
+type BoardJobRow = Omit<BoardJob, "crew"> & { job_assignments?: { staff_id: string | null }[] | null };
 
 export default async function SchedulePage() {
   const supabase = await createClient();
-  const [{ data: jobs }, { data: staff }, { count: unscheduledCount }, { data: todoRows, error: todoError }] = await Promise.all([
-    supabase
-      .from("jobs")
-      // jobs has multiple FK columns to profiles (assigned_to, created_by,
-      // overtime_logged_by, voice_report_recorded_by) so an unhinted
-      // "profiles(...)" embed is ambiguous — PostgREST rejects the whole
-      // query (PGRST201), which meant this query was returning zero rows
-      // for every job, assigned or not. Hinting the exact FK fixes it.
-      //
-      // Only the columns TeamScheduleView's Job type reads — "*" shipped every
-      // job's descriptions, notes and voice transcripts to draw a card.
-      //
-      // Deliberately NOT date-windowed: the board's prev/next arrows step to
-      // any day or week client-side, and the List tab's "Upcoming" shows every
-      // open job, past-dated ones included. A window would silently drop jobs
-      // the UI shows. The set is bounded by open work (completed/cancelled
-      // excluded), not by history.
-      .select(
-        "id, job_number, title, status, scheduled_start, scheduled_end, assigned_to, customers(name), profiles!jobs_assigned_to_fkey(full_name), sites(name, address_line1, suburb, state, site_lat, site_lng)"
-      )
-      // The Schedule board only makes sense for jobs that actually have a
-      // time slot — a job with no scheduled_start hasn't been scheduled
-      // yet, so it belongs in the general Jobs list (where it's still
-      // fully visible) until someone gives it a time, not dumped into this
-      // board's Unassigned column alongside genuinely time-slotted jobs.
-      .not("scheduled_start", "is", null)
-      // Match "My Jobs"' status filter (exclude completed/cancelled only,
-      // rather than allow-listing specific statuses) so a job on_hold still
-      // shows here — otherwise a technician's own "My Jobs" list could show
-      // a job as assigned to them while the Team Schedule showed them free,
-      // since on_hold wasn't in the old allow-list.
-      .not("status", "in", '("completed","cancelled")')
-      .order("scheduled_start", { ascending: true, nullsFirst: false }),
+  // jobs has multiple FK columns to profiles (assigned_to, created_by,
+  // overtime_logged_by, voice_report_recorded_by), so the crew is read through
+  // job_assignments(staff_id) — its only FK to jobs is job_id, so that embed is
+  // unambiguous — and names come from the staff list below.
+  //
+  // Only the columns TeamScheduleView's BoardJob type reads — "*" shipped every
+  // job's descriptions, notes and voice transcripts to draw a card.
+  //
+  // Deliberately NOT date-windowed: the board's prev/next arrows step to any
+  // day or week client-side, and the List tab's "Upcoming" shows every open
+  // job, past-dated ones included. A window would silently drop jobs the UI
+  // shows — and a multi-day job that started last week is still on today. The
+  // set is bounded by open work (completed/cancelled excluded), not by history.
+  //
+  // The schedule board only makes sense for jobs that actually have a time
+  // slot — a job with no scheduled_start hasn't been scheduled yet, so it
+  // belongs in the general Jobs list until someone gives it a time.
+  //
+  // Match "My Jobs"' status filter (exclude completed/cancelled only) so a job
+  // on_hold still shows here; otherwise a technician's own list could show a
+  // job as theirs while the board showed them free.
+  //
+  // schedule_daily / schedule_all_day come from the multi-day migration, which
+  // is drafted and NOT APPLIED yet. Until it is, PostgREST rejects the whole
+  // select with 42703 (undefined column), so the board retries once without
+  // them and every job reads as a single-day block — the board's old behaviour.
+  const loadBoardJobs = async () => {
+    const run = (columns: string) =>
+      supabase
+        .from("jobs")
+        .select(columns)
+        .not("scheduled_start", "is", null)
+        .not("status", "in", '("completed","cancelled")')
+        .order("scheduled_start", { ascending: true, nullsFirst: false });
+    const result = await run(`${BOARD_COLUMNS}, schedule_daily, schedule_all_day`);
+    return result.error?.code === "42703" ? run(BOARD_COLUMNS) : result;
+  };
+
+  const [{ data: jobRows }, { data: staff }, { count: unscheduledCount }, { data: todoRows, error: todoError }] = await Promise.all([
+    loadBoardJobs(),
     supabase
       .from("profiles")
       .select("id, full_name, role")
@@ -66,6 +79,13 @@ export default async function SchedulePage() {
       .order("todo_listed_at", { ascending: true }),
   ]);
 
+  // The select string is built at runtime (the 42703 fallback), so the client
+  // cannot type the rows; this is the shape both column lists return.
+  const jobs: BoardJob[] = ((jobRows ?? []) as unknown as BoardJobRow[]).map(({ job_assignments, ...job }) => ({
+    ...job,
+    crew: crewFromRow(job.assigned_to, job_assignments),
+  }));
+
   // Two follow-up reads, each needing only the batch above and not each
   // other, so they run together.
   //
@@ -74,18 +94,13 @@ export default async function SchedulePage() {
   // this page never holds a PO value even though office could read one.
   const todoIds = (todoRows ?? []).filter((j) => j.estimated_hours == null).map((j) => j.id);
 
-  // The staff list above is active-only, so a job assigned to someone who's
-  // since been deactivated would have no column to render into on the Team
-  // board and would silently disappear from view. Append any such profiles
-  // (flagged) so every scheduled job always has somewhere to show up.
+  // The staff list above is active-only, so a job whose crew includes someone
+  // who's since been deactivated would have no row to render into for them on
+  // the Team board. Append any such profiles (flagged) so every crew member's
+  // jobs always have somewhere to show up.
   const activeStaff = staff ?? [];
-  const missingIds = Array.from(
-    new Set(
-      (jobs ?? [])
-        .map((j: any) => j.assigned_to)
-        .filter((id: string | null) => id && !activeStaff.some((s: any) => s.id === id))
-    )
-  );
+  const activeIds = new Set(activeStaff.map((s) => s.id));
+  const missingIds = Array.from(new Set(jobs.flatMap((j) => j.crew).filter((id) => !activeIds.has(id))));
 
   const [poRows, missingProfiles] = await Promise.all([
     todoIds.length > 0
@@ -112,9 +127,6 @@ export default async function SchedulePage() {
 
   const today = new Date();
 
-  const todayJobs = jobs?.filter((j: any) => isTodayInBusinessTZ(j.scheduled_start)) ?? [];
-  const upcomingJobs = jobs?.filter((j: any) => !isTodayInBusinessTZ(j.scheduled_start)) ?? [];
-
   let staffForDisplay = activeStaff;
   if (missingIds.length > 0) {
     staffForDisplay = [
@@ -129,7 +141,7 @@ export default async function SchedulePage() {
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Schedule</h1>
           <p className="text-slate-500 text-sm mt-1">
-            {today.toLocaleDateString("en-AU", { weekday: "long", day: "numeric", month: "long", timeZone: BUSINESS_TIME_ZONE })} · {jobs?.length ?? 0} scheduled jobs
+            {today.toLocaleDateString("en-AU", { weekday: "long", day: "numeric", month: "long", timeZone: BUSINESS_TIME_ZONE })} · {jobs.length} scheduled jobs
             {(unscheduledCount ?? 0) > 0 && (
               <>
                 {" "}·{" "}
@@ -146,8 +158,7 @@ export default async function SchedulePage() {
       </div>
 
       <TeamScheduleView
-        todayJobs={todayJobs}
-        upcomingJobs={upcomingJobs}
+        jobs={jobs}
         staff={staffForDisplay}
         todoJobs={todoJobs}
         todoError={todoError?.message ?? null}

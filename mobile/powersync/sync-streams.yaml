@@ -171,7 +171,7 @@ streams:
       SELECT id, job_number, title, description, notes, status, priority, job_type,
              customer_id, site_id, assigned_to, scheduled_start, scheduled_end,
              actual_start, actual_end, completion_notes, voice_report_transcript, created_at,
-             scheduled_cost_center_id
+             scheduled_cost_center_id, schedule_daily, schedule_all_day
       FROM jobs
       WHERE sync_tech IS NOT false
         AND id IN (SELECT job_id FROM job_assignments WHERE staff_id = auth.user_id())

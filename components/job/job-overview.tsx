@@ -12,8 +12,10 @@ import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Phone, Mail, MapPin, Calendar, User, Save, Navigation } from "lucide-react";
-import { formatDate, toBusinessInputValue, fromBusinessInputValue } from "@/lib/date";
-import { DEFAULT_SHIFT_START_TIME, DEFAULT_SHIFT_END_TIME } from "@/lib/scheduling";
+import { formatDate } from "@/lib/date";
+import type { ScheduleInput } from "@/lib/scheduling";
+import { formatScheduleDates, sameScheduleInput, scheduleColumnsFromForm, scheduleFormFromJob } from "@/lib/schedule-form";
+import { ScheduleFields } from "./schedule-fields";
 import { CustomerPicker } from "@/components/customer-picker";
 import { AddSiteDialog } from "@/components/site-add-dialog";
 
@@ -47,11 +49,24 @@ export function JobOverview({ job, staff }: Props) {
     status: job.status,
     priority: job.priority,
     assigned_to: job.assigned_to ?? "",
-    scheduled_start: job.scheduled_start ? toBusinessInputValue(job.scheduled_start) : "",
-    scheduled_end: job.scheduled_end ? toBusinessInputValue(job.scheduled_end) : "",
     description: job.description ?? "",
     notes: job.notes ?? "",
   });
+  // The schedule as the job was loaded, and as edited here. Start date, end
+  // date, All day and daily times — the same inputs as the Schedule Job
+  // wizard, writing the same four columns.
+  const [savedSchedule, setSavedSchedule] = useState<ScheduleInput>(() => scheduleFormFromJob(job));
+  const [schedule, setSchedule] = useState<ScheduleInput>(savedSchedule);
+
+  // The Schedule Job wizard writes the same columns and then refreshes the
+  // page; follow it, or this form would show (and compare against) the old
+  // schedule until a reload.
+  useEffect(() => {
+    const fresh = scheduleFormFromJob(job);
+    setSavedSchedule(fresh);
+    setSchedule(fresh);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [job.scheduled_start, job.scheduled_end, job.schedule_daily, job.schedule_all_day]);
 
   // Sites belong to a customer, so the site list has to be reloaded whenever
   // the customer changes — same pattern as the "New Job" form. Also runs
@@ -81,15 +96,6 @@ export function JobOverview({ job, staff }: Props) {
     setForm((prev) => ({ ...prev, customer_id: customerId, site_id: "" }));
   }
 
-  // Quick-fill a standard 7:00am-3:30pm work day (Melbourne time) instead of
-  // requiring manual entry of both start and end times. Keeps whatever date
-  // is already selected (falls back to today) so this can be used after
-  // picking a date, or before.
-  function setAllDay() {
-    const datePart = (form.scheduled_start || toBusinessInputValue(new Date())).slice(0, 10);
-    setForm((prev) => ({ ...prev, scheduled_start: `${datePart}T${DEFAULT_SHIFT_START_TIME}`, scheduled_end: `${datePart}T${DEFAULT_SHIFT_END_TIME}` }));
-  }
-
   async function save() {
     if (!form.title.trim()) {
       toast.error("Job title is required");
@@ -97,6 +103,17 @@ export function JobOverview({ job, staff }: Props) {
     }
     if (!form.customer_id) {
       toast.error("Customer is required");
+      return;
+    }
+    // The schedule is only rewritten when it was edited here. This form saves
+    // on every change of title or status too, and a job whose saved window
+    // the inputs cannot express exactly — a pre-0071 block running past
+    // midnight or over several days — must not be reshaped by an unrelated
+    // save. A blank start date clears all four columns.
+    const scheduleEdited = !sameScheduleInput(schedule, savedSchedule);
+    const built = scheduleColumnsFromForm(schedule, { optional: true });
+    if (scheduleEdited && !built.ok) {
+      toast.error(built.error);
       return;
     }
     setSaving(true);
@@ -110,8 +127,7 @@ export function JobOverview({ job, staff }: Props) {
       title: form.title.trim(),
       site_id: form.site_id || null,
       assigned_to: form.assigned_to || null,
-      scheduled_start: form.scheduled_start ? fromBusinessInputValue(form.scheduled_start) : null,
-      scheduled_end: form.scheduled_end ? fromBusinessInputValue(form.scheduled_end) : null,
+      ...(scheduleEdited && built.ok ? built.columns : {}),
     });
     if (!result.ok) {
       toast.error(result.error);
@@ -120,6 +136,7 @@ export function JobOverview({ job, staff }: Props) {
       // believing the technician's calendar shows the new time.
       if (result.calendarSynced) toast.success("Job updated");
       else toast.warning("Job updated — Google Calendar not updated");
+      if (scheduleEdited) setSavedSchedule(schedule);
       // customer/site changed => the header and the read-only customer/site
       // cards below (which come from the server-fetched `job` prop, not this
       // form's local state) need a re-fetch to reflect the change.
@@ -223,17 +240,23 @@ export function JobOverview({ job, staff }: Props) {
                   </SelectContent>
                 </Select>
               </div>
-              <div className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <Label>Scheduled Start</Label>
-                  <Button type="button" variant="link" size="sm" className="h-auto p-0 text-xs" onClick={setAllDay}>All Day (7:00–3:30)</Button>
-                </div>
-                <Input type="datetime-local" value={form.scheduled_start} onChange={(e) => set("scheduled_start", e.target.value)} />
+            </div>
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <Label>Schedule</Label>
+                {schedule.startDateKey && (
+                  <Button
+                    type="button"
+                    variant="link"
+                    size="sm"
+                    className="h-auto p-0 text-xs"
+                    onClick={() => setSchedule({ ...schedule, startDateKey: "", endDateKey: "", allDay: false })}
+                  >
+                    Clear schedule
+                  </Button>
+                )}
               </div>
-              <div className="space-y-2">
-                <Label>Scheduled End</Label>
-                <Input type="datetime-local" value={form.scheduled_end} onChange={(e) => set("scheduled_end", e.target.value)} />
-              </div>
+              <ScheduleFields value={schedule} onChange={setSchedule} optional />
             </div>
             <div className="space-y-2">
               <Label>Description</Label>
@@ -321,7 +344,7 @@ export function JobOverview({ job, staff }: Props) {
             {job.scheduled_start && (
               <div className="flex justify-between">
                 <span className="text-slate-500">Scheduled</span>
-                <span>{formatDate(job.scheduled_start)}</span>
+                <span>{job.schedule_daily ? formatScheduleDates(job) : formatDate(job.scheduled_start)}</span>
               </div>
             )}
             {job.actual_start && (

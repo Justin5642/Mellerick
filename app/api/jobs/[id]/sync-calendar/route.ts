@@ -4,6 +4,7 @@ import { getGoogleCalendarClient } from "@/lib/google";
 import { requireUser } from "@/lib/api/guards";
 import { canManageJobBilling } from "@/lib/api/job-authz";
 import { reportError } from "@/lib/monitoring";
+import { buildCalendarEventBody, type CalendarJob } from "@/lib/calendar-event";
 
 export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   // Any authenticated staff member can trigger a calendar sync for a job they
@@ -63,22 +64,12 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       return NextResponse.json({ removed: true });
     }
 
-    const site = job.sites as any;
-    const location = site
-      ? [site.address_line1, site.suburb, site.state, site.postcode].filter(Boolean).join(", ")
-      : undefined;
-    const start = new Date(job.scheduled_start);
-    const end = job.scheduled_end ? new Date(job.scheduled_end) : new Date(start.getTime() + 60 * 60 * 1000);
-
-    const eventBody = {
-      summary: `#${job.job_number} — ${job.title}`,
-      description: [job.description, (job.customers as any)?.name ? `Customer: ${(job.customers as any).name}` : null]
-        .filter(Boolean)
-        .join("\n\n"),
-      location,
-      start: { dateTime: start.toISOString() },
-      end: { dateTime: end.toISOString() },
-    };
+    // A multi-day job (schedule_daily, migration 0071 — selected by `*` above)
+    // becomes ONE recurring event whose occurrences are exactly scheduleDays();
+    // a single-window job is one event as before, with `recurrence: []` so an
+    // update from daily → single collapses the old series. See
+    // lib/calendar-event.ts.
+    const eventBody = buildCalendarEventBody(job as CalendarJob)!;
 
     if (job.google_event_id) {
       try {

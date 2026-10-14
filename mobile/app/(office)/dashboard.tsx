@@ -5,7 +5,9 @@ import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import { colors } from "../../lib/theme";
 import { useAuth } from "../../lib/auth-context";
-import { isTodayInBusinessTZ, formatBusinessTime, businessHour } from "../../lib/date";
+import { formatBusinessTime, businessHour } from "../../lib/date";
+import { businessTodayKey, scheduleDayOn } from "../../lib/scheduleDisplay";
+import type { ScheduleDay } from "../../lib/scheduling";
 import { StatCard } from "../../design/components/StatCard";
 import { JobListRow } from "../../design/components/JobListRow";
 import { ScreenError } from "../../design/components/ScreenError";
@@ -13,6 +15,9 @@ import { getOfficeDashboard, type DashboardJob } from "../../lib/data/reads/dash
 import { listBackflowDevices } from "../../lib/data/reads/backflow";
 
 type DashJob = DashboardJob;
+// A job on today's list with TODAY's block — a Mon–Wed daily job shows its
+// Tuesday hours on Tuesday, not just on the Monday it starts (migration 0071).
+type TodayJob = { job: DashJob; day: ScheduleDay & { index: number; count: number } };
 interface Counts {
   total: number;
   active: number;
@@ -26,7 +31,7 @@ export default function DashboardScreen() {
   const { profile } = useAuth();
   const [counts, setCounts] = useState<Counts>({ total: 0, active: 0, customers: 0, overdue: 0, backflowDue: 0 });
   const [recent, setRecent] = useState<DashJob[]>([]);
-  const [today, setToday] = useState<DashJob[]>([]);
+  const [today, setToday] = useState<TodayJob[]>([]);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<unknown>(null);
 
@@ -49,7 +54,15 @@ export default function DashboardScreen() {
 
       setCounts({ ...dash.counts, backflowDue });
       setRecent(dash.recent);
-      setToday(dash.scheduled.filter((j) => j.scheduled_start != null && isTodayInBusinessTZ(j.scheduled_start)));
+      const todayKey = businessTodayKey();
+      setToday(
+        dash.scheduled
+          .flatMap((job) => {
+            const day = scheduleDayOn(job, todayKey);
+            return day ? [{ job, day }] : [];
+          })
+          .sort((a, b) => a.day.startIso.localeCompare(b.day.startIso))
+      );
     } catch (e) {
       setError(e);
     }
@@ -104,17 +117,17 @@ export default function DashboardScreen() {
           {today.length === 0 ? (
             <Empty icon="time-outline" text="No jobs scheduled for today." />
           ) : (
-            today.map((job) => (
+            today.map(({ job, day }) => (
               <JobListRow
                 key={job.id}
                 jobNumber={job.job_number}
                 title={job.title}
-                subtitle={`${job.customers?.name ?? "—"}${job.assigned_profile?.full_name ? ` · ${job.assigned_profile.full_name}` : " · Unassigned"}`}
+                subtitle={`${job.customers?.name ?? "—"}${job.assigned_profile?.full_name ? ` · ${job.assigned_profile.full_name}` : " · Unassigned"}${day.count > 1 ? ` · Day ${day.index + 1} of ${day.count}` : ""}`}
                 status={job.status}
                 leading={
                   <View style={styles.timeCol}>
-                    <Text style={styles.timeStart}>{job.scheduled_start ? formatBusinessTime(job.scheduled_start) : ""}</Text>
-                    {job.scheduled_end ? <Text style={styles.timeEnd}>{formatBusinessTime(job.scheduled_end)}</Text> : null}
+                    <Text style={styles.timeStart}>{formatBusinessTime(day.startIso)}</Text>
+                    {job.scheduled_end ? <Text style={styles.timeEnd}>{formatBusinessTime(day.endIso)}</Text> : null}
                   </View>
                 }
                 onPress={() => router.push(`/job/${job.id}`)}
