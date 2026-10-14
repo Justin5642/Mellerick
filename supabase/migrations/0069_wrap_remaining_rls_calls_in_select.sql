@@ -2,8 +2,9 @@
 -- Finish what 0053 started: every per-row auth call in a public-schema policy
 -- evaluates once per query.
 --
--- STATUS: DRAFT — NOT APPLIED. Apply on its own in the SQL editor, after
--- 0053, then run the two verification suites at the bottom.
+-- STATUS: ✅ APPLIED IN PRODUCTION (2026-10-15, via SQL editor, on its own, after 0053;
+-- money_boundary_sweep.sql and 0035_rls_role_impersonation_test.sql run clean
+-- afterwards, as reported by Justin).
 --
 -- It also covers 0053's job: is_office_or_admin(auth.uid()) is wrapped here
 -- too, producing exactly the text 0053 produces. So 0053 → 0069 (the CI draft
