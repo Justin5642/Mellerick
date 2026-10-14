@@ -252,7 +252,13 @@ describe("all-history reads", () => {
   });
 
   it("countOtherScheduledJobs: local for a day inside the window, network before it", async () => {
-    mirror(HORIZON, [], [["COUNT(*) AS n FROM jobs", { n: 2 }]]);
+    const onTheDay = (id: string) => ({
+      id,
+      scheduled_start: "2026-10-09T22:00:00.000Z", // 09:00 on the 10th, Melbourne
+      scheduled_end: "2026-10-10T01:00:00.000Z",
+      schedule_daily: 0,
+    });
+    mirror(HORIZON, [["j.schedule_daily FROM jobs", [onTheDay("a"), onTheDay("b")]]]);
     await expect(countOtherScheduledJobs("t1", "2026-10-10", "j1")).resolves.toBe(2);
     expect(remoteTables).toEqual([]);
 

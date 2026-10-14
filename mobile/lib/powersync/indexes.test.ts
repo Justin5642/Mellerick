@@ -53,6 +53,11 @@ const SCAN_BY_DESIGN: Record<string, string> = {
   // sync window already holds to 24 months — about half the rows match, where
   // a scan beats an index probe per row.
   "equipment_usage_log.usage_date": "range matching ~half of a windowed table",
+  // countOtherScheduledJobs (0071 overlap): assigned_to = ? AND scheduled_start
+  // < ? already seeks through (assigned_to, scheduled_start); scheduled_end is a
+  // residual test on that technician's handful of rows, OR-ed with an IS NULL
+  // branch, so an index on it would never be chosen.
+  "jobs.scheduled_end": "residual filter after the (assigned_to, scheduled_start) seek",
 };
 
 function statements(): Array<[string, string]> {

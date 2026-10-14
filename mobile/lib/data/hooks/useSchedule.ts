@@ -1,6 +1,8 @@
 import { useCallback } from "react";
 import { useDataLayer } from "../DataProvider";
 import { useFlush } from "./useFlush";
+import type { ScheduleColumns } from "../../scheduling";
+import type { RescheduleFlags } from "../repositories/schedule";
 
 export function useSchedule() {
   const layer = useDataLayer();
@@ -19,12 +21,14 @@ export function useSchedule() {
     ready: !!layer,
     reassign: useCallback((jobId: string, assignedTo: string | null) => run((r) => r.reassign(jobId, assignedTo)), [run]),
     reschedule: useCallback(
-      (jobId: string, scheduledStartIso: string, scheduledEndIso: string | null) => run((r) => r.reschedule(jobId, scheduledStartIso, scheduledEndIso)),
+      (jobId: string, scheduledStartIso: string, scheduledEndIso: string | null, flags?: RescheduleFlags) =>
+        run((r) => r.reschedule(jobId, scheduledStartIso, scheduledEndIso, flags)),
       [run]
     ),
+    clearSchedule: useCallback((jobId: string) => run((r) => r.clearSchedule(jobId)), [run]),
     schedule: useCallback(
-      (jobId: string, staffIds: string[], scheduledStartIso: string, scheduledEndIso: string, costCenterId: string | null = null) =>
-        run((r) => r.schedule(jobId, staffIds, scheduledStartIso, scheduledEndIso, costCenterId)),
+      (jobId: string, staffIds: string[], columns: ScheduleColumns, costCenterId: string | null = null) =>
+        run((r) => r.schedule(jobId, staffIds, columns, costCenterId)),
       [run]
     ),
   };

@@ -9,10 +9,14 @@ import { useJobNotes } from "../../lib/data/hooks/useJobNotes";
 import {
   DEFAULT_SHIFT_START_TIME,
   DEFAULT_SHIFT_END_TIME,
+  buildScheduleColumns,
   defaultAllDay,
-  validateScheduleWindow,
+  scheduleInputFromJob,
+  validateScheduleInput,
+  type ScheduleInput,
 } from "../../lib/scheduling";
-import { dateKeyInBusinessTZ, toBusinessInputValue, fromBusinessInputValue } from "../../lib/date";
+import { businessTodayKey, formatScheduleSummary, shortDayLabel } from "../../lib/scheduleDisplay";
+import { localDateKey } from "../../lib/date";
 import type { JobCostCentre } from "../../lib/data/reads/jobBilling";
 
 interface Props {
@@ -24,14 +28,25 @@ interface Props {
   currentUserId: string;
   currentScheduledStart: string | null;
   currentScheduledEnd: string | null;
+  /** jobs.schedule_daily / schedule_all_day (migration 0071, draft) — so the dialog reopens as saved. */
+  currentScheduleDaily?: boolean;
+  currentScheduleAllDay?: boolean;
   costCenters?: JobCostCentre[];
   currentScheduledCostCenterId?: string | null;
   onScheduled: (patch: {
     scheduled_start: string;
     scheduled_end: string;
+    schedule_daily: boolean;
+    schedule_all_day: boolean;
     status: string;
     scheduled_cost_center_id: string | null;
   }) => void;
+}
+
+/** A Melbourne "YYYY-MM-DD" as a device-local Date for the picker (noon: no DST edge). */
+function keyToPickerDate(key: string): Date {
+  const [y, m, d] = key.split("-").map(Number);
+  return new Date(y, m - 1, d, 12, 0, 0, 0);
 }
 
 type Step = "technician" | "time" | "stage" | "notes" | "confirm";
@@ -45,7 +60,8 @@ function friendlyTime(hhmm: string): string {
 
 /**
  * Mobile twin of the web job detail's "Schedule Job" dialog — multi-select
- * technician, time with an All day toggle, optional cost centre, an optional
+ * technician, start + end date (same daily hours on each booked weekday —
+ * migration 0071, draft) with an All day toggle, optional cost centre, an optional
  * note for the technician, then confirm — same shared rules (lib/scheduling.ts),
  * writing through ScheduleRepository.schedule() so the job/time update is one
  * durable outbox entry with a coalesced calendar sync and a coalesced
@@ -61,6 +77,8 @@ export function ScheduleJobModal({
   currentUserId,
   currentScheduledStart,
   currentScheduledEnd,
+  currentScheduleDaily = false,
+  currentScheduleAllDay = false,
   costCenters = [],
   currentScheduledCostCenterId,
   onScheduled,
@@ -71,8 +89,15 @@ export function ScheduleJobModal({
   const [staff, setStaff] = useState<AssignableStaff[]>([]);
   const [technicianIds, setTechnicianIds] = useState<string[]>(currentAssignedIds);
   const [costCenterId, setCostCenterId] = useState<string | null>(currentScheduledCostCenterId ?? null);
-  const [date, setDate] = useState(new Date());
-  const [showDatePicker, setShowDatePicker] = useState(false);
+  // Melbourne "YYYY-MM-DD" keys — the picker's local date converts straight to
+  // one (localDateKey), so a phone in another timezone books the day it shows.
+  const [startDateKey, setStartDateKey] = useState(() => businessTodayKey());
+  const [endDateKey, setEndDateKey] = useState(() => businessTodayKey());
+  const [showDatePicker, setShowDatePicker] = useState<"start" | "end" | null>(null);
+  // The start day of the schedule being edited (null for a new one): the
+  // "All day" smart default only overrides what was SAVED once the office
+  // moves the job to a different day.
+  const [savedStartKey, setSavedStartKey] = useState<string | null>(null);
   const [allDay, setAllDay] = useState(true);
   const [startTime, setStartTime] = useState(DEFAULT_SHIFT_START_TIME);
   const [endTime, setEndTime] = useState(DEFAULT_SHIFT_END_TIME);
@@ -87,22 +112,44 @@ export function ScheduleJobModal({
     setStep("technician");
     setTechnicianIds(currentAssignedIds);
     setCostCenterId(currentScheduledCostCenterId ?? null);
-    setDate(currentScheduledStart ? new Date(currentScheduledStart) : new Date());
-    if (currentScheduledStart && currentScheduledEnd) {
-      setAllDay(false);
-      setStartTime(toBusinessInputValue(currentScheduledStart).slice(11));
-      setEndTime(toBusinessInputValue(currentScheduledEnd).slice(11));
+    // Reopen as saved (start/end date, hours, All day) — the reverse of
+    // buildScheduleColumns. A saved start with no end is a point in time;
+    // it reopens on its day with the standard shift.
+    const saved =
+      currentScheduledStart && currentScheduledEnd
+        ? scheduleInputFromJob({
+            scheduled_start: currentScheduledStart,
+            scheduled_end: currentScheduledEnd,
+            schedule_daily: currentScheduleDaily,
+            schedule_all_day: currentScheduleAllDay,
+          })
+        : null;
+    if (saved) {
+      setStartDateKey(saved.startDateKey);
+      setEndDateKey(saved.endDateKey);
+      setAllDay(saved.allDay);
+      setStartTime(saved.allDay ? DEFAULT_SHIFT_START_TIME : saved.startTime);
+      setEndTime(saved.allDay ? DEFAULT_SHIFT_END_TIME : saved.endTime);
+      setSavedStartKey(saved.startDateKey);
     } else {
+      const key = currentScheduledStart
+        ? (scheduleInputFromJob({ scheduled_start: currentScheduledStart, scheduled_end: null })?.startDateKey ?? businessTodayKey())
+        : businessTodayKey();
+      setStartDateKey(key);
+      setEndDateKey(key);
       setAllDay(true);
       setStartTime(DEFAULT_SHIFT_START_TIME);
       setEndTime(DEFAULT_SHIFT_END_TIME);
+      setSavedStartKey(null);
     }
+    setShowDatePicker(null);
     setConflictsByTechnician({});
     setNoteText("");
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [visible, currentScheduledStart, currentScheduledEnd, currentScheduledCostCenterId]);
+  }, [visible, currentScheduledStart, currentScheduledEnd, currentScheduleDaily, currentScheduleAllDay, currentScheduledCostCenterId]);
 
-  const dateKey = dateKeyInBusinessTZ(date);
+  // The "All day" default and the conflict warning look at the START day.
+  const dateKey = startDateKey;
 
   function toggleTechnician(id: string) {
     setTechnicianIds((prev) => (prev.includes(id) ? prev.filter((t) => t !== id) : [...prev, id]));
@@ -121,6 +168,9 @@ export function ScheduleJobModal({
         if (cancelled) return;
         const counts = Object.fromEntries(pairs.filter(([, n]) => n > 0));
         setConflictsByTechnician(counts);
+        // Editing a saved schedule on its own start day: keep its saved "All
+        // day" choice (0071, draft, persists it) rather than re-guessing it.
+        if (dateKey === savedStartKey) return;
         const maxConflicts = Math.max(0, ...Object.values(counts));
         const nextAllDay = defaultAllDay(maxConflicts);
         setAllDay(nextAllDay);
@@ -133,7 +183,7 @@ export function ScheduleJobModal({
     return () => {
       cancelled = true;
     };
-  }, [visible, step, technicianIds, dateKey, jobId]);
+  }, [visible, step, technicianIds, dateKey, jobId, savedStartKey]);
 
   function toggleAllDay() {
     const next = !allDay;
@@ -144,9 +194,17 @@ export function ScheduleJobModal({
     }
   }
 
-  function onDateChange(event: DateTimePickerEvent, selected?: Date) {
-    setShowDatePicker(Platform.OS === "ios");
-    if (event.type === "set" && selected) setDate(selected);
+  function onDateChange(which: "start" | "end", event: DateTimePickerEvent, selected?: Date) {
+    setShowDatePicker(Platform.OS === "ios" ? which : null);
+    if (event.type !== "set" || !selected) return;
+    const key = localDateKey(selected);
+    if (which === "start") {
+      // A start moved past the end drags the end with it (end ≥ start).
+      setStartDateKey(key);
+      if (endDateKey < key) setEndDateKey(key);
+    } else {
+      setEndDateKey(key);
+    }
   }
 
   function onTimeChange(which: "start" | "end", event: DateTimePickerEvent, selected?: Date) {
@@ -158,9 +216,13 @@ export function ScheduleJobModal({
   }
 
   const selectedTechnicians = staff.filter((s) => technicianIds.includes(s.id));
-  const scheduledStartIso = fromBusinessInputValue(`${dateKey}T${startTime}`);
-  const scheduledEndIso = fromBusinessInputValue(`${dateKey}T${endTime}`);
-  const windowError = validateScheduleWindow(scheduledStartIso, scheduledEndIso);
+  const input: ScheduleInput = { startDateKey, endDateKey, startTime, endTime, allDay };
+  const windowError = validateScheduleInput(input);
+  // The columns written — window + schedule_daily + schedule_all_day — from
+  // the shared rules (lib/scheduling.ts), so the phone and the board agree.
+  const columns = windowError ? null : buildScheduleColumns(input);
+  // "Mon 19 – Wed 21 Oct, 7:00–15:30 each weekday · 3 days"
+  const summary = columns ? formatScheduleSummary(columns) : null;
   const hasCostCenters = costCenters.length > 0;
 
   function timeAsDate(hhmm: string): Date {
@@ -171,10 +233,10 @@ export function ScheduleJobModal({
   }
 
   async function confirm() {
-    if (technicianIds.length === 0 || windowError || saving || !ready) return;
+    if (technicianIds.length === 0 || !columns || saving || !ready) return;
     setSaving(true);
     try {
-      await schedule(jobId, technicianIds, scheduledStartIso, scheduledEndIso, costCenterId);
+      await schedule(jobId, technicianIds, columns, costCenterId);
     } catch (e) {
       setSaving(false);
       Alert.alert("Couldn't schedule", e instanceof Error ? e.message : "Please try again.");
@@ -195,8 +257,7 @@ export function ScheduleJobModal({
     }
 
     onScheduled({
-      scheduled_start: scheduledStartIso,
-      scheduled_end: scheduledEndIso,
+      ...columns,
       status: jobStatus === "pending" ? "scheduled" : jobStatus,
       scheduled_cost_center_id: costCenterId,
     });
@@ -237,14 +298,33 @@ export function ScheduleJobModal({
 
           {step === "time" && (
             <View style={{ gap: 14 }}>
-              <View>
-                <Text style={styles.label}>Date</Text>
-                <TouchableOpacity style={styles.selector} onPress={() => setShowDatePicker(true)}>
-                  <Text style={styles.selectorText}>{date.toLocaleDateString("en-AU", { weekday: "short", day: "numeric", month: "short" })}</Text>
-                  <Ionicons name="calendar-outline" size={16} color={colors.slate400} />
-                </TouchableOpacity>
-                {showDatePicker && <DateTimePicker value={date} mode="date" onChange={onDateChange} />}
+              <View style={{ flexDirection: "row", gap: 10 }}>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.label}>Start date</Text>
+                  <TouchableOpacity style={styles.selector} onPress={() => setShowDatePicker("start")}>
+                    <Text style={styles.selectorText}>{shortDayLabel(startDateKey)}</Text>
+                    <Ionicons name="calendar-outline" size={16} color={colors.slate400} />
+                  </TouchableOpacity>
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.label}>End date</Text>
+                  <TouchableOpacity style={styles.selector} onPress={() => setShowDatePicker("end")}>
+                    <Text style={styles.selectorText}>{shortDayLabel(endDateKey)}</Text>
+                    <Ionicons name="calendar-outline" size={16} color={colors.slate400} />
+                  </TouchableOpacity>
+                </View>
               </View>
+              {showDatePicker && (
+                <DateTimePicker
+                  value={keyToPickerDate(showDatePicker === "start" ? startDateKey : endDateKey)}
+                  minimumDate={showDatePicker === "end" ? keyToPickerDate(startDateKey) : undefined}
+                  mode="date"
+                  onChange={(e, d) => onDateChange(showDatePicker, e, d)}
+                />
+              )}
+              {endDateKey > startDateKey && (
+                <Text style={styles.hint}>Same hours on each weekday — Saturdays and Sundays between the dates are skipped.</Text>
+              )}
 
               <TouchableOpacity style={styles.allDayRow} onPress={toggleAllDay}>
                 <Ionicons name={allDay ? "checkbox" : "square-outline"} size={20} color={allDay ? colors.blue600 : colors.slate400} />
@@ -257,26 +337,28 @@ export function ScheduleJobModal({
                 const name = staff.find((s) => s.id === staffId)?.full_name ?? "This technician";
                 return (
                   <Text key={staffId} style={styles.warnHint}>
-                    {name} already has {n} job{n === 1 ? "" : "s"} that day — set a custom time block below.
+                    {name} already has {n} job{n === 1 ? "" : "s"} on {shortDayLabel(startDateKey)} — set a custom time block below.
                   </Text>
                 );
               })}
 
-              <View style={{ flexDirection: "row", gap: 10 }}>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.label}>Start</Text>
-                  <TouchableOpacity style={styles.selector} onPress={() => setShowTimePicker("start")}>
-                    <Text style={styles.selectorText}>{friendlyTime(startTime)}</Text>
-                  </TouchableOpacity>
+              {!allDay && (
+                <View style={{ flexDirection: "row", gap: 10 }}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.label}>Start</Text>
+                    <TouchableOpacity style={styles.selector} onPress={() => setShowTimePicker("start")}>
+                      <Text style={styles.selectorText}>{friendlyTime(startTime)}</Text>
+                    </TouchableOpacity>
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.label}>End</Text>
+                    <TouchableOpacity style={styles.selector} onPress={() => setShowTimePicker("end")}>
+                      <Text style={styles.selectorText}>{friendlyTime(endTime)}</Text>
+                    </TouchableOpacity>
+                  </View>
                 </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.label}>End</Text>
-                  <TouchableOpacity style={styles.selector} onPress={() => setShowTimePicker("end")}>
-                    <Text style={styles.selectorText}>{friendlyTime(endTime)}</Text>
-                  </TouchableOpacity>
-                </View>
-              </View>
-              {showTimePicker && (
+              )}
+              {!allDay && showTimePicker && (
                 <DateTimePicker
                   value={timeAsDate(showTimePicker === "start" ? startTime : endTime)}
                   mode="time"
@@ -284,7 +366,11 @@ export function ScheduleJobModal({
                 />
               )}
 
-              {windowError && <Text style={styles.errorText}>{windowError}</Text>}
+              {windowError ? (
+                <Text style={styles.errorText}>{windowError}</Text>
+              ) : summary ? (
+                <Text style={styles.summaryText}>{summary}</Text>
+              ) : null}
             </View>
           )}
 
@@ -340,12 +426,7 @@ export function ScheduleJobModal({
             <View style={styles.confirmBox}>
               <Text style={styles.confirmTech}>{selectedTechnicians.map((t) => t.full_name).join(", ")}</Text>
               <Text style={styles.confirmLine}>
-                {new Date(scheduledStartIso).toLocaleDateString("en-AU", { weekday: "long", day: "numeric", month: "long", timeZone: "Australia/Melbourne" })}
-              </Text>
-              <Text style={styles.confirmLine}>
-                {new Date(scheduledStartIso).toLocaleTimeString("en-AU", { hour: "2-digit", minute: "2-digit", timeZone: "Australia/Melbourne" })}
-                {" – "}
-                {new Date(scheduledEndIso).toLocaleTimeString("en-AU", { hour: "2-digit", minute: "2-digit", timeZone: "Australia/Melbourne" })}
+                {summary}
                 {allDay ? " · All day" : ""}
               </Text>
               {hasCostCenters && (
@@ -425,6 +506,7 @@ const styles = StyleSheet.create({
   hint: { fontSize: 12, color: colors.slate400, marginTop: 4 },
   warnHint: { fontSize: 12, color: colors.yellow700 },
   errorText: { fontSize: 12, color: colors.red600 },
+  summaryText: { fontSize: 13, fontWeight: "600", color: colors.slate700 },
   row: { flexDirection: "row", alignItems: "center", paddingHorizontal: 12, paddingVertical: 10, borderRadius: 10, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.bg },
   rowActive: { borderColor: colors.blue600, backgroundColor: colors.blue100 },
   rowText: { fontSize: 14, fontWeight: "600", color: colors.slate900 },

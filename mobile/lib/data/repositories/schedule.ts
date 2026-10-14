@@ -2,6 +2,16 @@ import type { Outbox } from "../outbox/outbox";
 import type { IdGen } from "../ids";
 import type { WriteOperation, SideEffectOperation } from "../outbox/types";
 import { systemTime, type TimeSource } from "../time";
+import type { ScheduleColumns } from "../../scheduling";
+
+/**
+ * How a moved schedule's two flags change (migration 0071, draft). Omitted fields are
+ * left as stored — a reschedule never touches what it does not know about.
+ */
+export interface RescheduleFlags {
+  scheduleDaily?: boolean;
+  scheduleAllDay?: boolean;
+}
 
 // Offline-first schedule dispatch (office/admin), mirroring the web schedule
 // board's drag-to-reassign and drag-to-reschedule (components/schedule/
@@ -21,9 +31,37 @@ export class ScheduleRepository {
     await this.updateJob(jobId, { assigned_to: assignedTo });
   }
 
-  /** Move a job to new start/end instants (compute them with computeReschedule). */
-  async reschedule(jobId: string, scheduledStartIso: string, scheduledEndIso: string | null): Promise<void> {
-    await this.updateJob(jobId, { scheduled_start: scheduledStartIso, scheduled_end: scheduledEndIso });
+  /**
+   * Move a job to new start/end instants. Compute them with moveSchedule() for
+   * a daily job (keeps its hours and NUMBER OF BOOKED DAYS) or
+   * computeRescheduleWithTime() for a continuous block. `flags` writes
+   * schedule_daily / schedule_all_day alongside, so a block moved off the
+   * standard shift stops claiming to be "All day".
+   */
+  async reschedule(
+    jobId: string,
+    scheduledStartIso: string,
+    scheduledEndIso: string | null,
+    flags: RescheduleFlags = {}
+  ): Promise<void> {
+    const payload: Record<string, unknown> = { scheduled_start: scheduledStartIso, scheduled_end: scheduledEndIso };
+    if (flags.scheduleDaily !== undefined) payload.schedule_daily = flags.scheduleDaily;
+    if (flags.scheduleAllDay !== undefined) payload.schedule_all_day = flags.scheduleAllDay;
+    await this.updateJob(jobId, payload);
+  }
+
+  /**
+   * Take a job off the schedule. Both 0071 (draft) flags reset with the window, so a
+   * job scheduled again later never inherits "daily" or "All day" from a
+   * schedule that no longer exists.
+   */
+  async clearSchedule(jobId: string): Promise<void> {
+    await this.updateJob(jobId, {
+      scheduled_start: null,
+      scheduled_end: null,
+      schedule_daily: false,
+      schedule_all_day: false,
+    });
   }
 
   /**
@@ -45,13 +83,17 @@ export class ScheduleRepository {
   async schedule(
     jobId: string,
     staffIds: string[],
-    scheduledStartIso: string,
-    scheduledEndIso: string,
+    columns: ScheduleColumns,
     costCenterId: string | null = null
   ): Promise<void> {
+    // `columns` comes from buildScheduleColumns() (lib/scheduling.ts), so the
+    // window and both 0071 (draft) flags are always written together — a single-day
+    // reschedule of a once-daily job resets schedule_daily, not just the times.
     const opId = await this.updateJob(jobId, {
-      scheduled_start: scheduledStartIso,
-      scheduled_end: scheduledEndIso,
+      scheduled_start: columns.scheduled_start,
+      scheduled_end: columns.scheduled_end,
+      schedule_daily: columns.schedule_daily,
+      schedule_all_day: columns.schedule_all_day,
       scheduled_cost_center_id: costCenterId,
     });
     const assign: SideEffectOperation = {

@@ -356,6 +356,8 @@ const jobs = new Table({
   estimated_hours: column.real,
   sync_tech: column.integer,
   sync_office: column.integer,
+  schedule_daily: column.integer,
+  schedule_all_day: column.integer,
 }, {
   indexes: {
     assigned_scheduled: ['assigned_to', 'scheduled_start'],
