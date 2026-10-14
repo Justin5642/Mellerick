@@ -3,6 +3,8 @@ import { readdirSync, readFileSync } from "node:fs";
 import { join, relative } from "node:path";
 
 import { applyScheduleChange, pushJobToCalendar, setJobAssignments } from "@/lib/schedule-dispatch";
+import { buildScheduleColumns } from "@/lib/scheduling";
+import { CLEARED_SCHEDULE } from "@/lib/schedule-form";
 
 // ============================================================================
 // Item 1.8, first half — the drag that never reached Google.
@@ -118,6 +120,28 @@ describe("applyScheduleChange — the write", () => {
     await applyScheduleChange(client, "job1", { title: "Fix pump", scheduled_end: null }, okFetch());
 
     expect(calls[0].patch).toEqual({ title: "Fix pump", scheduled_end: null });
+  });
+
+  it("carries the multi-day flags (0071) with the window they describe, in one statement", async () => {
+    // schedule_daily changes what scheduled_start..scheduled_end MEANS, so it
+    // must land in the same write as the times — a second statement could
+    // fail on its own and leave a Mon–Wed window read as one 56-hour block.
+    const { client, calls } = fakeClient(null);
+    const columns = buildScheduleColumns({ startDateKey: "2026-10-19", endDateKey: "2026-10-21", startTime: "", endTime: "", allDay: true });
+
+    await applyScheduleChange(client, "job1", { ...columns, status: "scheduled" }, okFetch());
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0].patch).toEqual({ ...columns, status: "scheduled" });
+    expect(calls[0].patch).toMatchObject({ schedule_daily: true, schedule_all_day: true });
+  });
+
+  it("a cleared schedule resets the flags with the times", async () => {
+    const { client, calls } = fakeClient(null);
+
+    await applyScheduleChange(client, "job1", { ...CLEARED_SCHEDULE }, okFetch());
+
+    expect(calls[0].patch).toEqual({ scheduled_start: null, scheduled_end: null, schedule_daily: false, schedule_all_day: false });
   });
 });
 
@@ -266,7 +290,9 @@ describe("setJobAssignments", () => {
 // ============================================================================
 
 const ROOT = process.cwd();
-const SCHEDULE_COLUMNS = /\b(scheduled_start|scheduled_end|assigned_to)\b/;
+// schedule_daily / schedule_all_day (0071) change what the window means, so a
+// direct write of either is the same bypass as a direct write of the times.
+const SCHEDULE_COLUMNS = /\b(scheduled_start|scheduled_end|schedule_daily|schedule_all_day|assigned_to)\b/;
 
 /** The text between the parens of a call whose `(` is at `open`. */
 function callArguments(src: string, open: number): string {
@@ -377,7 +403,11 @@ describe("every surface that reschedules a job routes through the seam", () => {
   it("the schedule-writing surfaces actually call the dispatcher", () => {
     // Without this the scan above passes for a screen that stopped saving
     // altogether — which is green, and broken.
-    for (const rel of ["components/schedule/team-schedule-view.tsx", "components/job/job-overview.tsx"]) {
+    for (const rel of [
+      "components/schedule/team-schedule-view.tsx",
+      "components/job/job-overview.tsx",
+      "components/job/schedule-job-dialog.tsx",
+    ]) {
       expect(readFileSync(join(ROOT, rel), "utf8"), rel).toContain("applyScheduleChange");
     }
   });

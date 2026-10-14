@@ -6,15 +6,20 @@ import { redirect } from "next/navigation";
 import { Card, CardContent } from "@/components/ui/card";
 import { Briefcase, Clock, MapPin, Navigation } from "lucide-react";
 import Link from "next/link";
-import { formatTime, formatDate, isTodayInBusinessTZ } from "@/lib/date";
+import { anchorForDateKey, dateKeyInBusinessTZ, formatTime, formatDate } from "@/lib/date";
+import { scheduleDays } from "@/lib/scheduling";
+import { formatScheduleDates, nextScheduleDay, scheduleDayOn } from "@/lib/schedule-form";
 import { jobStatusColors } from "@/lib/badge-colors";
 
 // Only what the cards below render. Technicians land here, so the job row is
 // named column by column rather than "*" — nothing on it they do not see.
 const JOB_COLUMNS =
-  "id, job_number, title, status, scheduled_start, scheduled_end, customers(name), sites(address_line1, suburb, site_lat, site_lng)";
+  "id, job_number, title, status, scheduled_start, scheduled_end, schedule_daily, customers(name), sites(address_line1, suburb, site_lat, site_lng)";
 
 function JobCard({ job }: { job: any }) {
+  // A multi-day job's times are its daily hours (scheduleDays' first block
+  // has the same time of day as every other).
+  const block = scheduleDays(job)[0];
   const address = job.sites
     ? `${job.sites.address_line1}, ${job.sites.suburb}`
     : null;
@@ -39,10 +44,11 @@ function JobCard({ job }: { job: any }) {
             <MapPin className="w-3 h-3" />{address}
           </p>
         )}
-        {job.scheduled_start && (
+        {block && (
           <p className="text-xs text-slate-400 flex items-center gap-1 mt-0.5">
-            <Clock className="w-3 h-3" />{formatTime(job.scheduled_start)}
-            {job.scheduled_end ? ` — ${formatTime(job.scheduled_end)}` : ""}
+            <Clock className="w-3 h-3" />{formatTime(block.startIso)}
+            {job.scheduled_end ? ` — ${formatTime(block.endIso)}` : ""}
+            {job.schedule_daily ? ` daily · ${formatScheduleDates(job)}` : ""}
           </p>
         )}
       </Link>
@@ -89,15 +95,28 @@ export default async function MyJobsPage() {
   for (const job of primary ?? []) byId.set(job.id, job);
   for (const row of (crew ?? []) as any[]) if (row.jobs) byId.set(row.jobs.id, row.jobs);
 
-  // The database used to sort this: scheduled_start ascending, unscheduled last.
-  const jobs = [...byId.values()].sort((a, b) => {
-    if (!a.scheduled_start) return b.scheduled_start ? 1 : 0;
-    if (!b.scheduled_start) return -1;
-    return new Date(a.scheduled_start).getTime() - new Date(b.scheduled_start).getTime();
-  });
+  // "Today" is every job BOOKED today (occupiesDay), so a multi-day job
+  // (schedule_daily, 0071 — draft, not applied yet) that started on Monday is still here on
+  // Wednesday. Everything else is "Upcoming", dated and ordered by its next
+  // booked day — or, once every booked day is behind it (still open), by its
+  // start, which sorts it first as before. Unscheduled last.
+  const todayKey = dateKeyInBusinessTZ(new Date());
+  const rows = [...byId.values()].map((job) => ({
+    job,
+    today: scheduleDayOn(job, todayKey),
+    next: nextScheduleDay(job, todayKey),
+  }));
+  const sortKey = (r: (typeof rows)[number]) => {
+    const iso = r.today?.startIso ?? r.next?.startIso ?? r.job.scheduled_start;
+    return iso ? new Date(iso).getTime() : Number.POSITIVE_INFINITY;
+  };
+  rows.sort((a, b) => sortKey(a) - sortKey(b));
 
-  const todayJobs = jobs.filter(j => j.scheduled_start && isTodayInBusinessTZ(j.scheduled_start));
-  const upcomingJobs = jobs.filter(j => !j.scheduled_start || !isTodayInBusinessTZ(j.scheduled_start));
+  const jobs = rows.map((r) => r.job);
+  const todayJobs = rows.filter((r) => r.today).map((r) => r.job);
+  const upcomingJobs = rows
+    .filter((r) => !r.today)
+    .map((r) => ({ job: r.job, dateKey: r.next?.dateKey ?? (r.job.scheduled_start ? dateKeyInBusinessTZ(r.job.scheduled_start) : null) }));
 
   return (
     <div className="p-6 space-y-6 max-w-2xl">
@@ -132,10 +151,10 @@ export default async function MyJobsPage() {
           <Card>
             <CardContent className="p-0">
               <div className="divide-y">
-                {upcomingJobs.map(job => (
+                {upcomingJobs.map(({ job, dateKey }) => (
                   <div key={job.id}>
-                    {job.scheduled_start && (
-                      <p className="text-xs font-medium text-slate-400 px-6 pt-3">{formatDate(job.scheduled_start, { weekday: "short", day: "numeric", month: "short" })}</p>
+                    {dateKey && (
+                      <p className="text-xs font-medium text-slate-400 px-6 pt-3">{formatDate(anchorForDateKey(dateKey), { weekday: "short", day: "numeric", month: "short" })}</p>
                     )}
                     <JobCard job={job} />
                   </div>

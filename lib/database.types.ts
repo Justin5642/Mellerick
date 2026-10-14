@@ -1433,6 +1433,8 @@ export type Database = {
           overtime_reason: string | null
           priority: string
           ready_to_invoice: boolean
+          schedule_all_day: boolean
+          schedule_daily: boolean
           scheduled_cost_center_id: string | null
           scheduled_end: string | null
           scheduled_start: string | null
@@ -1473,6 +1475,8 @@ export type Database = {
           overtime_reason?: string | null
           priority?: string
           ready_to_invoice?: boolean
+          schedule_all_day?: boolean
+          schedule_daily?: boolean
           scheduled_cost_center_id?: string | null
           scheduled_end?: string | null
           scheduled_start?: string | null
@@ -1513,6 +1517,8 @@ export type Database = {
           overtime_reason?: string | null
           priority?: string
           ready_to_invoice?: boolean
+          schedule_all_day?: boolean
+          schedule_daily?: boolean
           scheduled_cost_center_id?: string | null
           scheduled_end?: string | null
           scheduled_start?: string | null
