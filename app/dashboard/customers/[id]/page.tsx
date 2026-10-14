@@ -36,13 +36,16 @@ export default async function CustomerDetailPage({
   const { id } = await params;
   const supabase = await createClient();
 
+  // Each tab lists every row, and the stat cards are those lists' lengths and
+  // invoice totals, so the rows are needed — just not every column of them.
+  // Only what the page renders or sums.
   const [{ data: customer }, { data: sites }, { data: jobs }, { data: quotes }, { data: invoices }] =
     await Promise.all([
-      supabase.from("customers").select("*").eq("id", id).single(),
-      supabase.from("sites").select("*").eq("customer_id", id).order("name"),
-      supabase.from("jobs").select("*").eq("customer_id", id).order("created_at", { ascending: false }),
-      supabase.from("quotes").select("*").eq("customer_id", id).order("created_at", { ascending: false }),
-      supabase.from("invoices").select("*").eq("customer_id", id).order("created_at", { ascending: false }),
+      supabase.from("customers").select("name, company, is_active, phone, mobile, email, abn, notes").eq("id", id).single(),
+      supabase.from("sites").select("id, name, is_active, address_line1, suburb, state, postcode").eq("customer_id", id).order("name"),
+      supabase.from("jobs").select("id, job_number, title, scheduled_start, status").eq("customer_id", id).order("created_at", { ascending: false }),
+      supabase.from("quotes").select("id, quote_number, title, created_at, total, status").eq("customer_id", id).order("created_at", { ascending: false }),
+      supabase.from("invoices").select("id, invoice_number, title, due_date, total, status").eq("customer_id", id).order("created_at", { ascending: false }),
     ]);
 
   if (!customer) notFound();
