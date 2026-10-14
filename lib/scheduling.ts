@@ -53,7 +53,8 @@ export function validateScheduleWindow(scheduledStartIso: string, scheduledEndIs
 }
 
 // ---------------------------------------------------------------------------
-// Multi-day schedules (migration 0071)
+// Multi-day schedules (migration 0071 — DRAFT until applied; before then the
+// two columns are absent and every job reads as single-day)
 // ---------------------------------------------------------------------------
 // A job still stores ONE window, scheduled_start..scheduled_end. What that
 // window MEANS depends on jobs.schedule_daily:
