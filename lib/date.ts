@@ -5,25 +5,64 @@
 // actually sees on the clock.
 export const BUSINESS_TIME_ZONE = "Australia/Melbourne";
 
+// Every toLocale*String call with a timeZone option builds (and throws away) a
+// fresh Intl.DateTimeFormat, which is slow — and the schedule board formats
+// hundreds of dates per render. The formatters are built once and reused.
+//
+// To stay byte-identical with the toLocale*String calls they replace, each
+// formatter is built with the same defaults those methods add (ECMA-402
+// ToDateTimeOptions): toLocaleDateString adds year/month/day when no date
+// field is given, toLocaleTimeString adds hour/minute/second when no time
+// field is given, and toLocaleString adds both. tests/unit/date.test.ts
+// compares every output against the original calls.
+type DefaultsFor = "date" | "time" | "all";
+
+const DATE_FIELDS = ["weekday", "year", "month", "day"] as const;
+const TIME_FIELDS = ["dayPeriod", "hour", "minute", "second", "fractionalSecondDigits"] as const;
+
+const formatterCache = new Map<string, Intl.DateTimeFormat>();
+
+function businessFormatter(locale: string, opts: Intl.DateTimeFormatOptions, defaults: DefaultsFor) {
+  const key = `${locale}|${defaults}|${JSON.stringify(opts)}`;
+  let formatter = formatterCache.get(key);
+  if (!formatter) {
+    const resolved: Intl.DateTimeFormatOptions = { ...opts, timeZone: BUSINESS_TIME_ZONE };
+    if (resolved.dateStyle === undefined && resolved.timeStyle === undefined) {
+      const hasDate = DATE_FIELDS.some((f) => resolved[f] !== undefined);
+      const hasTime = TIME_FIELDS.some((f) => resolved[f] !== undefined);
+      const needDate = (defaults === "date" && !hasDate) || (defaults === "all" && !hasDate && !hasTime);
+      const needTime = (defaults === "time" && !hasTime) || (defaults === "all" && !hasDate && !hasTime);
+      if (needDate) Object.assign(resolved, { year: "numeric", month: "numeric", day: "numeric" });
+      if (needTime) Object.assign(resolved, { hour: "numeric", minute: "numeric", second: "numeric" });
+    }
+    formatter = new Intl.DateTimeFormat(locale, resolved);
+    formatterCache.set(key, formatter);
+  }
+  return formatter;
+}
+
+// Intl's format() throws on an invalid date where toLocale*String returned
+// the string "Invalid Date" — keep the old, non-throwing result.
+function formatInBusinessTZ(formatter: Intl.DateTimeFormat, value: string | Date) {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? "Invalid Date" : formatter.format(date);
+}
+
 export function formatTime(value: string | Date) {
-  return new Date(value).toLocaleTimeString("en-AU", {
-    hour: "2-digit",
-    minute: "2-digit",
-    timeZone: BUSINESS_TIME_ZONE,
-  });
+  return formatInBusinessTZ(businessFormatter("en-AU", { hour: "2-digit", minute: "2-digit" }, "time"), value);
 }
 
 export function formatDate(
   value: string | Date,
   opts: Intl.DateTimeFormatOptions = { day: "numeric", month: "short" }
 ) {
-  return new Date(value).toLocaleDateString("en-AU", { ...opts, timeZone: BUSINESS_TIME_ZONE });
+  return formatInBusinessTZ(businessFormatter("en-AU", opts, "date"), value);
 }
 
 // A stable "YYYY-MM-DD" key for the given instant, as seen in Melbourne —
 // use this instead of `Date#toDateString()` when grouping/comparing "today".
 export function dateKeyInBusinessTZ(value: string | Date) {
-  return new Date(value).toLocaleDateString("en-CA", { timeZone: BUSINESS_TIME_ZONE }); // en-CA => YYYY-MM-DD
+  return formatInBusinessTZ(businessFormatter("en-CA", {}, "date"), value); // en-CA => YYYY-MM-DD
 }
 
 export function isTodayInBusinessTZ(value: string | Date) {
@@ -35,7 +74,7 @@ export function isTodayInBusinessTZ(value: string | Date) {
 // month or branching on time-of-day, since those getters read the server's
 // local clock (UTC on Vercel), not the business's.
 export function formatDateTime(value: string | Date) {
-  return new Date(value).toLocaleString("en-AU", { timeZone: BUSINESS_TIME_ZONE });
+  return formatInBusinessTZ(businessFormatter("en-AU", {}, "all"), value);
 }
 
 // datetime-local inputs read/write local wall-clock digits with no
@@ -46,31 +85,35 @@ export function formatDateTime(value: string | Date) {
 // device isn't set to Melbourne (or for any server-rendered value), and
 // mixing UTC digits into a field that's supposed to hold local digits is
 // exactly what caused scheduled jobs to land on the wrong calendar day.
+const INPUT_VALUE_FORMATTER = new Intl.DateTimeFormat("en-CA", {
+  timeZone: BUSINESS_TIME_ZONE,
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+  hour: "2-digit",
+  minute: "2-digit",
+  hourCycle: "h23",
+});
+
 export function toBusinessInputValue(value: string | Date) {
-  const parts = new Intl.DateTimeFormat("en-CA", {
-    timeZone: BUSINESS_TIME_ZONE,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    hourCycle: "h23",
-  }).formatToParts(new Date(value));
+  const parts = INPUT_VALUE_FORMATTER.formatToParts(new Date(value));
   const map = Object.fromEntries(parts.map((p) => [p.type, p.value]));
   return `${map.year}-${map.month}-${map.day}T${map.hour}:${map.minute}`;
 }
 
+const OFFSET_FORMATTER = new Intl.DateTimeFormat("en-US", {
+  timeZone: BUSINESS_TIME_ZONE,
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+  hour: "2-digit",
+  minute: "2-digit",
+  second: "2-digit",
+  hourCycle: "h23",
+});
+
 function businessTimeZoneOffsetMinutes(instant: Date) {
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone: BUSINESS_TIME_ZONE,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-    hourCycle: "h23",
-  }).formatToParts(instant);
+  const parts = OFFSET_FORMATTER.formatToParts(instant);
   const map = Object.fromEntries(parts.map((p) => [p.type, p.value]));
   const asUtc = Date.UTC(
     Number(map.year),
@@ -143,15 +186,17 @@ export function weekDateKeys(key: string) {
   return Array.from({ length: 7 }, (_, i) => shiftDateKey(start, i));
 }
 
+const DATE_PARTS_FORMATTER = new Intl.DateTimeFormat("en-CA", {
+  timeZone: BUSINESS_TIME_ZONE,
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+  hour: "2-digit",
+  hourCycle: "h23",
+});
+
 export function businessDateParts(value: string | Date = new Date()) {
-  const parts = new Intl.DateTimeFormat("en-CA", {
-    timeZone: BUSINESS_TIME_ZONE,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    hourCycle: "h23",
-  }).formatToParts(new Date(value));
+  const parts = DATE_PARTS_FORMATTER.formatToParts(new Date(value));
   const map = Object.fromEntries(parts.map((p) => [p.type, p.value]));
   return {
     year: Number(map.year),
