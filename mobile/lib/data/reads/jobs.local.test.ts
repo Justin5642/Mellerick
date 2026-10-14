@@ -48,6 +48,7 @@ describe("listMyJobs (local)", () => {
     {
       id: "j1", job_number: 101, title: "Backflow annual test", status: "scheduled",
       scheduled_start: "2026-07-27T08:00:00+00:00", scheduled_end: "2026-07-27T10:00:00+00:00",
+      schedule_daily: 1,
       customer_name: "Acme Pty Ltd",
       site_name: "Head office", site_address_line1: "1 Main St", site_suburb: "Richmond",
       site_lat: -37.82, site_lng: 144.99,
@@ -55,6 +56,7 @@ describe("listMyJobs (local)", () => {
     {
       id: "j2", job_number: 102, title: "Pump repair", status: "pending",
       scheduled_start: null, scheduled_end: null,
+      schedule_daily: 0,
       customer_name: null,
       site_name: null, site_address_line1: null, site_suburb: null,
       site_lat: null, site_lng: null,
@@ -71,12 +73,14 @@ describe("listMyJobs (local)", () => {
       {
         id: "j1", job_number: 101, title: "Backflow annual test", status: "scheduled",
         scheduled_start: "2026-07-27T08:00:00+00:00", scheduled_end: "2026-07-27T10:00:00+00:00",
+        schedule_daily: true,
         customers: { name: "Acme Pty Ltd" },
         sites: { name: "Head office", address_line1: "1 Main St", suburb: "Richmond", site_lat: -37.82, site_lng: 144.99 },
       },
       {
         id: "j2", job_number: 102, title: "Pump repair", status: "pending",
         scheduled_start: null, scheduled_end: null,
+        schedule_daily: false,
         customers: null,
         sites: null,
       },
@@ -84,7 +88,7 @@ describe("listMyJobs (local)", () => {
     expect(getAll).toHaveBeenCalledTimes(1);
     const [sql, params] = getAll.mock.calls[0];
     expect(norm(sql)).toBe(norm(`
-      SELECT j.id, j.job_number, j.title, j.status, j.scheduled_start, j.scheduled_end,
+      SELECT j.id, j.job_number, j.title, j.status, j.scheduled_start, j.scheduled_end, j.schedule_daily,
              c.name AS customer_name,
              s.name AS site_name, s.address_line1 AS site_address_line1,
              s.suburb AS site_suburb, s.site_lat, s.site_lng
@@ -140,6 +144,7 @@ describe("getJob (local)", () => {
     priority: "high", description: "Annual RPZ test", notes: "Bring spare kit",
     job_type: "maintenance", created_at: "2026-07-01T00:00:00+00:00",
     scheduled_start: "2026-07-27T08:00:00+00:00", scheduled_end: "2026-07-27T10:00:00+00:00",
+    schedule_daily: 0, schedule_all_day: 1,
     actual_start: "2026-07-27T08:05:00+00:00", actual_end: null,
     completion_notes: null, overtime_reason: null, overtime_category: null,
     voice_report_transcript: null,
@@ -161,6 +166,7 @@ describe("getJob (local)", () => {
       priority: "high", description: "Annual RPZ test", notes: "Bring spare kit",
       job_type: "maintenance", created_at: "2026-07-01T00:00:00+00:00",
       scheduled_start: "2026-07-27T08:00:00+00:00", scheduled_end: "2026-07-27T10:00:00+00:00",
+      schedule_daily: false, schedule_all_day: true,
       actual_start: "2026-07-27T08:05:00+00:00", actual_end: null,
       completion_notes: null, overtime_reason: null, overtime_category: null,
       voice_report_transcript: null,
@@ -171,7 +177,7 @@ describe("getJob (local)", () => {
     const [sql, params] = getOptional.mock.calls[0];
     expect(norm(sql)).toBe(norm(`
       SELECT j.id, j.job_number, j.title, j.status, j.priority, j.description, j.notes,
-             j.job_type, j.created_at, j.scheduled_start, j.scheduled_end,
+             j.job_type, j.created_at, j.scheduled_start, j.scheduled_end, j.schedule_daily, j.schedule_all_day,
              j.actual_start, j.actual_end, j.completion_notes,
              j.overtime_reason, j.overtime_category, j.voice_report_transcript,
              j.assigned_to, j.scheduled_cost_center_id, p.full_name AS assigned_profile_full_name,

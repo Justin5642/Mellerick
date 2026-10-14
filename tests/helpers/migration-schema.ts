@@ -63,12 +63,13 @@ export function migrationTables(sql: string): Map<string, TableColumns> {
   // early `alter table` with a much later `add column`, silently losing real
   // columns. Same reasoning as schema-column-contract.test.ts.
   //
-  // Every `add column` in the statement counts, not just the first: one
-  // `alter table jobs add column a …, add column b …;` (0071) adds both, and
-  // matching only the first silently lost `b`.
-  const alterRe = /alter table (?:only )?(\w+)([^;]*)/gi;
-  const addRe =
-    /add column (?:if not exists )?"?(\w+)"?\s+([a-z_]+(?:\s*\(\s*\d+(?:\s*,\s*\d+)?\s*\))?(?:\[\])?)/gi;
+  // One statement may add several columns (`alter table jobs add column a …,
+  // add column b …;` — 0012, 0041, 0071). Matching `alter table … add column`
+  // as one pattern only ever saw the FIRST, so the rest were invisible to every
+  // guard built on this; the statement is taken whole (up to its `;`) and each
+  // `add column` inside it is read.
+  const alterRe = /alter table (?:only )?(\w+)([^;]*);/gi;
+  const addRe = /add column (?:if not exists )?"?(\w+)"?\s+([a-z_]+(?:\s*\(\s*\d+(?:\s*,\s*\d+)?\s*\))?(?:\[\])?)/gi;
   for (const [, table, body] of sql.matchAll(alterRe)) {
     for (const [, col, type] of body.matchAll(addRe)) {
       if (!out.has(table)) out.set(table, new Map());

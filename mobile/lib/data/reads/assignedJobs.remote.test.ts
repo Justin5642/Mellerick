@@ -28,7 +28,8 @@ jest.mock("../../supabase", () => {
 import { resetSourceForTests, setLocalReads, type LocalReads } from "./source";
 import { listMyJobs, listMyJobSites } from "./jobs";
 import { countOtherScheduledJobs } from "./schedule";
-import { assignedOrCrewFilter } from "./assignedJobs";
+import { assignedOrCrewFilter, overlapFilter } from "./assignedJobs";
+import { buildScheduleColumns, businessDayRange } from "../../scheduling";
 
 const callsOn = (table: string, method: string) =>
   mockCalls.filter((c) => c.table === table && c.method === method).map((c) => c.args);
@@ -113,22 +114,48 @@ describe("listMyJobSites (remote)", () => {
 });
 
 describe("countOtherScheduledJobs (remote)", () => {
-  it("counts the technician's crew jobs that day, narrowing the crew lookup to the same day", async () => {
+  it("counts the technician's crew jobs OCCUPYING that day, narrowing the crew lookup to the same overlap", async () => {
+    const { dayStartIso, dayEndIso } = businessDayRange("2026-10-21");
+    // Mon 19 – Wed 21 Oct, daily: started two days ago, still books the 21st.
+    const daily = buildScheduleColumns({ startDateKey: "2026-10-19", endDateKey: "2026-10-21", startTime: "", endTime: "", allDay: true });
     mockAnswers = {
       job_assignments: { data: [{ job_id: "crew-am" }], error: null },
-      jobs: { count: 2, error: null },
+      jobs: {
+        data: [
+          { id: "crew-am", scheduled_start: daily.scheduled_start, scheduled_end: daily.scheduled_end, schedule_daily: true },
+          // Same window, NOT daily: one block, booked on the 19th only.
+          { id: "legacy", scheduled_start: daily.scheduled_start, scheduled_end: daily.scheduled_end, schedule_daily: false },
+        ],
+        error: null,
+      },
     };
 
-    await expect(countOtherScheduledJobs("tech-2", "2026-10-09", "this-job")).resolves.toBe(2);
+    await expect(countOtherScheduledJobs("tech-2", "2026-10-21", "this-job")).resolves.toBe(1);
 
-    const [[fromCol, fromIso]] = callsOn("job_assignments", "gte") as [string, string][];
-    const [[beforeCol, beforeIso]] = callsOn("job_assignments", "lt") as [string, string][];
-    expect(fromCol).toBe("jobs.scheduled_start");
-    expect(beforeCol).toBe("jobs.scheduled_start");
-    // The jobs query uses the identical day window.
-    expect(callsOn("jobs", "gte")).toEqual([["scheduled_start", fromIso]]);
-    expect(callsOn("jobs", "lt")).toEqual([["scheduled_start", beforeIso]]);
-    expect(callsOn("jobs", "or")).toEqual([["assigned_to.eq.tech-2,id.in.(crew-am)"]]);
+    const overlap = overlapFilter(dayStartIso);
+    expect(callsOn("job_assignments", "lt")).toEqual([["jobs.scheduled_start", dayEndIso]]);
+    expect(callsOn("job_assignments", "or")).toEqual([[overlap, { referencedTable: "jobs" }]]);
+    // The jobs query uses the identical overlap.
+    expect(callsOn("jobs", "lt")).toEqual([["scheduled_start", dayEndIso]]);
+    expect(callsOn("jobs", "or")).toEqual([["assigned_to.eq.tech-2,id.in.(crew-am)"], [overlap]]);
     expect(callsOn("jobs", "neq")).toEqual([["id", "this-job"]]);
+    expect(callsOn("jobs", "select")).toEqual([["id, scheduled_start, scheduled_end, schedule_daily"]]);
+  });
+
+  it("returns the same count as the local path for the same rows", async () => {
+    const daily = buildScheduleColumns({ startDateKey: "2026-10-19", endDateKey: "2026-10-21", startTime: "", endTime: "", allDay: true });
+    const base = { id: "d", scheduled_start: daily.scheduled_start, scheduled_end: daily.scheduled_end };
+    mockAnswers = { job_assignments: { data: [], error: null }, jobs: { data: [{ ...base, schedule_daily: true }], error: null } };
+    const remote = await countOtherScheduledJobs("tech-2", "2026-10-20", "this-job");
+
+    setLocalReads({
+      hasSynced: () => true,
+      role: () => "office",
+      getAll: jest.fn().mockResolvedValue([{ ...base, schedule_daily: 1 }]) as LocalReads["getAll"],
+      getOptional: jest.fn().mockResolvedValue(null) as LocalReads["getOptional"],
+    });
+    const local = await countOtherScheduledJobs("tech-2", "2026-10-20", "this-job");
+    expect(remote).toBe(1);
+    expect(local).toBe(remote);
   });
 });

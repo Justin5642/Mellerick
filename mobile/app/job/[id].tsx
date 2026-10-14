@@ -18,6 +18,7 @@ import { JobDocumentsTab } from "../../components/job/documents";
 import { JobVariationsTab } from "../../components/job/variations";
 import { ScheduleJobModal } from "../../components/job/schedule-job-modal";
 import { getJobStageLabel } from "../../lib/job-stages";
+import { formatScheduleSummary } from "../../lib/scheduleDisplay";
 import { getJobCostCentres, type JobCostCentre } from "../../lib/data/reads/jobBilling";
 
 const TABS = [
@@ -246,7 +247,10 @@ export default function JobDetailScreen() {
         {job.sites ? ` · ${job.sites.name}, ${job.sites.suburb}` : ""}
       </Text>
       <Text style={styles.scheduleSubtitle}>
-        {assignedStaff.length > 0 && job.scheduled_start
+        {assignedStaff.length > 0 && job.scheduled_start && job.schedule_daily
+          ? // Multi-day (0071, draft): the range and the hours worked on each day.
+            `${assignedStaff.map((a) => a.full_name).join(", ")} · ${formatScheduleSummary(job)}`
+          : assignedStaff.length > 0 && job.scheduled_start
           ? `${assignedStaff.map((a) => a.full_name).join(", ")} · ${new Date(job.scheduled_start).toLocaleString("en-AU", {
               weekday: "short",
               day: "numeric",
@@ -379,6 +383,8 @@ export default function JobDetailScreen() {
         currentUserId={userId ?? ""}
         currentScheduledStart={job.scheduled_start}
         currentScheduledEnd={job.scheduled_end}
+        currentScheduleDaily={!!job.schedule_daily}
+        currentScheduleAllDay={!!job.schedule_all_day}
         costCenters={costCenters}
         currentScheduledCostCenterId={job.scheduled_cost_center_id}
         onScheduled={(patch) => {

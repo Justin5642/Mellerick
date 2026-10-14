@@ -1,7 +1,7 @@
 import { supabase } from "../../supabase";
 import { fromLocalOr, type LocalReads } from "./source";
 import { requireCompletePage } from "./horizon";
-import { nestOne, num, numOrNull } from "./rowMap";
+import { bool, nestOne, num, numOrNull } from "./rowMap";
 import { unwrap, unwrapRows } from "./unwrap";
 import { assignedOrCrewFilter, assignedOrCrewSql, crewJobIdsRemote } from "./assignedJobs";
 
@@ -63,6 +63,8 @@ export interface MyJob {
   status: string;
   scheduled_start: string | null;
   scheduled_end: string | null;
+  /** Migration 0071 (draft): the window repeats on each booked day (lib/scheduling.ts). */
+  schedule_daily: boolean;
   customers: { name: string } | null;
   sites: JobSiteSummary | null;
 }
@@ -80,6 +82,8 @@ export interface JobDetail {
   created_at: string;
   scheduled_start: string | null;
   scheduled_end: string | null;
+  schedule_daily: boolean;
+  schedule_all_day: boolean;
   actual_start: string | null;
   actual_end: string | null;
   completion_notes: string | null;
@@ -149,7 +153,7 @@ const OFFICE_SELECT_WITH_STAGE = `${OFFICE_SELECT}, job_stage_notes(stage, creat
 // `.order("scheduled_start", { ascending: true, nullsFirst: false })` is PG
 // ASC NULLS LAST; SQLite ASC is NULLS FIRST, hence the `IS NULL,` prefix.
 export const SQL_LIST_MY_JOBS = `
-  SELECT j.id, j.job_number, j.title, j.status, j.scheduled_start, j.scheduled_end,
+  SELECT j.id, j.job_number, j.title, j.status, j.scheduled_start, j.scheduled_end, j.schedule_daily,
          c.name AS customer_name,
          s.name AS site_name, s.address_line1 AS site_address_line1,
          s.suburb AS site_suburb, s.site_lat, s.site_lng
@@ -175,7 +179,7 @@ export const SQL_LIST_MY_JOB_SITES = `
 
 export const SQL_GET_JOB = `
   SELECT j.id, j.job_number, j.title, j.status, j.priority, j.description, j.notes,
-         j.job_type, j.created_at, j.scheduled_start, j.scheduled_end,
+         j.job_type, j.created_at, j.scheduled_start, j.scheduled_end, j.schedule_daily, j.schedule_all_day,
          j.actual_start, j.actual_end, j.completion_notes,
          j.overtime_reason, j.overtime_category, j.voice_report_transcript,
          j.assigned_to, j.scheduled_cost_center_id, p.full_name AS assigned_profile_full_name,
@@ -254,6 +258,7 @@ interface RawMyJobRow {
   status: string;
   scheduled_start: string | null;
   scheduled_end: string | null;
+  schedule_daily: number | boolean | null;
   customer_name: string | null;
   site_name: string | null;
   site_address_line1: string | null;
@@ -274,6 +279,8 @@ interface RawJobDetailRow {
   created_at: string;
   scheduled_start: string | null;
   scheduled_end: string | null;
+  schedule_daily: number | boolean | null;
+  schedule_all_day: number | boolean | null;
   actual_start: string | null;
   actual_end: string | null;
   completion_notes: string | null;
@@ -353,6 +360,7 @@ function mapMyJob(r: RawMyJobRow): MyJob {
     status: r.status,
     scheduled_start: r.scheduled_start,
     scheduled_end: r.scheduled_end,
+    schedule_daily: bool(r.schedule_daily) ?? false,
     customers: nestOne(r.customer_name, { name: r.customer_name as string }),
     sites: mapSiteSummary(r),
   };
@@ -371,6 +379,8 @@ function mapJobDetail(r: RawJobDetailRow): JobDetail {
     created_at: r.created_at,
     scheduled_start: r.scheduled_start,
     scheduled_end: r.scheduled_end,
+    schedule_daily: bool(r.schedule_daily) ?? false,
+    schedule_all_day: bool(r.schedule_all_day) ?? false,
     actual_start: r.actual_start,
     actual_end: r.actual_end,
     completion_notes: r.completion_notes,
@@ -458,7 +468,7 @@ export async function listMyJobs(userId: string): Promise<MyJob[]> {
       const crew = await crewJobIdsRemote(userId, { kind: "open" }, "listMyJobs");
       const res = await supabase
         .from("jobs")
-        .select("id, job_number, title, status, scheduled_start, scheduled_end, customers(name), sites(name, address_line1, suburb, site_lat, site_lng)")
+        .select("id, job_number, title, status, scheduled_start, scheduled_end, schedule_daily, customers(name), sites(name, address_line1, suburb, site_lat, site_lng)")
         .or(assignedOrCrewFilter(userId, crew))
         .not("status", "in", '("completed","cancelled")')
         .order("scheduled_start", { ascending: true, nullsFirst: false });
@@ -551,7 +561,7 @@ export async function getJob(id: string): Promise<JobDetail | null> {
     const res = await supabase
       .from("jobs")
       .select(
-        "id, job_number, title, status, priority, description, notes, job_type, created_at, scheduled_start, scheduled_end, actual_start, actual_end, completion_notes, overtime_reason, overtime_category, voice_report_transcript, assigned_to, scheduled_cost_center_id, assigned_profile:profiles!jobs_assigned_to_fkey(full_name), customers(name, phone, mobile, email), sites(name, address_line1, suburb, state, postcode, site_lat, site_lng)"
+        "id, job_number, title, status, priority, description, notes, job_type, created_at, scheduled_start, scheduled_end, schedule_daily, schedule_all_day, actual_start, actual_end, completion_notes, overtime_reason, overtime_category, voice_report_transcript, assigned_to, scheduled_cost_center_id, assigned_profile:profiles!jobs_assigned_to_fkey(full_name), customers(name, phone, mobile, email), sites(name, address_line1, suburb, state, postcode, site_lat, site_lng)"
       )
       .eq("id", id)
       .single();

@@ -2,8 +2,9 @@ import { supabase } from "../../supabase";
 import { fromLocalOr } from "./source";
 import { requireCoveredSince } from "./horizon";
 import { unwrapRows } from "./unwrap";
-import { assignedOrCrewFilter, assignedOrCrewSql, crewJobIdsRemote } from "./assignedJobs";
-import { businessDayRange } from "../../scheduling";
+import { assignedOrCrewFilter, assignedOrCrewSql, crewJobIdsRemote, overlapFilter } from "./assignedJobs";
+import { bool } from "./rowMap";
+import { businessDayRange, occupiesDay } from "../../scheduling";
 
 export interface AssignableStaff {
   id: string;
@@ -48,15 +49,42 @@ export async function listAssignableStaff(): Promise<AssignableStaff[]> {
   );
 }
 
-// How many jobs (other than `excludeJobId`) a technician already has
-// scheduled on a given business date — feeds the Schedule Job flow's "All
-// day" smart default (lib/scheduling.ts's defaultAllDay). Counts crew jobs too
+// How many jobs (other than `excludeJobId`) a technician already has booked
+// on a given business date — feeds the Schedule Job flow's "All day" smart
+// default (lib/scheduling.ts's defaultAllDay). Counts crew jobs too
 // (./assignedJobs): a technician who is the second name on a morning job is
 // not free that morning.
+//
+// "Booked on" means OCCUPIES the day (migration 0071, draft), not "starts on it": a
+// Mon–Wed daily job books Tuesday too. The SQL is a coarse overlap on the
+// stored window (starts before the day ends; ends — or, with no end, starts —
+// on or after it begins); occupiesDay() then drops a daily job's skipped
+// weekend and a block that only grazes the day. Both paths fetch the same
+// columns and narrow through the same countOccupying(), so they cannot
+// disagree about which days a job books.
 export const SQL_COUNT_OTHER_SCHEDULED_JOBS = `
-  SELECT COUNT(*) AS n FROM jobs j
+  SELECT j.id, j.scheduled_start, j.scheduled_end, j.schedule_daily FROM jobs j
   WHERE ${assignedOrCrewSql("j", "?1")}
-    AND j.id != ?2 AND j.scheduled_start >= ?3 AND j.scheduled_start < ?4`;
+    AND j.id != ?2 AND j.scheduled_start < ?4
+    AND (j.scheduled_end >= ?3 OR (j.scheduled_end IS NULL AND j.scheduled_start >= ?3))`;
+
+export interface OccupancyRow {
+  id: string;
+  scheduled_start: string | null;
+  scheduled_end: string | null;
+  /** SQLite 1/0 locally, true/false from PostgREST — both go through bool(). */
+  schedule_daily: boolean | number | null;
+}
+
+/** Shared by both paths: how many of these rows book `dateKey`. */
+export function countOccupying(rows: OccupancyRow[], dateKey: string): number {
+  return rows.filter((r) =>
+    occupiesDay(
+      { scheduled_start: r.scheduled_start, scheduled_end: r.scheduled_end, schedule_daily: bool(r.schedule_daily) ?? false },
+      dateKey
+    )
+  ).length;
+}
 
 export async function countOtherScheduledJobs(
   technicianId: string,
@@ -66,33 +94,35 @@ export async function countOtherScheduledJobs(
   const { dayStartIso, dayEndIso } = businessDayRange(dateKey);
   return fromLocalOr(
     async (db) => {
-      // Every job scheduled on or after the window cutoff is on the device;
-      // a day further back than that (rare — scheduling is forward-looking)
+      // The office window (0068) keeps any job whose start OR end is after the
+      // cutoff, and a job booked on this day ends on or after the day begins —
+      // so when the day is inside the window, every such job is on the device.
+      // A day further back than that (rare — scheduling is forward-looking)
       // asks the server.
       await requireCoveredSince(db, "office", dayStartIso, "countOtherScheduledJobs");
-      const row = await db.getOptional<{ n: number }>(SQL_COUNT_OTHER_SCHEDULED_JOBS, [
+      const rows = await db.getAll<OccupancyRow>(SQL_COUNT_OTHER_SCHEDULED_JOBS, [
         technicianId,
         excludeJobId,
         dayStartIso,
         dayEndIso,
       ]);
-      return row?.n ?? 0;
+      return countOccupying(rows, dateKey);
     },
     async () => {
       const crew = await crewJobIdsRemote(
         technicianId,
-        { kind: "scheduled", fromIso: dayStartIso, beforeIso: dayEndIso },
+        { kind: "occupying", fromIso: dayStartIso, beforeIso: dayEndIso },
         "countOtherScheduledJobs"
       );
-      const { count, error } = await supabase
+      // Two .or() params: PostgREST ANDs separate logic-tree params.
+      const res = await supabase
         .from("jobs")
-        .select("id", { count: "exact", head: true })
+        .select("id, scheduled_start, scheduled_end, schedule_daily")
         .or(assignedOrCrewFilter(technicianId, crew))
         .neq("id", excludeJobId)
-        .gte("scheduled_start", dayStartIso)
-        .lt("scheduled_start", dayEndIso);
-      if (error) throw error;
-      return count ?? 0;
+        .lt("scheduled_start", dayEndIso)
+        .or(overlapFilter(dayStartIso));
+      return countOccupying(unwrapRows(res as never, "countOtherScheduledJobs") as unknown as OccupancyRow[], dateKey);
     },
     { roles: ["office", "admin"] }
   );

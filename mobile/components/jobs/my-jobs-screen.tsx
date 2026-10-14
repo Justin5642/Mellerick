@@ -17,6 +17,9 @@ import { ScreenError } from "../../design/components/ScreenError";
 import { openNavigation } from "../../lib/open-external-url";
 import { useAuth } from "../../lib/auth-context";
 import { colors, statusColors } from "../../lib/theme";
+import { occupiesDay } from "../../lib/scheduling";
+import { BUSINESS_TIME_ZONE } from "../../lib/date";
+import { businessTodayKey, formatScheduleSummary, scheduleDayOn } from "../../lib/scheduleDisplay";
 
 interface Job {
   id: string;
@@ -25,6 +28,7 @@ interface Job {
   status: string;
   scheduled_start: string | null;
   scheduled_end: string | null;
+  schedule_daily: boolean;
   customers: { name: string } | null;
   sites: { name: string; address_line1: string; suburb: string; site_lat: number | null; site_lng: number | null } | null;
 }
@@ -75,16 +79,23 @@ export function MyJobsScreen() {
   }
 
   function formatTime(iso: string) {
-    return new Date(iso).toLocaleTimeString("en-AU", { hour: "2-digit", minute: "2-digit" });
+    return new Date(iso).toLocaleTimeString("en-AU", { hour: "2-digit", minute: "2-digit", timeZone: BUSINESS_TIME_ZONE });
   }
 
   function formatDate(iso: string) {
-    return new Date(iso).toLocaleDateString("en-AU", { weekday: "short", day: "numeric", month: "short" });
+    return new Date(iso).toLocaleDateString("en-AU", { weekday: "short", day: "numeric", month: "short", timeZone: BUSINESS_TIME_ZONE });
   }
 
-  const today = new Date().toDateString();
-  const todayJobs = jobs.filter((j) => j.scheduled_start && new Date(j.scheduled_start).toDateString() === today);
-  const upcomingJobs = jobs.filter((j) => !j.scheduled_start || new Date(j.scheduled_start).toDateString() !== today);
+  // "Today" is the Melbourne day, and a job is today's when it is BOOKED today
+  // — a Mon–Wed daily job sits under Today on Tuesday too (migration 0071, draft).
+  // This used the device-local calendar day and the start date alone, so a
+  // phone on another timezone split the list on the wrong midnight and a
+  // multi-day job left Today after its first day.
+  const todayKey = businessTodayKey();
+  const todayJobs = jobs
+    .filter((j) => occupiesDay(j, todayKey))
+    .sort((a, b) => (scheduleDayOn(a, todayKey)?.startIso ?? "").localeCompare(scheduleDayOn(b, todayKey)?.startIso ?? ""));
+  const upcomingJobs = jobs.filter((j) => !occupiesDay(j, todayKey));
 
   function openWaze(job: Job) {
     // openNavigation owns the coordinates-then-address fallback and tells the
@@ -110,12 +121,14 @@ export function MyJobsScreen() {
         </View>
         {job.customers?.name && <Text style={styles.cardSubtext}>{job.customers.name}</Text>}
         {address && <Text style={styles.cardMeta}>📍 {address}</Text>}
-        {job.scheduled_start && (
+        {job.scheduled_start && job.schedule_daily ? (
+          <Text style={styles.cardMeta}>🕐 {formatScheduleSummary(job)}</Text>
+        ) : job.scheduled_start ? (
           <Text style={styles.cardMeta}>
             🕐 {formatDate(job.scheduled_start)} · {formatTime(job.scheduled_start)}
             {job.scheduled_end ? ` – ${formatTime(job.scheduled_end)}` : ""}
           </Text>
-        )}
+        ) : null}
         {job.sites && (
           <TouchableOpacity style={styles.wazeButton} onPress={() => openWaze(job)}>
             <Text style={styles.wazeButtonText}>Navigate</Text>

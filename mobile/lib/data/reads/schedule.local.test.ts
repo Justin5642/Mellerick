@@ -23,7 +23,10 @@ import {
   type LocalReads,
   type LocalRole,
 } from "./source";
+import { buildScheduleColumns } from "../../scheduling";
+import { fromBusinessInputValue } from "../../date";
 import {
+  countOccupying,
   countOtherScheduledJobs,
   listAssignableStaff,
   SQL_COUNT_OTHER_SCHEDULED_JOBS,
@@ -114,21 +117,48 @@ describe("countOtherScheduledJobs (local path)", () => {
   });
 
   it("counts crew jobs (job_assignments) as well as jobs.assigned_to, binding the id once", async () => {
-    const getOptional = jest.fn().mockResolvedValue({ n: 2 });
-    setLocalReads(fakeReads({ getOptional }));
+    const at = (key: string, time: string) => fromBusinessInputValue(`${key}T${time}`);
+    const getAll = jest.fn().mockResolvedValue([
+      { id: "a", scheduled_start: at("2026-10-09", "07:00"), scheduled_end: at("2026-10-09", "10:00"), schedule_daily: 0 },
+      { id: "b", scheduled_start: at("2026-10-09", "13:00"), scheduled_end: null, schedule_daily: 0 },
+    ]);
+    setLocalReads(fakeReads({ getAll }));
 
     await expect(countOtherScheduledJobs("tech-2", "2026-10-09", "this-job")).resolves.toBe(2);
 
-    // calls[0] is the sync_horizon lookup (./horizon); the count follows.
-    const [sql, params] = getOptional.mock.calls[getOptional.mock.calls.length - 1];
+    const [sql, params] = getAll.mock.calls[0];
     expect(sql).toBe(SQL_COUNT_OTHER_SCHEDULED_JOBS);
     expect(norm(sql)).toContain(
       "WHERE (j.assigned_to = ?1 OR j.id IN (SELECT ja.job_id FROM job_assignments ja WHERE ja.staff_id = ?1))"
     );
-    expect(norm(sql)).toContain("AND j.id != ?2 AND j.scheduled_start >= ?3 AND j.scheduled_start < ?4");
+    expect(norm(sql)).toContain(
+      "AND j.id != ?2 AND j.scheduled_start < ?4 AND (j.scheduled_end >= ?3 OR (j.scheduled_end IS NULL AND j.scheduled_start >= ?3))"
+    );
     expect(params[0]).toBe("tech-2");
     expect(params[1]).toBe("this-job");
     expect(params).toHaveLength(4);
     expect(supabase.from as jest.Mock).not.toHaveBeenCalled();
+  });
+
+  it("counts a daily job on every booked day of its range, but not on a weekend it skips (0071)", async () => {
+    // Thu 22 – Mon 26 Oct 2026, all day: books Thu, Fri, Mon — not Sat 24.
+    const daily = { id: "d", ...buildScheduleColumns({ startDateKey: "2026-10-22", endDateKey: "2026-10-26", startTime: "", endTime: "", allDay: true }) };
+    const row = { id: daily.id, scheduled_start: daily.scheduled_start, scheduled_end: daily.scheduled_end, schedule_daily: 1 };
+    const getAll = jest.fn().mockResolvedValue([row]);
+    setLocalReads(fakeReads({ getAll }));
+
+    await expect(countOtherScheduledJobs("tech-2", "2026-10-23", "this-job")).resolves.toBe(1); // a middle day
+    await expect(countOtherScheduledJobs("tech-2", "2026-10-24", "this-job")).resolves.toBe(0); // skipped Saturday
+    // Without the flag the same window is one long block, booked on its start day only.
+    getAll.mockResolvedValue([{ ...row, schedule_daily: 0 }]);
+    await expect(countOtherScheduledJobs("tech-2", "2026-10-23", "this-job")).resolves.toBe(0);
+  });
+
+  it("countOccupying treats SQLite 1/0 and PostgREST true/false alike", () => {
+    const cols = buildScheduleColumns({ startDateKey: "2026-10-19", endDateKey: "2026-10-21", startTime: "", endTime: "", allDay: true });
+    const base = { id: "x", scheduled_start: cols.scheduled_start, scheduled_end: cols.scheduled_end };
+    expect(countOccupying([{ ...base, schedule_daily: 1 }], "2026-10-20")).toBe(1);
+    expect(countOccupying([{ ...base, schedule_daily: true }], "2026-10-20")).toBe(1);
+    expect(countOccupying([{ ...base, schedule_daily: null }], "2026-10-20")).toBe(0);
   });
 });

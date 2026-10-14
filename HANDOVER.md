@@ -121,7 +121,9 @@ lands in **plaintext SQLite on that technician's phone**, whatever RLS says.
 Treat `sync-streams.yaml` as security code. Re-audited 9 October 2026 (sync
 windows) — all 16 technician-visible streams are money-free:
 
-- `tech_jobs` — 19 named columns, none monetary
+- `tech_jobs` — 21 named columns, none monetary (`schedule_daily`,
+  `schedule_all_day` added for the 0071 multi-day schedules — draft; the
+  migration must be applied before these sync rules are redeployed)
 - `tech_job_variations` — omits `rate`, `total_amount`, `admin_notes`
 - `variation_types` — omits the preset `rate`
 - `tech_time_entries` — omits `rate`
@@ -298,8 +300,9 @@ declared by hand in `mobile/powersync/device-indexes.js` and merged into the
 generated `schema.ts` by `generate-powersync-schema.mjs` (which refuses an
 index on a column the device does not hold). `lib/powersync/indexes.test.ts`
 reads every local SQL statement and fails when a lookup has no usable index —
-add the index there, then regenerate. Two scans are deliberate and named in
-that test.
+add the index there, then regenerate. Three scans are deliberate and named in
+that test (the third, `jobs.scheduled_end`, is the residual half of
+`countOtherScheduledJobs`' multi-day overlap test).
 
 No horizon row means no window (migration or YAML not deployed) and every read
 behaves exactly as before. Consequence to tell office staff: once deployed,
