@@ -52,6 +52,12 @@ export type ScheduleChange = {
   assigned_to?: string | null;
   scheduled_start?: string | null;
   scheduled_end?: string | null;
+  // Multi-day schedules (migration 0071 — draft, not applied yet): what scheduled_start..scheduled_end
+  // MEANS. Written together with the times — buildScheduleColumns() in
+  // lib/scheduling.ts returns all four — and reset to false when the schedule
+  // is cleared, so the window and its meaning cannot disagree.
+  schedule_daily?: boolean;
+  schedule_all_day?: boolean;
   scheduled_cost_center_id?: string | null;
   // The other job columns an editable form saves in the same statement.
   //

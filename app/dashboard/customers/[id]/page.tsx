@@ -20,6 +20,7 @@ import {
   Plus,
 } from "lucide-react";
 import { formatDate } from "@/lib/date";
+import { formatScheduleDates } from "@/lib/schedule-form";
 import { SiteArchiveButton } from "@/components/site-archive-button";
 import { formatInvoiceNumber } from "@/lib/utils";
 import { jobStatusColors, quoteStatusColors, invoiceStatusColors } from "@/lib/badge-colors";
@@ -43,7 +44,7 @@ export default async function CustomerDetailPage({
     await Promise.all([
       supabase.from("customers").select("name, company, is_active, phone, mobile, email, abn, notes").eq("id", id).single(),
       supabase.from("sites").select("id, name, is_active, address_line1, suburb, state, postcode").eq("customer_id", id).order("name"),
-      supabase.from("jobs").select("id, job_number, title, scheduled_start, status").eq("customer_id", id).order("created_at", { ascending: false }),
+      supabase.from("jobs").select("id, job_number, title, scheduled_start, scheduled_end, schedule_daily, status").eq("customer_id", id).order("created_at", { ascending: false }),
       supabase.from("quotes").select("id, quote_number, title, created_at, total, status").eq("customer_id", id).order("created_at", { ascending: false }),
       supabase.from("invoices").select("id, invoice_number, title, due_date, total, status").eq("customer_id", id).order("created_at", { ascending: false }),
     ]);
@@ -227,7 +228,7 @@ export default async function CustomerDetailPage({
                             </p>
                             <p className="text-xs text-slate-500">
                               {job.scheduled_start
-                                ? formatDate(job.scheduled_start)
+                                ? (job.schedule_daily ? formatScheduleDates(job) : formatDate(job.scheduled_start))
                                 : "Not scheduled"}
                             </p>
                           </div>

@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Briefcase, Plus, Search, X } from "lucide-react";
 import Link from "next/link";
 import { formatDate } from "@/lib/date";
+import { formatScheduleDates } from "@/lib/schedule-form";
 import { ListPageSkeleton } from "@/components/ui/loading-skeletons";
 import { jobStatusColors, jobPriorityColors } from "@/lib/badge-colors";
 import { getJobStageLabel } from "@/lib/job-stages";
@@ -19,7 +20,9 @@ const BASE_COLUMNS = "id, job_number, title, status, priority, scheduled_start, 
 // todo_listed_at drives the "To-do" badge. Until the to-do columns exist in the
 // database PostgREST rejects the whole select with 42703 (undefined column), so
 // the list retries once without it — the badge is optional, the list is not.
-const LIST_COLUMNS = `${BASE_COLUMNS}, todo_listed_at`;
+// scheduled_end + schedule_daily (0071, draft — not applied yet) turn a multi-day job's date into its
+// range; they ride the same retry, falling back to the start date alone.
+const LIST_COLUMNS = `${BASE_COLUMNS}, todo_listed_at, scheduled_end, schedule_daily`;
 
 type StageInfo = { stage: string; created_at: string };
 
@@ -209,7 +212,9 @@ export default function JobsPage() {
                     </p>
                     <p className="text-xs text-slate-500 mt-0.5 truncate">
                       {job.customers?.name ?? "No customer"}
-                      {job.scheduled_start ? ` · ${formatDate(job.scheduled_start)}` : ""}
+                      {job.scheduled_start
+                        ? ` · ${job.schedule_daily ? formatScheduleDates(job) : formatDate(job.scheduled_start)}`
+                        : ""}
                     </p>
                   </div>
                   <div className="flex items-center gap-2 ml-4 flex-shrink-0">

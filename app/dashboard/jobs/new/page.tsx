@@ -12,9 +12,11 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ArrowLeft } from "lucide-react";
 import Link from "next/link";
-import { fromBusinessInputValue, toBusinessInputValue } from "@/lib/date";
+import type { ScheduleInput } from "@/lib/scheduling";
+import { emptyScheduleInput, scheduleColumnsFromForm } from "@/lib/schedule-form";
 import { CustomerPicker } from "@/components/customer-picker";
 import { AddSiteDialog } from "@/components/site-add-dialog";
+import { ScheduleFields } from "@/components/job/schedule-fields";
 
 // Radix/shadcn's SelectItem can't take value="", so an explicit "Unassigned"
 // option needs a sentinel value that gets translated back to "" (-> null on
@@ -41,8 +43,11 @@ export default function NewJobPage() {
   const [form, setForm] = useState({
     title: "", description: "", customer_id: params?.get("customer_id") ?? "", site_id: "", assigned_to: "",
     status: "pending", priority: "normal", job_type: "service",
-    scheduled_start: "", scheduled_end: "", notes: "",
+    notes: "",
   });
+  // Start date, end date, All day and daily times — the same inputs as the
+  // Schedule Job wizard. A blank start date creates the job unscheduled.
+  const [schedule, setSchedule] = useState<ScheduleInput>(emptyScheduleInput);
 
   useEffect(() => {
     async function load() {
@@ -65,24 +70,19 @@ export default function NewJobPage() {
     setForm((prev) => ({ ...prev, [field]: value ?? "" }));
   }
 
-  // Quick-fill a standard 7:00am-3:30pm work day (Melbourne time) instead of
-  // requiring manual entry of both start and end times. Keeps whatever date
-  // is already selected (falls back to today) so this can be used after
-  // picking a date, or before.
-  function setAllDay() {
-    const datePart = (form.scheduled_start || toBusinessInputValue(new Date())).slice(0, 10);
-    setForm((prev) => ({ ...prev, scheduled_start: `${datePart}T07:00`, scheduled_end: `${datePart}T15:30` }));
-  }
-
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    const built = scheduleColumnsFromForm(schedule, { optional: true });
+    if (!built.ok) {
+      toast.error(built.error);
+      return;
+    }
     setLoading(true);
     const payload: any = {
       ...form,
       assigned_to: form.assigned_to || null,
       site_id: form.site_id || null,
-      scheduled_start: form.scheduled_start ? fromBusinessInputValue(form.scheduled_start) : null,
-      scheduled_end: form.scheduled_end ? fromBusinessInputValue(form.scheduled_end) : null,
+      ...built.columns,
     };
     const { data, error } = await supabase.from("jobs").insert(payload).select("id").single();
     if (error) {
@@ -191,17 +191,10 @@ export default function NewJobPage() {
                   </SelectContent>
                 </Select>
               </div>
-              <div className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <Label htmlFor="scheduled_start">Scheduled Start</Label>
-                  <Button type="button" variant="link" size="sm" className="h-auto p-0 text-xs" onClick={setAllDay}>All Day (7:00–3:30)</Button>
-                </div>
-                <Input id="scheduled_start" type="datetime-local" value={form.scheduled_start} onChange={(e) => set("scheduled_start", e.target.value)} />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="scheduled_end">Scheduled End</Label>
-                <Input id="scheduled_end" type="datetime-local" value={form.scheduled_end} onChange={(e) => set("scheduled_end", e.target.value)} />
-              </div>
+            </div>
+            <div className="space-y-2">
+              <Label>Schedule</Label>
+              <ScheduleFields value={schedule} onChange={setSchedule} optional />
             </div>
             <div className="space-y-2">
               <Label htmlFor="description">Description</Label>
