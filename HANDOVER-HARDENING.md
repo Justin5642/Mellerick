@@ -25,6 +25,8 @@ Re-verified 11 Aug 2026 by reading each header:
 | `0051` | `time_entries` duration constraint | nothing in the schema stops a reversed or 200-hour shift reaching payroll |
 | `0052` | foreign-key indexes | performance only |
 | `0053` | wrap `is_office_or_admin` in `select` | performance only — apply this one **last and alone**, it rewrites live RLS policies |
+| `0069` | wrap `is_admin(auth.uid())`, `auth.uid()`, `auth.role()` in `select` (and `is_office_or_admin`, so it also covers 0053) | performance only — apply **alone**, after 0053; then run `money_boundary_sweep.sql` |
+| `0070` | dashboard sort/filter indexes (`jobs.created_at`, `invoices.created_at`, `google_event_id`, …) | performance only — independent, any time |
 
 **Merging a migration does not run it.** This repo has been bitten by that gap repeatedly:
 `0034` reported success while achieving nothing, and `0040` shipped after nine call sites had
