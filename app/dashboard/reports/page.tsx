@@ -8,6 +8,14 @@ import { computeEquipmentCost } from "@/lib/equipment-cost";
 import { businessDateParts, formatDate } from "@/lib/date";
 import { fetchAllRows } from "@/lib/fetch-all-rows";
 
+// What computeEquipmentCost / computeLoadedCost read, plus the keys the page
+// joins on — not "*", which carried every other column of both tables.
+const EQUIPMENT_COST_COLUMNS =
+  "id, name, assigned_to, purchase_cost, estimated_life_years, insurance_annual, maintenance_annual, " +
+  "registration_annual, other_annual_costs, fuel_cost_per_hour, target_hours_per_year";
+const STAFF_COST_COLUMNS =
+  "staff_id, hourly_rate, super_rate, workers_comp_rate, leave_loading_rate, annual_fixed_oncosts, target_hours_per_week";
+
 function monthKey(date: string) {
   const { year, month } = businessDateParts(date);
   return `${year}-${String(month).padStart(2, "0")}`;
@@ -42,24 +50,52 @@ export default async function ReportsPage() {
   equipmentTwelveMonthsAgo.setFullYear(equipmentTwelveMonthsAgo.getFullYear() - 1);
   const equipmentCutoffDate = equipmentTwelveMonthsAgo.toISOString().slice(0, 10);
 
-  // The three growing tables select only the columns the sums below read, and
-  // are ordered by id: range() paging over an unordered select has no stable
-  // row order between requests, so a page boundary could skip or repeat a row
-  // and the "complete" total would not be. (equipment and staff_cost_profiles
-  // stay "*" — small tables, and the cost helpers read most of their columns.)
-  const [invoicesResult, quotesResult, jobsResult, profilesResult, equipmentResult, equipmentUsageResult, viewer] = await Promise.all([
-    fetchAllRows(supabase.from("invoices").select("total, status, created_at, customer_id, customers(name)").order("id")),
-    fetchAllRows(supabase.from("quotes").select("total, status").order("id")),
-    fetchAllRows(supabase.from("jobs").select("status, assigned_to").order("id")),
-    fetchAllRows(supabase.from("profiles").select("id, full_name").eq("is_active", true)),
-    fetchAllRows(supabase.from("equipment").select("*").eq("is_active", true)),
-    fetchAllRows(
+  // Every read selects only the columns the sums below read, and is ordered by
+  // a unique key: range() paging over an unordered select has no stable row
+  // order between requests, so a page boundary could skip or repeat a row and
+  // the "complete" total would not be. Each read is a factory because pages
+  // are now fetched together (lib/fetch-all-rows.ts).
+  const viewerPromise = getViewer();
+
+  // Staff cost/efficiency data is payroll-sensitive (wage, super, sick
+  // leave), so it's only fetched and passed down at all when the viewer is
+  // an admin -- everyone else gets `staffEfficiency: null` and the
+  // dashboard component simply doesn't render that section. It needs only
+  // the viewer's role, so it starts as soon as that is known instead of
+  // waiting for the batch below.
+  const twelveMonthsAgo = new Date();
+  twelveMonthsAgo.setFullYear(twelveMonthsAgo.getFullYear() - 1);
+  const cutoffIso = twelveMonthsAgo.toISOString();
+  const cutoffDate = twelveMonthsAgo.toISOString().slice(0, 10);
+  const adminReadsPromise = viewerPromise.then((viewer) => {
+    if (!viewer?.user || viewer.profile?.role !== "admin") return null;
+    // time_entries is the one here that grows without bound — twelve months of
+    // work entries across the whole team — so it is the first of these to cross
+    // the 1000-row cap and start under-reporting utilisation.
+    return Promise.all([
+      fetchAllRows((c) => supabase.from("staff_cost_profiles").select(STAFF_COST_COLUMNS, c).order("staff_id")),
+      fetchAllRows((c) => supabase.from("staff_leave").select("staff_id, leave_type, hours", c).gte("start_date", cutoffDate).order("id")),
+      fetchAllRows((c) =>
+        supabase.from("time_entries").select("staff_id, hours", c).eq("entry_type", "work").gte("clock_in", cutoffIso).not("hours", "is", null).order("id")
+      ),
+    ]);
+  });
+
+  const [invoicesResult, quotesResult, jobsResult, profilesResult, equipmentResult, equipmentUsageResult, viewer, adminReads] = await Promise.all([
+    fetchAllRows((c) => supabase.from("invoices").select("total, status, created_at, customer_id, customers(name)", c).order("id")),
+    fetchAllRows((c) => supabase.from("quotes").select("total, status", c).order("id")),
+    fetchAllRows((c) => supabase.from("jobs").select("status, assigned_to", c).order("id")),
+    fetchAllRows((c) => supabase.from("profiles").select("id, full_name", c).eq("is_active", true).order("id")),
+    fetchAllRows((c) => supabase.from("equipment").select(EQUIPMENT_COST_COLUMNS, c).eq("is_active", true).order("id")),
+    fetchAllRows((c) =>
       supabase
         .from("equipment_usage_log")
-        .select("equipment_id, hours, usage_date")
+        .select("equipment_id, hours", c)
         .gte("usage_date", equipmentCutoffDate)
+        .order("id")
     ),
-    getViewer(),
+    viewerPromise,
+    adminReadsPromise,
   ]);
 
   // A report that cannot read all its rows must say so rather than render a
@@ -85,10 +121,7 @@ export default async function ReportsPage() {
   const equipmentList = equipmentResult.ok ? equipmentResult.rows : [];
   const equipmentUsage = equipmentUsageResult.ok ? equipmentUsageResult.rows : [];
 
-  // Staff cost/efficiency data is payroll-sensitive (wage, super, sick
-  // leave), so it's only fetched and passed down at all when the viewer is
-  // an admin -- everyone else gets `staffEfficiency: null` and the
-  // dashboard component simply doesn't render that section.
+  // Same test the admin reads above started on.
   let isAdmin = false;
   const user = viewer?.user;
   if (user) {
@@ -117,20 +150,8 @@ export default async function ReportsPage() {
     trueCostPerWorkedHour: number | null;
   }[] = [];
 
-  if (isAdmin) {
-    const twelveMonthsAgo = new Date();
-    twelveMonthsAgo.setFullYear(twelveMonthsAgo.getFullYear() - 1);
-    const cutoffIso = twelveMonthsAgo.toISOString();
-    const cutoffDate = twelveMonthsAgo.toISOString().slice(0, 10);
-
-    // time_entries is the one here that grows without bound — twelve months of
-    // work entries across the whole team — so it is the first of these to cross
-    // the 1000-row cap and start under-reporting utilisation.
-    const [costProfilesResult, leaveResult, workResult] = await Promise.all([
-      fetchAllRows(supabase.from("staff_cost_profiles").select("*")),
-      fetchAllRows(supabase.from("staff_leave").select("staff_id, leave_type, hours, start_date").gte("start_date", cutoffDate)),
-      fetchAllRows(supabase.from("time_entries").select("staff_id, hours").eq("entry_type", "work").gte("clock_in", cutoffIso).not("hours", "is", null)),
-    ]);
+  if (isAdmin && adminReads) {
+    const [costProfilesResult, leaveResult, workResult] = adminReads;
 
     const costProfiles = costProfilesResult.ok ? costProfilesResult.rows : null;
     const leaveEntries = leaveResult.ok ? leaveResult.rows : null;

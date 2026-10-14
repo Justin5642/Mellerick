@@ -29,19 +29,22 @@ export default async function BackflowDevicePage({ params }: { params: Promise<{
   const { id } = await params;
   const supabase = await createClient();
 
-  const { data: device } = await supabase
-    .from("backflow_devices")
-    .select("*, customers(name), sites(name, address_line1, suburb, state, postcode)")
-    .eq("id", id)
-    .single();
+  // Both keyed by the id in the URL, so read together. A missing device still
+  // 404s; its tests (none, under the same RLS) are simply unused.
+  const [{ data: device }, { data: tests }] = await Promise.all([
+    supabase
+      .from("backflow_devices")
+      .select("*, customers(name), sites(name, address_line1, suburb, state, postcode)")
+      .eq("id", id)
+      .single(),
+    supabase
+      .from("backflow_tests")
+      .select("*, profiles!backflow_tests_tested_by_fkey(full_name)")
+      .eq("device_id", id)
+      .order("test_date", { ascending: false }),
+  ]);
 
   if (!device) notFound();
-
-  const { data: tests } = await supabase
-    .from("backflow_tests")
-    .select("*, profiles!backflow_tests_tested_by_fkey(full_name)")
-    .eq("device_id", id)
-    .order("test_date", { ascending: false });
 
   const lastPass = (tests ?? []).find((t: any) => t.result === "pass");
   const nextDueDate = computeNextDueDate(lastPass?.test_date, Number(device.test_frequency_months));
