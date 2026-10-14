@@ -87,7 +87,7 @@ export function MyJobsScreen() {
   }
 
   // "Today" is the Melbourne day, and a job is today's when it is BOOKED today
-  // — a Mon–Wed daily job sits under Today on Tuesday too (migration 0071, draft).
+  // — a Mon–Wed daily job sits under Today on Tuesday too (migration 0071).
   // This used the device-local calendar day and the start date alone, so a
   // phone on another timezone split the list on the wrong midnight and a
   // multi-day job left Today after its first day.

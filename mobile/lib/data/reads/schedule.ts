@@ -55,7 +55,7 @@ export async function listAssignableStaff(): Promise<AssignableStaff[]> {
 // (./assignedJobs): a technician who is the second name on a morning job is
 // not free that morning.
 //
-// "Booked on" means OCCUPIES the day (migration 0071, draft), not "starts on it": a
+// "Booked on" means OCCUPIES the day (migration 0071), not "starts on it": a
 // Mon–Wed daily job books Tuesday too. The SQL is a coarse overlap on the
 // stored window (starts before the day ends; ends — or, with no end, starts —
 // on or after it begins); occupiesDay() then drops a daily job's skipped

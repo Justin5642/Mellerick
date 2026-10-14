@@ -37,7 +37,7 @@ export type CrewJobScope =
   | { kind: "occupying"; fromIso: string; beforeIso: string };
 
 /**
- * PostgREST `.or()` half of a window-overlap test (migration 0071, draft — a daily job
+ * PostgREST `.or()` half of a window-overlap test (migration 0071 — a daily job
  * books every day of its range, not just the day it starts): the job ends on
  * or after `fromIso`, or has no end and STARTS on or after it (a start with no
  * end occupies its start day only — lib/scheduling.ts scheduleDays). Pair with

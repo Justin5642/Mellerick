@@ -5,7 +5,7 @@ import { systemTime, type TimeSource } from "../time";
 import type { ScheduleColumns } from "../../scheduling";
 
 /**
- * How a moved schedule's two flags change (migration 0071, draft). Omitted fields are
+ * How a moved schedule's two flags change (migration 0071). Omitted fields are
  * left as stored — a reschedule never touches what it does not know about.
  */
 export interface RescheduleFlags {
@@ -51,7 +51,7 @@ export class ScheduleRepository {
   }
 
   /**
-   * Take a job off the schedule. Both 0071 (draft) flags reset with the window, so a
+   * Take a job off the schedule. Both 0071 flags reset with the window, so a
    * job scheduled again later never inherits "daily" or "All day" from a
    * schedule that no longer exists.
    */
@@ -87,7 +87,7 @@ export class ScheduleRepository {
     costCenterId: string | null = null
   ): Promise<void> {
     // `columns` comes from buildScheduleColumns() (lib/scheduling.ts), so the
-    // window and both 0071 (draft) flags are always written together — a single-day
+    // window and both 0071 flags are always written together — a single-day
     // reschedule of a once-daily job resets schedule_daily, not just the times.
     const opId = await this.updateJob(jobId, {
       scheduled_start: columns.scheduled_start,

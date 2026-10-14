@@ -49,7 +49,7 @@ export default async function DashboardPage() {
   // database returns only jobs that can touch today instead of every open
   // scheduled job (DST changes happen at 2-3am, never at midnight, so both
   // ends are real instants). "Touch" is an overlap, not "starts today": a
-  // multi-day job (schedule_daily, 0071 — draft, not applied yet) that began on Monday is still on
+  // multi-day job (schedule_daily, 0071) that began on Monday is still on
   // today's list on Wednesday. occupiesDay() then drops the rows whose span
   // only crosses today — a weekend inside a range, or the tail of a legacy
   // block that ran past midnight.

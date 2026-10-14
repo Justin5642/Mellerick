@@ -1,4 +1,4 @@
-// Display helpers for multi-day schedules (migration 0071, draft). The day rules
+// Display helpers for multi-day schedules (migration 0071). The day rules
 // themselves live in ./scheduling.ts (byte-identical to the web copy, pinned by
 // tests/unit/scheduling-multiday.test.ts) — this file only turns their output
 // into text and answers "which of a job's days is this one?" for list screens.

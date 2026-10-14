@@ -63,7 +63,7 @@ export interface MyJob {
   status: string;
   scheduled_start: string | null;
   scheduled_end: string | null;
-  /** Migration 0071 (draft): the window repeats on each booked day (lib/scheduling.ts). */
+  /** Migration 0071: the window repeats on each booked day (lib/scheduling.ts). */
   schedule_daily: boolean;
   customers: { name: string } | null;
   sites: JobSiteSummary | null;

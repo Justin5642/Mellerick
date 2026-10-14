@@ -52,7 +52,7 @@ export type ScheduleChange = {
   assigned_to?: string | null;
   scheduled_start?: string | null;
   scheduled_end?: string | null;
-  // Multi-day schedules (migration 0071 — draft, not applied yet): what scheduled_start..scheduled_end
+  // Multi-day schedules (migration 0071): what scheduled_start..scheduled_end
   // MEANS. Written together with the times — buildScheduleColumns() in
   // lib/scheduling.ts returns all four — and reset to false when the schedule
   // is cleared, so the window and its meaning cannot disagree.

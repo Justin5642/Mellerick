@@ -56,7 +56,7 @@ interface Props {
   currentUserId: string;
   currentScheduledStart: string | null;
   currentScheduledEnd: string | null;
-  /** jobs.schedule_daily / schedule_all_day (0071, draft — not applied yet) — so a saved range and All day reopen as saved. */
+  /** jobs.schedule_daily / schedule_all_day (0071) — so a saved range and All day reopen as saved. */
   currentScheduleDaily?: boolean | null;
   currentScheduleAllDay?: boolean | null;
   costCenters?: CostCenterOption[];

@@ -28,7 +28,7 @@ export interface DashboardJob {
   priority: string | null;
   scheduled_start: string | null;
   scheduled_end: string | null;
-  /** Migration 0071 (draft) — the screen asks occupiesDay(), never the start date alone. */
+  /** Migration 0071 — the screen asks occupiesDay(), never the start date alone. */
   schedule_daily: boolean;
   customers: { name: string } | null;
   assigned_profile: { full_name: string } | null;

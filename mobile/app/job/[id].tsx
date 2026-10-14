@@ -248,7 +248,7 @@ export default function JobDetailScreen() {
       </Text>
       <Text style={styles.scheduleSubtitle}>
         {assignedStaff.length > 0 && job.scheduled_start && job.schedule_daily
-          ? // Multi-day (0071, draft): the range and the hours worked on each day.
+          ? // Multi-day (0071): the range and the hours worked on each day.
             `${assignedStaff.map((a) => a.full_name).join(", ")} · ${formatScheduleSummary(job)}`
           : assignedStaff.length > 0 && job.scheduled_start
           ? `${assignedStaff.map((a) => a.full_name).join(", ")} · ${new Date(job.scheduled_start).toLocaleString("en-AU", {

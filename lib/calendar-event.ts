@@ -4,8 +4,7 @@
 // has one answer.
 //
 // A single-window job (schedule_daily false) is one event from
-// scheduled_start to scheduled_end, exactly as before migration 0071 (a DRAFT,
-// not applied yet — apply it before shipping this).
+// scheduled_start to scheduled_end, exactly as before migration 0071.
 //
 // A multi-day job (schedule_daily true) is ONE recurring event: the first
 // booked day's block, in Melbourne wall time with timeZone set (so Google

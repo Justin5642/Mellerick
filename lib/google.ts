@@ -182,8 +182,7 @@ function sameInstant(a: string | null | undefined, b: string | null | undefined)
  * `event.updated`, so the next poll sees the event as newer — and by then the
  * times match, so nothing is written and it does not oscillate.
  *
- * MULTI-DAY JOBS (schedule_daily, migration 0071 — a DRAFT, not applied yet;
- * the select below needs it applied first) are ONE recurring event (see
+ * MULTI-DAY JOBS (schedule_daily, migration 0071) are ONE recurring event (see
  * lib/calendar-event.ts). The listing uses singleEvents: true, so a series
  * arrives as its occurrences — each with its own id and `recurringEventId` =
  * the master, which is what jobs.google_event_id holds. For those the app is

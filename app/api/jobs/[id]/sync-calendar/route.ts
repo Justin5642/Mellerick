@@ -64,8 +64,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       return NextResponse.json({ removed: true });
     }
 
-    // A multi-day job (schedule_daily, migration 0071 — a DRAFT, not applied
-    // yet; must be applied before this ships — selected by `*` above)
+    // A multi-day job (schedule_daily, migration 0071 — selected by `*` above)
     // becomes ONE recurring event whose occurrences are exactly scheduleDays();
     // a single-window job is one event as before, with `recurrence: []` so an
     // update from daily → single collapses the old series. See

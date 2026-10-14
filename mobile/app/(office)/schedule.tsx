@@ -22,7 +22,7 @@ interface SchedJob {
   status: string;
   scheduled_start: string;
   scheduled_end: string | null;
-  /** Migration 0071 (draft) — booked on each weekday of its range (lib/scheduling.ts). */
+  /** Migration 0071 — booked on each weekday of its range (lib/scheduling.ts). */
   schedule_daily?: boolean | null;
   schedule_all_day?: boolean | null;
   assigned_to: string | null;
@@ -93,7 +93,7 @@ export default function ScheduleScreen() {
     setRefreshing(false);
   }, [load]);
 
-  // One row per booked DAY, not per job (migration 0071, draft): a Mon–Wed daily job
+  // One row per booked DAY, not per job (migration 0071): a Mon–Wed daily job
   // appears under Monday, Tuesday and Wednesday with that day's hours, and
   // not under the weekend it skips. A single-day job is one row, as before.
   const sections = useMemo(() => {
@@ -191,7 +191,7 @@ export default function ScheduleScreen() {
   // immediately, same as the original date-only picker did -- stays open for
   // continuous scrolling. Android has no combined mode, so the date dialog
   // chains into a second time dialog before anything is applied. A daily job
-  // (0071, draft) only picks its new start DATE — its hours and day count move with it.
+  // (0071) only picks its new start DATE — its hours and day count move with it.
   function onDatePicked(event: DateTimePickerEvent, selected?: Date) {
     const job = datePickerFor;
     if (Platform.OS === "ios") {

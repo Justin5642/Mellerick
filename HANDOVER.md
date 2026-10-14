@@ -77,7 +77,7 @@ token expires (≤1 h); RLS still authorizes every query. List-row `<Link>`s are
 `prefetch={false}`; the sidebar prefetches. If the database ever moves to Sydney,
 move `vercel.json` back to `syd1` in the same change.
 
-**Multi-day schedules (migration `0071`, draft until applied).** A job still
+**Multi-day schedules (migration `0071`, applied 2026-10-14).** A job still
 stores one `scheduled_start..scheduled_end`; `jobs.schedule_daily = true` means
 the same daily hours on each booked day — weekdays between the two dates, plus
 either date itself even on a weekend — and `schedule_all_day` remembers the
@@ -100,10 +100,10 @@ mirrored at `mobile/lib/scheduling.ts` and pinned identical by
   (`lib/calendar-event.ts`). The poll never writes an edited single occurrence
   back to the job, and for a daily job never writes series time changes back
   either — the app is the source of truth for multi-day schedules.
-- **Rollout order matters:** apply `0071` → redeploy the PowerSync sync rules
-  (`tech_jobs` lists both columns) → merge/deploy web → ship mobile. Web reads
-  and writes the columns, and the calendar poll selects them; before `0071`
-  only the Jobs list and the schedule board fall back (42703).
+- **Rolled out 14 Oct 2026** in the order that matters for any future column
+  like this: apply the migration → redeploy the PowerSync sync rules → merge
+  web → ship mobile. Web and the calendar poll select these columns; only the
+  Jobs list and the schedule board fall back (42703) if they are ever missing.
 
 **Load page data on the server, not in the browser.** A browser→Supabase
 query from Australia costs ~100 ms+; a server query in `sin1` costs ~2 ms. So
@@ -150,8 +150,8 @@ Treat `sync-streams.yaml` as security code. Re-audited 9 October 2026 (sync
 windows) — all 16 technician-visible streams are money-free:
 
 - `tech_jobs` — 21 named columns, none monetary (`schedule_daily`,
-  `schedule_all_day` added for the 0071 multi-day schedules — draft; the
-  migration must be applied before these sync rules are redeployed)
+  `schedule_all_day` added for the 0071 multi-day schedules; 0071 applied and
+  these rules redeployed 2026-10-14)
 - `tech_job_variations` — omits `rate`, `total_amount`, `admin_notes`
 - `variation_types` — omits the preset `rate`
 - `tech_time_entries` — omits `rate`

@@ -20,7 +20,7 @@ const BASE_COLUMNS = "id, job_number, title, status, priority, scheduled_start, 
 // todo_listed_at drives the "To-do" badge. Until the to-do columns exist in the
 // database PostgREST rejects the whole select with 42703 (undefined column), so
 // the list retries once without it — the badge is optional, the list is not.
-// scheduled_end + schedule_daily (0071, draft — not applied yet) turn a multi-day job's date into its
+// scheduled_end + schedule_daily (0071) turn a multi-day job's date into its
 // range; they ride the same retry, falling back to the start date alone.
 const LIST_COLUMNS = `${BASE_COLUMNS}, todo_listed_at, scheduled_end, schedule_daily`;
 

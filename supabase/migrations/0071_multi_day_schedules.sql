@@ -1,9 +1,12 @@
 -- ============================================================================
 -- Multi-day schedules: a job booked for the same hours on several workdays.
 --
--- STATUS: DRAFT — NOT APPLIED. Apply in the SQL editor BEFORE merging the
--- code that writes these columns, then redeploy the PowerSync sync rules
--- (tech_jobs lists these two columns explicitly), then build the mobile app.
+-- STATUS: ✅ APPLIED IN PRODUCTION (2026-10-14, via SQL editor), before the
+-- code that writes these columns was merged; PowerSync sync rules (tech_jobs
+-- lists both columns explicitly) redeployed the same day. Verify, do not trust
+-- this comment:
+--   select column_name from information_schema.columns
+--   where table_name = 'jobs' and column_name like 'schedule_%';
 --
 -- WHY
 -- A job holds one window, scheduled_start..scheduled_end. Booking a technician

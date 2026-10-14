@@ -107,7 +107,7 @@ export function JobOverview({ job, staff }: Props) {
     }
     // The schedule is only rewritten when it was edited here. This form saves
     // on every change of title or status too, and a job whose saved window
-    // the inputs cannot express exactly — a pre-0071 (draft) block running past
+    // the inputs cannot express exactly — a pre-0071 block running past
     // midnight or over several days — must not be reshaped by an unrelated
     // save. A blank start date clears all four columns.
     const scheduleEdited = !sameScheduleInput(schedule, savedSchedule);

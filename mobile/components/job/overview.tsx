@@ -250,7 +250,7 @@ export function JobOverviewTab({ job, currentUserId }: { job: Job; currentUserId
             <Text style={styles.meta}>Scheduled</Text>
             <Text style={styles.meta}>
               {job.schedule_daily
-                ? // Multi-day (0071, draft): first to last booked day, not just the first.
+                ? // Multi-day (0071): first to last booked day, not just the first.
                   (() => {
                     const days = scheduleDays({ scheduled_start: job.scheduled_start, scheduled_end: job.scheduled_end ?? null, schedule_daily: true });
                     return days.length > 0 ? dateRangeLabel(days[0].dateKey, days[days.length - 1].dateKey) : "";

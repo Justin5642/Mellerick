@@ -16,7 +16,7 @@ import { listBackflowDevices } from "../../lib/data/reads/backflow";
 
 type DashJob = DashboardJob;
 // A job on today's list with TODAY's block — a Mon–Wed daily job shows its
-// Tuesday hours on Tuesday, not just on the Monday it starts (migration 0071, draft).
+// Tuesday hours on Tuesday, not just on the Monday it starts (migration 0071).
 type TodayJob = { job: DashJob; day: ScheduleDay & { index: number; count: number } };
 interface Counts {
   total: number;

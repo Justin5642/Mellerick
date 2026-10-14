@@ -28,7 +28,7 @@ interface Props {
   currentUserId: string;
   currentScheduledStart: string | null;
   currentScheduledEnd: string | null;
-  /** jobs.schedule_daily / schedule_all_day (migration 0071, draft) — so the dialog reopens as saved. */
+  /** jobs.schedule_daily / schedule_all_day (migration 0071) — so the dialog reopens as saved. */
   currentScheduleDaily?: boolean;
   currentScheduleAllDay?: boolean;
   costCenters?: JobCostCentre[];
@@ -61,7 +61,7 @@ function friendlyTime(hhmm: string): string {
 /**
  * Mobile twin of the web job detail's "Schedule Job" dialog — multi-select
  * technician, start + end date (same daily hours on each booked weekday —
- * migration 0071, draft) with an All day toggle, optional cost centre, an optional
+ * migration 0071) with an All day toggle, optional cost centre, an optional
  * note for the technician, then confirm — same shared rules (lib/scheduling.ts),
  * writing through ScheduleRepository.schedule() so the job/time update is one
  * durable outbox entry with a coalesced calendar sync and a coalesced
@@ -169,7 +169,7 @@ export function ScheduleJobModal({
         const counts = Object.fromEntries(pairs.filter(([, n]) => n > 0));
         setConflictsByTechnician(counts);
         // Editing a saved schedule on its own start day: keep its saved "All
-        // day" choice (0071, draft, persists it) rather than re-guessing it.
+        // day" choice (0071, persists it) rather than re-guessing it.
         if (dateKey === savedStartKey) return;
         const maxConflicts = Math.max(0, ...Object.values(counts));
         const nextAllDay = defaultAllDay(maxConflicts);

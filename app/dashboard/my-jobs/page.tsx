@@ -96,7 +96,7 @@ export default async function MyJobsPage() {
   for (const row of (crew ?? []) as any[]) if (row.jobs) byId.set(row.jobs.id, row.jobs);
 
   // "Today" is every job BOOKED today (occupiesDay), so a multi-day job
-  // (schedule_daily, 0071 — draft, not applied yet) that started on Monday is still here on
+  // (schedule_daily, 0071) that started on Monday is still here on
   // Wednesday. Everything else is "Upcoming", dated and ordered by its next
   // booked day — or, once every booked day is behind it (still open), by its
   // start, which sorts it first as before. Unscheduled last.
