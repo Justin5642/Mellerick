@@ -77,6 +77,15 @@ token expires (≤1 h); RLS still authorizes every query. List-row `<Link>`s are
 `prefetch={false}`; the sidebar prefetches. If the database ever moves to Sydney,
 move `vercel.json` back to `syd1` in the same change.
 
+**Load page data on the server, not in the browser.** A browser→Supabase
+query from Australia costs ~100 ms+; a server query in `sin1` costs ~2 ms. So
+My Jobs, Approvals, Staff, Fleet and Customers are server pages that pass
+initial data (and the role, from `getViewer()`) to their client UI, and lists
+search/paginate in the database (Customers `?q=&page=`, Quotes/Pricing "Load
+more", the customer picker queries as you type, max 20). `lib/fetch-all-rows.ts`
+takes a query *builder function* and fetches pages 2..n in parallel — a
+Supabase query object mutates its own range, so pages cannot share one.
+
 **Scheduling notes surface on the mobile Overview tab, not just in Notes.**
 `job_notes` has a `source` column (migration `0062`); both the web and mobile
 "Schedule job" flows tag their note `source: "schedule"`. `mobile/components/
@@ -366,6 +375,9 @@ longer upload audio to OpenAI Whisper. Speech is recognised where it is spoken:
   new token, so keying on the URL (RN `<Image>`) re-downloaded every photo on
   every visit. Supabase image transforms are **not** used (plan support
   unconfirmed); thumbnails rely on resized uploads + the disk cache.
+- **Web Photos tab** (`components/job/job-photos.tsx`) likewise signs every
+  unsigned photo in ONE `createSignedUrls` per load (it was one request per
+  thumbnail) and renders thumbnails `loading="lazy"` / `decoding="async"`.
 - `expo-image-manipulator` is a native module: it reaches devices only through a
   **new dev client / `eas build`**, never an OTA update.
 

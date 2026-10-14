@@ -50,7 +50,7 @@ function fakeQuery(total: number, pageSize: number, opts: { failOnPage?: number 
 describe("fetchAllRows", () => {
   it("returns everything when the source fits in one page", async () => {
     const q = fakeQuery(120, 1000);
-    const result = await fetchAllRows(q as never, 1000);
+    const result = await fetchAllRows(() => q, 1000);
 
     expect(result.ok).toBe(true);
     if (!result.ok) throw new Error("unreachable");
@@ -61,7 +61,7 @@ describe("fetchAllRows", () => {
   it("keeps paging past the cap instead of stopping at it", async () => {
     // The whole point: 2500 rows behind a 1000-row cap must come back as 2500.
     const q = fakeQuery(2500, 1000);
-    const result = await fetchAllRows(q as never, 1000);
+    const result = await fetchAllRows(() => q, 1000);
 
     expect(result.ok).toBe(true);
     if (!result.ok) throw new Error("unreachable");
@@ -71,7 +71,7 @@ describe("fetchAllRows", () => {
 
   it("stops when a page comes back short, without an extra round trip", async () => {
     const q = fakeQuery(1500, 1000);
-    await fetchAllRows(q as never, 1000);
+    await fetchAllRows(() => q, 1000);
     expect(q.calls()).toBe(2);
   });
 
@@ -80,7 +80,7 @@ describe("fetchAllRows", () => {
     // That one extra call is the price of not guessing, and is asserted so the
     // behaviour is deliberate rather than accidental.
     const q = fakeQuery(2000, 1000);
-    const result = await fetchAllRows(q as never, 1000);
+    const result = await fetchAllRows(() => q, 1000);
     if (!result.ok) throw new Error("unreachable");
     expect(result.rows).toHaveLength(2000);
     expect(q.calls()).toBe(3);
@@ -89,7 +89,7 @@ describe("fetchAllRows", () => {
   it("reports failure rather than returning the pages it managed to get", async () => {
     // A partial sum is worse than no sum: it looks like a number and is wrong.
     const q = fakeQuery(2500, 1000, { failOnPage: 2 });
-    const result = await fetchAllRows(q as never, 1000);
+    const result = await fetchAllRows(() => q, 1000);
 
     expect(result.ok).toBe(false);
     if (result.ok) throw new Error("unreachable");
@@ -100,10 +100,97 @@ describe("fetchAllRows", () => {
     // Defence against a fake, a proxy, or a future PostgREST that ignores the
     // range header: bail with an error rather than spinning.
     const endless = { range: () => Promise.resolve({ data: Array.from({ length: 1000 }, (_, i) => ({ i })), error: null }) };
-    const result = await fetchAllRows(endless as never, 1000, 3);
+    const result = await fetchAllRows(() => endless, 1000, 3);
 
     expect(result.ok).toBe(false);
     if (result.ok) throw new Error("unreachable");
     expect(result.error).toMatch(/too many pages|did not terminate/i);
+  });
+
+  describe("with an exact total on the first page", () => {
+    /**
+     * Like fakeQuery, but reports `count` when the page asks for it, records
+     * which pages were requested before any resolved, and can resolve later
+     * pages in reverse to prove the result is reassembled in page order.
+     */
+    function countingQuery(total: number, opts: { failFrom?: number; reverse?: boolean } = {}) {
+      const requested: { from: number; count: boolean }[] = [];
+      let inFlight = 0;
+      let maxInFlight = 0;
+      const build = (count: { count?: "exact" }) => ({
+        range: (from: number, to: number): Promise<Page & { count?: number | null }> => {
+          requested.push({ from, count: count.count === "exact" });
+          inFlight += 1;
+          maxInFlight = Math.max(maxInFlight, inFlight);
+          const rows = [];
+          for (let i = from; i <= Math.min(to, total - 1); i++) rows.push({ i });
+          const page =
+            opts.failFrom === from
+              ? { data: null, error: { message: "boom" } }
+              : { data: rows, error: null, count: count.count === "exact" ? total : null };
+          // Later pages finish first when reversed: a smaller `from` waits longer.
+          const delay = opts.reverse ? Math.max(0, 10 - from / 1000) : 0;
+          return new Promise((resolve) =>
+            setTimeout(() => {
+              inFlight -= 1;
+              resolve(page);
+            }, delay)
+          );
+        },
+      });
+      return { build, requested, maxInFlight: () => maxInFlight };
+    }
+
+    it("asks for the total on the first page only, then requests the rest together", async () => {
+      const q = countingQuery(3500);
+      const result = await fetchAllRows(q.build, 1000);
+
+      if (!result.ok) throw new Error("unreachable");
+      expect(result.rows).toHaveLength(3500);
+      expect(q.requested).toEqual([
+        { from: 0, count: true },
+        { from: 1000, count: false },
+        { from: 2000, count: false },
+        { from: 3000, count: false },
+      ]);
+      expect(q.maxInFlight()).toBe(3);
+    });
+
+    it("returns rows in page order even when later pages arrive first", async () => {
+      const q = countingQuery(3500, { reverse: true });
+      const result = await fetchAllRows(q.build, 1000);
+
+      if (!result.ok) throw new Error("unreachable");
+      expect(result.rows.map((r) => (r as { i: number }).i)).toEqual(Array.from({ length: 3500 }, (_, i) => i));
+    });
+
+    it("needs no confirming request when the total is an exact multiple", async () => {
+      // The total already says where the table ends.
+      const q = countingQuery(2000);
+      const result = await fetchAllRows(q.build, 1000);
+
+      if (!result.ok) throw new Error("unreachable");
+      expect(result.rows).toHaveLength(2000);
+      expect(q.requested).toHaveLength(2);
+    });
+
+    it("reports failure if any later page fails, rather than returning the rest", async () => {
+      const q = countingQuery(3500, { failFrom: 2000 });
+      const result = await fetchAllRows(q.build, 1000);
+
+      expect(result.ok).toBe(false);
+      if (result.ok) throw new Error("unreachable");
+      expect(result.error).toMatch(/page 3.*boom/);
+    });
+
+    it("refuses up front when the total needs more pages than allowed", async () => {
+      const q = countingQuery(5000);
+      const result = await fetchAllRows(q.build, 1000, 3);
+
+      expect(result.ok).toBe(false);
+      if (result.ok) throw new Error("unreachable");
+      expect(result.error).toMatch(/did not terminate/i);
+      expect(q.requested).toHaveLength(1);
+    });
   });
 });

@@ -66,15 +66,37 @@ export default async function SchedulePage() {
       .order("todo_listed_at", { ascending: true }),
   ]);
 
+  // Two follow-up reads, each needing only the batch above and not each
+  // other, so they run together.
+  //
   // Fallback hours for listed jobs with no estimate: the PO allocation. Read
   // from the money-free purchase_orders_public view (0038) — hours only, so
   // this page never holds a PO value even though office could read one.
   const todoIds = (todoRows ?? []).filter((j) => j.estimated_hours == null).map((j) => j.id);
-  let poHours = new Map<string, number>();
-  if (todoIds.length > 0) {
-    const { data: poRows } = await supabase.from("purchase_orders_public").select("job_id, total_hours").in("job_id", todoIds);
-    poHours = allocatedHoursByJob(poRows ?? []);
-  }
+
+  // The staff list above is active-only, so a job assigned to someone who's
+  // since been deactivated would have no column to render into on the Team
+  // board and would silently disappear from view. Append any such profiles
+  // (flagged) so every scheduled job always has somewhere to show up.
+  const activeStaff = staff ?? [];
+  const missingIds = Array.from(
+    new Set(
+      (jobs ?? [])
+        .map((j: any) => j.assigned_to)
+        .filter((id: string | null) => id && !activeStaff.some((s: any) => s.id === id))
+    )
+  );
+
+  const [poRows, missingProfiles] = await Promise.all([
+    todoIds.length > 0
+      ? supabase.from("purchase_orders_public").select("job_id, total_hours").in("job_id", todoIds).then(({ data }) => data)
+      : null,
+    missingIds.length > 0
+      ? supabase.from("profiles").select("id, full_name, role").in("id", missingIds).then(({ data }) => data)
+      : null,
+  ]);
+
+  const poHours = todoIds.length > 0 ? allocatedHoursByJob(poRows ?? []) : new Map<string, number>();
   const todoJobs: TodoJob[] = (todoRows ?? []).map((j) => ({
     id: j.id,
     job_number: j.job_number,
@@ -93,23 +115,8 @@ export default async function SchedulePage() {
   const todayJobs = jobs?.filter((j: any) => isTodayInBusinessTZ(j.scheduled_start)) ?? [];
   const upcomingJobs = jobs?.filter((j: any) => !isTodayInBusinessTZ(j.scheduled_start)) ?? [];
 
-  // The staff list above is active-only, so a job assigned to someone who's
-  // since been deactivated would have no column to render into on the Team
-  // board and would silently disappear from view. Append any such profiles
-  // (flagged) so every scheduled job always has somewhere to show up.
-  let staffForDisplay = staff ?? [];
-  const missingIds = Array.from(
-    new Set(
-      (jobs ?? [])
-        .map((j: any) => j.assigned_to)
-        .filter((id: string | null) => id && !staffForDisplay.some((s: any) => s.id === id))
-    )
-  );
+  let staffForDisplay = activeStaff;
   if (missingIds.length > 0) {
-    const { data: missingProfiles } = await supabase
-      .from("profiles")
-      .select("id, full_name, role")
-      .in("id", missingIds);
     staffForDisplay = [
       ...staffForDisplay,
       ...(missingProfiles ?? []).map((p: any) => ({ ...p, full_name: `${p.full_name} (inactive)` })),

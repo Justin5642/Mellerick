@@ -1,73 +1,69 @@
-"use client";
+export const dynamic = "force-dynamic";
 
-import { useEffect, useMemo, useState } from "react";
-import { createClient } from "@/lib/supabase/client";
+import { createClient } from "@/lib/supabase/server";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Users, Plus, Phone, Mail, Search, X } from "lucide-react";
+import { Users, Plus, Phone, Mail, ChevronLeft, ChevronRight } from "lucide-react";
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { CustomerFavoriteButton } from "@/components/customer-favorite-button";
-import { ListPageSkeleton } from "@/components/ui/loading-skeletons";
+import { CustomerSearchBox } from "@/components/customer-search-box";
+import { customerSearchFilters } from "@/lib/customer-search";
 
-export default function CustomersPage() {
-  const supabase = createClient();
-  const [customers, setCustomers] = useState<any[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [search, setSearch] = useState("");
+const PAGE_SIZE = 50;
+// Only what the rows render. This page used to be a client component that
+// paged through EVERY customer (select("*, sites(count)"), 1000 at a time,
+// each page a ~100 ms browser→Singapore round trip) and filtered in the
+// browser; now the search and paging run in the database, next to it.
+const LIST_COLUMNS = "id, name, company, phone, email, is_active, is_favorite";
+// Same fields the old client-side filter matched against.
+const SEARCH_COLUMNS = ["name", "company", "phone", "mobile", "email"] as const;
 
-  useEffect(() => {
-    async function load() {
-      // Paginate explicitly — Supabase caps an unranged .select() at 1000
-      // rows, which would silently hide older customers (and results of the
-      // search box below) once the table grows past that. Same pattern as
-      // app/dashboard/jobs/page.tsx.
-      const pageSize = 1000;
-      let from = 0;
-      const all: any[] = [];
-      for (;;) {
-        const { data, error } = await supabase
-          .from("customers")
-          .select("*, sites(count)")
-          // Favourites first so the handful of repeat customers that matter
-          // most day to day don't get lost scrolling a long alphabetical list.
-          .order("is_favorite", { ascending: false })
-          .order("name")
-          .range(from, from + pageSize - 1);
-        if (error) {
-          setError(error.message);
-          return;
-        }
-        all.push(...(data ?? []));
-        if (!data || data.length < pageSize) break;
-        from += pageSize;
-      }
-      setCustomers(all);
-    }
-    load();
-  }, []);
+function pageHref(q: string, page: number) {
+  const params = new URLSearchParams();
+  if (q) params.set("q", q);
+  if (page > 1) params.set("page", String(page));
+  const qs = params.toString();
+  return qs ? `/dashboard/customers?${qs}` : "/dashboard/customers";
+}
 
-  const filteredCustomers = useMemo(() => {
-    if (!customers) return customers;
-    const q = search.trim().toLowerCase();
-    if (!q) return customers;
-    return customers.filter((customer: any) => {
-      const haystack = [customer.name, customer.company, customer.phone, customer.mobile, customer.email]
-        .filter(Boolean)
-        .join(" ")
-        .toLowerCase();
-      return haystack.includes(q);
-    });
-  }, [customers, search]);
+export default async function CustomersPage({ searchParams }: { searchParams: Promise<{ q?: string; page?: string }> }) {
+  const params = await searchParams;
+  const q = (params.q ?? "").trim();
+  const page = Math.max(1, Math.floor(Number(params.page)) || 1);
+  const from = (page - 1) * PAGE_SIZE;
 
-  if (customers === null && !error) {
-    return <ListPageSkeleton />;
-  }
+  const supabase = await createClient();
+  let listQuery = supabase.from("customers").select(LIST_COLUMNS, { count: "exact" });
+  for (const filter of customerSearchFilters(q, SEARCH_COLUMNS)) listQuery = listQuery.or(filter);
 
+  const [list, all] = await Promise.all([
+    listQuery
+      // Favourites first so the handful of repeat customers that matter
+      // most day to day don't get lost scrolling a long alphabetical list.
+      // id last so paging is stable between customers with the same name.
+      .order("is_favorite", { ascending: false })
+      .order("name")
+      .order("id")
+      .range(from, from + PAGE_SIZE - 1),
+    // The header's "N of M customers" needs the unfiltered total too; without
+    // a search the list's own count already is that total.
+    q ? supabase.from("customers").select("id", { count: "exact", head: true }) : null,
+  ]);
+
+  const error = list.error ?? all?.error;
   if (error) {
-    return <div className="p-6 text-red-500 text-sm">Error: {error}</div>;
+    return <div className="p-6 text-red-500 text-sm">Error: {error.message}</div>;
   }
+
+  const customers = list.data ?? [];
+  const matchCount = list.count ?? customers.length;
+  const totalCount = all ? (all.count ?? 0) : matchCount;
+  const pageCount = Math.max(1, Math.ceil(matchCount / PAGE_SIZE));
+  // A stale ?page= (e.g. bookmarked, or the list shrank) would show an empty
+  // card; send it to the last page that has rows instead.
+  if (page > pageCount) redirect(pageHref(q, pageCount));
 
   return (
     <div className="p-6 space-y-6">
@@ -75,7 +71,7 @@ export default function CustomersPage() {
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Customers</h1>
           <p className="text-slate-500 text-sm mt-1">
-            {filteredCustomers?.length ?? 0} of {customers?.length ?? 0} customers
+            {matchCount} of {totalCount} customers
           </p>
         </div>
         <Link href="/dashboard/customers/new">
@@ -86,33 +82,15 @@ export default function CustomersPage() {
         </Link>
       </div>
 
-      <div className="relative max-w-md">
-        <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-        <Input
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          placeholder="Search customers by name, company, phone, or email..."
-          className="pl-8 pr-8"
-        />
-        {search && (
-          <button
-            type="button"
-            onClick={() => setSearch("")}
-            className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
-            aria-label="Clear search"
-          >
-            <X className="w-4 h-4" />
-          </button>
-        )}
-      </div>
+      <CustomerSearchBox initialQuery={q} />
 
       <Card>
         <CardContent className="p-0">
-          {!filteredCustomers || filteredCustomers.length === 0 ? (
+          {customers.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-16 text-slate-400">
               <Users className="w-12 h-12 mb-3 opacity-40" />
-              {customers && customers.length > 0 && search ? (
-                <p className="text-sm font-medium">No customers match &ldquo;{search}&rdquo;</p>
+              {totalCount > 0 && q ? (
+                <p className="text-sm font-medium">No customers match &ldquo;{q}&rdquo;</p>
               ) : (
                 <>
                   <p className="text-sm font-medium">No customers yet</p>
@@ -124,7 +102,7 @@ export default function CustomersPage() {
             </div>
           ) : (
             <div className="divide-y">
-              {filteredCustomers.map((customer: any) => (
+              {customers.map((customer) => (
                 <Link prefetch={false}
                   key={customer.id}
                   href={`/dashboard/customers/${customer.id}`}
@@ -169,6 +147,45 @@ export default function CustomersPage() {
           )}
         </CardContent>
       </Card>
+
+      {pageCount > 1 && (
+        <div className="flex items-center justify-between text-sm text-slate-500">
+          <span>
+            {from + 1}–{from + customers.length} of {matchCount}
+          </span>
+          <div className="flex items-center gap-2">
+            {page > 1 ? (
+              <Link prefetch={false} href={pageHref(q, page - 1)}>
+                <Button variant="outline" size="sm" className="gap-1">
+                  <ChevronLeft className="w-4 h-4" />
+                  Previous
+                </Button>
+              </Link>
+            ) : (
+              <Button variant="outline" size="sm" className="gap-1" disabled>
+                <ChevronLeft className="w-4 h-4" />
+                Previous
+              </Button>
+            )}
+            <span>
+              Page {page} of {pageCount}
+            </span>
+            {page < pageCount ? (
+              <Link prefetch={false} href={pageHref(q, page + 1)}>
+                <Button variant="outline" size="sm" className="gap-1">
+                  Next
+                  <ChevronRight className="w-4 h-4" />
+                </Button>
+              </Link>
+            ) : (
+              <Button variant="outline" size="sm" className="gap-1" disabled>
+                Next
+                <ChevronRight className="w-4 h-4" />
+              </Button>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

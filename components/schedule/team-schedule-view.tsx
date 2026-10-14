@@ -30,7 +30,6 @@ import {
   formatTime,
   formatDate,
   dateKeyInBusinessTZ,
-  isTodayInBusinessTZ,
   shiftDateKey,
   anchorForDateKey,
   weekDateKeys,
@@ -289,6 +288,11 @@ function DroppableWeekCell({
   );
 }
 
+function byScheduleUrgency(a: Job, b: Job) {
+  if (!a.scheduled_start || !b.scheduled_start) return 0;
+  return new Date(a.scheduled_start).getTime() - new Date(b.scheduled_start).getTime();
+}
+
 export function TeamScheduleView({
   todayJobs,
   upcomingJobs,
@@ -324,82 +328,107 @@ export function TeamScheduleView({
     useSensor(PointerSensor, { activationConstraint: { delay: 200, tolerance: 8 } })
   );
 
-  const todayJobsLive = jobs.filter((j) => isTodayInBusinessTZ(j.scheduled_start!));
-  const upcomingJobsLive = jobs.filter((j) => !isTodayInBusinessTZ(j.scheduled_start!));
+  // Everything below is derived from jobs/staff/the selected period and was
+  // rebuilt on every render — including the one setActiveId triggers at drag
+  // start. Each collection is memoised on its real inputs, and each job's
+  // Melbourne date key is computed once per job rather than once per use.
+  const jobDateKeys = useMemo(() => {
+    const keys = new Map<Job, string>();
+    for (const job of jobs) keys.set(job, dateKeyInBusinessTZ(job.scheduled_start!));
+    return keys;
+  }, [jobs]);
 
-  const selectedDateJobs = jobs.filter((j) => dateKeyInBusinessTZ(j.scheduled_start!) === selectedDateKey);
+  // Read every render, as isTodayInBusinessTZ did, so a board left open past
+  // midnight still re-splits today/upcoming on its next render.
+  const liveTodayKey = dateKeyInBusinessTZ(new Date());
+  const { todayJobsLive, upcomingJobsLive } = useMemo(() => {
+    const today: Job[] = [];
+    const upcoming: Job[] = [];
+    for (const job of jobs) (jobDateKeys.get(job) === liveTodayKey ? today : upcoming).push(job);
+    return { todayJobsLive: today, upcomingJobsLive: upcoming };
+  }, [jobs, jobDateKeys, liveTodayKey]);
 
-  function byScheduleUrgency(a: Job, b: Job) {
-    if (!a.scheduled_start || !b.scheduled_start) return 0;
-    return new Date(a.scheduled_start).getTime() - new Date(b.scheduled_start).getTime();
-  }
-
-  const jobsByStaff = new Map<string, Job[]>();
-  const unassigned: Job[] = [];
-  for (const job of selectedDateJobs) {
-    if (!job.assigned_to) {
-      unassigned.push(job);
-      continue;
+  const { jobsByStaff, unassigned } = useMemo(() => {
+    const jobsByStaff = new Map<string, Job[]>();
+    const unassigned: Job[] = [];
+    for (const job of jobs) {
+      if (jobDateKeys.get(job) !== selectedDateKey) continue;
+      if (!job.assigned_to) {
+        unassigned.push(job);
+        continue;
+      }
+      const list = jobsByStaff.get(job.assigned_to) ?? [];
+      list.push(job);
+      jobsByStaff.set(job.assigned_to, list);
     }
-    const list = jobsByStaff.get(job.assigned_to) ?? [];
-    list.push(job);
-    jobsByStaff.set(job.assigned_to, list);
-  }
-  unassigned.sort(byScheduleUrgency);
+    unassigned.sort(byScheduleUrgency);
+    return { jobsByStaff, unassigned };
+  }, [jobs, jobDateKeys, selectedDateKey]);
 
   // Week grid data — staff (rows) x the 7 days (Mon-Sun) containing
   // selectedDateKey. Built the same way as the day board's jobsByStaff/
   // unassigned above, just bucketed by day as well as by staff.
   const weekKeys = useMemo(() => weekDateKeys(selectedDateKey), [selectedDateKey]);
   const weekKeySet = useMemo(() => new Set(weekKeys), [weekKeys]);
-  const weekJobs = jobs.filter((j) => weekKeySet.has(dateKeyInBusinessTZ(j.scheduled_start!)));
 
-  const jobsByStaffByDay = new Map<string, Map<string, Job[]>>();
-  const unassignedByDay = new Map<string, Job[]>();
-  for (const job of weekJobs) {
-    const dayKey = dateKeyInBusinessTZ(job.scheduled_start!);
-    if (!job.assigned_to) {
-      const list = unassignedByDay.get(dayKey) ?? [];
+  const { jobsByStaffByDay, unassignedByDay, staffWeekJobCount } = useMemo(() => {
+    const jobsByStaffByDay = new Map<string, Map<string, Job[]>>();
+    const unassignedByDay = new Map<string, Job[]>();
+    for (const job of jobs) {
+      const dayKey = jobDateKeys.get(job)!;
+      if (!weekKeySet.has(dayKey)) continue;
+      if (!job.assigned_to) {
+        const list = unassignedByDay.get(dayKey) ?? [];
+        list.push(job);
+        unassignedByDay.set(dayKey, list);
+        continue;
+      }
+      const byDay = jobsByStaffByDay.get(job.assigned_to) ?? new Map<string, Job[]>();
+      const list = byDay.get(dayKey) ?? [];
       list.push(job);
-      unassignedByDay.set(dayKey, list);
-      continue;
+      byDay.set(dayKey, list);
+      jobsByStaffByDay.set(job.assigned_to, byDay);
     }
-    const byDay = jobsByStaffByDay.get(job.assigned_to) ?? new Map<string, Job[]>();
-    const list = byDay.get(dayKey) ?? [];
-    list.push(job);
-    byDay.set(dayKey, list);
-    jobsByStaffByDay.set(job.assigned_to, byDay);
-  }
-  for (const list of unassignedByDay.values()) list.sort(byScheduleUrgency);
-  for (const byDay of jobsByStaffByDay.values()) {
-    for (const list of byDay.values()) list.sort(byScheduleUrgency);
-  }
-  const staffWeekJobCount = new Map<string, number>();
-  for (const [staffId, byDay] of jobsByStaffByDay) {
-    let total = 0;
-    for (const list of byDay.values()) total += list.length;
-    staffWeekJobCount.set(staffId, total);
-  }
+    for (const list of unassignedByDay.values()) list.sort(byScheduleUrgency);
+    for (const byDay of jobsByStaffByDay.values()) {
+      for (const list of byDay.values()) list.sort(byScheduleUrgency);
+    }
+    const staffWeekJobCount = new Map<string, number>();
+    for (const [staffId, byDay] of jobsByStaffByDay) {
+      let total = 0;
+      for (const list of byDay.values()) total += list.length;
+      staffWeekJobCount.set(staffId, total);
+    }
+    return { jobsByStaffByDay, unassignedByDay, staffWeekJobCount };
+  }, [jobs, jobDateKeys, weekKeySet]);
 
   // Staff with the most jobs first (busiest first, in whichever period is
   // currently showing), then everyone else so it's obvious at a glance
   // who's free and could take on more work.
-  const sortedStaff = [...staff].sort((a, b) => {
-    const countA = viewMode === "week" ? staffWeekJobCount.get(a.id) ?? 0 : jobsByStaff.get(a.id)?.length ?? 0;
-    const countB = viewMode === "week" ? staffWeekJobCount.get(b.id) ?? 0 : jobsByStaff.get(b.id)?.length ?? 0;
-    const diff = countB - countA;
-    if (diff !== 0) return diff;
-    return a.full_name.localeCompare(b.full_name);
-  });
+  const sortedStaff = useMemo(
+    () =>
+      [...staff].sort((a, b) => {
+        const countA = viewMode === "week" ? staffWeekJobCount.get(a.id) ?? 0 : jobsByStaff.get(a.id)?.length ?? 0;
+        const countB = viewMode === "week" ? staffWeekJobCount.get(b.id) ?? 0 : jobsByStaff.get(b.id)?.length ?? 0;
+        const diff = countB - countA;
+        if (diff !== 0) return diff;
+        return a.full_name.localeCompare(b.full_name);
+      }),
+    [staff, viewMode, staffWeekJobCount, jobsByStaff],
+  );
 
-  const activeJob = activeId ? jobs.find((j) => j.id === activeId) ?? null : null;
+  const activeJob = useMemo(() => (activeId ? jobs.find((j) => j.id === activeId) ?? null : null), [activeId, jobs]);
   const isSelectedToday = selectedDateKey === todayKey;
   const isCurrentPeriod = viewMode === "week" ? weekKeySet.has(todayKey) : isSelectedToday;
-  const selectedDateLabel = formatDate(anchorForDateKey(selectedDateKey), {
-    weekday: "long",
-    day: "numeric",
-    month: "long",
-  });
+  const selectedDateLabel = useMemo(
+    () =>
+      formatDate(anchorForDateKey(selectedDateKey), {
+        weekday: "long",
+        day: "numeric",
+        month: "long",
+      }),
+    [selectedDateKey],
+  );
   const weekRangeLabel = useMemo(() => formatWeekRangeLabel(weekKeys), [weekKeys]);
 
   function handleDragStart(event: DragStartEvent) {

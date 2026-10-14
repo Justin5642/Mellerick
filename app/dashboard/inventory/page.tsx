@@ -6,9 +6,12 @@ import Link from "next/link";
 
 export default async function InventoryPage() {
   const supabase = await createClient();
+  // Every active item, not a page: the header count and the low-stock banner
+  // are over the whole list, and "at or below reorder level" compares two
+  // columns, which PostgREST cannot filter on. Only the columns a row renders.
   const { data: items } = await supabase
     .from("inventory")
-    .select("*")
+    .select("id, name, category, sku, quantity_on_hand, reorder_level, unit, unit_sell")
     .eq("is_active", true)
     .order("name");
 

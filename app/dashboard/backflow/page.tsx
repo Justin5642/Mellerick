@@ -21,15 +21,22 @@ const STATUS_ORDER: Record<DueStatus, number> = { overdue: 0, due_soon: 1, no_te
 export default async function BackflowDevicesPage() {
   const supabase = await createClient();
 
+  // Due status only needs each device's most recent PASS, so — as on the
+  // dashboard home — the embed is filtered and limited to that one row in the
+  // database rather than shipping every test ever recorded and sorting here.
+  // Not an inner join: a device with no pass still comes back (empty array)
+  // and stays "no_test", as before. Only the columns a row renders.
   const { data: devices } = await supabase
     .from("backflow_devices")
-    .select("*, customers(name), sites(name, suburb), backflow_tests(test_date, result)")
+    .select("id, device_type, water_authority, serial_number, test_frequency_months, customers(name), sites(suburb), backflow_tests(test_date)")
     .eq("is_active", true)
-    .order("created_at", { ascending: false });
+    .eq("backflow_tests.result", "pass")
+    .order("created_at", { ascending: false })
+    .order("test_date", { referencedTable: "backflow_tests", ascending: false })
+    .limit(1, { referencedTable: "backflow_tests" });
 
   const rows = (devices ?? []).map((device: any) => {
-    const passingTests = (device.backflow_tests ?? []).filter((t: any) => t.result === "pass");
-    const lastPass = passingTests.sort((a: any, b: any) => (a.test_date < b.test_date ? 1 : -1))[0];
+    const lastPass = (device.backflow_tests ?? [])[0];
     const nextDueDate = computeNextDueDate(lastPass?.test_date, Number(device.test_frequency_months));
     const status = getDueStatus(nextDueDate);
     return { device, lastPass, nextDueDate, status };
