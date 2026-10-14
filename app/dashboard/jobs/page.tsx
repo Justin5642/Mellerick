@@ -198,7 +198,7 @@ export default function JobsPage() {
           ) : (
             <div className="divide-y">
               {filteredJobs.map((job: any) => (
-                <Link
+                <Link prefetch={false}
                   key={job.id}
                   href={`/dashboard/jobs/${job.id}`}
                   className="flex items-center justify-between px-6 py-4 hover:bg-slate-50 transition-colors group"

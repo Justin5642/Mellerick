@@ -71,7 +71,7 @@ export default async function BackflowDevicePage({ params }: { params: Promise<{
         </div>
         <div className="flex items-center gap-3">
           <Badge className={`${STATUS_STYLES[status]} border`}>{DUE_STATUS_LABELS[status]}</Badge>
-          <Link href={`/dashboard/backflow/${id}/test/new`}>
+          <Link prefetch={false} href={`/dashboard/backflow/${id}/test/new`}>
             <Button className="gap-2"><Plus className="w-4 h-4" />Log Test</Button>
           </Link>
           <DeleteDeviceButton deviceId={id} customerName={device.customers?.name ?? "this customer"} />

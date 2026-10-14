@@ -278,7 +278,7 @@ export default function ApprovalsPage() {
                   </p>
                   {v.description && <p className="text-xs text-slate-400 mt-1 truncate">{v.description}</p>}
                 </div>
-                <Link href={`/dashboard/jobs/${v.jobs?.id}?tab=variations&variation=${v.id}`} className="shrink-0">
+                <Link prefetch={false} href={`/dashboard/jobs/${v.jobs?.id}?tab=variations&variation=${v.id}`} className="shrink-0">
                   <Button size="sm" variant="outline" className="gap-1.5 text-xs">
                     Price &amp; review →
                   </Button>
@@ -339,7 +339,7 @@ export default function ApprovalsPage() {
                 {expanded === job.id && (
                   <div className="border-t px-6 py-4 space-y-4 bg-slate-50">
                     <div className="flex gap-3">
-                      <Link href={`/dashboard/jobs/${job.id}`} className="text-xs text-blue-600 hover:underline">
+                      <Link prefetch={false} href={`/dashboard/jobs/${job.id}`} className="text-xs text-blue-600 hover:underline">
                         View full job details →
                       </Link>
                     </div>

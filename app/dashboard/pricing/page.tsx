@@ -47,7 +47,7 @@ export default async function PricingPage() {
               <CardContent className="p-0">
                 <div className="divide-y">
                   {categoryItems.map((item: any) => (
-                    <Link key={item.id} href={`/dashboard/pricing/${item.id}`} className="flex items-center justify-between px-6 py-4 hover:bg-slate-50 transition-colors group">
+                    <Link prefetch={false} key={item.id} href={`/dashboard/pricing/${item.id}`} className="flex items-center justify-between px-6 py-4 hover:bg-slate-50 transition-colors group">
                       <div className="flex-1 min-w-0">
                         <p className="font-medium text-sm group-hover:text-blue-600 transition-colors truncate">{item.name}</p>
                         {item.description && <p className="text-xs text-slate-500 mt-0.5 truncate">{item.description}</p>}

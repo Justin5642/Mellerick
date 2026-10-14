@@ -187,11 +187,12 @@ export function AppSidebar({ userEmail, userName, userRole }: AppSidebarProps) {
               <Link
                 key={href}
                 href={href}
-                // No background prefetch: with ~15 links, prefetching fired ~15
-                // server renders (each running middleware's auth + role lookup)
-                // on every dashboard open, competing with the page actually
-                // being loaded. Pages are fully dynamic, so prefetch saved little.
-                prefetch={false}
+                // Default prefetch: for these dynamic pages it fetches only up to
+                // the route's loading.tsx, so a click shows the skeleton at once.
+                // It used to be off because each prefetch ran middleware's auth
+                // round trip to Singapore; middleware now verifies the JWT
+                // locally and runs in sin1. Row links in lists stay
+                // prefetch={false} — dozens per page would still each render.
                 onClick={() => setMobileOpen(false)}
                 className={cn(
                   "flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors",

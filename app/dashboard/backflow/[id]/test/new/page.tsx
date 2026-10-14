@@ -258,7 +258,7 @@ export default function NewBackflowTestPage() {
   return (
     <div className="p-6 max-w-3xl space-y-6">
       <div className="flex items-center gap-3">
-        <Link href={`/dashboard/backflow/${deviceId}`}>
+        <Link prefetch={false} href={`/dashboard/backflow/${deviceId}`}>
           <Button variant="ghost" size="sm" className="gap-2 text-slate-500">
             <ArrowLeft className="w-4 h-4" /> Back
           </Button>
@@ -418,7 +418,7 @@ export default function NewBackflowTestPage() {
         </Card>
 
         <div className="flex justify-end gap-3">
-          <Link href={`/dashboard/backflow/${deviceId}`}><Button variant="outline" type="button">Cancel</Button></Link>
+          <Link prefetch={false} href={`/dashboard/backflow/${deviceId}`}><Button variant="outline" type="button">Cancel</Button></Link>
           <Button type="submit" disabled={saving}>{saving ? "Submitting..." : "Save & Submit to Water Authority"}</Button>
         </div>
       </form>

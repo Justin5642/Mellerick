@@ -53,9 +53,12 @@ export async function middleware(request: NextRequest) {
     }
   );
 
-  // getUser(), not getSession(): this revalidates against the auth server and is
-  // what actually triggers the refresh whose cookies we persist above.
-  const { data: { user } } = await supabase.auth.getUser();
+  // getClaims(), not getSession(): it verifies the JWT signature (locally,
+  // against the project's ES256 JWKS — no auth-server round trip) and, like
+  // getUser(), refreshes an expired session first, which is what produces the
+  // cookies persisted above. See lib/auth/viewer.ts for the trade-off.
+  const { data } = await supabase.auth.getClaims();
+  const user = data?.claims?.sub ? { id: data.claims.sub } : null;
 
   const path = request.nextUrl.pathname;
 
@@ -75,6 +78,10 @@ export async function middleware(request: NextRequest) {
 }
 
 export const config = {
+  // Node.js runtime, so middleware runs in the function region (vercel.json,
+  // sin1 — next to the Supabase database in Singapore) instead of at the edge
+  // nearest the visitor, where its profiles lookup crossed to Singapore.
+  runtime: "nodejs",
   // Everything except static assets and image optimisation. API routes are
   // deliberately INCLUDED for the cookie refresh, but the role gate above only
   // looks at /dashboard — every API handler already authorizes itself, and

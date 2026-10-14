@@ -145,7 +145,7 @@ function formatWeekRangeLabel(weekKeys: string[]) {
 
 function JobCard({ job }: { job: Job }) {
   return (
-    <Link
+    <Link prefetch={false}
       href={`/dashboard/jobs/${job.id}`}
       className="block px-3 py-2.5 rounded-lg border border-slate-200 hover:border-blue-300 hover:bg-blue-50/50 transition-colors group"
     >
@@ -225,7 +225,7 @@ function DroppableColumn({
 // full JobCard's detail for a glanceable time + job + customer stack.
 function WeekJobChip({ job }: { job: Job }) {
   return (
-    <Link
+    <Link prefetch={false}
       href={`/dashboard/jobs/${job.id}`}
       className="block px-1.5 py-1 rounded-md border border-slate-200 hover:border-blue-300 hover:bg-blue-50/50 transition-colors"
     >
@@ -751,7 +751,7 @@ export function TeamScheduleView({
             ) : (
               <div className="divide-y">
                 {todayJobsLive.map((job) => (
-                  <Link key={job.id} href={`/dashboard/jobs/${job.id}`} className="flex items-center gap-4 px-6 py-4 hover:bg-slate-50 transition-colors group">
+                  <Link prefetch={false} key={job.id} href={`/dashboard/jobs/${job.id}`} className="flex items-center gap-4 px-6 py-4 hover:bg-slate-50 transition-colors group">
                     <div className="text-center w-16 flex-shrink-0">
                       <p className="text-xs font-bold text-blue-600">{formatTime(job.scheduled_start!)}</p>
                       {job.scheduled_end && <p className="text-xs text-slate-400">{formatTime(job.scheduled_end)}</p>}
@@ -777,7 +777,7 @@ export function TeamScheduleView({
             <CardContent className="p-0">
               <div className="divide-y">
                 {upcomingJobsLive.map((job) => (
-                  <Link key={job.id} href={`/dashboard/jobs/${job.id}`} className="flex items-center gap-4 px-6 py-4 hover:bg-slate-50 transition-colors group">
+                  <Link prefetch={false} key={job.id} href={`/dashboard/jobs/${job.id}`} className="flex items-center gap-4 px-6 py-4 hover:bg-slate-50 transition-colors group">
                     <div className="text-center w-20 flex-shrink-0">
                       <p className="text-xs font-bold text-slate-700">{formatDate(job.scheduled_start!)}</p>
                       <p className="text-xs text-slate-400">{formatTime(job.scheduled_start!)}</p>

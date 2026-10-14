@@ -27,7 +27,7 @@ export default async function PricingDetailPage({ params }: { params: Promise<{ 
             <ArrowLeft className="w-4 h-4" /> Back
           </Button>
         </Link>
-        <Link href={`/dashboard/pricing/${id}/edit`}>
+        <Link prefetch={false} href={`/dashboard/pricing/${id}/edit`}>
           <Button variant="outline" className="gap-2">
             <Pencil className="w-4 h-4" /> Edit
           </Button>

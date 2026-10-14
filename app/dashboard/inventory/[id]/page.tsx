@@ -29,7 +29,7 @@ export default async function InventoryDetailPage({ params }: { params: Promise<
             <ArrowLeft className="w-4 h-4" /> Back
           </Button>
         </Link>
-        <Link href={`/dashboard/inventory/${id}/edit`}>
+        <Link prefetch={false} href={`/dashboard/inventory/${id}/edit`}>
           <Button variant="outline" className="gap-2">
             <Pencil className="w-4 h-4" /> Edit
           </Button>

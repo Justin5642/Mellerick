@@ -54,7 +54,7 @@ export function InvoiceList({ initialInvoices, total }: { initialInvoices: Invoi
           ) : (
             <div className="divide-y">
               {invoices.map((inv) => (
-                <Link key={inv.id} href={`/dashboard/invoices/${inv.id}`} className="flex items-center justify-between px-6 py-4 hover:bg-slate-50 transition-colors group">
+                <Link prefetch={false} key={inv.id} href={`/dashboard/invoices/${inv.id}`} className="flex items-center justify-between px-6 py-4 hover:bg-slate-50 transition-colors group">
                   <div className="flex-1 min-w-0">
                     <p className="font-medium text-sm group-hover:text-blue-600 transition-colors truncate">
                       {formatInvoiceNumber(inv.invoice_number)} — {inv.title}

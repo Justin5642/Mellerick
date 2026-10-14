@@ -88,7 +88,7 @@ export default function EditInventoryPage() {
   return (
     <div className="p-6 max-w-2xl space-y-6">
       <div className="flex items-center gap-3">
-        <Link href={`/dashboard/inventory/${id}`}>
+        <Link prefetch={false} href={`/dashboard/inventory/${id}`}>
           <Button variant="ghost" size="sm" className="gap-2 text-slate-500">
             <ArrowLeft className="w-4 h-4" /> Back
           </Button>
@@ -156,7 +156,7 @@ export default function EditInventoryPage() {
         </Card>
 
         <div className="flex justify-end gap-3">
-          <Link href={`/dashboard/inventory/${id}`}><Button variant="outline" type="button">Cancel</Button></Link>
+          <Link prefetch={false} href={`/dashboard/inventory/${id}`}><Button variant="outline" type="button">Cancel</Button></Link>
           <Button type="submit" disabled={loading}>{loading ? "Saving..." : "Save Changes"}</Button>
         </div>
       </form>

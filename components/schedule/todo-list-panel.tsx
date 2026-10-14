@@ -105,7 +105,7 @@ export function TodoListPanel({ jobs, error }: { jobs: TodoJob[]; error: string 
                         <p className="text-[11px] text-slate-400 leading-tight">no estimate</p>
                       )}
                     </div>
-                    <Link href={`/dashboard/jobs/${job.id}`} className="flex-1 min-w-0 group">
+                    <Link prefetch={false} href={`/dashboard/jobs/${job.id}`} className="flex-1 min-w-0 group">
                       <p className="font-medium text-sm group-hover:text-blue-600 transition-colors truncate">
                         #{job.job_number} — {job.title}
                       </p>
@@ -123,7 +123,7 @@ export function TodoListPanel({ jobs, error }: { jobs: TodoJob[]; error: string 
                         {job.status.replace("_", " ")}
                       </span>
                     )}
-                    <Link href={`/dashboard/jobs/${job.id}?schedule=1`} className="flex-shrink-0">
+                    <Link prefetch={false} href={`/dashboard/jobs/${job.id}?schedule=1`} className="flex-shrink-0">
                       <Button size="sm" variant="outline" className="gap-1.5 h-8">
                         <CalendarClock className="w-3.5 h-3.5" />
                         Schedule

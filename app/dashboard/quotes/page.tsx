@@ -36,7 +36,7 @@ export default async function QuotesPage() {
           ) : (
             <div className="divide-y">
               {quotes.map((quote: any) => (
-                <Link key={quote.id} href={`/dashboard/quotes/${quote.id}`} className="flex items-center justify-between px-6 py-4 hover:bg-slate-50 transition-colors group">
+                <Link prefetch={false} key={quote.id} href={`/dashboard/quotes/${quote.id}`} className="flex items-center justify-between px-6 py-4 hover:bg-slate-50 transition-colors group">
                   <div className="flex-1 min-w-0">
                     <p className="font-medium text-sm group-hover:text-blue-600 transition-colors truncate">
                       #{quote.quote_number} — {quote.title}

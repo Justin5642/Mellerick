@@ -15,7 +15,7 @@ function StatCard({ title, value, icon: Icon, color, href }: {
   title: string; value: string | number; icon: React.ElementType; color: string; href: string;
 }) {
   return (
-    <Link href={href}>
+    <Link prefetch={false} href={href}>
       <Card className="hover:shadow-md transition-shadow cursor-pointer">
         <CardContent className="flex items-center gap-4 p-6">
           <div className={`flex items-center justify-center w-12 h-12 rounded-xl ${color}`}>
@@ -33,7 +33,8 @@ function StatCard({ title, value, icon: Icon, color, href }: {
 
 export default async function DashboardPage() {
   const supabase = await createClient();
-  const user = (await getViewer())?.user;
+  const viewer = await getViewer();
+  const user = viewer?.user;
 
   // Guarded rather than asserted. `user!.id` below relied on the layout (and
   // now middleware) having redirected an unauthenticated visitor first — true
@@ -56,7 +57,6 @@ export default async function DashboardPage() {
     { count: totalCustomers },
     { count: overdueInvoices },
     { data: recentJobs },
-    { data: profile },
     { data: scheduledJobs },
     { data: backflowDevices },
   ] = await Promise.all([
@@ -75,7 +75,6 @@ export default async function DashboardPage() {
       .select("id, job_number, title, status, priority, customers(name), assigned_profile:profiles!jobs_assigned_to_fkey(full_name)")
       .order("created_at", { ascending: false })
       .limit(8),
-    supabase.from("profiles").select("full_name").eq("id", user.id).single(),
     supabase.from("jobs")
       .select("id, job_number, title, status, scheduled_start, scheduled_end, customers(name), profiles!jobs_assigned_to_fkey(full_name)")
       .gte("scheduled_start", todayStart)
@@ -108,7 +107,7 @@ export default async function DashboardPage() {
 
   const { hour } = businessDateParts();
   const greeting = hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening";
-  const firstName = profile?.full_name?.split(" ")[0] ?? "there";
+  const firstName = viewer?.profile?.full_name?.split(" ")[0] ?? "there";
 
   return (
     <div className="p-6 space-y-6">
@@ -142,7 +141,7 @@ export default async function DashboardPage() {
           ) : (
             <div className="divide-y">
               {todaysJobs.map((job: any) => (
-                <Link key={job.id} href={`/dashboard/jobs/${job.id}`} className="flex items-center gap-4 px-6 py-4 hover:bg-slate-50 transition-colors group">
+                <Link prefetch={false} key={job.id} href={`/dashboard/jobs/${job.id}`} className="flex items-center gap-4 px-6 py-4 hover:bg-slate-50 transition-colors group">
                   <div className="text-center w-16 flex-shrink-0">
                     <p className="text-xs font-bold text-blue-600">{formatTime(job.scheduled_start)}</p>
                     {job.scheduled_end && <p className="text-xs text-slate-400">{formatTime(job.scheduled_end)}</p>}
@@ -182,7 +181,7 @@ export default async function DashboardPage() {
           ) : (
             <div className="divide-y">
               {recentJobs.map((job: any) => (
-                <Link key={job.id} href={`/dashboard/jobs/${job.id}`} className="flex items-center justify-between px-6 py-4 hover:bg-slate-50 transition-colors group">
+                <Link prefetch={false} key={job.id} href={`/dashboard/jobs/${job.id}`} className="flex items-center justify-between px-6 py-4 hover:bg-slate-50 transition-colors group">
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2">
                       <span className="font-medium text-sm text-slate-900 group-hover:text-blue-600 transition-colors truncate">

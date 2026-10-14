@@ -65,7 +65,7 @@ function tableStub(rows: Row[], error?: string) {
 
 function fakeClient(tables: Record<string, { rows?: Row[]; error?: string }>) {
   return {
-    auth: { getUser: async () => ({ data: { user: null }, error: null }) },
+    auth: { getClaims: async () => ({ data: null, error: null }) },
     from: (name: string) => tableStub(tables[name]?.rows ?? [], tables[name]?.error),
   };
 }

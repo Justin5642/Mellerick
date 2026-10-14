@@ -82,7 +82,7 @@ export default function EditPricingItemPage() {
   return (
     <div className="p-6 max-w-xl space-y-6">
       <div className="flex items-center gap-3">
-        <Link href={`/dashboard/pricing/${id}`}>
+        <Link prefetch={false} href={`/dashboard/pricing/${id}`}>
           <Button variant="ghost" size="sm" className="gap-2 text-slate-500">
             <ArrowLeft className="w-4 h-4" /> Back
           </Button>
@@ -146,7 +146,7 @@ export default function EditPricingItemPage() {
         </Card>
 
         <div className="flex justify-end gap-3">
-          <Link href={`/dashboard/pricing/${id}`}><Button variant="outline" type="button">Cancel</Button></Link>
+          <Link prefetch={false} href={`/dashboard/pricing/${id}`}><Button variant="outline" type="button">Cancel</Button></Link>
           <Button type="submit" disabled={loading}>{loading ? "Saving..." : "Save Changes"}</Button>
         </div>
       </form>
