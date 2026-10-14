@@ -170,3 +170,38 @@ export async function setJobAssignments(
   }
   return { ok: true };
 }
+
+/**
+ * The crew after moving a job off one technician's row and onto another's on
+ * the schedule board (drag-and-drop and double-click cut & paste both use it).
+ *
+ * The move is a SWAP, not a reassignment: `fromStaffId` (the row the job was
+ * taken from) leaves the crew and `toStaffId` (the row it was put on) joins,
+ * and everyone else on the crew stays. The board used to write `assigned_to`
+ * instead, which the 0059 trigger turns into "this one technician only" —
+ * dragging one member of a three-person crew silently dropped the other two.
+ *
+ * - `fromStaffId` null: taken from the Unassigned row — the target is added.
+ * - `toStaffId` null: put on the Unassigned row — the source is removed.
+ * - Target already on the crew: the source is just removed (no duplicate).
+ *
+ * The target takes the source's place in the list so a display that orders
+ * the crew keeps its order. Pure; write the result with setJobAssignments.
+ */
+export function swapCrewMember(
+  crew: readonly string[],
+  fromStaffId: string | null,
+  toStaffId: string | null
+): string[] {
+  if (fromStaffId === toStaffId) return [...new Set(crew)];
+  const next: string[] = [];
+  for (const id of crew) {
+    if (id === fromStaffId) {
+      if (toStaffId && !crew.includes(toStaffId)) next.push(toStaffId);
+    } else if (!next.includes(id)) {
+      next.push(id);
+    }
+  }
+  if (toStaffId && !next.includes(toStaffId)) next.push(toStaffId);
+  return next;
+}
