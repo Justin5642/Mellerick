@@ -40,6 +40,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const eventsList = vi.fn();
 const eventsPatch = vi.fn(async (..._args: unknown[]) => ({ data: {} }));
+const eventsGet = vi.fn(async (..._args: unknown[]): Promise<{ data: unknown }> => ({ data: null }));
 
 vi.mock("googleapis", () => {
   class OAuth2 {
@@ -54,7 +55,13 @@ vi.mock("googleapis", () => {
   return {
     google: {
       auth: { OAuth2 },
-      calendar: () => ({ events: { list: (...a: unknown[]) => eventsList(...a), patch: (...a: unknown[]) => eventsPatch(...a) } }),
+      calendar: () => ({
+        events: {
+          list: (...a: unknown[]) => eventsList(...a),
+          patch: (...a: unknown[]) => eventsPatch(...a),
+          get: (...a: unknown[]) => eventsGet(...a),
+        },
+      }),
     },
   };
 });
@@ -75,6 +82,8 @@ type Job = {
   scheduled_end: string | null;
   status: string;
   updated_at: string | null;
+  schedule_daily?: boolean;
+  schedule_all_day?: boolean;
 };
 
 const TOKEN = {
@@ -159,6 +168,7 @@ const jobDraggedTo = (updatedAt: string | null): Job => ({
 beforeEach(() => {
   vi.clearAllMocks();
   eventsPatch.mockResolvedValue({ data: {} });
+  eventsGet.mockResolvedValue({ data: null });
 });
 
 describe("pollGoogleCalendarChanges — the app's own edit must survive a poll", () => {
@@ -248,7 +258,16 @@ describe("pollGoogleCalendarChanges — a deletion in Google must not wipe a new
     const result = await pollGoogleCalendarChanges(supabase);
 
     expect(jobUpdates).toEqual([
-      { id: "job1", payload: { scheduled_start: null, scheduled_end: null, google_event_id: null } },
+      {
+        id: "job1",
+        payload: {
+          scheduled_start: null,
+          scheduled_end: null,
+          schedule_daily: false,
+          schedule_all_day: false,
+          google_event_id: null,
+        },
+      },
     ]);
     expect(result).toMatchObject({ clearedByDeletion: 1 });
   });
@@ -270,5 +289,260 @@ describe("pollGoogleCalendarChanges — the fake itself is not absorbing writes"
     expect(tokenUpdates).toEqual([
       expect.objectContaining({ calendar_sync_token: "sync-2" }),
     ]);
+  });
+});
+
+// ============================================================================
+// Multi-day jobs (schedule_daily, migration 0071) are ONE recurring event.
+// The listing uses singleEvents: true, so Google hands back OCCURRENCES — each
+// with its own id and recurringEventId = the master id the job stores. Writing
+// one occurrence's times onto the job would collapse a Fri–Tue booking into a
+// single day, so for these the app is the source of truth.
+// ============================================================================
+
+// Fri 2 – Tue 6 Oct 2026, 07:00–15:30 Melbourne (DST starts Sun 4 Oct).
+const dailyJob = (updatedAt: string | null): Job => ({
+  id: "job1",
+  scheduled_start: "2026-10-01T21:00:00.000Z",
+  scheduled_end: "2026-10-06T04:30:00.000Z",
+  schedule_daily: true,
+  schedule_all_day: true,
+  status: "scheduled",
+  updated_at: updatedAt,
+});
+
+const SERIES_RULE = [
+  "RRULE:FREQ=DAILY;UNTIL=20261005T200000Z",
+  "EXDATE;TZID=Australia/Melbourne:20261003T070000,20261004T070000",
+];
+
+const master = (over: Record<string, unknown> = {}) => ({
+  id: "series1",
+  status: "confirmed",
+  updated: "2026-09-30T09:00:00.000Z",
+  start: { dateTime: "2026-10-02T07:00:00+10:00", timeZone: "Australia/Melbourne" },
+  end: { dateTime: "2026-10-02T15:30:00+10:00", timeZone: "Australia/Melbourne" },
+  recurrence: SERIES_RULE,
+  ...over,
+});
+
+/** One occurrence as singleEvents: true returns it. `day` is its booked date, `offset` its UTC offset. */
+const occurrence = (day: string, offset: string, over: Record<string, unknown> = {}) => ({
+  id: `series1_${day.replace(/-/g, "")}`,
+  recurringEventId: "series1",
+  status: "confirmed",
+  updated: "2026-09-30T09:00:00.000Z",
+  originalStartTime: { dateTime: `${day}T07:00:00${offset}`, timeZone: "Australia/Melbourne" },
+  start: { dateTime: `${day}T07:00:00${offset}` },
+  end: { dateTime: `${day}T15:30:00${offset}` },
+  ...over,
+});
+
+describe("pollGoogleCalendarChanges — multi-day jobs (one recurring event)", () => {
+  it("ignores the series' own untouched occurrences (eg right after a push)", async () => {
+    eventsGet.mockResolvedValue({ data: master() });
+    listReturns([
+      occurrence("2026-10-02", "+10:00"),
+      occurrence("2026-10-05", "+11:00"),
+      occurrence("2026-10-06", "+11:00"),
+    ]);
+    const { supabase, jobUpdates } = makeSupabase({ series1: dailyJob("2026-09-30T08:00:00.000Z") });
+
+    const result = await pollGoogleCalendarChanges(supabase);
+
+    expect(jobUpdates).toEqual([]);
+    expect(eventsPatch).not.toHaveBeenCalled();
+    // The master is read once per poll, not once per occurrence.
+    expect(eventsGet).toHaveBeenCalledTimes(1);
+    expect(eventsGet.mock.calls[0][0]).toMatchObject({ eventId: "series1" });
+    expect(result).toMatchObject({ seriesSkipped: 0, updated: 0, skipped: 0 });
+  });
+
+  it("NEVER writes one edited occurrence onto the job, even when it is newer", async () => {
+    eventsGet.mockResolvedValue({ data: master() });
+    listReturns([
+      occurrence("2026-10-05", "+11:00", {
+        updated: "2026-10-01T12:00:00.000Z",
+        start: { dateTime: "2026-10-05T09:00:00+11:00" },
+        end: { dateTime: "2026-10-05T11:00:00+11:00" },
+      }),
+    ]);
+    const { supabase, jobUpdates } = makeSupabase({ series1: dailyJob("2026-09-30T08:00:00.000Z") });
+
+    const result = await pollGoogleCalendarChanges(supabase);
+
+    // Written back, the job would have become Mon 5 Oct 09:00–11:00 only.
+    expect(jobUpdates).toEqual([]);
+    expect(eventsPatch).not.toHaveBeenCalled();
+    expect(result).toMatchObject({ seriesSkipped: 1, updated: 0 });
+  });
+
+  it("does not clear the schedule when ONE occurrence is deleted in Google", async () => {
+    eventsGet.mockResolvedValue({ data: master() });
+    listReturns([occurrence("2026-10-05", "+11:00", { status: "cancelled", updated: "2026-10-01T12:00:00.000Z" })]);
+    const { supabase, jobUpdates } = makeSupabase({ series1: dailyJob("2026-09-30T08:00:00.000Z") });
+
+    const result = await pollGoogleCalendarChanges(supabase);
+
+    expect(jobUpdates).toEqual([]);
+    expect(result).toMatchObject({ seriesSkipped: 1, clearedByDeletion: 0 });
+  });
+
+  it("clears the schedule (and the 0071 flags) once when the whole series is deleted", async () => {
+    eventsGet.mockResolvedValue({ data: master({ status: "cancelled", updated: "2026-10-01T12:00:00.000Z" }) });
+    listReturns([
+      occurrence("2026-10-02", "+10:00", { status: "cancelled", updated: "2026-10-01T12:00:00.000Z" }),
+      occurrence("2026-10-05", "+11:00", { status: "cancelled", updated: "2026-10-01T12:00:00.000Z" }),
+    ]);
+    const { supabase, jobUpdates } = makeSupabase({ series1: dailyJob("2026-09-30T08:00:00.000Z") });
+
+    const result = await pollGoogleCalendarChanges(supabase);
+
+    expect(jobUpdates).toEqual([
+      {
+        id: "job1",
+        payload: {
+          scheduled_start: null,
+          scheduled_end: null,
+          schedule_daily: false,
+          schedule_all_day: false,
+          google_event_id: null,
+        },
+      },
+    ]);
+    expect(result).toMatchObject({ clearedByDeletion: 1 });
+  });
+
+  it("treats a master Google no longer has (404) as a deleted series", async () => {
+    eventsGet.mockRejectedValue(Object.assign(new Error("gone"), { code: 404 }));
+    listReturns([occurrence("2026-10-02", "+10:00", { status: "cancelled", updated: "2026-10-01T12:00:00.000Z" })]);
+    const { supabase, jobUpdates } = makeSupabase({ series1: dailyJob("2026-09-30T08:00:00.000Z") });
+
+    await pollGoogleCalendarChanges(supabase);
+
+    expect(jobUpdates).toEqual([
+      expect.objectContaining({ payload: expect.objectContaining({ scheduled_start: null, schedule_daily: false }) }),
+    ]);
+  });
+
+  it("keeps a NEWER multi-day schedule when the series was deleted earlier (link only)", async () => {
+    eventsGet.mockResolvedValue({ data: master({ status: "cancelled", updated: "2026-09-30T09:00:00.000Z" }) });
+    listReturns([occurrence("2026-10-02", "+10:00", { status: "cancelled" })]);
+    const { supabase, jobUpdates } = makeSupabase({ series1: dailyJob("2026-09-30T10:00:00.000Z") });
+
+    await pollGoogleCalendarChanges(supabase);
+
+    expect(jobUpdates).toEqual([{ id: "job1", payload: { google_event_id: null } }]);
+  });
+
+  it("pushes the job back onto the MASTER when the series changed but the job is newer", async () => {
+    // The series is still the OLD booking (Mon 28 – Tue 29 Sep); the office
+    // has since moved the job to Fri 2 – Tue 6 Oct.
+    eventsGet.mockResolvedValue({
+      data: master({
+        start: { dateTime: "2026-09-28T07:00:00+10:00" },
+        end: { dateTime: "2026-09-28T15:30:00+10:00" },
+        recurrence: ["RRULE:FREQ=DAILY;UNTIL=20260928T210000Z"],
+      }),
+    });
+    listReturns([occurrence("2026-09-28", "+10:00"), occurrence("2026-09-29", "+10:00")]);
+    const { supabase, jobUpdates } = makeSupabase({ series1: dailyJob("2026-09-30T10:00:00.000Z") });
+
+    const result = await pollGoogleCalendarChanges(supabase);
+
+    expect(jobUpdates).toEqual([]);
+    expect(eventsPatch).toHaveBeenCalledTimes(1);
+    expect(eventsPatch.mock.calls[0][0]).toMatchObject({
+      eventId: "series1",
+      requestBody: {
+        start: { dateTime: "2026-10-02T07:00:00", timeZone: "Australia/Melbourne", date: null },
+        end: { dateTime: "2026-10-02T15:30:00", timeZone: "Australia/Melbourne", date: null },
+        recurrence: SERIES_RULE,
+      },
+    });
+    expect(result).toMatchObject({ pushedToCalendar: 1 });
+  });
+
+  it("does NOT reverse-engineer a newer Google-side series change onto the job", async () => {
+    eventsGet.mockResolvedValue({
+      data: master({
+        updated: "2026-10-01T12:00:00.000Z",
+        recurrence: ["RRULE:FREQ=WEEKLY;COUNT=3"],
+      }),
+    });
+    listReturns([occurrence("2026-10-02", "+10:00", { updated: "2026-10-01T12:00:00.000Z" })]);
+    const { supabase, jobUpdates } = makeSupabase({ series1: dailyJob("2026-09-30T10:00:00.000Z") });
+
+    const result = await pollGoogleCalendarChanges(supabase);
+
+    expect(jobUpdates).toEqual([]);
+    expect(eventsPatch).not.toHaveBeenCalled();
+    expect(result).toMatchObject({ seriesSkipped: 1, updated: 0 });
+  });
+
+  it("restores the series when a multi-day job's event lost its recurrence and the job is newer", async () => {
+    // Matched directly by id (not an occurrence) — eg someone in Google made
+    // the series a one-off. Same rule: the newer side wins, the app pushes.
+    listReturns([
+      {
+        id: "series1",
+        status: "confirmed",
+        updated: "2026-09-30T09:00:00.000Z",
+        start: { dateTime: "2026-10-02T07:00:00+10:00" },
+        end: { dateTime: "2026-10-02T15:30:00+10:00" },
+      },
+    ]);
+    const { supabase, jobUpdates } = makeSupabase({ series1: dailyJob("2026-09-30T10:00:00.000Z") });
+
+    await pollGoogleCalendarChanges(supabase);
+
+    expect(jobUpdates).toEqual([]);
+    expect(eventsGet).not.toHaveBeenCalled();
+    expect(eventsPatch.mock.calls[0][0]).toMatchObject({ eventId: "series1", requestBody: { recurrence: SERIES_RULE } });
+  });
+});
+
+describe("pollGoogleCalendarChanges — all-day Google events", () => {
+  // end.date is EXCLUSIVE: 2026-10-19 .. 2026-10-22 means Mon 19 – Wed 21.
+  const allDay = (updated: string) => ({
+    id: "evt1",
+    status: "confirmed",
+    updated,
+    start: { date: "2026-10-19" },
+    end: { date: "2026-10-22" },
+  });
+
+  it("maps a newer all-day event to the standard shift on each of its dates", async () => {
+    listReturns([allDay("2026-08-09T11:00:00.000Z")]);
+    const { supabase, jobUpdates } = makeSupabase({ evt1: jobDraggedTo("2026-08-09T10:00:00.000Z") });
+
+    await pollGoogleCalendarChanges(supabase);
+
+    // Not a UTC-midnight 72 h block: 07:00–15:30 Melbourne, Mon to Wed.
+    expect(jobUpdates).toEqual([
+      {
+        id: "job1",
+        payload: {
+          scheduled_start: "2026-10-18T20:00:00.000Z",
+          scheduled_end: "2026-10-21T04:30:00.000Z",
+          schedule_daily: true,
+          schedule_all_day: true,
+        },
+      },
+    ]);
+  });
+
+  it("maps a one-day all-day event to a single standard shift", async () => {
+    listReturns([{ ...allDay("2026-08-09T11:00:00.000Z"), end: { date: "2026-10-20" } }]);
+    const { supabase, jobUpdates } = makeSupabase({ evt1: jobDraggedTo("2026-08-09T10:00:00.000Z") });
+
+    await pollGoogleCalendarChanges(supabase);
+
+    expect(jobUpdates[0].payload).toEqual({
+      scheduled_start: "2026-10-18T20:00:00.000Z",
+      scheduled_end: "2026-10-19T04:30:00.000Z",
+      schedule_daily: false,
+      schedule_all_day: true,
+    });
   });
 });

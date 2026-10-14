@@ -62,11 +62,18 @@ export function migrationTables(sql: string): Map<string, TableColumns> {
   // `[^;]*?` is load-bearing: without it the gap spans whole files and pairs an
   // early `alter table` with a much later `add column`, silently losing real
   // columns. Same reasoning as schema-column-contract.test.ts.
+  //
+  // Every `add column` in the statement counts, not just the first: one
+  // `alter table jobs add column a …, add column b …;` (0071) adds both, and
+  // matching only the first silently lost `b`.
+  const alterRe = /alter table (?:only )?(\w+)([^;]*)/gi;
   const addRe =
-    /alter table (?:only )?(\w+)[^;]*?add column (?:if not exists )?"?(\w+)"?\s+([a-z_]+(?:\s*\(\s*\d+(?:\s*,\s*\d+)?\s*\))?(?:\[\])?)/gi;
-  for (const [, table, col, type] of sql.matchAll(addRe)) {
-    if (!out.has(table)) out.set(table, new Map());
-    out.get(table)!.set(col, type.trim().toLowerCase());
+    /add column (?:if not exists )?"?(\w+)"?\s+([a-z_]+(?:\s*\(\s*\d+(?:\s*,\s*\d+)?\s*\))?(?:\[\])?)/gi;
+  for (const [, table, body] of sql.matchAll(alterRe)) {
+    for (const [, col, type] of body.matchAll(addRe)) {
+      if (!out.has(table)) out.set(table, new Map());
+      out.get(table)!.set(col, type.trim().toLowerCase());
+    }
   }
 
   // No migration in this tree drops or renames a column today. Handling drops
