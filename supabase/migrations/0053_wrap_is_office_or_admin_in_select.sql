@@ -1,9 +1,9 @@
 -- ============================================================================
 -- Make the role check evaluate once per query instead of once per row.
 --
--- STATUS: DRAFT — NOT APPLIED. (`npm run check:migrations` fails once this
--- line is still here and the ledger HAS this migration;
--- tests/unit/migration-header-truth.test.ts keeps that check able to see it.)
+-- STATUS: ✅ APPLIED IN PRODUCTION (2026-10-15, via SQL editor, run before 0069;
+-- money_boundary_sweep.sql and 0035_rls_role_impersonation_test.sql run clean
+-- afterwards, as reported by Justin).
 --
 -- APPLY THIS ONE LAST, AND ON ITS OWN. It is the only migration in this batch
 -- that rewrites existing RLS policies, which is the operation this project has

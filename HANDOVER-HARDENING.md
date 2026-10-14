@@ -13,20 +13,11 @@ fact could go stale, the command to re-check it is given.
 
 ## 0. READ THIS FIRST — the thing most likely to bite you
 
-**Five migrations — `0049` through `0053` — are written, reviewed and merged, and none of
-them has been applied to production. Every defect they close is live right now.**
-
-Re-verified 11 Aug 2026 by reading each header:
-
-| Migration | Closes | Live consequence while unapplied |
-|---|---|---|
-| `0049` | job media delete scoping | any authenticated user can destroy any job's photos, customer signatures and voice recordings |
-| `0050` | atomic replace helpers | the invoice/quote line replacement and the OAuth token swap are correct in application code but still not transactional |
-| `0051` | `time_entries` duration constraint | nothing in the schema stops a reversed or 200-hour shift reaching payroll |
-| `0052` | foreign-key indexes | performance only |
-| `0053` | wrap `is_office_or_admin` in `select` | performance only — apply this one **last and alone**, it rewrites live RLS policies |
-| `0069` | wrap `is_admin(auth.uid())`, `auth.uid()`, `auth.role()` in `select` (and `is_office_or_admin`, so it also covers 0053) | performance only — apply **alone**, after 0053; then run `money_boundary_sweep.sql` |
-| `0070` | dashboard sort/filter indexes (`jobs.created_at`, `invoices.created_at`, `google_event_id`, …) | performance only — independent, any time |
+**Resolved 15 Oct 2026: every migration in this document is applied.** `0049`–`0052`
+were applied 2026-08-22, and `0053`, `0069` and `0070` on 2026-10-15 via the SQL
+editor (`0053` then `0069`, each alone, then `money_boundary_sweep.sql` and
+`0035_rls_role_impersonation_test.sql`, then `0070`). Each header says so. The rule
+below still applies to the next one.
 
 **Merging a migration does not run it.** This repo has been bitten by that gap repeatedly:
 `0034` reported success while achieving nothing, and `0040` shipped after nine call sites had
@@ -70,7 +61,7 @@ teaches them to discount the section that also lists the five real ones. Whoever
 
 | Migrations | What | Status |
 |---|---|---|
-| `0049`–`0053` | media delete scoping, atomic replace helpers, time-entry duration constraint, FK indexes, RLS InitPlan | **In `main`, absent from production.** See §0 |
+| — | none | `0049`–`0052` applied 2026-08-22; `0053`, `0069`, `0070` applied 2026-10-15 |
 
 `0047` (PR [#15](https://github.com/Justin5642/Mellerick/pull/15), storage policy scoping) sat
 in this table until 11 Aug. It and `0048` were applied on **2026-08-05** and their headers say

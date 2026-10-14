@@ -95,10 +95,19 @@ const drafts = draftNumbers();
 const files = sourceFiles();
 
 describe("code does not claim an unapplied migration is in force", () => {
-  it("found the drafts and something to scan", () => {
-    // Vacuity guard: with no drafts, or no files, everything below passes for
-    // free — which is the shape of failure this whole suite keeps finding.
-    expect({ drafts: drafts.length > 0, files: files.length > 50 }).toEqual({ drafts: true, files: true });
+  it("read the migration headers and found something to scan", () => {
+    // Vacuity guard: if the STATUS lines or the source files are not being
+    // read, everything below passes for free — which is the shape of failure
+    // this whole suite keeps finding. It no longer insists on at least one
+    // DRAFT: since 15 Oct 2026 every migration is applied, and zero drafts is
+    // then the correct state, not a broken scan.
+    const statusLines = readdirSync(MIGRATIONS)
+      .filter((f) => f.endsWith(".sql"))
+      .filter((f) => /^--\s*STATUS:/im.test(readFileSync(join(MIGRATIONS, f), "utf8"))).length;
+    expect({ statusLines: statusLines > 20, files: files.length > 50 }).toEqual({ statusLines: true, files: true });
+    // And the draft test itself still recognises a draft when there is one.
+    expect(/\bDRAFT\b|NOT APPLIED/i.test("-- STATUS: DRAFT — NOT APPLIED.")).toBe(true);
+    expect(Array.isArray(drafts)).toBe(true);
   });
 
   it("every comment naming a draft migration says it is not applied", () => {

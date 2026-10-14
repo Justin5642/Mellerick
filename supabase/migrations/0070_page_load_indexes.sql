@@ -1,8 +1,8 @@
 -- ============================================================================
 -- Indexes for the filters and sorts the web dashboard actually runs.
 --
--- STATUS: DRAFT — NOT APPLIED. Independent of 0053/0069 — safe to apply
--- before or after them. Plain CREATE INDEX (not CONCURRENTLY, which the SQL
+-- STATUS: ✅ APPLIED IN PRODUCTION (2026-10-15, via SQL editor).
+-- Independent of 0053/0069. Plain CREATE INDEX (not CONCURRENTLY, which the SQL
 -- editor's transaction cannot run): these tables are small (jobs ~830 rows,
 -- time_entries a few thousand), so each build holds its write lock for well
 -- under a second.
