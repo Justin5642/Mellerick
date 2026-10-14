@@ -3,9 +3,10 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { Input } from "@/components/ui/input";
-import { Star } from "lucide-react";
+import { Star, UserPlus } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { customerSearchFilters } from "@/lib/customer-search";
+import { AddCustomerDialog } from "@/components/customer-add-dialog";
 
 interface CustomerOption {
   id: string;
@@ -22,6 +23,13 @@ interface CustomerPickerProps {
   placeholder?: string;
   error?: boolean;
   disabled?: boolean;
+  /**
+   * Offer "+ Add new customer" at the foot of the list, opening
+   * AddCustomerDialog prefilled with the search text; the new customer is
+   * selected as soon as it's saved. On for the New Job / Quote / Invoice forms,
+   * where a missing customer used to mean abandoning the form.
+   */
+  allowCreate?: boolean;
 }
 
 // Reusable searchable customer picker for the "new job / quote / invoice"
@@ -41,7 +49,7 @@ const COLUMNS = "id, name, company, phone, email, is_favorite";
 const SEARCH_COLUMNS = ["name", "company", "phone", "email"] as const;
 const RESULT_LIMIT = 20;
 
-export function CustomerPicker({ value, onChange, placeholder, error, disabled }: CustomerPickerProps) {
+export function CustomerPicker({ value, onChange, placeholder, error, disabled, allowCreate }: CustomerPickerProps) {
   const supabase = createClient();
   const [results, setResults] = useState<CustomerOption[]>([]);
   // Held separately from `results`: the selected customer is often not in the
@@ -52,6 +60,10 @@ export function CustomerPicker({ value, onChange, placeholder, error, disabled }
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState(false);
   const [searching, setSearching] = useState(true);
+  const [addOpen, setAddOpen] = useState(false);
+  // What was typed when "Add new customer" was clicked — the blur handler
+  // resets `query` as the dialog takes focus, so it's captured first.
+  const [addName, setAddName] = useState("");
   // Only the latest search may write results, so a slow response for "smi"
   // can't land on top of the one for "smith".
   const requestSeq = useRef(0);
@@ -219,7 +231,36 @@ export function CustomerPicker({ value, onChange, placeholder, error, disabled }
           {matches.length === RESULT_LIMIT && (
             <p className="px-3 py-2 text-xs text-slate-400">Showing the first {RESULT_LIMIT} — keep typing to narrow the list</p>
           )}
+          {allowCreate && (
+            <button
+              type="button"
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => {
+                setAddName(term);
+                setOpen(false);
+                setEditing(false);
+                setAddOpen(true);
+              }}
+              className="sticky bottom-0 w-full flex items-center gap-2 px-3 py-2 text-sm font-medium text-blue-700 bg-white border-t hover:bg-blue-50"
+            >
+              <UserPlus className="w-4 h-4 shrink-0" />
+              <span className="truncate">
+                {term && !searching && matches.length === 0 ? <>Add &ldquo;{term}&rdquo; as a new customer</> : "Add new customer"}
+              </span>
+            </button>
+          )}
         </div>
+      )}
+      {allowCreate && (
+        <AddCustomerDialog
+          open={addOpen}
+          onOpenChange={setAddOpen}
+          initialName={addName}
+          onCreated={(customer) => {
+            setResults((prev) => [customer, ...prev.filter((c) => c.id !== customer.id)]);
+            select(customer);
+          }}
+        />
       )}
     </div>
   );

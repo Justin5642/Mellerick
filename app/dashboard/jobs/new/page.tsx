@@ -119,7 +119,7 @@ export default function NewJobPage() {
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label>Customer *</Label>
-                <CustomerPicker value={form.customer_id} onChange={(v) => set("customer_id", v)} placeholder="Search customers..." />
+                <CustomerPicker value={form.customer_id} onChange={(v) => set("customer_id", v)} placeholder="Search customers..." allowCreate />
               </div>
               <div className="space-y-2">
                 <Label>Site</Label>

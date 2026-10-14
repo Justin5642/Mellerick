@@ -158,6 +158,7 @@ export default function NewQuotePage() {
                   onChange={v => setField("customer_id", v)}
                   placeholder="Search customers..."
                   error={errors.customer_id}
+                  allowCreate
                 />
                 {errors.customer_id && <p className="text-xs text-red-500">Customer is required</p>}
               </div>
