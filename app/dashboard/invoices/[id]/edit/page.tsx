@@ -143,7 +143,7 @@ export default function EditInvoicePage() {
   return (
     <div className="p-6 max-w-3xl space-y-6">
       <div className="flex items-center gap-3">
-        <Link href={`/dashboard/invoices/${id}`}>
+        <Link prefetch={false} href={`/dashboard/invoices/${id}`}>
           <Button variant="ghost" size="sm" className="gap-2 text-slate-500"><ArrowLeft className="w-4 h-4" />Back</Button>
         </Link>
         <h1 className="text-2xl font-bold text-slate-900">Edit Invoice</h1>
@@ -228,7 +228,7 @@ export default function EditInvoicePage() {
         </Card>
 
         <div className="flex justify-end gap-3">
-          <Link href={`/dashboard/invoices/${id}`}><Button variant="outline" type="button">Cancel</Button></Link>
+          <Link prefetch={false} href={`/dashboard/invoices/${id}`}><Button variant="outline" type="button">Cancel</Button></Link>
           <Button type="submit" disabled={loading}>{loading ? "Saving..." : "Save Changes"}</Button>
         </div>
       </form>

@@ -92,7 +92,7 @@ export default function EditCustomerPage() {
   return (
     <div className="p-6 max-w-2xl space-y-6">
       <div className="flex items-center gap-3">
-        <Link href={`/dashboard/customers/${id}`}>
+        <Link prefetch={false} href={`/dashboard/customers/${id}`}>
           <Button variant="ghost" size="sm" className="gap-2 text-slate-500">
             <ArrowLeft className="w-4 h-4" /> Back
           </Button>
@@ -152,7 +152,7 @@ export default function EditCustomerPage() {
         </Card>
 
         <div className="flex justify-end gap-3">
-          <Link href={`/dashboard/customers/${id}`}>
+          <Link prefetch={false} href={`/dashboard/customers/${id}`}>
             <Button variant="outline" type="button">
               Cancel
             </Button>

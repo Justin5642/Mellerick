@@ -99,7 +99,7 @@ export function InvoiceDetail({ invoice, xeroConnected }: Props) {
           <a href={`/api/invoices/${invoice.id}/pdf`} target="_blank" rel="noopener noreferrer">
             <Button variant="outline" size="sm" className="gap-2"><FileDown className="w-3.5 h-3.5" />PDF</Button>
           </a>
-          <Link href={`/dashboard/invoices/${invoice.id}/edit`}>
+          <Link prefetch={false} href={`/dashboard/invoices/${invoice.id}/edit`}>
             <Button variant="outline" size="sm" className="gap-2"><Pencil className="w-3.5 h-3.5" />Edit</Button>
           </Link>
 

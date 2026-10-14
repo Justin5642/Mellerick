@@ -46,7 +46,7 @@ export default async function InventoryPage() {
               {items.map((item: any) => {
                 const isLow = Number(item.quantity_on_hand) <= Number(item.reorder_level);
                 return (
-                  <Link key={item.id} href={`/dashboard/inventory/${item.id}`} className="flex items-center justify-between px-6 py-4 hover:bg-slate-50 transition-colors group">
+                  <Link prefetch={false} key={item.id} href={`/dashboard/inventory/${item.id}`} className="flex items-center justify-between px-6 py-4 hover:bg-slate-50 transition-colors group">
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2">
                         <p className="font-medium text-sm group-hover:text-blue-600 transition-colors truncate">{item.name}</p>

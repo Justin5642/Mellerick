@@ -1,7 +1,7 @@
 {
   "framework": "nextjs",
   "regions": [
-    "syd1"
+    "sin1"
   ],
   "buildCommand": "next build",
   "installCommand": "npm install",

@@ -191,7 +191,7 @@ export default function FleetPage() {
                 const assignedStaff = staff.find((s) => s.id === item.assigned_to);
                 return (
                   <div key={item.id} className="flex items-center justify-between px-6 py-4 gap-4">
-                    <Link href={`/dashboard/fleet/${item.id}`} className="flex items-center gap-4 group flex-1 min-w-0">
+                    <Link prefetch={false} href={`/dashboard/fleet/${item.id}`} className="flex items-center gap-4 group flex-1 min-w-0">
                       <div className="w-10 h-10 rounded-full bg-slate-100 flex items-center justify-center text-slate-500 flex-shrink-0">
                         <Truck className="w-5 h-5" />
                       </div>
@@ -244,7 +244,7 @@ export default function FleetPage() {
                           {item.is_active ? "Deactivate" : "Reactivate"}
                         </Button>
                       )}
-                      <Link href={`/dashboard/fleet/${item.id}`} className="text-slate-300 hover:text-blue-600 transition-colors">
+                      <Link prefetch={false} href={`/dashboard/fleet/${item.id}`} className="text-slate-300 hover:text-blue-600 transition-colors">
                         <ChevronRight className="w-4 h-4" />
                       </Link>
                     </div>

@@ -89,7 +89,7 @@ export default async function InvoicesPage() {
                       )}
                     </div>
                   </div>
-                  <Link href={`/dashboard/invoices/new?job_id=${job.id}&customer_id=${job.customer_id}&title=${encodeURIComponent(job.title)}`} className="shrink-0">
+                  <Link prefetch={false} href={`/dashboard/invoices/new?job_id=${job.id}&customer_id=${job.customer_id}&title=${encodeURIComponent(job.title)}`} className="shrink-0">
                     <Button size="sm" className="gap-1.5 h-8 text-xs">
                       <Plus className="w-3.5 h-3.5" />Create Invoice
                     </Button>

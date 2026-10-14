@@ -64,7 +64,7 @@ export default async function CustomerDetailPage({
             <ArrowLeft className="w-4 h-4" /> Back
           </Button>
         </Link>
-        <Link href={`/dashboard/customers/${id}/edit`}>
+        <Link prefetch={false} href={`/dashboard/customers/${id}/edit`}>
           <Button variant="outline" className="gap-2">
             <Pencil className="w-4 h-4" /> Edit
           </Button>
@@ -197,7 +197,7 @@ export default async function CustomerDetailPage({
 
             <TabsContent value="jobs">
               <div className="flex justify-end mb-3">
-                <Link href={`/dashboard/jobs/new?customer_id=${id}`}>
+                <Link prefetch={false} href={`/dashboard/jobs/new?customer_id=${id}`}>
                   <Button size="sm" className="gap-2">
                     <Plus className="w-3.5 h-3.5" /> Add Job
                   </Button>
@@ -213,7 +213,7 @@ export default async function CustomerDetailPage({
                   ) : (
                     <div className="divide-y">
                       {jobs.map((job: any) => (
-                        <Link
+                        <Link prefetch={false}
                           key={job.id}
                           href={`/dashboard/jobs/${job.id}`}
                           className="flex items-center justify-between px-4 py-3 hover:bg-slate-50 transition-colors group"
@@ -243,7 +243,7 @@ export default async function CustomerDetailPage({
 
             <TabsContent value="quotes">
               <div className="flex justify-end mb-3">
-                <Link href={`/dashboard/quotes/new?customer_id=${id}`}>
+                <Link prefetch={false} href={`/dashboard/quotes/new?customer_id=${id}`}>
                   <Button size="sm" className="gap-2">
                     <Plus className="w-3.5 h-3.5" /> Add Quote
                   </Button>
@@ -259,7 +259,7 @@ export default async function CustomerDetailPage({
                   ) : (
                     <div className="divide-y">
                       {quotes.map((quote: any) => (
-                        <Link
+                        <Link prefetch={false}
                           key={quote.id}
                           href={`/dashboard/quotes/${quote.id}`}
                           className="flex items-center justify-between px-4 py-3 hover:bg-slate-50 transition-colors group"
@@ -292,7 +292,7 @@ export default async function CustomerDetailPage({
 
             <TabsContent value="invoices">
               <div className="flex justify-end mb-3">
-                <Link href={`/dashboard/invoices/new?customer_id=${id}`}>
+                <Link prefetch={false} href={`/dashboard/invoices/new?customer_id=${id}`}>
                   <Button size="sm" className="gap-2">
                     <Plus className="w-3.5 h-3.5" /> Add Invoice
                   </Button>
@@ -308,7 +308,7 @@ export default async function CustomerDetailPage({
                   ) : (
                     <div className="divide-y">
                       {invoices.map((inv: any) => (
-                        <Link
+                        <Link prefetch={false}
                           key={inv.id}
                           href={`/dashboard/invoices/${inv.id}`}
                           className="flex items-center justify-between px-4 py-3 hover:bg-slate-50 transition-colors group"

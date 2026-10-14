@@ -70,7 +70,7 @@ export default async function BackflowDevicesPage() {
       ) : (
         <div className="space-y-3">
           {rows.map(({ device, nextDueDate, status }) => (
-            <Link key={device.id} href={`/dashboard/backflow/${device.id}`}>
+            <Link prefetch={false} key={device.id} href={`/dashboard/backflow/${device.id}`}>
               <Card className="hover:shadow-md transition-shadow cursor-pointer">
                 <CardContent className="flex items-center justify-between gap-4 py-4">
                   <div className="min-w-0">

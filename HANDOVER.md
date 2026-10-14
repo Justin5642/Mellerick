@@ -63,6 +63,20 @@ uptime with low CPU is normal and healthy.
 **Two separate npm projects.** Root and `mobile/` have their own lockfiles and no
 workspace linking them. Install in the right directory.
 
+**Supabase is in Singapore (ap-southeast-1), so Vercel functions run in `sin1`.**
+Confirmed 14 October 2026 by resolving `db.<ref>.supabase.co`. #46 moved
+functions to `syd1` believing Supabase was in Sydney; every query then crossed
+Sydney↔Singapore (~90 ms each), and a page makes several in sequence. A page
+costs one Melbourne→Singapore trip for the visitor and ~2 ms per query instead.
+Middleware runs on the Node.js runtime (`config.runtime = "nodejs"`) so it also
+runs in `sin1` rather than at the edge nearest the visitor. Login is verified
+with `auth.getClaims()` — the project signs JWTs with an ES256 key, so it is a
+local signature check, not an auth-server round trip (middleware and
+`lib/auth/viewer.ts`). Trade-off: a revoked session stays valid until its access
+token expires (≤1 h); RLS still authorizes every query. List-row `<Link>`s are
+`prefetch={false}`; the sidebar prefetches. If the database ever moves to Sydney,
+move `vercel.json` back to `syd1` in the same change.
+
 **Scheduling notes surface on the mobile Overview tab, not just in Notes.**
 `job_notes` has a `source` column (migration `0062`); both the web and mobile
 "Schedule job" flows tag their note `source: "schedule"`. `mobile/components/
