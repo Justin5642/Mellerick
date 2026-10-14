@@ -77,6 +77,34 @@ token expires (≤1 h); RLS still authorizes every query. List-row `<Link>`s are
 `prefetch={false}`; the sidebar prefetches. If the database ever moves to Sydney,
 move `vercel.json` back to `syd1` in the same change.
 
+**Multi-day schedules (migration `0071`, draft until applied).** A job still
+stores one `scheduled_start..scheduled_end`; `jobs.schedule_daily = true` means
+the same daily hours on each booked day — weekdays between the two dates, plus
+either date itself even on a weekend — and `schedule_all_day` remembers the
+"All day" box (07:00–15:30, 8 h + 30 min break, each day). The rule lives only
+in `lib/scheduling.ts` (`scheduleDays`, `occupiesDay`, `moveSchedule`, …),
+mirrored at `mobile/lib/scheduling.ts` and pinned identical by
+`tests/unit/scheduling-multiday.test.ts`. **Never bucket a job by
+`scheduled_start` alone** — that is what showed a Mon–Wed job on Monday only.
+- **Board** (`components/schedule/`): a job shows in every crew member's row on
+  every booked day, with booked hours per tech per day. Double-click a card to
+  cut it, click a tech's day to paste (Esc cancels). Paste AND drag both move
+  the dates (`moveSchedule` — a daily job keeps its daily hours and number of
+  booked days, starting on the target day) and SWAP the source tech for the
+  target tech, keeping the rest of the crew, via `set_job_assignments` —
+  never a direct `assigned_to` write, which collapses the crew (0059). Before
+  14 Oct 2026 a drop replaced the whole crew; changing that was the office's
+  call.
+- **Google Calendar**: a daily job is ONE event with
+  `RRULE:FREQ=DAILY;UNTIL=…` + `EXDATE` for skipped weekend days
+  (`lib/calendar-event.ts`). The poll never writes an edited single occurrence
+  back to the job, and for a daily job never writes series time changes back
+  either — the app is the source of truth for multi-day schedules.
+- **Rollout order matters:** apply `0071` → redeploy the PowerSync sync rules
+  (`tech_jobs` lists both columns) → merge/deploy web → ship mobile. Web reads
+  and writes the columns, and the calendar poll selects them; before `0071`
+  only the Jobs list and the schedule board fall back (42703).
+
 **Load page data on the server, not in the browser.** A browser→Supabase
 query from Australia costs ~100 ms+; a server query in `sin1` costs ~2 ms. So
 My Jobs, Approvals, Staff, Fleet and Customers are server pages that pass
