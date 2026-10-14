@@ -1,5 +1,13 @@
-import { google } from "googleapis";
+import { google, type calendar_v3 } from "googleapis";
 import { createClient } from "@/lib/supabase/server";
+import { buildCalendarEventTiming, eventMatchesJob, instanceMatchesJob } from "@/lib/calendar-event";
+import { shiftDateKey } from "@/lib/date";
+import {
+  buildScheduleColumns,
+  DEFAULT_SHIFT_END_TIME,
+  DEFAULT_SHIFT_START_TIME,
+  type ScheduleColumns,
+} from "@/lib/scheduling";
 
 const SCOPES = [
   "https://www.googleapis.com/auth/calendar.events",
@@ -103,6 +111,55 @@ export function calendarEventIsNewer(
   return event > job;
 }
 
+type CalendarEvent = calendar_v3.Schema$Event;
+
+type PolledJob = {
+  id: string;
+  scheduled_start: string | null;
+  scheduled_end: string | null;
+  schedule_daily: boolean | null;
+  schedule_all_day: boolean | null;
+  status: string;
+  updated_at: string | null;
+};
+
+/**
+ * What an event says the job's columns should be, when the event is the newer
+ * writer. A timed event is its own start/end. An ALL-DAY event (start.date,
+ * end.date exclusive) is the standard shift on each of its dates — the same
+ * columns the Schedule Job dialog writes with "All day" ticked — rather than a
+ * UTC-midnight 24 h block nobody meant.
+ */
+function columnsFromEvent(event: {
+  start?: { dateTime?: string | null; date?: string | null } | null;
+  end?: { dateTime?: string | null; date?: string | null } | null;
+}): Partial<ScheduleColumns> | null {
+  if (!event.start?.dateTime && event.start?.date) {
+    const startDateKey = event.start.date;
+    const endExclusive = event.end?.date ?? shiftDateKey(startDateKey, 1);
+    const lastKey = shiftDateKey(endExclusive, -1);
+    return buildScheduleColumns({
+      startDateKey,
+      endDateKey: lastKey < startDateKey ? startDateKey : lastKey,
+      startTime: DEFAULT_SHIFT_START_TIME,
+      endTime: DEFAULT_SHIFT_END_TIME,
+      allDay: true,
+    });
+  }
+  const start = event.start?.dateTime ?? null;
+  const end = event.end?.dateTime ?? null;
+  if (!start && !end) return null;
+  const cols: Partial<ScheduleColumns> = {};
+  if (start) cols.scheduled_start = new Date(start).toISOString();
+  if (end) cols.scheduled_end = new Date(end).toISOString();
+  return cols;
+}
+
+function sameInstant(a: string | null | undefined, b: string | null | undefined): boolean {
+  if (!a || !b) return !a && !b;
+  return new Date(a).getTime() === new Date(b).getTime();
+}
+
 /**
  * Pulls changes made *directly in Google Calendar* (drag to reschedule,
  * resize, or delete an event) back onto the matching job — the other half
@@ -124,6 +181,20 @@ export function calendarEventIsNewer(
  * converge in a single round rather than disagreeing forever. That patch bumps
  * `event.updated`, so the next poll sees the event as newer — and by then the
  * times match, so nothing is written and it does not oscillate.
+ *
+ * MULTI-DAY JOBS (schedule_daily, migration 0071 — a DRAFT, not applied yet;
+ * the select below needs it applied first) are ONE recurring event (see
+ * lib/calendar-event.ts). The listing uses singleEvents: true, so a series
+ * arrives as its occurrences — each with its own id and `recurringEventId` =
+ * the master, which is what jobs.google_event_id holds. For those the app is
+ * the source of truth:
+ *   - one occurrence edited or deleted in Google is NEVER written back (it
+ *     would collapse the whole schedule into that one day) — logged, counted
+ *     in `seriesSkipped`;
+ *   - the series itself deleted → the ordinary deletion path;
+ *   - the series itself changed: job newer → the job is pushed back onto the
+ *     master; event newer → logged and skipped, because reverse-engineering a
+ *     recurrence rule into "start date, end date, daily hours" is guesswork.
  */
 export async function pollGoogleCalendarChanges(supabase: any) {
   const { data: tokenRow } = await supabase.from("google_tokens").select("*").single();
@@ -150,10 +221,181 @@ export async function pollGoogleCalendarChanges(supabase: any) {
   // every other count here describes what the poll INTENDED, and only this says
   // what actually landed.
   let writeFailed = 0;
+  // Google-side edits to a recurring (multi-day) job's event that were
+  // deliberately NOT written back — the app owns multi-day schedules.
+  let seriesSkipped = 0;
 
   // If we don't have a sync token yet, scope the initial listing to "from
   // now on" so we don't walk years of calendar history on the first run.
   const isInitialSync = !syncToken;
+
+  // A series' occurrences arrive together; fetch each master once and
+  // reconcile each series once per poll.
+  const masters = new Map<string, CalendarEvent | null>();
+  const reconciledSeries = new Set<string>();
+
+  // `updated_at` is what makes the direction of a change knowable; without
+  // it every comparison below degrades to "the times differ", which is the
+  // bug this guard exists to close.
+  const findJob = async (eventId: string): Promise<PolledJob | null> => {
+    const { data } = await supabase
+      .from("jobs")
+      .select("id, scheduled_start, scheduled_end, schedule_daily, schedule_all_day, status, updated_at")
+      .eq("google_event_id", eventId)
+      .maybeSingle();
+    return data ?? null;
+  };
+
+  const dropLink = async (jobId: string) => {
+    const { error: linkError } = await supabase.from("jobs").update({ google_event_id: null }).eq("id", jobId);
+    // Left set, the job keeps pointing at an event that no longer exists,
+    // so /sync-calendar takes its UPDATE branch, 404s, and recreates —
+    // producing a duplicate rather than repairing the link.
+    if (linkError) linkClearFailed++;
+  };
+
+  /** The event (or whole series) is gone from Google. */
+  const handleDeletion = async (job: PolledJob, eventUpdated: string | null | undefined) => {
+    if (!calendarEventIsNewer(eventUpdated, job.updated_at)) {
+      // Someone deleted the event in Google, but the app touched this job
+      // AFTER that. The event genuinely no longer exists, so the link has
+      // to go — but clearing the schedule too would throw away the newer
+      // edit, which is the whole failure this guard exists to prevent.
+      // Re-creating the event needs the job number, title, customer and
+      // site that only /sync-calendar assembles, so that stays its job.
+      await dropLink(job.id);
+      skipped++;
+      return;
+    }
+    // Event was deleted directly in Google Calendar — clear the schedule so
+    // office staff notice the job needs re-booking, rather than silently
+    // leaving a stale schedule in place. The 0071 flags go with it: an
+    // unscheduled job is neither multi-day nor all-day.
+    const cleared = await supabase
+      .from("jobs")
+      .update({
+        scheduled_start: null,
+        scheduled_end: null,
+        schedule_daily: false,
+        schedule_all_day: false,
+        google_event_id: null,
+      })
+      .eq("id", job.id);
+    // Counting this regardless would report a re-booking prompt the office
+    // never actually gets.
+    if (cleared.error) {
+      console.error(`Calendar poll: could not clear job ${job.id}:`, cleared.error.message);
+      writeFailed++;
+    } else clearedByDeletion++;
+  };
+
+  /** The JOB is newer: correct the event (a single event or a series master). */
+  const pushJobOntoEvent = async (job: PolledJob, eventId: string) => {
+    const timing = buildCalendarEventTiming(job);
+    if (!timing) {
+      // The app cleared the schedule. Deleting the event is the right answer
+      // but it is a destructive call, and /sync-calendar already owns that
+      // decision (its `shouldRemove` branch). Leave it be and say so.
+      skipped++;
+      return;
+    }
+    try {
+      await calendar.events.patch({
+        calendarId: "primary",
+        eventId,
+        requestBody: {
+          // `date: null` so a patch onto an all-day event does not leave it
+          // holding both a date and a dateTime, which Google rejects.
+          start: { ...timing.start, date: null },
+          end: { ...timing.end, date: null },
+          recurrence: timing.recurrence,
+        },
+      });
+      pushedToCalendar++;
+    } catch (e: unknown) {
+      const code = (e as { code?: number })?.code;
+      if (code === 404 || code === 410) {
+        // The event vanished between the list and the patch. Drop the dead
+        // link; the schedule stays, and /sync-calendar recreates the event.
+        await dropLink(job.id);
+        skipped++;
+        return;
+      }
+      // One uncooperative event must not abort the reconciliation of every
+      // other job, but nor may it vanish: it is counted and returned.
+      console.error(`Calendar poll: could not push job ${job.id} onto event ${eventId}:`, e);
+      pushFailed++;
+    }
+  };
+
+  /** Fetch a series master once per poll. null = gone (404/410). Throws on anything else. */
+  const getMaster = async (masterId: string): Promise<CalendarEvent | null> => {
+    if (masters.has(masterId)) return masters.get(masterId) ?? null;
+    let master: CalendarEvent | null;
+    try {
+      master = (await calendar.events.get({ calendarId: "primary", eventId: masterId })).data ?? null;
+    } catch (e: unknown) {
+      const code = (e as { code?: number })?.code;
+      if (code !== 404 && code !== 410) throw e;
+      master = null;
+    }
+    masters.set(masterId, master);
+    return master;
+  };
+
+  /**
+   * An event belonging to a recurring series, or any event of a multi-day
+   * job. `masterId` is the job's google_event_id.
+   */
+  const handleSeriesEvent = async (event: CalendarEvent, job: PolledJob, masterId: string) => {
+    const isOccurrence = event.id !== masterId;
+    let master: CalendarEvent | null;
+    if (isOccurrence) {
+      try {
+        master = await getMaster(masterId);
+      } catch (e) {
+        console.error(`Calendar poll: could not read series ${masterId} for job ${job.id}:`, e);
+        skipped++;
+        return;
+      }
+    } else {
+      master = event;
+    }
+
+    if (!master || master.status === "cancelled") {
+      if (reconciledSeries.has(masterId)) return;
+      reconciledSeries.add(masterId);
+      await handleDeletion(job, master?.updated ?? event.updated);
+      return;
+    }
+
+    if (!eventMatchesJob(master, job)) {
+      // The series itself disagrees with the job.
+      if (reconciledSeries.has(masterId)) return;
+      reconciledSeries.add(masterId);
+      if (calendarEventIsNewer(master.updated, job.updated_at)) {
+        console.warn(
+          `Calendar poll: event ${masterId} for job ${job.id} was changed in Google; ` +
+            `not written back — the app is the source of truth for multi-day schedules.`
+        );
+        seriesSkipped++;
+        return;
+      }
+      await pushJobOntoEvent(job, masterId);
+      return;
+    }
+
+    // The series matches the job. An occurrence that is not its booked block
+    // was edited or deleted on its own in Google; writing it onto the job
+    // would turn the whole schedule into that one day.
+    if (isOccurrence && !instanceMatchesJob(event, job)) {
+      console.warn(
+        `Calendar poll: one occurrence (${event.id}) of job ${job.id}'s calendar series was ` +
+          `${event.status === "cancelled" ? "deleted" : "edited"} in Google; not written back.`
+      );
+      seriesSkipped++;
+    }
+  };
 
   do {
     let res;
@@ -191,76 +433,43 @@ export async function pollGoogleCalendarChanges(supabase: any) {
 
     for (const event of res.data.items ?? []) {
       if (!event.id) continue;
-      // `updated_at` is what makes the direction of a change knowable; without
-      // it every comparison below degrades to "the times differ", which is the
-      // bug this guard exists to close.
-      const { data: job } = await supabase
-        .from("jobs")
-        .select("id, scheduled_start, scheduled_end, status, updated_at")
-        .eq("google_event_id", event.id)
-        .maybeSingle();
+
+      // An occurrence of a series is linked through its master's id.
+      let job = await findJob(event.id);
+      let masterId = event.id;
+      if (!job && event.recurringEventId) {
+        job = await findJob(event.recurringEventId);
+        masterId = event.recurringEventId;
+      }
       if (!job) {
         skipped++;
         continue;
       }
 
-      const eventWins = calendarEventIsNewer(event.updated, job.updated_at);
-
-      if (event.status === "cancelled") {
-        if (!eventWins) {
-          // Someone deleted the event in Google, but the app touched this job
-          // AFTER that. The event genuinely no longer exists, so the link has
-          // to go — but clearing the schedule too would throw away the newer
-          // edit, which is the whole failure this guard exists to prevent.
-          // Re-creating the event needs the job number, title, customer and
-          // site that only /sync-calendar assembles, so that stays its job.
-          const { error: linkError } = await supabase
-            .from("jobs")
-            .update({ google_event_id: null })
-            .eq("id", job.id);
-          // Left set, the job keeps pointing at an event that no longer exists,
-          // so /sync-calendar takes its UPDATE branch, 404s, and recreates —
-          // producing a duplicate rather than repairing the link.
-          if (linkError) linkClearFailed++;
-          skipped++;
-          continue;
-        }
-        // Event was deleted directly in Google Calendar — clear the
-        // schedule so office staff notice the job needs re-booking, rather
-        // than silently leaving a stale schedule in place.
-        const cleared = await supabase
-          .from("jobs")
-          .update({ scheduled_start: null, scheduled_end: null, google_event_id: null })
-          .eq("id", job.id);
-        // Counting this regardless would report a re-booking prompt the office
-        // never actually gets.
-        if (cleared.error) {
-          console.error(`Calendar poll: could not clear job ${job.id}:`, cleared.error.message);
-          writeFailed++;
-        } else clearedByDeletion++;
+      if (masterId !== event.id || job.schedule_daily || (event.recurrence?.length ?? 0) > 0) {
+        await handleSeriesEvent(event, job, masterId);
         continue;
       }
 
-      const newStart = event.start?.dateTime ?? event.start?.date ?? null;
-      const newEnd = event.end?.dateTime ?? event.end?.date ?? null;
-      const startChanged =
-        newStart && new Date(newStart).toISOString() !== (job.scheduled_start ? new Date(job.scheduled_start).toISOString() : null);
-      const endChanged =
-        newEnd && new Date(newEnd).toISOString() !== (job.scheduled_end ? new Date(job.scheduled_end).toISOString() : null);
+      if (event.status === "cancelled") {
+        await handleDeletion(job, event.updated);
+        continue;
+      }
 
-      if (!startChanged && !endChanged) continue;
+      const fromEvent = columnsFromEvent(event);
+      if (!fromEvent) continue;
+      const changed =
+        (fromEvent.scheduled_start !== undefined && !sameInstant(fromEvent.scheduled_start, job.scheduled_start)) ||
+        (fromEvent.scheduled_end !== undefined && !sameInstant(fromEvent.scheduled_end, job.scheduled_end)) ||
+        (fromEvent.schedule_daily !== undefined && fromEvent.schedule_daily !== !!job.schedule_daily);
 
-      if (eventWins) {
+      if (!changed) continue;
+
+      if (calendarEventIsNewer(event.updated, job.updated_at)) {
         // THE write this whole function exists to make — and `updated++` ran
         // whether or not it landed, so the poll could report "3 jobs updated"
         // having changed none of them.
-        const applied = await supabase
-          .from("jobs")
-          .update({
-            scheduled_start: newStart ? new Date(newStart).toISOString() : job.scheduled_start,
-            scheduled_end: newEnd ? new Date(newEnd).toISOString() : job.scheduled_end,
-          })
-          .eq("id", job.id);
+        const applied = await supabase.from("jobs").update(fromEvent).eq("id", job.id);
         if (applied.error) {
           console.error(`Calendar poll: could not apply event to job ${job.id}:`, applied.error.message);
           writeFailed++;
@@ -273,49 +482,7 @@ export async function pollGoogleCalendarChanges(supabase: any) {
       // The JOB is the newer writer, so the event is stale. Correct the event
       // rather than the job — writing the job here is precisely the data loss
       // this guard exists to stop.
-      if (!job.scheduled_start) {
-        // The app cleared the schedule. Deleting the event is the right answer
-        // but it is a destructive call, and /sync-calendar already owns that
-        // decision (its `shouldRemove` branch). Leave it be and say so.
-        skipped++;
-        continue;
-      }
-
-      const pushStart = new Date(job.scheduled_start);
-      // Same default as /sync-calendar (route.ts): a job with no end is an hour.
-      const pushEnd = job.scheduled_end ? new Date(job.scheduled_end) : new Date(pushStart.getTime() + 60 * 60 * 1000);
-
-      try {
-        await calendar.events.patch({
-          calendarId: "primary",
-          eventId: event.id,
-          requestBody: {
-            start: { dateTime: pushStart.toISOString() },
-            end: { dateTime: pushEnd.toISOString() },
-          },
-        });
-        pushedToCalendar++;
-      } catch (e: unknown) {
-        const code = (e as { code?: number })?.code;
-        if (code === 404 || code === 410) {
-          // The event vanished between the list and the patch. Drop the dead
-          // link; the schedule stays, and /sync-calendar recreates the event.
-          const { error: linkError } = await supabase
-            .from("jobs")
-            .update({ google_event_id: null })
-            .eq("id", job.id);
-          // Left set, the job keeps pointing at an event that no longer exists,
-          // so /sync-calendar takes its UPDATE branch, 404s, and recreates —
-          // producing a duplicate rather than repairing the link.
-          if (linkError) linkClearFailed++;
-          skipped++;
-          continue;
-        }
-        // One uncooperative event must not abort the reconciliation of every
-        // other job, but nor may it vanish: it is counted and returned.
-        console.error(`Calendar poll: could not push job ${job.id} onto event ${event.id}:`, e);
-        pushFailed++;
-      }
+      await pushJobOntoEvent(job, event.id);
     }
 
     pageToken = res.data.nextPageToken ?? undefined;
@@ -346,6 +513,7 @@ export async function pollGoogleCalendarChanges(supabase: any) {
     pushFailed,
     linkClearFailed,
     writeFailed,
+    seriesSkipped,
     initialSync: isInitialSync,
   };
 }
