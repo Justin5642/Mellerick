@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -24,6 +24,33 @@ export function JobPhotos({ jobId, photos, onUpdate, currentUserId }: Props) {
   const [photoType, setPhotoType] = useState<string>("general");
   const [lightbox, setLightbox] = useState<string | null>(null);
   const [signedUrls, setSignedUrls] = useState<Record<string, string>>({});
+  // Paths already sent for signing, so a re-render (or a new photos array
+  // after an upload) never re-signs one that is in flight or done.
+  const requestedPaths = useRef<Set<string>>(new Set());
+
+  // ONE createSignedUrls for every photo not yet signed, instead of a
+  // createSignedUrl round trip per thumbnail (the mobile Photos tab does the
+  // same — HANDOVER §3). Runs again when photos change, signing only new ones.
+  useEffect(() => {
+    const paths = photos
+      .map((p) => p.storage_path as string)
+      .filter((path) => path && !requestedPaths.current.has(path));
+    if (paths.length === 0) return;
+    paths.forEach((path) => requestedPaths.current.add(path));
+    createClient()
+      .storage.from("job-photos")
+      .createSignedUrls(paths, 3600)
+      .then(({ data }) => {
+        const next: Record<string, string> = {};
+        for (const item of data ?? []) {
+          if (item.path && item.signedUrl) next[item.path] = item.signedUrl;
+        }
+        // A path that came back unsigned is released so the lightbox's
+        // single-path fallback (getUrl) or a later load can retry it.
+        paths.forEach((path) => { if (!next[path]) requestedPaths.current.delete(path); });
+        if (Object.keys(next).length > 0) setSignedUrls((prev) => ({ ...prev, ...next }));
+      });
+  }, [photos]);
 
   async function getUrl(path: string) {
     if (signedUrls[path]) return signedUrls[path];
@@ -178,7 +205,7 @@ export function JobPhotos({ jobId, photos, onUpdate, currentUserId }: Props) {
               photo={photo}
               onOpen={() => openLightbox(photo.storage_path)}
               onDelete={() => handleDelete(photo)}
-              getUrl={getUrl}
+              url={signedUrls[photo.storage_path] ?? ""}
               tagColors={photoTagColors}
             />
           ))}
@@ -194,17 +221,12 @@ export function JobPhotos({ jobId, photos, onUpdate, currentUserId }: Props) {
   );
 }
 
-function PhotoCard({ photo, onOpen, onDelete, getUrl, tagColors }: any) {
-  const [url, setUrl] = useState<string>("");
-  const supabase = createClient();
-
-  useState(() => {
-    getUrl(photo.storage_path).then(setUrl);
-  });
-
+function PhotoCard({ photo, onOpen, onDelete, url, tagColors }: any) {
+  // The URL is signed in one batch by JobPhotos. Lazy + async decode so a long
+  // grid of full-size originals only downloads and decodes what is on screen.
   return (
     <div className="group relative aspect-square rounded-lg overflow-hidden bg-slate-100 cursor-pointer" onClick={onOpen}>
-      {url && <img src={url} alt="" className="w-full h-full object-cover" />}
+      {url && <img src={url} alt="" loading="lazy" decoding="async" className="w-full h-full object-cover" />}
       <div className="absolute inset-0 bg-black/0 group-hover:bg-black/30 transition-colors flex items-center justify-center">
         <ZoomIn className="w-6 h-6 text-white opacity-0 group-hover:opacity-100 transition-opacity" />
       </div>

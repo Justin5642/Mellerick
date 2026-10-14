@@ -366,6 +366,9 @@ longer upload audio to OpenAI Whisper. Speech is recognised where it is spoken:
   new token, so keying on the URL (RN `<Image>`) re-downloaded every photo on
   every visit. Supabase image transforms are **not** used (plan support
   unconfirmed); thumbnails rely on resized uploads + the disk cache.
+- **Web Photos tab** (`components/job/job-photos.tsx`) likewise signs every
+  unsigned photo in ONE `createSignedUrls` per load (it was one request per
+  thumbnail) and renders thumbnails `loading="lazy"` / `decoding="async"`.
 - `expo-image-manipulator` is a native module: it reaches devices only through a
   **new dev client / `eas build`**, never an OTA update.
 
