@@ -147,7 +147,10 @@ function buildJobNotes(job) {
   lines.push(`Simpro stage: ${job.Stage}`);
   if (job.Status?.Name) lines.push(`Simpro status: ${job.Status.Name}`);
   if (job.Notes) lines.push(`Simpro notes: ${job.Notes}`);
-  if (job.Total?.IncTax != null) lines.push(`Simpro total (inc tax): $${job.Total.IncTax}`);
+  // NEVER put the job's value here: jobs.notes syncs to technicians and shows
+  // on the job page, and technicians must never see a dollar figure. This line
+  // used to write "Simpro total (inc tax): $…" — removed by migration 0072
+  // (draft until applied). tests/unit/simpro-import-no-money.test.ts guards it.
   return lines.join("\n");
 }
 

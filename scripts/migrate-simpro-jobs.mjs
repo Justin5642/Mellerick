@@ -134,7 +134,10 @@ function buildJobNotes(job) {
   if (job.orderNo) lines.push(`Simpro order no: ${job.orderNo}`);
   if (job.statusName) lines.push(`Simpro status: ${job.statusName}`);
   if (job.notes) lines.push(`Simpro notes: ${job.notes}`);
-  if (job.totalIncTax != null) lines.push(`Simpro total (inc tax): $${job.totalIncTax}`);
+  // NEVER put the job's value here: jobs.notes syncs to technicians and shows
+  // on the job page, and technicians must never see a dollar figure. This line
+  // used to write "Simpro total (inc tax): $…" — removed by migration 0072
+  // (draft until applied). tests/unit/simpro-import-no-money.test.ts guards it.
   return lines.join("\n");
 }
 
