@@ -77,6 +77,21 @@ token expires (≤1 h); RLS still authorizes every query. List-row `<Link>`s are
 `prefetch={false}`; the sidebar prefetches. If the database ever moves to Sydney,
 move `vercel.json` back to `syd1` in the same change.
 
+**Password links: invites, resets, lockout (fixed 16 Oct 2026).** Every emailed
+auth link lands on `/update-password`, which accepts all three link shapes:
+implicit `#access_token=…` (staff invites — admin links are always implicit —
+the mobile app's "Forgot password?", and `/forgot-password`, which now sends
+through `/api/auth/forgot-password` with an implicit client), `?token_hash=…`,
+and PKCE `?code=…`. The browser client is PKCE-only and silently rejects
+implicit links, which is why invites and phone resets used to show "invalid or
+expired" in a loop. Invites pass `redirectTo: /update-password`, so new staff
+set a password first. A successful reset calls `/api/auth/clear-lockout`, so
+the 0056 lockout no longer keeps refusing the NEW password for 10 minutes.
+Sign-out is `scope: "local"` on web and mobile (the default revoked every
+device). Mobile sign-in gives up after 15 s with a plain "slow connection"
+message. Supabase's redirect allow list must keep
+`https://mellerick-app.vercel.app/update-password`.
+
 **Multi-day schedules (migration `0071`, applied 2026-10-14).** A job still
 stores one `scheduled_start..scheduled_end`; `jobs.schedule_daily = true` means
 the same daily hours on each booked day — weekdays between the two dates, plus

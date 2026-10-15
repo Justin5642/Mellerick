@@ -33,6 +33,12 @@ export async function POST(request: NextRequest) {
     // turn that into a clearer message pointing at "Forgot password" instead.
     const { error: authError } = await supabaseAdmin.auth.admin.inviteUserByEmail(email, {
       data: { full_name, role },
+      // Land the invite on the page that sets a password. Without it the link
+      // went to the site root → /dashboard → /login with the tokens ignored,
+      // so the new person never got a password and was stuck in a
+      // forgot-password loop. /update-password applies the invite's tokens
+      // (admin invite links are always implicit — see that page).
+      redirectTo: `${new URL(request.url).origin}/update-password`,
     });
 
     if (authError) {

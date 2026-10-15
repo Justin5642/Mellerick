@@ -69,7 +69,10 @@ export function AppSidebar({ userEmail, userName, userRole }: AppSidebarProps) {
   const [mobileOpen, setMobileOpen] = useState(false);
 
   async function handleSignOut() {
-    await supabase.auth.signOut();
+    // "local": end THIS browser's session only. The default ("global") revoked
+    // every session the person had, so signing out on the office PC also
+    // logged them out of the app on their phone.
+    await supabase.auth.signOut({ scope: "local" });
     toast.success("Signed out");
     router.push("/login");
     router.refresh();

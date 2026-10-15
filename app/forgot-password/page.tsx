@@ -3,14 +3,13 @@
 // NOTE: a route-segment `export const dynamic = "force-dynamic"` used to sit
 // here. Next ignores route-segment config exported from a "use client" module,
 // so it never had any effect — this page is still prerendered at build time
-// (confirmed in the build output, which lists it as Static). It has been removed
-// rather than made to work: because createClient() runs during that prerender,
-// the build fails loudly when NEXT_PUBLIC_SUPABASE_* is missing, and that is
-// worth keeping. Those values are inlined into the client bundle at build time,
-// so a build that succeeded without them would ship a broken sign-in page.
+// (confirmed in the build output, which lists it as Static). It has been
+// removed rather than made to work. This page no longer creates a Supabase
+// client at all — the reset email is sent by /api/auth/forgot-password — so the
+// missing-env build failure now comes only from next.config.ts's
+// assertRequiredEnv().
 
 import { useState } from "react";
-import { createClient } from "@/lib/supabase/client";
 import Link from "next/link";
 import { toast } from "sonner";
 import { Button, buttonVariants } from "@/components/ui/button";
@@ -22,17 +21,21 @@ export default function ForgotPasswordPage() {
   const [email, setEmail] = useState("");
   const [loading, setLoading] = useState(false);
   const [sent, setSent] = useState(false);
-  const supabase = createClient();
 
   async function handleReset(e: React.FormEvent) {
     e.preventDefault();
     setLoading(true);
-    const { error } = await supabase.auth.resetPasswordForEmail(email, {
-      redirectTo: `${window.location.origin}/update-password`,
-    });
+    // Through the server so the link works in any browser or device — see
+    // app/api/auth/forgot-password/route.ts for why the browser client can't.
+    const res = await fetch("/api/auth/forgot-password", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email }),
+    }).catch(() => null);
+    const data = res ? await res.json().catch(() => ({})) : {};
     setLoading(false);
-    if (error) {
-      toast.error(error.message);
+    if (!res || !res.ok) {
+      toast.error(data.error ?? "Couldn't send the reset email — check your connection and try again.");
     } else {
       setSent(true);
     }

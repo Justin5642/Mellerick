@@ -57,7 +57,7 @@ export default function LoginScreen() {
     }
     Alert.alert(
       "Check your email",
-      "We've sent a password reset link. Open it on a computer or phone browser to set a new password, then come back and sign in here."
+      "We've sent a password reset link. Open the newest email, tap the link, set a new password, then come back and sign in here."
     );
   }
 

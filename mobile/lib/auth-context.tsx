@@ -32,6 +32,10 @@ interface AuthContextValue {
   signOut: () => Promise<void>;
 }
 
+const SIGN_IN_TIMEOUT_MS = 15_000;
+const SLOW_CONNECTION_MESSAGE =
+  "Couldn't reach the server — your connection looks slow or offline. Move to better signal or Wi-Fi and try again.";
+
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
@@ -217,12 +221,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return { error: error?.message ?? null };
     }
 
+    // Bounded: with no timeout, weak signal left the button spinning for iOS's
+    // ~60 s default and then showed a raw "Network request timed out" — what
+    // staff reported as the login timing out.
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), SIGN_IN_TIMEOUT_MS);
     try {
       const res = await fetch(`${API_BASE_URL}/api/auth/login`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email, password }),
+        signal: controller.signal,
       });
+      clearTimeout(timer);
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
         return { error: data.error ?? "Sign in failed" };
@@ -233,11 +244,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
       const { error } = await supabase.auth.setSession({ access_token, refresh_token });
       return { error: error?.message ?? null };
-    } catch {
+    } catch (e) {
+      clearTimeout(timer);
+      // Timed out: the connection is the problem, so a second network attempt
+      // would only double the wait. Say so plainly.
+      if ((e as { name?: string })?.name === "AbortError") {
+        return { error: SLOW_CONNECTION_MESSAGE };
+      }
       // Network failure talking to the web API -- fall back to signing in
       // directly rather than stranding a technician who can't reach the
       // office server but does have signal to Supabase itself.
       const { error } = await supabase.auth.signInWithPassword({ email, password });
+      if (error && /network|timed out|fetch/i.test(error.message)) return { error: SLOW_CONNECTION_MESSAGE };
       return { error: error?.message ?? null };
     }
   }
@@ -247,7 +265,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // half-way (offline revoke) must still not leave this person's role on the
     // device for whoever opens the app next.
     await clearCachedProfile(activeUserRef.current ?? undefined);
-    await supabase.auth.signOut();
+    // "local": end this phone's session only. The default ("global") also
+    // revoked the person's other sessions, so signing out on one device
+    // logged them out everywhere.
+    await supabase.auth.signOut({ scope: "local" });
   }
 
   return (
