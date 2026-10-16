@@ -19,7 +19,45 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 
+// What the emailed link carried, read once before the Supabase client can touch
+// the URL. Three shapes reach this page:
+//
+//   #access_token=…&refresh_token=…&type=invite|recovery
+//       "implicit" links: every staff INVITE (admin-generated links are always
+//       implicit), the mobile app's "Forgot password?", and /forgot-password
+//       (which now requests through /api/auth/forgot-password for exactly this
+//       reason). The browser client here is PKCE-only and REJECTS these
+//       ("Not a valid PKCE flow url"), so they are applied by hand.
+//   ?token_hash=…&type=…
+//       Supabase's token-hash email templates, if the dashboard is ever
+//       switched to them — verified here with verifyOtp.
+//   ?code=…
+//       a PKCE link opened in the same browser that asked for it — the client
+//       exchanges it itself; the poll below picks the session up.
+//
+// Before 16 Oct 2026 only the last worked, and it only works in the SAME
+// browser that requested it. Invites and phone resets therefore always showed
+// "invalid or expired" → "Request a new link" → the same failure: the loop new
+// technicians reported.
+function readLinkParams() {
+  if (typeof window === "undefined") return null;
+  const hash = new URLSearchParams(window.location.hash.replace(/^#/, ""));
+  const query = new URLSearchParams(window.location.search);
+  return {
+    accessToken: hash.get("access_token"),
+    refreshToken: hash.get("refresh_token"),
+    tokenHash: query.get("token_hash"),
+    type: hash.get("type") ?? query.get("type"),
+    errorDescription: hash.get("error_description") ?? query.get("error_description"),
+  };
+}
+
 export default function UpdatePasswordPage() {
+  // Read in the effect, not during render: this page is prerendered, so
+  // reading window.location while rendering made the first client render
+  // differ from the static HTML (React hydration error #418).
+  const [isInvite, setIsInvite] = useState(false);
+  const [linkError, setLinkError] = useState<string | null>(null);
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
   const [loading, setLoading] = useState(false);
@@ -33,6 +71,49 @@ export default function UpdatePasswordPage() {
     // the session is established from the URL. We also check for an existing
     // session in case it was already exchanged.
     let cancelled = false;
+    const link = readLinkParams();
+    setIsInvite(link?.type === "invite");
+
+    // A link Supabase already refused (expired, or used up — e.g. by an email
+    // scanner opening it first) arrives as an error, not tokens.
+    if (link?.errorDescription && !link.accessToken) {
+      setLinkError(link.errorDescription.replace(/\+/g, " "));
+      setInvalid(true);
+      return;
+    }
+
+    // Implicit or token-hash link: establish the session ourselves, then strip
+    // the tokens from the address bar so they aren't left in history.
+    const manual = link?.accessToken && link.refreshToken
+      ? supabase.auth.setSession({ access_token: link.accessToken, refresh_token: link.refreshToken })
+      : link?.tokenHash && link.type
+        ? supabase.auth.verifyOtp({ token_hash: link.tokenHash, type: link.type as "invite" | "recovery" | "magiclink" | "email" })
+        : null;
+    if (manual) {
+      window.history.replaceState(null, "", window.location.pathname);
+      manual
+        .then(({ data, error }) => {
+          if (cancelled) return;
+          cancelled = true;
+          if (error || !data.session) {
+            setLinkError(error?.message ?? null);
+            setInvalid(true);
+          } else {
+            setReady(true);
+          }
+        })
+        // A mangled token makes setSession THROW (it decodes the JWT) rather
+        // than return an error — without this the page sat on "Verifying link…".
+        .catch(() => {
+          if (cancelled) return;
+          cancelled = true;
+          setInvalid(true);
+        });
+      return () => {
+        cancelled = true;
+      };
+    }
+
     const { data: sub } = supabase.auth.onAuthStateChange((event) => {
       if (event === "PASSWORD_RECOVERY" || event === "SIGNED_IN") {
         cancelled = true;
@@ -75,7 +156,8 @@ export default function UpdatePasswordPage() {
       cancelled = true;
       sub.subscription.unsubscribe();
     };
-  }, [supabase]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   async function handleUpdate(e: React.FormEvent) {
     e.preventDefault();
@@ -89,11 +171,21 @@ export default function UpdatePasswordPage() {
     }
     setLoading(true);
     const { error } = await supabase.auth.updateUser({ password });
-    setLoading(false);
     if (error) {
+      setLoading(false);
       toast.error(error.message);
     } else {
-      toast.success("Password updated. You're all set.");
+      // Proving control of the inbox is the point of a reset, so it also ends
+      // any lockout from the failed attempts that usually precede one —
+      // otherwise the new password was refused for up to 10 more minutes
+      // (the "timeout" people hit when logging back in). Best effort.
+      await fetch("/api/auth/clear-lockout", { method: "POST" }).catch(() => {});
+      setLoading(false);
+      toast.success(
+        isInvite
+          ? "Password set. You can now sign in to the Mellerick Field app."
+          : "Password updated. You can now sign in, including on the Mellerick Field app."
+      );
       router.push("/dashboard");
       router.refresh();
     }
@@ -111,14 +203,19 @@ export default function UpdatePasswordPage() {
 
         <Card className="shadow-2xl border-0">
           <CardHeader className="space-y-1">
-            <CardTitle className="text-xl">Set a new password</CardTitle>
-            <CardDescription>Choose a new password for your account.</CardDescription>
+            <CardTitle className="text-xl">{isInvite ? "Welcome — set your password" : "Set a new password"}</CardTitle>
+            <CardDescription>
+              {isInvite
+                ? "Choose a password for your Mellerick account. You'll use it to sign in on the app and the website."
+                : "Choose a new password for your account."}
+            </CardDescription>
           </CardHeader>
           <CardContent>
             {invalid ? (
               <div className="space-y-4">
                 <p className="text-sm text-muted-foreground">
-                  This reset link is invalid or has expired. Please request a new one.
+                  This link is invalid or has expired{linkError ? ` (${linkError})` : ""}. Links work once —
+                  request a new one below and open the newest email.
                 </p>
                 <Link
                   href="/forgot-password"
