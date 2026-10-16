@@ -5,7 +5,7 @@ import { join } from "node:path";
 // The Simpro import scripts once appended "Simpro total (inc tax): $…" to
 // jobs.notes — a free-text column technicians see on the job page and in their
 // sync stream — so 2,501 jobs showed their value to technicians (cleaned by
-// migration 0072, draft until applied). Money COLUMNS are guarded four ways (HANDOVER §2); free
+// migration 0072, applied 16 Oct 2026). Money COLUMNS are guarded four ways (HANDOVER §2); free
 // text is not, so the writers themselves are checked here.
 const SCRIPTS = ["scripts/migrate-simpro-jobs.mjs", "scripts/backfill-recent-simpro-jobs.mjs"];
 

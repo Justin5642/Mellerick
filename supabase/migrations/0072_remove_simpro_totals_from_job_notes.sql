@@ -1,8 +1,10 @@
 -- ============================================================================
 -- Remove the "Simpro total (inc tax): $…" line from every imported job's notes.
 --
--- STATUS: DRAFT — NOT APPLIED. Apply in the SQL editor as ONE run (the whole
--- file — it is a single transaction).
+-- STATUS: ✅ APPLIED IN PRODUCTION (2026-10-16, via SQL editor, one run).
+-- Verified afterwards (service role, read-only): 0 jobs with a Simpro total
+-- line, 0 jobs whose notes contain a dollar amount, and no job's updated_at
+-- moved (the triggers really were off).
 --
 -- WHY — A MONEY-BOUNDARY BREACH
 -- Technicians must never see a dollar figure (HANDOVER §2). Both Simpro import
