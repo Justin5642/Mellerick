@@ -136,8 +136,8 @@ function buildJobNotes(job) {
   if (job.notes) lines.push(`Simpro notes: ${job.notes}`);
   // NEVER put the job's value here: jobs.notes syncs to technicians and shows
   // on the job page, and technicians must never see a dollar figure. This line
-  // used to write "Simpro total (inc tax): $…" — removed by migration 0072
-  // (draft until applied). tests/unit/simpro-import-no-money.test.ts guards it.
+  // used to write "Simpro total (inc tax): $…" — removed from existing jobs by
+  // migration 0072 (applied 16 Oct 2026). tests/unit/simpro-import-no-money.test.ts guards it.
   return lines.join("\n");
 }
 
