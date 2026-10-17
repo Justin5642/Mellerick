@@ -156,6 +156,30 @@ describe("in-session changes", () => {
     expect(f.log).toEqual([]);
   });
 
+  // THE COLD-START GAP: a session that expired (or was revoked) while the app
+  // was closed starts the app signed out, with nothing connected — and the
+  // previous person's mirror still on disk.
+  it("a cold start that is DEFINITELY signed out wipes a mirror the marker says exists", async () => {
+    const f = fake({ userId: "u1", role: "office" });
+    await runTransition(f, fresh(), { userId: null, role: null, signedOut: true }, () => true);
+    expect(f.marker).toBeNull();
+    expect(f.log).toEqual(["clearMarker", "wipe(marker=cleared)"]);
+  });
+
+  it("a definitely-signed-out cold start with no marker touches nothing", async () => {
+    const f = fake(null);
+    await runTransition(f, fresh(), { userId: null, role: null, signedOut: true }, () => true);
+    expect(f.log).toEqual([]);
+  });
+
+  it("a session with an unknown role (profile failed to load) does not wipe at cold start", async () => {
+    // userId present: this is a profile read failure offline, not a sign-out.
+    // The mirror is what lets the technician keep working.
+    const f = fake({ userId: "u1", role: "technician" });
+    await runTransition(f, fresh(), { userId: "u1", role: null, signedOut: false }, () => true);
+    expect(f.log).toEqual([]);
+  });
+
   it("a repeat transition for an already-synced identity is a no-op", async () => {
     const f = fake(null);
     const state = fresh();

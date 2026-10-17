@@ -373,6 +373,72 @@ Load-bearing properties:
   wedge the FIFO queue forever — but it logs a warning naming the table, so a
   vanished row is traceable.
 
+### Sync reliability and sign-out (17 October 2026 audit)
+
+Twelve findings fixed in one PR (branch `fix/mobile-sync-reliability`). What
+changed in behaviour:
+
+- **Queued work belongs to a user.** Every outbox operation carries `userId`
+  (stamped at enqueue from `lib/data/outboxOwner.ts`, which AuthProvider keeps
+  current). The processor only selects the signed-in user's operations;
+  another user's are neither run nor block a row's FIFO — they wait for their
+  owner. Operations queued by an older build (no `userId`) are adopted by the
+  first user to drain after the upgrade (`Outbox.adoptUnowned`), never dropped.
+- **Sign-out warns, then wipes.** Every sign-out button uses
+  `lib/useSignOut.ts` → `lib/signOutFlow.ts`: it counts the user's unsynced
+  outbox ops (dead included) plus queued background clock actions and asks
+  "N items haven't synced … Sign out anyway?". Only on confirm: engine stopped,
+  the user's ops removed, every unreferenced staged attachment deleted (no grace
+  period), push-token row deleted (before `auth.signOut`, bounded 5 s,
+  best-effort), expo-image memory + disk caches cleared. An *involuntary*
+  sign-out (expired session) clears nothing — ownership keeps it safe.
+- **Transient failures never dead-letter.** `outbox/errors.ts` classifies:
+  status 0 / 408 / 429 / 5xx, network and timeout errors are *transient* —
+  backed off (`transientFailures`) but never counted toward `MAX_ATTEMPTS`.
+  Only rejections (other 4xx, RLS, constraints) count. Gateways throw
+  `TransientSyncError` via `syncError(message, status)`.
+- **Retry cannot revert a newer edit.** `retryDead()` marks a dead write `done`
+  (`error: "superseded…"`) instead of reviving it when a newer write to the same
+  row has already synced; `pruneCompleted` keeps that newer done write while the
+  dead one exists.
+- **Failed writes retry while online.** After each drain `SyncEngine` arms a
+  timer for the earliest backoff (`Outbox.msUntilNextRetry`, ≥1 s, clamped to the
+  max backoff); it also drains on AppState `active` and when the owner changes.
+- **Every request is bounded.** `lib/fetchWithTimeout.ts` is the Supabase
+  client's `global.fetch`: 30 s, 120 s for `/storage/v1/`. Polish-note and the
+  data-plate scan (60 s) use it too.
+- **Uploads stream from disk.** `uploadObject` uses
+  `FileSystem.createUploadTask` (POST `/storage/v1/object/<bucket>/<path>`,
+  user bearer, `x-upsert`) instead of base64 in the JS heap; cancelled at 120 s.
+- **`callSideEffect` throws when `EXPO_PUBLIC_API_BASE_URL` is missing**, so the
+  op stays queued (and eventually dead-letters, which is reported) instead of
+  being marked done. It is NOT a startup requirement — sign-in still degrades
+  without it.
+- **Background auto-clock no longer loses offline arrivals.** Planned actions go
+  into a durable AsyncStorage queue (`lib/backgroundClockQueue.ts`) with their
+  original timestamps and client row ids *before* the geofence state advances;
+  they replay in order on each delivery, after each outbox drain (DataProvider)
+  and in the background-sync task. Network failures never drop an action; 5
+  rejections do (reported as `background-clock`). A late departure never closes
+  an entry opened after it.
+- **PowerSync mirror wiped on a signed-out cold start.** If auth has finished
+  loading with no session and a sync marker exists, the mirror is wiped
+  (`signedOut` input to `runTransition`). Caveat: offline with an *expired*
+  access token, supabase-js reports no session, so this also wipes — read data
+  only; it re-syncs at the next sign-in.
+- **Search tab filters on the server**, ≥2 characters, 50 rows (customer/site
+  matches resolved to ≤50 ids each, then one OR on `jobs`). Job number matches
+  exactly, not as a substring, on the remote path.
+- **Session tokens are in SecureStore** (`lib/secureSessionStorage.ts`):
+  chunked (1800 chars) behind a manifest that is the atomic commit,
+  `AFTER_FIRST_UNLOCK` so locked-phone background tasks can read it, migrated
+  from AsyncStorage on first read (plaintext deleted only after a verified
+  copy), falls back to AsyncStorage if the native module is absent or a call
+  fails, and ignores a Keychain session left by a previous install.
+  **Check on devices** (new binary needed if the current one predates
+  `expo-secure-store` being linked): an existing signed-in user stays signed in
+  after the update; background clock still records with the phone locked.
+
 ### Voice-to-text — on the device, no OpenAI (12 October 2026)
 
 "Record note" (stage notes, mobile and web) and the job **voice report** no

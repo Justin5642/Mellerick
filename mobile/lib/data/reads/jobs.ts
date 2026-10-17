@@ -647,51 +647,74 @@ export async function searchOfficeJobs(query: string, limit: number): Promise<Of
   );
 }
 
+/** Shorter queries return nothing: one character matches most of the table. */
+export const MIN_SEARCH_LENGTH = 2;
+
 /**
  * Whole-system job search (the technician Search tab): matching jobs, newest
- * first, capped at 50 — the screen's client-side haystack filter over its
- * 10,000-row pull, expressed as one function. Office/admin-gated: the screen
- * exists to find ANY job, and only an office/admin mirror holds them all —
- * a technician's mirror would silently hide every job that isn't theirs, so
- * technicians are always answered by Supabase.
+ * first, capped at 50. Office/admin-gated: the screen exists to find ANY job,
+ * and only an office/admin mirror holds them all — a technician's mirror would
+ * silently hide every job that isn't theirs, so technicians are always answered
+ * by Supabase.
  */
 export async function searchJobs(query: string): Promise<JobSearchRow[]> {
-  // The screen shows nothing until something is typed (useMemo: `if (!q) return []`).
-  if (!query.trim()) return [];
+  // Nothing until something meaningful is typed. One character used to fetch
+  // the whole jobs table just to show "everything with an 'a' in it".
+  if (query.trim().length < MIN_SEARCH_LENGTH) return [];
   return fromLocalOr(
     async (db) => {
       const rows = await db.getAll<RawJobSearchRow>(SQL_SEARCH_JOBS, [escapeLike(query.trim())]);
       await requireCompletePage(db, "office", rows, SEARCH_JOBS_LIMIT, "searchJobs");
       return rows.map(mapJobSearchRow);
     },
+    // FILTERED ON THE SERVER. This used to pull up to 10,000 jobs — every job,
+    // with its customer and site embedded — on EVERY debounced keystroke, and
+    // filter them in JS. On a technician's phone (always remote, see above) on
+    // one bar of signal that was megabytes per letter typed.
+    //
+    // PostgREST cannot OR a parent column with an embedded one, so customer and
+    // site matches are resolved to ids first (both bounded, in parallel), then
+    // folded into one OR on jobs. Same [,()%]-strip as searchOfficeJobs — those
+    // characters are PostgREST's OR syntax — plus quotes and backslashes.
+    //
+    // One difference from the local path: a job NUMBER matches exactly, not as
+    // a substring (job_number is an integer column, and PostgREST has no cast
+    // in a filter) — the same rule the office search has always used.
     async () => {
-      // Unchanged Supabase body (app/(tabs)/search.tsx loadJobs) …
+      const safe = query.replace(/[,()%"\\]/g, " ").trim();
+      if (safe.length < MIN_SEARCH_LENGTH) return [];
+      const pattern = `%${safe}%`;
+      const [customersRes, sitesRes] = await Promise.all([
+        supabase.from("customers").select("id").ilike("name", pattern).limit(ID_MATCH_LIMIT),
+        supabase
+          .from("sites")
+          .select("id")
+          .or(`name.ilike.${pattern},address_line1.ilike.${pattern},suburb.ilike.${pattern}`)
+          .limit(ID_MATCH_LIMIT),
+      ]);
+      const customerIds = (unwrapRows(customersRes as never, "searchJobs.customers") as { id: string }[]).map((r) => r.id);
+      const siteIds = (unwrapRows(sitesRes as never, "searchJobs.sites") as { id: string }[]).map((r) => r.id);
+
+      const clauses = [`title.ilike.${pattern}`];
+      if (/^\d+$/.test(safe)) clauses.push(`job_number.eq.${safe}`);
+      if (customerIds.length) clauses.push(`customer_id.in.(${customerIds.join(",")})`);
+      if (siteIds.length) clauses.push(`site_id.in.(${siteIds.join(",")})`);
+
       const res = await supabase
         .from("jobs")
         .select("id, job_number, title, status, scheduled_start, customers(name), sites(name, address_line1, suburb, site_lat, site_lng)")
+        .or(clauses.join(","))
         .order("created_at", { ascending: false })
-        .limit(10000);
-      const allJobs = unwrapRows(res as never, "searchJobs") as unknown as JobSearchRow[];
-      // … followed by the screen's client-side filter, moved verbatim
-      // (app/(tabs)/search.tsx results useMemo).
-      const q = query.trim().toLowerCase();
-      return allJobs
-        .filter((j) => {
-          const haystack = [
-            String(j.job_number),
-            j.title,
-            j.customers?.name,
-            j.sites?.name,
-            j.sites?.address_line1,
-            j.sites?.suburb,
-          ]
-            .filter(Boolean)
-            .join(" ")
-            .toLowerCase();
-          return haystack.includes(q);
-        })
-        .slice(0, 50);
+        .limit(SEARCH_JOBS_LIMIT);
+      return unwrapRows(res as never, "searchJobs") as unknown as JobSearchRow[];
     },
     ROLES
   );
 }
+
+// How many matching customers/sites feed the jobs OR. Bounded because the ids
+// travel in the URL: a common word ("street") must not build a query string of
+// thousands of UUIDs that a proxy rejects. 50 + 50 ids is ~4 KB. A very broad
+// term can therefore miss jobs at the 51st-and-later matching site — typing
+// one more word narrows it, the same as any capped search.
+const ID_MATCH_LIMIT = 50;

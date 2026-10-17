@@ -112,7 +112,7 @@ function toError(err: unknown, fallback: string): Error {
  * Skips the expected released-object teardown error, and reports each distinct
  * failure once per session.
  */
-export function reportSyncError(err: unknown, source: "sync-engine" | "sync-status" | "sync-retry" | "background-sync"): void {
+export function reportSyncError(err: unknown, source: "sync-engine" | "sync-status" | "sync-retry" | "background-sync" | "background-clock"): void {
   if (!enabled || isReleasedSharedObjectError(err)) return;
   try {
     const error = toError(err, `${source} failed`);

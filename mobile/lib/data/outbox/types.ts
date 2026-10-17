@@ -52,6 +52,23 @@ export interface WriteOperation {
   attachmentPathField?: string;
   /** Another operation id this one must run after (e.g. metadata after upload). */
   dependsOn?: string | null;
+  /**
+   * The signed-in user who queued this operation. The processor only replays an
+   * operation under its owner's session: a queue that survived a sign-out (or a
+   * session that simply expired) must never be replayed by whoever signs in
+   * next, which would attribute one person's work to another — or, under RLS,
+   * dead-letter it as a rejection. Absent on operations queued before this field
+   * existed; those are adopted by the first signed-in user to drain after the
+   * upgrade (Outbox.adoptUnowned), which is exactly who would have replayed them
+   * before.
+   */
+  userId?: string | null;
+  /**
+   * Failures that said nothing about the write (no signal, a timeout, a 5xx).
+   * They lengthen the backoff but do NOT count toward MAX_ATTEMPTS — see
+   * outbox/errors.ts. Absent means zero.
+   */
+  transientFailures?: number;
   status: OpStatus;
   attempts: number;
   nextAttemptAt: number; // epoch ms
@@ -80,6 +97,10 @@ export interface SideEffectOperation {
   coalesceKey: string; // e.g. `sync-billing:${entryId}` — dedupes queued duplicates
   payload: Record<string, unknown>;
   dependsOn?: string | null;
+  /** See WriteOperation.userId. */
+  userId?: string | null;
+  /** See WriteOperation.transientFailures. */
+  transientFailures?: number;
   status: OpStatus;
   attempts: number;
   nextAttemptAt: number;

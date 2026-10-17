@@ -49,7 +49,17 @@ const same = (a: Who | null, b: Who | null) => !!a && !!b && a.userId === b.user
 export async function runTransition(
   deps: TransitionDeps,
   state: TransitionState,
-  input: { userId: string | null; role: LocalRole },
+  input: {
+    userId: string | null;
+    role: LocalRole;
+    /**
+     * True only once auth has FINISHED loading and found no session. Distinct
+     * from `userId === null`, which is also what the first render of every cold
+     * start looks like, before the stored session has been read — wiping on
+     * that would throw away a perfectly good mirror on every launch.
+     */
+    signedOut?: boolean;
+  },
   isCurrent: () => boolean
 ): Promise<void> {
   if (input.userId && input.role) {
@@ -113,7 +123,20 @@ export async function runTransition(
   }
 
   // Signed out, unknown role, or deactivated.
-  if (state.connected === null && state.synced === null) return;
+  if (state.connected === null && state.synced === null) {
+    // THE COLD-START GAP. Nothing is connected in this app session, so there
+    // was "nothing to tear down" — but the mirror ON DISK is still whoever was
+    // last signed in: a session that expired or was revoked while the app was
+    // closed lands here with that person's jobs, customers and (for office)
+    // invoices sitting in SQLite on a device with no authenticated user. The
+    // marker says whether a mirror exists; if it does, wipe it now rather than
+    // waiting for someone to sign in.
+    if (input.signedOut && !input.userId && (await deps.readMarker())) {
+      await deps.clearMarker();
+      await deps.disconnectAndClear();
+    }
+    return;
+  }
   state.connected = null;
   state.synced = null;
   state.trusted = null;
