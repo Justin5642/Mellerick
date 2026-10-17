@@ -9,6 +9,11 @@ import { NextRequest } from "next/server";
 const invite = vi.fn(async (..._a: unknown[]) => ({ data: { user: { id: "new-1" } }, error: null }));
 const insert = vi.fn(async (..._a: unknown[]) => ({ error: null }));
 
+// /api/staff/invite authorises through requireAdmin (tested in
+// staff-routes-auth.test.ts); this file is only about email casing.
+vi.mock("@/lib/api/guards", () => ({
+  requireAdmin: async () => ({ ok: true, userId: "admin-1", role: "admin" }),
+}));
 vi.mock("@/lib/supabase/server", () => ({
   createClient: async () => ({
     auth: { getUser: async () => ({ data: { user: { id: "admin-1" } } }) },

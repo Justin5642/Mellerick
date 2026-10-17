@@ -14,6 +14,11 @@ const rpc = vi.fn();
 vi.mock("@/lib/supabase/admin", () => ({ createAdminClient: () => ({ rpc: (...a: unknown[]) => rpc(...a) }) }));
 const reportFailure = vi.fn();
 vi.mock("@/lib/monitoring", () => ({ reportFailure: (...a: unknown[]) => reportFailure(...a), reportError: vi.fn() }));
+// The route authenticates through the shared guard (which also refuses a
+// deactivated profile); these tests are about what happens after that.
+vi.mock("@/lib/api/guards", () => ({
+  requireUser: async () => ({ ok: true, userId: "tech-1", role: null }),
+}));
 vi.mock("@/lib/supabase/server", () => ({
   createClient: async () => ({ auth: { getUser: async () => ({ data: { user: { id: "tech-1" } } }) } }),
 }));
