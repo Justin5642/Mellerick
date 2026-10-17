@@ -17,6 +17,13 @@ vi.mock("@/lib/supabase/server", () => ({
   createClient: async () => ({ auth: { getUser: async () => ({ data: { user: { id: "u1" } } }) } }),
 }));
 
+// The shared per-user limiter (lib/api/rate-limit.ts). Mocked so the route
+// never reaches for a real database; `allowed` flips it per test.
+let allowed = true;
+vi.mock("@/lib/supabase/admin", () => ({
+  createAdminClient: () => ({ rpc: async () => ({ data: allowed, error: null }) }),
+}));
+
 function reply(text: string, stop_reason = "end_turn") {
   return { stop_reason, content: text ? [{ type: "text", text }] : [] };
 }
@@ -31,6 +38,7 @@ function post(text: string) {
 
 beforeEach(() => {
   create.mockReset();
+  allowed = true;
   process.env.ANTHROPIC_API_KEY = "test-key";
 });
 
@@ -64,6 +72,23 @@ describe("POST /api/ai/polish-note", () => {
     const res = await POST(post("a".repeat(POLISH_MAX_CHARS + 1)));
     expect(res.status).toBe(413);
     expect(create).not.toHaveBeenCalled();
+  });
+
+  it("returns 429 without calling the model once the user's window is spent", async () => {
+    allowed = false;
+    const { POST } = await import("@/app/api/ai/polish-note/route");
+    const res = await POST(post("fixed the tap"));
+    expect(res.status).toBe(429);
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  it("does not pass the SDK's error text through to the client", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    create.mockRejectedValue(new Error("401 invalid x-api-key sk-ant-REDACTED"));
+    const { POST } = await import("@/app/api/ai/polish-note/route");
+    const res = await POST(post("fixed the tap"));
+    expect(res.status).toBe(502);
+    expect((await res.json()).error).toBe("AI polish failed");
   });
 
   it("accepts a note at the limit", async () => {

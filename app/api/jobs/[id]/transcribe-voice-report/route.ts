@@ -93,13 +93,14 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       .eq("id", id);
 
     if (updateError) {
-      return NextResponse.json({ error: updateError.message }, { status: 500 });
+      console.error("Voice report job update failed:", updateError.message);
+      return NextResponse.json({ error: "Saving the voice report failed" }, { status: 500 });
     }
 
     return NextResponse.json({ transcript: transcript || null });
   } catch (err: unknown) {
     console.error("Voice report save error:", err);
     reportError(err, { route: "api/jobs/transcribe-voice-report" });
-    return NextResponse.json({ error: err instanceof Error ? err.message : "Saving the voice report failed" }, { status: 500 });
+    return NextResponse.json({ error: "Saving the voice report failed" }, { status: 500 });
   }
 }

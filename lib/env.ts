@@ -69,3 +69,20 @@ export function assertRequiredEnv(): void {
       `In CI: .github/workflows/ci.yml supplies dummy values for this reason.`
   );
 }
+
+// The app's own public origin, for links that leave the building in an email
+// (password resets). Built from a fixed setting, never from the request: the
+// Host header is attacker-controlled, and a reset link pointed at someone
+// else's host hands them the recovery tokens in its URL fragment. Supabase's
+// redirect allow list is the second line of defence, not the only one.
+//
+// APP_URL (server) wins, then NEXT_PUBLIC_APP_URL; unset falls back to
+// production so a missing variable can never produce a localhost or preview
+// link in a real customer's inbox. Set APP_URL=http://localhost:3000 locally
+// to test resets end to end.
+export const PRODUCTION_APP_URL = "https://mellerick-app.vercel.app";
+
+export function appUrl(): string {
+  const configured = optionalEnv("APP_URL") ?? optionalEnv("NEXT_PUBLIC_APP_URL");
+  return (configured ?? PRODUCTION_APP_URL).replace(/\/+$/, "");
+}

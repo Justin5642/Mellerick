@@ -20,7 +20,10 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Only admins can invite staff" }, { status: 403 });
     }
 
-    const { full_name, email, phone, role } = await request.json();
+    const { full_name, email: rawEmail, phone, role } = await request.json();
+    // Stored lowercase so profiles.email matches what Supabase Auth keeps —
+    // /api/auth/login keys its lockout on this column.
+    const email = typeof rawEmail === "string" ? rawEmail.trim().toLowerCase() : "";
 
     if (!full_name || !email || !role) {
       return NextResponse.json({ error: "Name, email and role are required" }, { status: 400 });

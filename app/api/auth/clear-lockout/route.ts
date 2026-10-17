@@ -22,6 +22,10 @@ export async function POST() {
 
   const admin = createAdminClient();
   const { error } = await admin.rpc("clear_login_lockout", { p_user_id: user.id });
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) {
+    // Detail to the log only — a raw database error is not for the browser.
+    console.error("clear_login_lockout failed:", error.message);
+    return NextResponse.json({ error: "Could not clear the sign-in lockout" }, { status: 500 });
+  }
   return NextResponse.json({ ok: true });
 }

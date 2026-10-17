@@ -17,9 +17,10 @@ export async function GET(request: NextRequest) {
   try {
     const result = await pollXeroInvoicePayments(supabase);
     return NextResponse.json(result);
-  } catch (err: any) {
+  } catch (err: unknown) {
     console.error("Xero invoice poll-sync error:", err);
     reportError(err, { route: "api/xero/poll-invoices", integration: "xero", cron: true });
-    return NextResponse.json({ error: err.message ?? "Xero invoice sync failed" }, { status: 500 });
+    // Logged and reported above; the caller (cron) needs only the outcome.
+    return NextResponse.json({ error: "Xero invoice sync failed" }, { status: 500 });
   }
 }

@@ -122,4 +122,30 @@ describe("backflow submit — water-authority dedupe (Q3)", () => {
     expect(res.status).toBe(403);
     expect(emailSend).not.toHaveBeenCalled();
   });
+
+  it("lets office/admin submit a test someone else performed", async () => {
+    requireUser.mockResolvedValue({ ok: true, userId: "office-1", role: null });
+    isOfficeOrAdmin.mockResolvedValue(true);
+    const res = await POST(req(), params);
+    expect(res.status).toBe(200);
+    expect(emailSend).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("backflow submit — errors stay server-side", () => {
+  it("a failed upload does not echo the storage error", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    upload.mockResolvedValueOnce({ error: { message: "new row violates row-level security policy for table objects" } } as never);
+    const res = await POST(req(), params);
+    expect(res.status).toBe(500);
+    expect(JSON.stringify(await res.json())).not.toMatch(/row-level security/);
+  });
+
+  it("a failed send does not echo Resend's text", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    emailSend.mockResolvedValueOnce({ error: { message: "The domain mellerick.test is not verified" } } as never);
+    const res = await POST(req(), params);
+    expect(res.status).toBe(500);
+    expect((await res.json()).error).toBe("Failed to submit backflow test");
+  });
 });

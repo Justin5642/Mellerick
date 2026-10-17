@@ -27,6 +27,27 @@ export type Database = {
   }
   public: {
     Tables: {
+      api_rate_limits: {
+        Row: {
+          bucket: string
+          request_count: number
+          user_id: string
+          window_start: string
+        }
+        Insert: {
+          bucket: string
+          request_count?: number
+          user_id: string
+          window_start?: string
+        }
+        Update: {
+          bucket?: string
+          request_count?: number
+          user_id?: string
+          window_start?: string
+        }
+        Relationships: []
+      }
       backflow_devices: {
         Row: {
           created_at: string | null
@@ -2606,6 +2627,15 @@ export type Database = {
     Functions: {
       check_login_lockout: { Args: { p_user_id: string }; Returns: Json }
       clear_login_lockout: { Args: { p_user_id: string }; Returns: undefined }
+      consume_rate_limit: {
+        Args: {
+          p_bucket: string
+          p_max: number
+          p_user_id: string
+          p_window_seconds: number
+        }
+        Returns: boolean
+      }
       hook_password_verification_attempt: {
         Args: { event: Json }
         Returns: Json
