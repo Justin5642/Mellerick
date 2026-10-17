@@ -1,6 +1,7 @@
 export const dynamic = "force-dynamic";
 
 import { createClient } from "@/lib/supabase/server";
+import { getViewer } from "@/lib/auth/viewer";
 import { notFound } from "next/navigation";
 import Link from "next/link";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -28,6 +29,8 @@ const STATUS_STYLES: Record<DueStatus, string> = {
 export default async function BackflowDevicePage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const supabase = await createClient();
+  const viewer = await getViewer();
+  const isOffice = viewer?.profile?.role === "admin" || viewer?.profile?.role === "office";
 
   // Both keyed by the id in the URL, so read together. A missing device still
   // 404s; its tests (none, under the same RLS) are simply unused.
@@ -77,7 +80,8 @@ export default async function BackflowDevicePage({ params }: { params: Promise<{
           <Link prefetch={false} href={`/dashboard/backflow/${id}/test/new`}>
             <Button className="gap-2"><Plus className="w-4 h-4" />Log Test</Button>
           </Link>
-          <DeleteDeviceButton deviceId={id} customerName={device.customers?.name ?? "this customer"} />
+          {/* Office/admin only. Migration 0074 (draft, not applied yet) makes the database refuse a technician too. */}
+          {isOffice && <DeleteDeviceButton deviceId={id} customerName={device.customers?.name ?? "this customer"} />}
         </div>
       </div>
 
