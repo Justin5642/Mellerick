@@ -51,9 +51,13 @@ const securityHeaders = [
   // Referrers leak URLs, and this app's URLs contain job, invoice and customer
   // ids. Same-origin gets the full path; anyone else gets the origin only.
   { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
-  // The app never uses these, so denying them means a compromised dependency
-  // cannot start.
-  { key: "Permissions-Policy", value: "camera=(), microphone=(), geolocation=(), payment=()" },
+  // Same-origin only: the app itself uses location (geofenced clock-in,
+  // components/job/job-time.tsx), the microphone (browser dictation,
+  // lib/use-browser-dictation.ts) and the camera (data-plate capture,
+  // app/dashboard/backflow/new). An earlier `=()` blocked all three outright.
+  // `(self)` still stops any embedded third-party frame using them; payment
+  // stays off.
+  { key: "Permissions-Policy", value: "camera=(self), microphone=(self), geolocation=(self), payment=()" },
 ];
 
 const nextConfig: NextConfig = {
