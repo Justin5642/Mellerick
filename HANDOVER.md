@@ -92,6 +92,22 @@ device). Mobile sign-in gives up after 15 s with a plain "slow connection"
 message. Supabase's redirect allow list must keep
 `https://mellerick-app.vercel.app/update-password`.
 
+**Web security leftovers (fix/web-security-leftovers, 17 Oct 2026).**
+`/api/auth/login` lowercases the email and matches `profiles.email`
+case-insensitively — `Admin@x` used to skip the lockout entirely — and answers
+a locked account, an unknown email and a wrong password with the SAME 401 text
+(it still points at "Forgot password?"). The lockout is a speed bump: the anon
+key lets anyone call Supabase Auth directly. Staff invites store the email
+lowercase. Reset links use `appUrl()` (`lib/env.ts`: `APP_URL` →
+`NEXT_PUBLIC_APP_URL` → production), never the request Host. `/api/backflow/
+scan-data-plate` accepts only JPEG/PNG/WebP ≤ 5 MB, and it and `/api/ai/
+polish-note` are rate limited per user through `consume_rate_limit()`
+(migration `0076`, **DRAFT — NOT APPLIED**; until applied they fail open and log
+"rate limiter unavailable"). API routes log DB/SDK error text and return fixed
+sentences (guard: `tests/unit/no-raw-error-responses.test.ts`). The Time tab's
+stage picker is disabled on entries you could not edit. Public sign-up is off
+in `supabase/config.toml` — the hosted switch is a §7 item.
+
 **Multi-day schedules (migration `0071`, applied 2026-10-14).** A job still
 stores one `scheduled_start..scheduled_end`; `jobs.schedule_daily = true` means
 the same daily hours on each booked day — weekdays between the two dates, plus
@@ -772,7 +788,7 @@ now execute and pass in CI.
 
 None of it is blocked on code.
 
-### The four things a person has to do
+### The things a person has to do
 
 Every one of these needs an account, a credential or a dashboard I cannot reach.
 They are listed first because they are the only things standing between this and
@@ -787,6 +803,9 @@ a shippable release.
 | **Apply migration `0073`** | Justin | Deactivated staff lose access + the four `_public` views refuse `anon` (17 Oct 2026 audit). Apply alone, run `supabase/tests/0073_deactivation_test.sql`, flip its STATUS line. Until then the web side already refuses inactive staff (middleware, `lib/api/guards.ts`, login ban via `/api/staff/set-active`); RLS does not yet. |
 | **Apply migration `0074`** | Justin | Technician write scope (17 Oct 2026, rules agreed with Justin): techs change only assigned jobs; customers office-only edits; no tech deletes of backflow devices/tests; time entries audited in `time_entry_changes` and locked once billed. Apply alone after 0073, run `supabase/tests/0074_technician_write_scope_test.sql`, flip its STATUS line. Mobile already shows other people's jobs view-only. |
 | **Apply migration `0075`** | Justin | Xero/Google OAuth tokens become server-only (17 Oct 2026 audit). **Order matters: deploy the app change first** (it moves every token read/write to the service role), then apply 0075 alone and run `supabase/tests/0075_oauth_tokens_server_only_test.sql`. Applied before the deploy, it breaks Xero push, both OAuth callbacks and calendar sync. |
+| **Turn off public sign-up** | Justin | Dashboard → Authentication → Sign In / Providers → untick **"Allow new users to sign up"**. `supabase/config.toml` now has `[auth] enable_signup = false`, but that file only configures the local stack — the hosted project still lets anyone with the anon key call `/auth/v1/signup`. Invites keep working (GoTrue's admin invite does not check this switch). Leave the **Email provider** itself enabled. |
+| **Apply `0076`** | Justin | Shared per-user rate limit for the AI routes. `supabase db push`, run `supabase/tests/0076_api_rate_limits_test.sql`, then flip its STATUS line. Until then the routes fail open (no limit) and log "rate limiter unavailable". |
+| **`APP_URL`** (optional) | Justin | Origin for emailed reset links. Unset = `https://mellerick-app.vercel.app`, which is right for production. Set it only for a different domain, or `http://localhost:3000` in `.env.local` to test resets locally. |
 | **Maestro flow 02** | Avi | Needs `ADMIN_EMAIL` / `ADMIN_PASSWORD` in the environment. The login subflow deliberately skips when a session already exists, so a password never passes through a script — which is why flows 01/03/04 could be run and 02 could not. |
 
 ### QA fixture — do not delete

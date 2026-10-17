@@ -58,7 +58,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
         const { error: clearError } = await supabase.from("jobs").update({ google_event_id: null }).eq("id", id);
         if (clearError) {
           console.error("Calendar sync: event deleted but job still references it:", clearError.message);
-          return NextResponse.json({ removed: true, linkCleared: false, warning: clearError.message });
+          return NextResponse.json({ removed: true, linkCleared: false, warning: "Job still references the deleted calendar event" });
         }
       }
       return NextResponse.json({ removed: true });
@@ -120,9 +120,10 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     }
 
     return NextResponse.json({ created: true, eventId: res.data.id });
-  } catch (err: any) {
+  } catch (err: unknown) {
     console.error("Calendar sync error:", err);
     reportError(err, { route: "api/jobs/sync-calendar", integration: "google-calendar" });
-    return NextResponse.json({ error: err.message ?? "Calendar sync failed" }, { status: 500 });
+    // Google's error text is logged and reported above, not returned.
+    return NextResponse.json({ error: "Calendar sync failed" }, { status: 500 });
   }
 }

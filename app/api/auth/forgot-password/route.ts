@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { appUrl } from "@/lib/env";
 
 // Sends the password-reset email from the SERVER, with an implicit-flow client.
 //
@@ -24,10 +25,17 @@ export async function POST(request: NextRequest) {
     auth: { flowType: "implicit", persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
   });
   const { error } = await supabase.auth.resetPasswordForEmail(email, {
-    redirectTo: `${new URL(request.url).origin}/update-password`,
+    // Fixed origin, not the request's — see appUrl() in lib/env.ts.
+    redirectTo: `${appUrl()}/update-password`,
   });
   if (error) {
-    return NextResponse.json({ error: error.message }, { status: error.status === 429 ? 429 : 400 });
+    // Supabase's text stays in the log. Only the rate limit is worth telling
+    // the person about, and it says nothing about whether the account exists.
+    console.error("Password reset email failed:", error.status, error.message);
+    if (error.status === 429) {
+      return NextResponse.json({ error: "Too many reset requests. Wait a few minutes and try again." }, { status: 429 });
+    }
+    return NextResponse.json({ error: "Could not send the reset email. Try again shortly." }, { status: 400 });
   }
   return NextResponse.json({ ok: true });
 }

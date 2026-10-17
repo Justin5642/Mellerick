@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireUser } from "@/lib/api/guards";
 import { DEVICE_TYPES } from "@/lib/backflow";
 import { reportError, reportFailure } from "@/lib/monitoring";
+import { consumeRateLimit, rateLimitedResponse, SCAN_DATA_PLATE_LIMIT } from "@/lib/api/rate-limit";
 
 // Reads a photographed backflow device data plate with Claude vision and
 // drags out as much structured data as the plate actually has printed on
@@ -42,6 +43,21 @@ interface ScanResult {
 
 const ANTHROPIC_MODEL = "claude-sonnet-4-5";
 
+// Checked BEFORE the paid call. Previously any string went straight to Claude
+// as `media_type` and any size as `data`, so a signed-in caller could push
+// arbitrary payloads through the app's API key. The types are what both
+// clients actually send (mobile always re-encodes to JPEG; web passes the
+// picked file's type) and what Claude's vision input accepts; 5 MB decoded
+// is Claude's own per-image limit, so anything bigger would fail there anyway
+// — after we had paid to upload it.
+const ALLOWED_MIME_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
+const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+
+function decodedBase64Bytes(b64: string): number {
+  const padding = b64.endsWith("==") ? 2 : b64.endsWith("=") ? 1 : 0;
+  return Math.floor((b64.length * 3) / 4) - padding;
+}
+
 export async function POST(request: NextRequest) {
   const callerId = await getAuthenticatedUserId(request);
   if (!callerId) {
@@ -60,9 +76,23 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
   }
 
-  const { imageBase64, mimeType } = body;
-  if (!imageBase64) {
+  const { imageBase64 } = body;
+  if (!imageBase64 || typeof imageBase64 !== "string") {
     return NextResponse.json({ error: "imageBase64 is required" }, { status: 400 });
+  }
+  // Absent still means JPEG, as before — older mobile builds may omit it.
+  const mimeType = body.mimeType || "image/jpeg";
+  if (typeof mimeType !== "string" || !ALLOWED_MIME_TYPES.has(mimeType)) {
+    return NextResponse.json({ error: "Unsupported image type — use a JPEG, PNG or WebP photo." }, { status: 415 });
+  }
+  if (decodedBase64Bytes(imageBase64) > MAX_IMAGE_BYTES) {
+    return NextResponse.json({ error: "Photo is too large to scan (max 5 MB)." }, { status: 413 });
+  }
+
+  // Last gate before money is spent: counted only for requests that would
+  // otherwise reach Claude, so a malformed upload does not use up the quota.
+  if (!(await consumeRateLimit(callerId, SCAN_DATA_PLATE_LIMIT))) {
+    return rateLimitedResponse();
   }
 
   const deviceTypeList = DEVICE_TYPES.map((d) => `- ${d.value}: ${d.label}`).join("\n");
@@ -87,7 +117,7 @@ export async function POST(request: NextRequest) {
             content: [
               {
                 type: "image",
-                source: { type: "base64", media_type: mimeType || "image/jpeg", data: imageBase64 },
+                source: { type: "base64", media_type: mimeType, data: imageBase64 },
               },
               {
                 type: "text",
@@ -153,9 +183,9 @@ export async function POST(request: NextRequest) {
     }
 
     return NextResponse.json({ result: parsed });
-  } catch (err: any) {
+  } catch (err: unknown) {
     console.error("Data plate scan error:", err);
     reportError(err, { route: "api/backflow/scan-data-plate", integration: "anthropic" });
-    return NextResponse.json({ error: err.message ?? "Failed to read data plate" }, { status: 500 });
+    return NextResponse.json({ error: "Failed to read data plate" }, { status: 500 });
   }
 }
