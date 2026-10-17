@@ -33,6 +33,10 @@ const TABS = [
 
 type TabKey = (typeof TABS)[number]["key"];
 
+// Tabs that still make sense read-only. Time, Variations and Signature are
+// all actions, so they are hidden rather than shown disabled.
+const VIEW_ONLY_TABS = new Set<TabKey>(["overview", "photos", "documents", "notes"]);
+
 const JOB_STATUSES = ["pending", "scheduled", "in_progress", "on_hold", "completed", "cancelled"] as const;
 const JOB_PRIORITIES = ["low", "normal", "high", "urgent"] as const;
 const JOB_TYPES = ["service", "installation", "maintenance", "emergency", "quote", "project"] as const;
@@ -64,18 +68,25 @@ export default function JobDetailScreen() {
   // local/remote read parity contract this screen must not destabilize.
   // Mirrors the same pattern already used in (office)/schedule.tsx.
   const [assignedStaff, setAssignedStaff] = useState<{ id: string; full_name: string }[]>([]);
+  // Whether assignedStaff came from a successful read. View-only mode needs a
+  // POSITIVE answer that the tech is not on the crew; offline or on a failed
+  // read the screen stays editable, so a tech's own job never locks up.
+  const [assignmentKnown, setAssignmentKnown] = useState(false);
 
   const refreshAssignedStaff = useCallback(async () => {
     try {
-      const { data } = await supabase
+      const { data, error: assignmentError } = await supabase
         .from("job_assignments")
         .select("staff_id, profiles(full_name)")
         .eq("job_id", id);
+      if (assignmentError) throw assignmentError;
       setAssignedStaff(
         (data ?? []).map((a: any) => ({ id: a.staff_id, full_name: a.profiles?.full_name ?? "" }))
       );
+      setAssignmentKnown(true);
     } catch {
       setAssignedStaff([]); // Best-effort, same tolerance as costCenters/currentStage above.
+      setAssignmentKnown(false);
     }
   }, [id]);
 
@@ -206,6 +217,15 @@ export default function JobDetailScreen() {
     );
   }
 
+  // A technician on a job they are not assigned to (opened from Search) may
+  // look but not change anything. Migration 0074 (a draft, not applied yet)
+  // makes the database refuse it, and a refused write would otherwise sit
+  // failed in the outbox.
+  const viewOnly =
+    !isOfficeOrAdmin && assignmentKnown && !!userId && !assignedStaff.some((a) => a.id === userId);
+  const visibleTabs = viewOnly ? TABS.filter((t) => VIEW_ONLY_TABS.has(t.key)) : TABS;
+  const activeTab: TabKey = visibleTabs.some((t) => t.key === tab) ? tab : "overview";
+
   const sc = statusColors[job.status] ?? statusColors.pending;
 
   return (
@@ -264,31 +284,37 @@ export default function JobDetailScreen() {
 
       <View style={styles.tabBarWrap}>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.tabBar}>
-          {TABS.map((t) => (
-            <TouchableOpacity key={t.key} style={[styles.tab, tab === t.key && styles.tabActive]} onPress={() => setTab(t.key)}>
-              <Text style={[styles.tabText, tab === t.key && styles.tabTextActive]}>{t.label}</Text>
+          {visibleTabs.map((t) => (
+            <TouchableOpacity key={t.key} style={[styles.tab, activeTab === t.key && styles.tabActive]} onPress={() => setTab(t.key)}>
+              <Text style={[styles.tabText, activeTab === t.key && styles.tabTextActive]}>{t.label}</Text>
             </TouchableOpacity>
           ))}
         </ScrollView>
       </View>
 
       <ScrollView style={styles.content} contentContainerStyle={{ paddingBottom: 40 }}>
-        {tab === "overview" && <JobOverviewTab job={job} currentUserId={userId} />}
-        {tab === "time" && userId && (
+        {viewOnly && (
+          <View style={styles.viewOnlyBanner}>
+            <Text style={styles.viewOnlyText}>View only — you're not assigned to this job.</Text>
+          </View>
+        )}
+        {activeTab === "overview" && <JobOverviewTab job={job} currentUserId={userId} readOnly={viewOnly} />}
+        {activeTab === "time" && userId && (
           <JobTimeTab jobId={job.id} currentUserId={userId} scheduledCostCenterId={job.scheduled_cost_center_id} />
         )}
-        {tab === "variations" && userId && <JobVariationsTab jobId={job.id} currentUserId={userId} />}
-        {tab === "photos" && userId && (
+        {activeTab === "variations" && userId && <JobVariationsTab jobId={job.id} currentUserId={userId} />}
+        {activeTab === "photos" && userId && (
           <JobPhotosTab
             jobId={job.id}
             currentUserId={userId}
             jobNumber={job.job_number}
             siteLabel={job.sites ? `${job.sites.address_line1}, ${job.sites.suburb}` : null}
+            readOnly={viewOnly}
           />
         )}
-        {tab === "documents" && <JobDocumentsTab jobId={job.id} />}
-        {tab === "notes" && userId && <JobNotesTab jobId={job.id} currentUserId={userId} />}
-        {tab === "signature" && userId && (
+        {activeTab === "documents" && <JobDocumentsTab jobId={job.id} />}
+        {activeTab === "notes" && userId && <JobNotesTab jobId={job.id} currentUserId={userId} readOnly={viewOnly} />}
+        {activeTab === "signature" && userId && (
           <JobSignatureTab
             jobId={job.id}
             currentUserId={userId}
@@ -398,6 +424,8 @@ export default function JobDetailScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.bg },
+  viewOnlyBanner: { margin: 12, marginBottom: 0, padding: 10, borderRadius: 10, backgroundColor: colors.blue100 },
+  viewOnlyText: { fontSize: 13, fontWeight: "600", color: colors.blue600, textAlign: "center" },
   center: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: colors.bg, padding: 24 },
   notFound: { fontSize: 16, fontWeight: "700", color: colors.slate900 },
   notFoundHint: { fontSize: 13, color: colors.slate500, textAlign: "center", marginTop: 6 },

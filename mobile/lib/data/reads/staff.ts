@@ -8,6 +8,8 @@
 import { supabase } from "../../supabase";
 import { unwrapRows } from "./unwrap";
 
+const API_BASE_URL = process.env.EXPO_PUBLIC_API_BASE_URL;
+
 export interface CostProfile {
   hourly_rate: number;
   super_rate: number;
@@ -55,8 +57,12 @@ export async function saveStaff(input: {
   phone: string | null;
   cost: CostProfile;
 }): Promise<void> {
-  const profileRes = await supabase.from("profiles").update({ role: input.role, is_active: input.isActive, phone: input.phone }).eq("id", input.id);
+  const profileRes = await supabase.from("profiles").update({ role: input.role, phone: input.phone }).eq("id", input.id);
   if (profileRes.error) throw new Error(`profile: ${profileRes.error.message}`);
+  // Active/inactive goes through the web API, not a direct write: deactivating
+  // must also ban the person's login (app/api/staff/set-active), which needs the
+  // service role. Idempotent, so it is safe to send on every save.
+  await setStaffActive(input.id, input.isActive);
   const costRes = await supabase.from("staff_cost_profiles").upsert(
     {
       staff_id: input.id,
@@ -71,6 +77,23 @@ export async function saveStaff(input: {
     { onConflict: "staff_id" }
   );
   if (costRes.error) throw new Error(`cost profile: ${costRes.error.message}`);
+}
+
+async function setStaffActive(id: string, active: boolean): Promise<void> {
+  if (!API_BASE_URL) throw new Error("active: app isn't configured to reach the office server");
+  const { data, error } = await supabase.auth.getSession();
+  if (error) throw new Error(`active: ${error.message}`);
+  const token = data.session?.access_token;
+  if (!token) throw new Error("active: session expired");
+  const res = await fetch(`${API_BASE_URL}/api/staff/set-active`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ id, active }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(`active: ${body?.error ?? `HTTP ${res.status}`}`);
+  }
 }
 
 // ---- Staff leave log (admin-only; direct writes per D33) ----

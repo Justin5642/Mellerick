@@ -63,11 +63,14 @@ export function JobPhotosTab({
   currentUserId,
   jobNumber,
   siteLabel,
+  readOnly = false,
 }: {
   jobId: string;
   currentUserId: string;
   jobNumber?: number;
   siteLabel?: string | null;
+  /** View-only: not assigned to this job (see JobNotesTab). */
+  readOnly?: boolean;
 }) {
   const [photos, setPhotos] = useState<Photo[]>([]);
   const [urls, setUrls] = useState<Record<string, string>>({});
@@ -305,7 +308,7 @@ export function JobPhotosTab({
 
   return (
     <View style={styles.container}>
-      {Platform.OS !== "ios" && (
+      {!readOnly && Platform.OS !== "ios" && (
         <View style={styles.typeRow}>
           {PHOTO_TYPES.map((t) => (
             <TouchableOpacity
@@ -319,14 +322,14 @@ export function JobPhotosTab({
         </View>
       )}
 
-      <View style={styles.actionRow}>
+      {!readOnly && <View style={styles.actionRow}>
         <TouchableOpacity style={styles.actionButton} onPress={handleCameraCapture} disabled={uploading || locating}>
           <Text style={styles.actionButtonText}>{locating ? "Locating..." : "📷 Timestamp Camera"}</Text>
         </TouchableOpacity>
         <TouchableOpacity style={styles.actionButton} onPress={handleGalleryPick} disabled={uploading || locating}>
           <Text style={styles.actionButtonText}>{uploading ? "Uploading..." : "🖼️ Gallery"}</Text>
         </TouchableOpacity>
-      </View>
+      </View>}
 
       {/* An inline banner rather than ScreenError: this tab renders inside the job
           screen's ScrollView (so ScreenError's own ScrollView can't nest), and
@@ -365,7 +368,7 @@ export function JobPhotosTab({
             <TouchableOpacity
               style={styles.photoCell}
               onPress={() => setViewingPhoto(item)}
-              onLongPress={() => confirmDelete(item)}
+              onLongPress={readOnly ? undefined : () => confirmDelete(item)}
             >
               {urls[item.storage_path] ? (
                 // cacheKey = storage path: the signed URL's token changes on every
@@ -503,10 +506,12 @@ export function JobPhotosTab({
               </View>
               <View style={styles.viewerBottomBar}>
                 <Text style={styles.viewerDate}>{new Date(viewingPhoto.created_at).toLocaleString("en-AU")}</Text>
-                <TouchableOpacity style={styles.viewerDeleteButton} onPress={() => confirmDelete(viewingPhoto)}>
-                  <Ionicons name="trash-outline" size={18} color="#fff" />
-                  <Text style={styles.viewerDeleteText}>Delete</Text>
-                </TouchableOpacity>
+                {!readOnly && (
+                  <TouchableOpacity style={styles.viewerDeleteButton} onPress={() => confirmDelete(viewingPhoto)}>
+                    <Ionicons name="trash-outline" size={18} color="#fff" />
+                    <Text style={styles.viewerDeleteText}>Delete</Text>
+                  </TouchableOpacity>
+                )}
               </View>
             </>
           )}

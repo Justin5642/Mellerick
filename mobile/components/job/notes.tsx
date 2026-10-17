@@ -68,7 +68,11 @@ function optimisticStageNote(id: string, stage: string, content: string): StageN
   return { id, stage, content, created_at: new Date().toISOString(), profiles: { full_name: "You" } };
 }
 
-export function JobNotesTab({ jobId, currentUserId }: { jobId: string; currentUserId: string }) {
+// readOnly: a technician viewing a job they are not assigned to (opened from
+// Search). Migration 0074 (a draft, not applied yet) makes the database refuse
+// their notes there; until then they would still save. Either way the
+// composers are hidden rather than letting a note fail to sync later.
+export function JobNotesTab({ jobId, currentUserId, readOnly = false }: { jobId: string; currentUserId: string; readOnly?: boolean }) {
   const [notes, setNotes] = useState<Note[]>([]);
   const [content, setContent] = useState("");
   const [saving, setSaving] = useState(false);
@@ -279,6 +283,8 @@ export function JobNotesTab({ jobId, currentUserId }: { jobId: string; currentUs
         </View>
       )}
 
+      {!readOnly && (
+        <>
       <View style={styles.chipRow}>
         {JOB_STAGES.map((s) => (
           <TouchableOpacity
@@ -332,6 +338,9 @@ export function JobNotesTab({ jobId, currentUserId }: { jobId: string; currentUs
         </View>
       </View>
 
+        </>
+      )}
+
       <View style={styles.chipRow}>
         <TouchableOpacity style={[styles.chip, stageFilter === null && styles.chipActive]} onPress={() => setStageFilter(null)}>
           <Text style={[styles.chipText, stageFilter === null && styles.chipTextActive]}>All stages</Text>
@@ -380,6 +389,8 @@ export function JobNotesTab({ jobId, currentUserId }: { jobId: string; currentUs
       <Text style={styles.sectionTitle}>Notes & Activity</Text>
       <Text style={styles.sectionSubtitle}>General job log visible to all staff</Text>
 
+      {!readOnly && (
+        <>
       <View style={styles.composer}>
         <TextInput
           style={styles.input}
@@ -402,6 +413,8 @@ export function JobNotesTab({ jobId, currentUserId }: { jobId: string; currentUs
           </TouchableOpacity>
         </View>
       </View>
+        </>
+      )}
 
       <FlatList
         data={notes}
