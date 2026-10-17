@@ -42,11 +42,14 @@ import { GET as xeroAuthGET } from "@/app/api/xero/auth/route";
 import { GET as xeroCallbackGET } from "@/app/api/xero/callback/route";
 import { GET as pollCalendarGET } from "@/app/api/google/poll-calendar/route";
 
+// The service-role client now serves both the guard's role read and the
+// route's own token-table write (0075 makes those service-role only), so the
+// chain also accepts update/delete and resolves as a completed write.
 function roleChain(role: string | null) {
   const chain: Record<string, unknown> = {};
-  chain.select = vi.fn(() => chain);
-  chain.eq = vi.fn(() => chain);
-  chain.single = vi.fn(async () => ({ data: role ? { role } : null, error: null }));
+  for (const m of ["select", "eq", "update", "delete", "neq"]) chain[m] = vi.fn(() => chain);
+  chain.single = vi.fn(async () => ({ data: role ? { role, id: "row-1" } : null, error: null }));
+  chain.then = (r: (v: { error: null }) => unknown) => r({ error: null });
   return chain;
 }
 

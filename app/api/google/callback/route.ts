@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { google } from "googleapis";
 import { getGoogleOAuthClient } from "@/lib/google";
-import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { requireAdmin } from "@/lib/api/guards";
 import { isValidOAuthState, GOOGLE_STATE_COOKIE } from "@/lib/oauth-state";
 import { replaceSingletonToken } from "@/lib/oauth-token-store";
@@ -43,7 +43,9 @@ export async function GET(request: NextRequest) {
     const oauth2 = google.oauth2({ version: "v2", auth: oauth2Client });
     const { data: userinfo } = await oauth2.userinfo.get();
 
-    const supabase = await createClient();
+    // Token tables are service-role only once migration 0075 (a draft, not
+    // applied yet) is in; the guard above has already authorised the caller.
+    const supabase = createAdminClient();
 
     // Insert-then-retire, and both results checked — see the twin in
     // xero/callback and the reasoning in lib/oauth-token-store.ts. The previous

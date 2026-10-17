@@ -66,6 +66,13 @@ vi.mock("googleapis", () => {
   };
 });
 
+// Token-table reads/writes go through the service role (lib/google.ts
+// tokenClient) — hand back the same fake, so tokenUpdates still sees them.
+let currentClient: { from: (table: string) => unknown } | null = null;
+vi.mock("@/lib/supabase/admin", () => ({
+  createAdminClient: () => currentClient,
+}));
+
 // The poll is always handed a client (service-role for cron, cookie-based for
 // the manual button). If it ever builds its own, that is a bug on its own.
 vi.mock("@/lib/supabase/server", () => ({
@@ -135,6 +142,7 @@ function makeSupabase(jobsByEventId: Record<string, Job>) {
     return api;
   };
 
+  currentClient = { from };
   return { supabase: { from }, jobUpdates, tokenUpdates };
 }
 
