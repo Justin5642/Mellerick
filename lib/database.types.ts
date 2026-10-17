@@ -2272,6 +2272,36 @@ export type Database = {
           },
         ]
       }
+      time_entry_changes: {
+        Row: {
+          changed_at: string
+          changed_by: string | null
+          id: number
+          new_row: Json | null
+          old_row: Json
+          operation: string
+          time_entry_id: string
+        }
+        Insert: {
+          changed_at?: string
+          changed_by?: string | null
+          id?: never
+          new_row?: Json | null
+          old_row: Json
+          operation: string
+          time_entry_id: string
+        }
+        Update: {
+          changed_at?: string
+          changed_by?: string | null
+          id?: never
+          new_row?: Json | null
+          old_row?: Json
+          operation?: string
+          time_entry_id?: string
+        }
+        Relationships: []
+      }
       variation_types: {
         Row: {
           auto_approve: boolean

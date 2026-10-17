@@ -10,6 +10,20 @@ import {
   DEFAULT_SHIFT_START_TIME,
   type ScheduleColumns,
 } from "@/lib/scheduling";
+import { createAdminClient } from "@/lib/supabase/admin";
+// The OAuth token tables are read and written ONLY through the service role.
+// Migration 0075 (a draft, not applied yet) revokes the token columns from
+// every signed-in user once it is, so an office account or an XSS on the
+// dashboard cannot lift the refresh token.
+// Every caller of this module is already authorised by its route — admin,
+// office/admin, a job-scoped check, or the cron secret — so this is a read of
+// the org's single connection on behalf of someone allowed to use it. The
+// client a caller passes in is still used for everything else (jobs,
+// invoices), so those writes keep running under the caller's own RLS.
+function tokenClient() {
+  return createAdminClient();
+}
+
 
 const SCOPES = [
   "https://www.googleapis.com/auth/calendar.events",
@@ -47,7 +61,7 @@ export function getGoogleConsentUrl(state?: string) {
  */
 export async function getGoogleCalendarClient(supabaseClient?: any) {
   const supabase = supabaseClient ?? (await createClient());
-  const { data: tokenRow } = await supabase.from("google_tokens").select("*").single();
+  const { data: tokenRow } = await tokenClient().from("google_tokens").select("*").single();
   if (!tokenRow) return null;
 
   const oauth2Client = getGoogleOAuthClient();
@@ -66,7 +80,7 @@ export async function getGoogleCalendarClient(supabaseClient?: any) {
     // is already dead and the connection is gone until someone reconnects by
     // hand. Throwing is right: the caller otherwise holds a token that works
     // for this call and nothing after it, which is worse than a clear failure.
-    const { error: persistError } = await supabase
+    const { error: persistError } = await tokenClient()
       .from("google_tokens")
       .update({
         access_token: credentials.access_token!,
@@ -198,7 +212,7 @@ function sameInstant(a: string | null | undefined, b: string | null | undefined)
  *     recurrence rule into "start date, end date, daily hours" is guesswork.
  */
 export async function pollGoogleCalendarChanges(supabase: any) {
-  const { data: tokenRow } = await supabase.from("google_tokens").select("*").single();
+  const { data: tokenRow } = await tokenClient().from("google_tokens").select("*").single();
   if (!tokenRow) return { skipped: true, reason: "Google Calendar not connected" };
 
   const calendar = await getGoogleCalendarClient(supabase);
@@ -417,7 +431,7 @@ export async function pollGoogleCalendarChanges(supabase: any) {
         // If THIS write is refused the stored token stays dead, every later
         // run takes the same 410, and calendar sync stops permanently while
         // reporting `resyncRequired` each time as though it were recovering.
-        const { error: clearError } = await supabase
+        const { error: clearError } = await tokenClient()
           .from("google_tokens")
           .update({ calendar_sync_token: null })
           .eq("id", tokenRow.id);
@@ -494,7 +508,7 @@ export async function pollGoogleCalendarChanges(supabase: any) {
   // the next run re-reading the same window, so a refused write means every
   // later poll re-processes from the same point — forever, while reporting
   // success each time.
-  const { error: tokenError } = await supabase
+  const { error: tokenError } = await tokenClient()
     .from("google_tokens")
     .update({
       calendar_sync_token: nextSyncToken ?? syncToken ?? null,
