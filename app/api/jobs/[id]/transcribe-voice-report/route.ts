@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getCallerId } from "@/lib/api/guards";
+import { requireUser } from "@/lib/api/guards";
 import { canManageJobBilling } from "@/lib/api/job-authz";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { reportError } from "@/lib/monitoring";
@@ -33,11 +33,11 @@ const VOICE_REPORT_MAX_CHARS = 20_000;
 export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
 
-  // Shared helper: accepts the mobile Bearer token AND the browser cookie session.
-  const callerId = await getCallerId(request);
-  if (!callerId) {
-    return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
-  }
+  // Shared helper: accepts the mobile Bearer token AND the browser cookie
+  // session, and refuses a deactivated profile.
+  const guard = await requireUser(request);
+  if (!guard.ok) return guard.response;
+  const callerId = guard.userId;
 
   let body: { storagePath?: unknown; transcript?: unknown; recordedBy?: unknown };
   try {
