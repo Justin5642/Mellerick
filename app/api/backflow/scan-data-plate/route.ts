@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient as createServiceClient } from "@supabase/supabase-js";
-import { createClient as createServerClient } from "@/lib/supabase/server";
+import { requireUser } from "@/lib/api/guards";
 import { DEVICE_TYPES } from "@/lib/backflow";
 import { reportError, reportFailure } from "@/lib/monitoring";
 import { consumeRateLimit, rateLimitedResponse, SCAN_DATA_PLATE_LIMIT } from "@/lib/api/rate-limit";
@@ -23,19 +22,11 @@ import { consumeRateLimit, rateLimitedResponse, SCAN_DATA_PLATE_LIMIT } from "@/
 // Same dual-auth pattern as the other backflow routes (Bearer token for
 // mobile, cookies for the web dashboard) since this is called from both the
 // web "Register Device" form and the mobile equivalent.
+// requireUser: Bearer token (mobile) or cookie (web), and refuses a
+// deactivated profile.
 async function getAuthenticatedUserId(request: NextRequest): Promise<string | null> {
-  const authHeader = request.headers.get("authorization") ?? "";
-  const token = authHeader.startsWith("Bearer ") ? authHeader.slice("Bearer ".length) : null;
-  if (token) {
-    const anonClient = createServiceClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!, {
-      auth: { autoRefreshToken: false, persistSession: false },
-    });
-    const { data, error } = await anonClient.auth.getUser(token);
-    if (!error && data.user) return data.user.id;
-  }
-  const cookieClient = await createServerClient();
-  const { data } = await cookieClient.auth.getUser();
-  return data.user?.id ?? null;
+  const guard = await requireUser(request);
+  return guard.ok ? guard.userId : null;
 }
 
 const DEVICE_TYPE_VALUES = DEVICE_TYPES.map((d) => d.value);

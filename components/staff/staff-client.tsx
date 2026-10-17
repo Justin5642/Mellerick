@@ -124,22 +124,25 @@ export function StaffClient({ role, staff: initialStaff, vehicles, fetchError }:
   }
 
   async function toggleActive(id: string, current: boolean) {
-    // `count: "exact"` because PostgREST returns no error for an UPDATE that
-    // matched nothing — RLS simply filters the row out and the statement
-    // succeeds against zero rows. profiles is exactly where that matters:
-    // migration 0044 tightened who may write it, so a refusal here is
-    // reachable, and this used to report "Staff member deactivated" for someone
-    // who still had access.
-    const { error, count } = await supabase
-      .from("profiles")
-      .update({ is_active: !current }, { count: "exact" })
-      .eq("id", id);
+    // Server route, not a direct profiles update: deactivating must also ban
+    // the login (see app/api/staff/set-active), which needs the service role.
+    let error: string | null = null;
+    try {
+      const res = await fetch("/api/staff/set-active", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id, active: !current }),
+      });
+      if (!res.ok) error = (await res.json().catch(() => null))?.error ?? "The change was refused.";
+    } catch {
+      error = "Network error.";
+    }
 
-    if (error || count === 0) {
+    if (error) {
       toast.error(
         current
-          ? `Could not deactivate this person — they still have access. ${error?.message ?? "The change was refused."}`
-          : `Could not reactivate this person. ${error?.message ?? "The change was refused."}`
+          ? `Could not deactivate this person — they still have access. ${error}`
+          : `Could not reactivate this person. ${error}`
       );
       return;
     }

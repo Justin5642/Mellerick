@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient as createServerClient } from "@/lib/supabase/server";
+import { requireAdmin } from "@/lib/api/guards";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 export async function POST(request: NextRequest) {
@@ -7,17 +7,8 @@ export async function POST(request: NextRequest) {
     // Same admin-only gate as the initial invite endpoint -- resending an
     // invite still lets the caller set the role in the invite metadata, so
     // it needs the same server-side enforcement, not just a UI hint.
-    const supabaseSession = await createServerClient();
-    const { data: { user } } = await supabaseSession.auth.getUser();
-    if (!user) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
-    const { data: requesterProfile } = await supabaseSession
-      .from("profiles")
-      .select("role")
-      .eq("id", user.id)
-      .single();
-    if (requesterProfile?.role !== "admin") {
-      return NextResponse.json({ error: "Only admins can resend invites" }, { status: 403 });
-    }
+    const guard = await requireAdmin(request);
+    if (!guard.ok) return guard.response;
 
     const { email, full_name, role } = await request.json();
     if (!email) {

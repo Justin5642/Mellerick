@@ -13,8 +13,8 @@ vi.mock("@anthropic-ai/sdk", () => ({
   },
 }));
 
-vi.mock("@/lib/supabase/server", () => ({
-  createClient: async () => ({ auth: { getUser: async () => ({ data: { user: { id: "u1" } } }) } }),
+vi.mock("@/lib/api/guards", () => ({
+  requireUser: async () => ({ ok: true, userId: "u1", role: null }),
 }));
 
 // The shared per-user limiter (lib/api/rate-limit.ts). Mocked so the route
