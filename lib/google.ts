@@ -11,10 +11,10 @@ import {
   type ScheduleColumns,
 } from "@/lib/scheduling";
 import { createAdminClient } from "@/lib/supabase/admin";
-// The OAuth token tables are read and written ONLY through the service role
-// (migration 0075 — a draft, not applied yet — revokes the token columns from
-// every signed-in user once it is, so an
-// office account or an XSS on the dashboard cannot lift the refresh token).
+// The OAuth token tables are read and written ONLY through the service role.
+// Migration 0075 (a draft, not applied yet) revokes the token columns from
+// every signed-in user once it is, so an office account or an XSS on the
+// dashboard cannot lift the refresh token.
 // Every caller of this module is already authorised by its route — admin,
 // office/admin, a job-scoped check, or the cron secret — so this is a read of
 // the org's single connection on behalf of someone allowed to use it. The
