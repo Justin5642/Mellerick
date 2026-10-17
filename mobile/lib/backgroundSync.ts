@@ -4,6 +4,7 @@ import { supabaseGateway, apiBridge } from "./data/gateway.supabase";
 import { netInfoConnectivity } from "./data/net/connectivity";
 import { supabase } from "./supabase";
 import { initMonitoring, reportDeadLetter, reportSyncError } from "./monitoring";
+import { replayBackgroundClockQueue } from "./backgroundClockTask";
 import {
   shouldRegisterBackgroundSync,
   backgroundSyncOutcome,
@@ -87,6 +88,7 @@ if (TaskManager && BackgroundFetch) {
     if (!data.session) {
       return BackgroundFetch.BackgroundFetchResult.NoData;
     }
+    const userId = data.session.user.id;
 
     const store = await SqliteOutboxStore.open();
     const layer = createDataLayer({
@@ -95,6 +97,9 @@ if (TaskManager && BackgroundFetch) {
       api: apiBridge,
       connectivity: netInfoConnectivity,
       ensureSession: () => supabase.auth.getSession(),
+      // Headless: no AuthProvider has published the owner, so use the session
+      // just read. Only this user's queued work is replayed.
+      owner: () => userId,
       // No UI here to show anything, so a failure is captured and reported to
       // the OS rather than thrown — an exception escaping a TaskManager task can
       // make the system stop scheduling it entirely, which would silently end
@@ -109,6 +114,9 @@ if (TaskManager && BackgroundFetch) {
     await layer.engine.flush();
     const pendingAfter = await layer.outbox.pendingCount();
     drained = Math.max(0, pendingBefore - pendingAfter);
+    // Background auto-clock arrivals/departures recorded in a dead zone.
+    // Never throws.
+    await replayBackgroundClockQueue();
   } catch (e) {
     error = e;
   }

@@ -19,6 +19,7 @@ import {
   Text,
 } from "react-native";
 import { AuthProvider, useAuth } from "../lib/auth-context";
+import { useSignOut } from "../lib/useSignOut";
 import { usePushRegistration } from "../lib/push/usePushRegistration";
 import { LocationTrackingProvider } from "../lib/location-tracking";
 import { DataProvider } from "../lib/data/DataProvider";
@@ -41,7 +42,9 @@ function SyncStatusOverlay() {
 }
 
 function RootNavigation() {
-  const { session, profile, loading, profileError, reloadProfile, signOut } = useAuth();
+  const { session, profile, loading, profileError, reloadProfile } = useAuth();
+  // Warns about unsynced work and clears it on a confirmed sign-out.
+  const signOut = useSignOut();
   // Register for push once signed in (best-effort; no-op without a device /
   // permission / credentials / the device_tokens table — never blocks the UI).
   usePushRegistration();

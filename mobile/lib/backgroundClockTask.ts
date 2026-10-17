@@ -12,8 +12,13 @@ import {
   stopSiteWake,
   storageDeps,
   type BackgroundClockDeps,
+  clockQueueStore,
 } from "./backgroundClock";
 import type { LocationReading } from "./backgroundClockPlan";
+import { appendClockActions, replayClockActions, type QueuedClockAction } from "./backgroundClockQueue";
+import { isTransientFailure, syncError } from "./data/outbox/errors";
+import { cryptoIdGen } from "./data/ids";
+import { reportSyncError } from "./monitoring";
 
 // Registration of the background location task.
 //
@@ -27,12 +32,32 @@ import type { LocationReading } from "./backgroundClockPlan";
 // outbox: the two paths produce the SAME rows, so a technician's timesheet does
 // not depend on whether the app happened to be open. Divergence here would be
 // invisible and would show up only as a disputed payslip.
+//
+// They are no longer called straight from a delivery, though: the delivery
+// QUEUES the planned actions (lib/backgroundClockQueue.ts) and these replay
+// them, so a write that fails in a dead zone is retried later with its
+// original timestamp instead of being re-derived (late, or never).
+//
+// Every failure is thrown via syncError, which marks no-signal/timeout/5xx as
+// transient: those wait for the next replay without counting toward the
+// action being dropped.
 
-async function insertWorkClockIn(jobId: string, at: string, staffId: string, costCenterId: string | null): Promise<void> {
+/** A replayed insert whose client id already exists landed the first time. */
+function isReplayOfSameRow(error: { code?: string; message: string }): boolean {
+  return error.code === "23505" && /_pkey"/.test(error.message);
+}
+
+async function insertWorkClockIn(
+  jobId: string,
+  at: string,
+  staffId: string,
+  costCenterId: string | null,
+  entryId?: string
+): Promise<void> {
   // Idempotence: if an entry is already open for this job, do nothing. The task
   // can legitimately re-derive a transition after the process is killed mid-way,
   // and a second clock-in would double-count the visit.
-  const { data: openEntry, error } = await supabase
+  const { data: openEntry, error, status } = await supabase
     .from("time_entries")
     .select("id")
     .eq("job_id", jobId)
@@ -40,10 +65,14 @@ async function insertWorkClockIn(jobId: string, at: string, staffId: string, cos
     .eq("entry_type", "work")
     .is("clock_out", null)
     .maybeSingle();
-  if (error) throw new Error(`backgroundClock openEntry: ${error.message}`);
+  if (error) throw syncError(`backgroundClock openEntry: ${error.message}`, status);
   if (openEntry) return;
 
-  const { error: insertError } = await supabase.from("time_entries").insert({
+  // The client id makes a replay idempotent even when the first attempt's
+  // response was lost after the row landed (and was then closed, so the
+  // open-entry check above no longer finds it).
+  const { error: insertError, status: insertStatus } = await supabase.from("time_entries").insert({
+    ...(entryId ? { id: entryId } : {}),
     job_id: jobId,
     staff_id: staffId,
     clock_in: at,
@@ -51,7 +80,9 @@ async function insertWorkClockIn(jobId: string, at: string, staffId: string, cos
     entry_type: "work",
     cost_center_id: costCenterId,
   });
-  if (insertError) throw new Error(`backgroundClock clockIn: ${insertError.message}`);
+  if (insertError && !isReplayOfSameRow(insertError)) {
+    throw syncError(`backgroundClock clockIn: ${insertError.message}`, insertStatus);
+  }
 }
 
 async function insertTravelLeg(
@@ -59,7 +90,8 @@ async function insertTravelLeg(
   fromJobId: string,
   departedAt: string,
   arrivedAt: string,
-  staffId: string
+  staffId: string,
+  travelId?: string
 ): Promise<void> {
   // The departure instant now arrives WITH the action, from the persisted
   // pending departure, rather than being re-derived by querying the previous
@@ -79,7 +111,10 @@ async function insertTravelLeg(
   const hours = plausibleAutoClockHours(departedAt, arrivedAt, MAX_PLAUSIBLE_TRAVEL_HOURS);
   if (hours === null) return;
 
-  const { error: insertError } = await supabase.from("time_entries").insert({
+  // The client id is what stops a replay writing the same drive twice — a
+  // travel leg has no open-entry check to fall back on.
+  const { error: insertError, status } = await supabase.from("time_entries").insert({
+    ...(travelId ? { id: travelId } : {}),
     job_id: toJobId,
     staff_id: staffId,
     clock_in: departedAt,
@@ -89,11 +124,13 @@ async function insertTravelLeg(
     travel_from_job_id: fromJobId,
     auto_clocked: true,
   });
-  if (insertError) throw new Error(`backgroundClock travel: ${insertError.message}`);
+  if (insertError && !isReplayOfSameRow(insertError)) {
+    throw syncError(`backgroundClock travel: ${insertError.message}`, status);
+  }
 }
 
 async function closeWorkEntry(jobId: string, at: string, staffId: string): Promise<void> {
-  const { data: openEntry, error } = await supabase
+  const { data: openEntry, error, status } = await supabase
     .from("time_entries")
     .select("id, clock_in")
     .eq("job_id", jobId)
@@ -101,31 +138,73 @@ async function closeWorkEntry(jobId: string, at: string, staffId: string): Promi
     .eq("entry_type", "work")
     .is("clock_out", null)
     .maybeSingle();
-  if (error) throw new Error(`backgroundClock openEntry: ${error.message}`);
+  if (error) throw syncError(`backgroundClock openEntry: ${error.message}`, status);
   if (!openEntry) return;
+  // A departure replayed late must not close an entry opened AFTER it — e.g.
+  // the technician came back to the site and the foreground clocked them in
+  // again while this departure waited out a dead zone. Closing that entry with
+  // an earlier clock_out would erase the second visit.
+  if (Date.parse(openEntry.clock_in) > Date.parse(at)) return;
 
   // The entry CLOSES either way; only `hours` is withheld when implausible, so
   // the office sees a gap to correct rather than a number that reconciles wrong.
   const hours = plausibleAutoClockHours(openEntry.clock_in, at, MAX_PLAUSIBLE_WORK_HOURS);
-  const { error: updateError } = await supabase
+  const { error: updateError, status: updateStatus } = await supabase
     .from("time_entries")
     .update({ clock_out: at, ...(hours === null ? {} : { hours }) })
     .eq("id", openEntry.id);
-  if (updateError) throw new Error(`backgroundClock clockOut: ${updateError.message}`);
+  if (updateError) throw syncError(`backgroundClock clockOut: ${updateError.message}`, updateStatus);
 }
 
 export const supabaseClockDeps: BackgroundClockDeps = {
   ...storageDeps,
-  onArrive: async (jobId, at, fromJobId, fromAt, staffId, costCenterId) => {
-    await insertWorkClockIn(jobId, at, staffId, costCenterId);
+  onArrive: async (jobId, at, fromJobId, fromAt, staffId, costCenterId, ids) => {
+    await insertWorkClockIn(jobId, at, staffId, costCenterId, ids?.entryId);
     // Both are required: fromJobId says where the drive started, fromAt says
     // when. Without the second the leg was always zero-length and discarded.
-    if (fromJobId && fromAt) await insertTravelLeg(jobId, fromJobId, fromAt, at, staffId);
+    if (fromJobId && fromAt) await insertTravelLeg(jobId, fromJobId, fromAt, at, staffId, ids?.travelId);
   },
   onDepart: async (jobId, at, staffId) => {
     await closeWorkEntry(jobId, at, staffId);
   },
+  enqueueActions: (actions, staffId) => appendClockActions(clockQueueStore, actions, staffId, cryptoIdGen.newId),
+  replayPending: async () => {
+    await replayBackgroundClockQueue();
+  },
 };
+
+function applyQueued(action: QueuedClockAction): Promise<void> {
+  return action.type === "depart"
+    ? supabaseClockDeps.onDepart(action.jobId, action.at, action.staffId)
+    : supabaseClockDeps.onArrive(action.jobId, action.at, action.fromJobId, action.fromAt, action.staffId, action.costCenterId, {
+        entryId: action.entryId,
+        travelId: action.travelId,
+      });
+}
+
+/**
+ * Replay the background auto-clock's queued actions for whoever is signed in.
+ * Called from every delivery, after every outbox drain while the app is open
+ * (lib/data/DataProvider.tsx), and from the background-sync task — so an
+ * arrival recorded in a dead zone reaches the timesheet as soon as ANY of them
+ * gets signal. Never throws. Returns how many actions are still waiting.
+ */
+export async function replayBackgroundClockQueue(): Promise<number> {
+  try {
+    const staffId = await storageDeps.readStaffId();
+    return await replayClockActions(clockQueueStore, staffId, {
+      apply: applyQueued,
+      isTransient: isTransientFailure,
+      // Rejected MAX_CLOCK_ACTION_FAILURES times: given up on so it cannot
+      // block every later clock event. Reported, so the office can correct the
+      // timesheet by hand. Tags only — no location, no times.
+      onDropped: (_action, e) => reportSyncError(e, "background-clock"),
+    });
+  } catch (e) {
+    console.warn("[backgroundClock] replay failed; will retry:", e);
+    return 0;
+  }
+}
 
 /** What expo-location hands a background task on each delivery. */
 interface LocationTaskBody {
@@ -150,9 +229,10 @@ async function handleDelivery({ data, error }: LocationTaskBody): Promise<void> 
     // Swallowing here is deliberate and is NOT the swallowed-error bug fixed
     // elsewhere: an exception escaping a TaskManager task can make the OS stop
     // delivering to it entirely, which would silently end tracking for the rest
-    // of the shift. State was not persisted (applyBackgroundBatch persists only
-    // after its writes), so the next delivery re-derives the same transition.
-    console.warn("[backgroundClock] batch failed; will re-derive on next delivery:", e);
+    // of the shift. Failed WRITES never reach here — they stay in the clock
+    // queue for the next replay; only a storage fault does, and then the state
+    // was not advanced, so the next delivery re-plans the same transition.
+    console.warn("[backgroundClock] batch failed; will retry on next delivery:", e);
     // Not followed by the stop check below: the re-derivation this comment
     // promises needs a next delivery, and a stopped task gets none.
     return;

@@ -11,7 +11,7 @@
 // isolation pattern as customers.local.test.ts.
 jest.mock("../../supabase", () => {
   const builder: Record<string, unknown> = {};
-  for (const m of ["select", "eq", "not", "or", "order", "range", "limit", "single"]) {
+  for (const m of ["select", "eq", "not", "or", "ilike", "order", "range", "limit", "single"]) {
     builder[m] = jest.fn(() => builder);
   }
   // Awaiting the builder (or any chained call) yields "no rows".

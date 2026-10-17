@@ -1,4 +1,5 @@
 import { applyBackgroundBatch, type BackgroundClockDeps } from "./backgroundClock";
+import type { ClockAction } from "./backgroundClockPlan";
 import type { TrackedSite } from "./geofenceState";
 
 jest.mock("expo-location", () => ({}));
@@ -23,10 +24,15 @@ const T0 = Date.parse("2026-08-04T08:00:00.000Z");
 const at = (s: TrackedSite, ms: number) => ({ coords: { latitude: s.lat, longitude: s.lng }, timestamp: ms });
 const away = (ms: number) => ({ coords: { latitude: -37.0, longitude: 144.0 }, timestamp: ms });
 
-function deps(over: Partial<BackgroundClockDeps> = {}): BackgroundClockDeps & { calls: string[] } {
+// The queue here is a list in memory; replayPending applies it through
+// onArrive/onDepart in order, as the real one (lib/backgroundClockQueue.ts,
+// tested on its own) does — so the ORDER of writes stays observable.
+function deps(over: Partial<BackgroundClockDeps> = {}): BackgroundClockDeps & { calls: string[]; queued: ClockAction[] } {
   const calls: string[] = [];
-  return {
+  const queued: ClockAction[] = [];
+  const d = {
     calls,
+    queued,
     readInside: jest.fn().mockResolvedValue(null),
     // Persisted across invocations like insideJobId, so a drive that starts in
     // one delivery and ends in the next can still be attributed.
@@ -45,22 +51,35 @@ function deps(over: Partial<BackgroundClockDeps> = {}): BackgroundClockDeps & { 
     onDepart: jest.fn(async (jobId: string) => {
       calls.push(`depart(${jobId})`);
     }),
+    enqueueActions: jest.fn(async (actions: ClockAction[]) => {
+      if (actions.length) calls.push(`enqueue(${actions.map((a) => `${a.type}:${a.jobId}`).join(",")})`);
+      queued.push(...actions);
+    }),
+    replayPending: jest.fn(async () => {
+      while (queued.length) {
+        const a = queued[0];
+        if (a.type === "depart") await d.onDepart(a.jobId, a.at, "staff-1");
+        else await d.onArrive(a.jobId, a.at, a.fromJobId, a.fromAt, "staff-1", a.costCenterId);
+        queued.shift();
+      }
+    }),
     ...over,
-  } as BackgroundClockDeps & { calls: string[] };
+  } as BackgroundClockDeps & { calls: string[]; queued: ClockAction[] };
+  return d;
 }
 
 describe("applyBackgroundBatch", () => {
   it("writes an arrival and persists the new state", async () => {
     const d = deps();
     await applyBackgroundBatch([at(SITE_A, T0)], d);
-    expect(d.calls).toEqual(["arrive(job-a)", "writeInside(job-a)"]);
+    expect(d.calls).toEqual(["enqueue(arrive:job-a)", "writeInside(job-a)", "arrive(job-a)"]);
   });
 
   // Ordering is the whole point of doing this sequentially.
   it("closes the old job BEFORE opening the new one when moving between sites", async () => {
     const d = deps({ readInside: jest.fn().mockResolvedValue("job-a") });
     await applyBackgroundBatch([at(SITE_B, T0)], d);
-    expect(d.calls).toEqual(["depart(job-a)", "arrive(job-b)", "writeInside(job-b)"]);
+    expect(d.calls).toEqual(["enqueue(depart:job-a,arrive:job-b)", "writeInside(job-b)", "depart(job-a)", "arrive(job-b)"]);
   });
 
   it("passes the previous job AND when it was left, so the travel leg can be attributed", async () => {
@@ -112,33 +131,61 @@ describe("applyBackgroundBatch", () => {
     // now driving, and the arrival that closes this leg will very likely be
     // delivered in a later batch — which is exactly the case that could never
     // produce a travel leg before.
-    expect(d.calls).toEqual(["arrive(job-a)", "depart(job-a)", "writePendingDeparture(job-a)"]);
+    expect(d.calls).toEqual(["enqueue(arrive:job-a,depart:job-a)", "writePendingDeparture(job-a)", "arrive(job-a)", "depart(job-a)"]);
     expect(d.writeInside).not.toHaveBeenCalled();
   });
 
-  // If the process dies partway, re-deriving a transition produces a duplicate
-  // the write path de-duplicates. Persisting FIRST would skip it and lose the
-  // entry outright. For payroll, re-doing beats losing.
-  it("persists state only AFTER the writes are enqueued", async () => {
+  // THE FIX. Writes used to go first and the state only advanced if they all
+  // succeeded, "so the next delivery re-derives the transition". It did not —
+  // the next delivery planned from ITS readings, so an offline arrival came
+  // back stamped late, or vanished if the technician had already left. Now the
+  // planned action is queued (durably, with its own timestamp) BEFORE the state
+  // advances, and the state advances whether or not the write gets through.
+  it("queues the planned actions BEFORE advancing the state, and writes after", async () => {
     const order: string[] = [];
     const d = deps({
-      onArrive: jest.fn(async () => {
-        order.push("arrive");
+      enqueueActions: jest.fn(async () => {
+        order.push("enqueue");
       }),
       writeInside: jest.fn(async () => {
         order.push("persist");
       }),
+      replayPending: jest.fn(async () => {
+        order.push("replay");
+      }),
     });
     await applyBackgroundBatch([at(SITE_A, T0)], d);
-    expect(order).toEqual(["arrive", "persist"]);
+    expect(order).toEqual(["enqueue", "persist", "replay"]);
   });
 
-  it("stops applying if a write throws, leaving state unpersisted for a retry", async () => {
-    const d = deps({
-      readInside: jest.fn().mockResolvedValue("job-a"),
-      onDepart: jest.fn().mockRejectedValue(new Error("offline")),
-    });
-    await expect(applyBackgroundBatch([at(SITE_B, T0)], d)).rejects.toThrow("offline");
+  it("queues the arrival with the READING's timestamp, not the time it is written", async () => {
+    const d = deps({ replayPending: jest.fn(async () => {}) }); // offline: nothing replays
+    await applyBackgroundBatch([at(SITE_A, T0)], d);
+    expect(d.queued).toEqual([expect.objectContaining({ type: "arrive", jobId: "job-a", at: new Date(T0).toISOString() })]);
+  });
+
+  it("advances the state even when the write cannot get through, so the arrival is not re-derived later", async () => {
+    // A replay that fails leaves the action queued (lib/backgroundClockQueue)
+    // and resolves; the geofence cursor must already say "inside job-a".
+    const d = deps({ replayPending: jest.fn(async () => {}) });
+    await applyBackgroundBatch([at(SITE_A, T0)], d);
+    expect(d.writeInside).toHaveBeenCalledWith("job-a");
+    // The next delivery, still on site, plans nothing new — no second arrival
+    // stamped with a later time.
+    const next = deps({ readInside: jest.fn().mockResolvedValue("job-a"), replayPending: jest.fn(async () => {}) });
+    await applyBackgroundBatch([at(SITE_A, T0 + 40 * 60_000)], next);
+    expect(next.queued).toEqual([]);
+  });
+
+  it("replays earlier leftovers even when this delivery planned nothing", async () => {
+    const d = deps({ readInside: jest.fn().mockResolvedValue("job-a") });
+    await applyBackgroundBatch([at(SITE_A, T0)], d);
+    expect(d.replayPending).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not advance the state if the actions could not be queued (a storage fault)", async () => {
+    const d = deps({ enqueueActions: jest.fn().mockRejectedValue(new Error("disk full")) });
+    await expect(applyBackgroundBatch([at(SITE_A, T0)], d)).rejects.toThrow("disk full");
     expect(d.writeInside).not.toHaveBeenCalled();
   });
 });

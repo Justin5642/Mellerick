@@ -1,6 +1,7 @@
 import * as FileSystem from "expo-file-system/legacy";
-import { decode } from "base64-arraybuffer";
 import { supabase } from "../supabase";
+import { STORAGE_TIMEOUT_MS, fetchWithTimeout } from "../fetchWithTimeout";
+import { TransientSyncError, isTransientStatus, syncError } from "./outbox/errors";
 import type { SupabaseGateway, ApiBridge } from "./gateway";
 import type { SideEffectKind } from "./outbox/types";
 import { OUTBOX_ATTACHMENT_DIR } from "./attachments";
@@ -11,7 +12,10 @@ import { OUTBOX_ATTACHMENT_DIR } from "./attachments";
 // chose the outbox over PowerSync for this app).
 export const supabaseGateway: SupabaseGateway = {
   async insertRow(table, row) {
-    const { error } = await supabase.from(table).insert(row);
+    // `status` travels with every failure from here down: 0 (no connection,
+    // timeout) and 5xx say nothing about the write and must not spend its
+    // dead-letter budget — see outbox/errors.ts.
+    const { error, status } = await supabase.from(table).insert(row);
     if (!error) return;
     // 23505 = unique_violation, and it means two very different things here.
     //
@@ -25,7 +29,7 @@ export const supabaseGateway: SupabaseGateway = {
     // written. Swallowing it would mark the operation done and lose the record
     // silently, with the user believing they had saved it. Surface it.
     if (error.code === "23505" && isReplayOfSameRow(table, error.message)) return;
-    throw new Error(`${table} insert: ${error.message}`);
+    throw syncError(`${table} insert: ${error.message}`, status);
   },
   async updateRow(table, id, patch) {
     // `count: "exact"` because A WRITE THAT AFFECTED NO ROWS IS NOT A WRITE.
@@ -37,11 +41,11 @@ export const supabaseGateway: SupabaseGateway = {
     // leaving no error, no dead letter and no badge. The same shape as the
     // geofence and clock-in defects: asking "did it fail?" when the question is
     // "did it happen?".
-    const { error, count } = await supabase
+    const { error, count, status } = await supabase
       .from(table)
       .update(patch, { count: "exact" })
       .eq("id", id);
-    if (error) throw new Error(`${table} update: ${error.message}`);
+    if (error) throw syncError(`${table} update: ${error.message}`, status);
 
     // An ABSENT count is not zero. Some PostgREST configurations omit the
     // header, and treating that as failure would dead-letter every healthy
@@ -70,9 +74,9 @@ export const supabaseGateway: SupabaseGateway = {
     // case reachable — everything above here treats a resolved promise as done
     // (the processor marks the op complete, the outbox drops it, the badge
     // clears). Same reasoning as updateRow's `count: "exact"` above.
-    const { error, count } = await supabase.from(table).delete({ count: "exact" }).eq("id", id);
+    const { error, count, status } = await supabase.from(table).delete({ count: "exact" }).eq("id", id);
     // A missing row on replay is success (idempotent delete).
-    if (error && !/not found/i.test(error.message)) throw new Error(`${table} delete: ${error.message}`);
+    if (error && !/not found/i.test(error.message)) throw syncError(`${table} delete: ${error.message}`, status);
 
     // An ABSENT count is not zero — some PostgREST configurations omit the
     // header, and probing on every delete would turn an unreadable-but-deleted
@@ -95,12 +99,7 @@ export const supabaseGateway: SupabaseGateway = {
     );
   },
   async uploadObject(bucket, path, localUri) {
-    const base64 = await FileSystem.readAsStringAsync(localUri, { encoding: FileSystem.EncodingType.Base64 });
-    const { error } = await supabase.storage.from(bucket).upload(path, decode(base64), {
-      contentType: guessContentType(path),
-      upsert: true, // idempotent re-upload on replay
-    });
-    if (error) throw new Error(`storage ${bucket}/${path}: ${error.message}`);
+    await uploadFileToStorage(bucket, path, localUri);
   },
   async removeObject(bucket, path) {
     // Best-effort, never throws — correct because the ROW delete is the gate.
@@ -190,9 +189,83 @@ function guessContentType(path: string): string {
   return "application/octet-stream";
 }
 
+/**
+ * Upload a local file to Supabase Storage straight from disk.
+ *
+ * WHY NOT supabase.storage.upload. That takes the bytes in memory, so the file
+ * was read whole as base64 (1.33x its size, as a JS string) and decoded into an
+ * ArrayBuffer (1x again) — over 2x the file held in the JS heap at once. A
+ * multi-minute voice-report recording is tens of MB; on a low-end Android that
+ * is an out-of-memory crash mid-drain, and because reclaimInflight charges a
+ * crash as an attempt, the recording dead-letters after eight of them.
+ *
+ * FileSystem's native upload streams the file from its path, never entering
+ * JS. It hits the same endpoint supabase-js does (POST
+ * /storage/v1/object/<bucket>/<path>) with the same headers: the user's bearer
+ * token (so Storage RLS applies exactly as before), the anon apikey, and
+ * x-upsert so a replay overwrites idempotently.
+ *
+ * Bounded at STORAGE_TIMEOUT_MS by cancelling the task — the native upload does
+ * not go through fetch, so lib/fetchWithTimeout.ts cannot cover it.
+ */
+async function uploadFileToStorage(bucket: string, path: string, localUri: string): Promise<void> {
+  const { data, error: sessionError } = await supabase.auth.getSession();
+  if (sessionError) throw new TransientSyncError(`storage ${bucket}/${path}: session unavailable: ${sessionError.message}`);
+  const token = data.session?.access_token;
+  // No session is not the file's fault; it must not spend the upload's attempts.
+  if (!token) throw new TransientSyncError(`storage ${bucket}/${path}: no signed-in session`);
+
+  // Same path normalisation as storage-js (_removeEmptyFolders), each segment
+  // encoded so a space or '#' in a file name cannot break the URL.
+  const cleanPath = path.replace(/^\/|\/$/g, "").replace(/\/+/g, "/");
+  const encoded = cleanPath.split("/").map(encodeURIComponent).join("/");
+  const url = `${process.env.EXPO_PUBLIC_SUPABASE_URL}/storage/v1/object/${encodeURIComponent(bucket)}/${encoded}`;
+
+  const task = FileSystem.createUploadTask(url, localUri, {
+    httpMethod: "POST",
+    uploadType: FileSystem.FileSystemUploadType.BINARY_CONTENT,
+    headers: {
+      Authorization: `Bearer ${token}`,
+      apikey: process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ?? "",
+      "Content-Type": guessContentType(path),
+      "x-upsert": "true", // idempotent re-upload on replay
+      "cache-control": "max-age=3600", // storage-js's default
+    },
+  });
+
+  let timedOut = false;
+  const timer = setTimeout(() => {
+    timedOut = true;
+    void task.cancelAsync().catch(() => {});
+  }, STORAGE_TIMEOUT_MS);
+  let result: FileSystem.FileSystemUploadResult | null | undefined;
+  try {
+    result = await task.uploadAsync();
+  } catch (e) {
+    // A thrown upload is a transport failure (no connection, cancelled by the
+    // deadline) — never a verdict on the file.
+    const reason = timedOut ? `timed out after ${STORAGE_TIMEOUT_MS}ms` : e instanceof Error ? e.message : String(e);
+    throw new TransientSyncError(`storage ${bucket}/${path}: ${reason}`);
+  } finally {
+    clearTimeout(timer);
+  }
+  // A cancelled task resolves with nothing rather than throwing.
+  if (!result) throw new TransientSyncError(`storage ${bucket}/${path}: ${timedOut ? `timed out after ${STORAGE_TIMEOUT_MS}ms` : "upload cancelled"}`);
+  if (result.status >= 200 && result.status < 300) return;
+
+  let message = `HTTP ${result.status}`;
+  try {
+    const body = JSON.parse(result.body) as { message?: string; error?: string };
+    message = body.message ?? body.error ?? message;
+  } catch {
+    // non-JSON error page — the status is all there is
+  }
+  const err = `storage ${bucket}/${path}: ${message}`;
+  throw isTransientStatus(result.status) ? new TransientSyncError(err) : new Error(err);
+}
+
 // Bearer web-API bridge for deferred server-side side-effects. Attaches the
-// current Supabase access token; a null API base (dev without the web server)
-// makes calls no-op rather than throw, mirroring the existing app pattern.
+// current Supabase access token.
 const API_BASE_URL = process.env.EXPO_PUBLIC_API_BASE_URL;
 
 const sideEffectPath: Record<SideEffectKind, (p: Record<string, unknown>) => string> = {
@@ -223,34 +296,45 @@ const SIDE_EFFECT_TIMEOUT_MS = 30_000;
 
 export const apiBridge: ApiBridge = {
   async callSideEffect(effect, payload) {
-    if (!API_BASE_URL) return; // degrade gracefully when the web API isn't configured
+    // THROW, do not return. This used to `return` ("degrade gracefully"), and
+    // the processor treats a resolved dispatch as success: on a build shipped
+    // without EXPO_PUBLIC_API_BASE_URL every billing sync, calendar sync,
+    // backflow submission and technician assignment was marked done and pruned
+    // without ever leaving the phone. Throwing keeps the operation queued and,
+    // after MAX_ATTEMPTS, dead-lettered — which is reported, so the missing
+    // configuration is found instead of silently eating the office's work.
+    if (!API_BASE_URL) {
+      throw new Error(`${effect}: EXPO_PUBLIC_API_BASE_URL is not set in this build — the office server cannot be reached`);
+    }
     const { data } = await supabase.auth.getSession();
     const token = data.session?.access_token;
 
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), SIDE_EFFECT_TIMEOUT_MS);
+    let res: Response;
     try {
-      const res = await fetch(`${API_BASE_URL}${sideEffectPath[effect](payload)}`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      res = await fetchWithTimeout(
+        `${API_BASE_URL}${sideEffectPath[effect](payload)}`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          },
+          body: JSON.stringify(payload),
         },
-        body: JSON.stringify(payload),
-        signal: controller.signal,
-      });
-      if (!res.ok) throw new Error(`${effect}: HTTP ${res.status}`);
+        SIDE_EFFECT_TIMEOUT_MS
+      );
     } catch (e) {
-      // An abort surfaces as a bare "Aborted", which tells whoever reads the
-      // dead-letter nothing. Name the effect and the limit.
-      if (e instanceof Error && e.name === "AbortError") {
-        throw new Error(`${effect}: timed out after ${SIDE_EFFECT_TIMEOUT_MS}ms`);
-      }
-      throw e;
-    } finally {
-      // Always cleared, including on success — an uncleared timer keeps a
-      // reference alive and fires abort() on a completed request.
-      clearTimeout(timer);
+      // A timeout surfaces as a bare "Aborted"/"timed out", which tells whoever
+      // reads the dead-letter nothing. Name the effect and the limit. Transport
+      // failures are transient either way (outbox/errors.ts).
+      const reason =
+        e instanceof Error && (e.name === "AbortError" || e.name === "TimeoutError")
+          ? `timed out after ${SIDE_EFFECT_TIMEOUT_MS}ms`
+          : e instanceof Error
+            ? e.message
+            : String(e);
+      throw new TransientSyncError(`${effect}: ${reason}`);
     }
+    if (!res.ok) throw syncError(`${effect}: HTTP ${res.status}`, res.status);
   },
 };

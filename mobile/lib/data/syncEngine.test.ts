@@ -7,8 +7,12 @@ async function flushMicrotasks(): Promise<void> {
   for (let i = 0; i < 20; i++) await Promise.resolve();
 }
 
-function fakeProcessor(): jest.Mocked<Pick<Processor, "drain" | "stop">> {
-  return { drain: jest.fn().mockResolvedValue(undefined), stop: jest.fn() };
+function fakeProcessor(): jest.Mocked<Pick<Processor, "drain" | "stop" | "msUntilNextRetry">> {
+  return {
+    drain: jest.fn().mockResolvedValue(undefined),
+    stop: jest.fn(),
+    msUntilNextRetry: jest.fn().mockResolvedValue(null),
+  };
 }
 
 // Connectivity fake that lets a test fire an online transition on demand and

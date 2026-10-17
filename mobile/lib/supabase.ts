@@ -2,6 +2,8 @@ import "react-native-url-polyfill/auto";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { createClient } from "@supabase/supabase-js";
 import { assertMobileEnv } from "./env";
+import { fetchWithTimeout } from "./fetchWithTimeout";
+import { createSecureSessionStorage, loadSecureStore } from "./secureSessionStorage";
 
 // Throws immediately if the build shipped without credentials. The `!` below
 // used to be the only "check": it satisfies TypeScript and does nothing at
@@ -23,8 +25,13 @@ const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL!;
 const supabaseAnonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY!;
 
 export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+  // Every request bounded — a stalled write used to freeze the serial outbox
+  // queue indefinitely. See lib/fetchWithTimeout.ts.
+  global: { fetch: fetchWithTimeout },
   auth: {
-    storage: AsyncStorage,
+    // Keychain/Keystore, chunked, migrated from AsyncStorage on first read so
+    // nobody is signed out by the update. See lib/secureSessionStorage.ts.
+    storage: createSecureSessionStorage(loadSecureStore(), AsyncStorage),
     autoRefreshToken: true,
     persistSession: true,
     detectSessionInUrl: false,

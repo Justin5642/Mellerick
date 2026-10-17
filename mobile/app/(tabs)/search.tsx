@@ -12,7 +12,7 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect, useRouter } from "expo-router";
-import { searchJobs } from "../../lib/data/reads/jobs";
+import { MIN_SEARCH_LENGTH, searchJobs } from "../../lib/data/reads/jobs";
 import { ScreenError } from "../../design/components/ScreenError";
 import { openNavigation } from "../../lib/open-external-url";
 import { colors, statusColors } from "../../lib/theme";
@@ -182,8 +182,10 @@ export default function SearchJobsScreen() {
           renderItem={({ item }) => <JobRow job={item} />}
           ListEmptyComponent={
             <Text style={styles.emptyText}>
-              {query.trim()
+              {query.trim().length >= MIN_SEARCH_LENGTH
                 ? "No jobs match your search."
+                : query.trim()
+                ? `Type at least ${MIN_SEARCH_LENGTH} characters to search.`
                 : "Search across every job in the system — scheduled or not, yours or not — to pull up photos and plans on the fly."}
             </Text>
           }

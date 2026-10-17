@@ -46,6 +46,12 @@ export interface DataLayer {
   backflow: BackflowRepository;
   settings: SettingsRepository;
   variations: VariationsRepository;
+  /**
+   * Discard `userId`'s queued work and every staged attachment no remaining
+   * operation needs. For a sign-out the user has CONFIRMED (lib/signOutFlow.ts)
+   * — stop the engine first.
+   */
+  clearLocalWorkFor(userId: string): Promise<void>;
 }
 
 export interface DataLayerDeps {
@@ -61,15 +67,19 @@ export interface DataLayerDeps {
   onSyncError?: (error: unknown) => void;
   /** Told when an outbox operation dead-letters — see Outbox. */
   onDeadLetter?: (op: Operation, reason: string) => void;
+  /** Who is signed in — stamps and filters queued work. See Outbox. */
+  owner?: () => string | null;
+  /** AppState 'active' subscription, so returning to the app drains. See SyncEngine. */
+  onForeground?: (cb: () => void) => () => void;
 }
 
 // Composition root, injectable end-to-end so the whole stack can be integration-
 // tested with fakes (no native SQLite/netinfo). DataProvider calls this with the
 // real adapters.
 export function createDataLayer(deps: DataLayerDeps): DataLayer {
-  const outbox = new Outbox(deps.store, deps.clock ?? systemClock, deps.onDeadLetter);
+  const outbox = new Outbox(deps.store, deps.clock ?? systemClock, deps.onDeadLetter, deps.owner);
   const processor = new Processor(outbox, deps.gateway, deps.api, deps.connectivity);
-  const engine = new SyncEngine(processor, deps.connectivity, deps.ensureSession, deps.onSyncError);
+  const engine = new SyncEngine(processor, deps.connectivity, deps.ensureSession, deps.onSyncError, deps.onForeground);
   const ids = deps.ids ?? cryptoIdGen;
   const timeEntries = new TimeEntriesRepository(outbox, ids);
   const photos = new JobPhotosRepository(outbox, ids);
@@ -88,5 +98,16 @@ export function createDataLayer(deps: DataLayerDeps): DataLayer {
   const backflow = new BackflowRepository(outbox, ids);
   const settings = new SettingsRepository(outbox, ids);
   const variations = new VariationsRepository(outbox, ids);
-  return { outbox, engine, timeEntries, photos, notes, stageNotes, signature, voiceReport, finance, customers, inventory, equipment, jobBilling, approvals, schedule, jobs, backflow, settings, variations };
+  async function clearLocalWorkFor(userId: string): Promise<void> {
+    await outbox.clearForOwner(userId);
+    // No grace period, unlike the drain's orphan sweep: nothing is being
+    // enqueued during a sign-out, so every unreferenced file is garbage — and
+    // these are job photos, receipts and signatures that must not outlive the
+    // session. Another user's queued attachments are still referenced and kept.
+    const [staged, referenced] = await Promise.all([deps.gateway.listStagedAttachments(), outbox.referencedAttachmentUris()]);
+    for (const file of staged) {
+      if (!referenced.has(file.uri)) await deps.gateway.cleanupAttachment(file.uri); // never throws
+    }
+  }
+  return { clearLocalWorkFor, outbox, engine, timeEntries, photos, notes, stageNotes, signature, voiceReport, finance, customers, inventory, equipment, jobBilling, approvals, schedule, jobs, backflow, settings, variations };
 }

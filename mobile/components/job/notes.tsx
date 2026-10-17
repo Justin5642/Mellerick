@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { View, Text, StyleSheet, TextInput, TouchableOpacity, FlatList, ActivityIndicator, Alert } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { supabase } from "../../lib/supabase";
+import { fetchWithTimeout } from "../../lib/fetchWithTimeout";
 import { colors } from "../../lib/theme";
 import { useJobNotes } from "../../lib/data/hooks/useJobNotes";
 import { useJobStageNotes } from "../../lib/data/hooks/useJobStageNotes";
@@ -27,7 +28,9 @@ async function polishOnServer(text: string): Promise<string> {
   if (!accessToken) throw new Error("Your session has expired. Sign out and back in, then try again.");
   let res: Response;
   try {
-    res = await fetch(`${API_BASE_URL}/api/ai/polish-note`, {
+    // Bounded (30s): with bare fetch a dead connection left the Polish button
+    // spinning until the OS gave up, minutes later.
+    res = await fetchWithTimeout(`${API_BASE_URL}/api/ai/polish-note`, {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
       body: JSON.stringify({ text }),

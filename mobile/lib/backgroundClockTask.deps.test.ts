@@ -18,6 +18,7 @@
 const mockInsert = jest.fn();
 const mockUpdate = jest.fn();
 const mockMaybeSingleResult = { data: null as unknown, error: null as unknown };
+const mockInsertResult = { value: { error: null as unknown, status: 201 } };
 
 jest.mock("expo-location", () => ({}));
 jest.mock("expo-task-manager", () => ({ defineTask: jest.fn() }));
@@ -33,7 +34,7 @@ jest.mock("./supabase", () => ({
     from: () => ({
       insert: (payload: unknown) => {
         mockInsert(payload);
-        return Promise.resolve({ error: null });
+        return Promise.resolve(mockInsertResult.value);
       },
       select: () => ({
         eq: () => ({
@@ -65,6 +66,7 @@ beforeEach(() => {
   jest.clearAllMocks();
   mockMaybeSingleResult.data = null;
   mockMaybeSingleResult.error = null;
+  mockInsertResult.value = { error: null, status: 201 };
 });
 
 describe("supabaseClockDeps.onArrive — the travel leg actually reaches the database", () => {
@@ -162,6 +164,40 @@ describe("supabaseClockDeps.onDepart", () => {
 
     await supabaseClockDeps.onDepart("job-a", iso(MIN), "staff-1");
 
+    expect(mockUpdate).not.toHaveBeenCalled();
+  });
+});
+
+// Replayed from the durable clock queue (lib/backgroundClockQueue.ts), possibly
+// long after they were planned and possibly more than once.
+describe("replay safety", () => {
+  it("inserts with the queued client ids, so a replay after a lost response cannot duplicate rows", async () => {
+    await supabaseClockDeps.onArrive("job-b", iso(25 * MIN), "job-a", iso(0), "staff-1", null, { entryId: "e-1", travelId: "t-1" });
+    const payloads = mockInsert.mock.calls.map((c) => c[0]);
+    expect(payloads.find((p) => p.entry_type === "work").id).toBe("e-1");
+    expect(payloads.find((p) => p.entry_type === "travel").id).toBe("t-1");
+  });
+
+  it("treats a primary-key collision as the replay it is", async () => {
+    mockInsertResult.value = {
+      error: { code: "23505", message: 'duplicate key value violates unique constraint "time_entries_pkey"' },
+      status: 409,
+    };
+    await expect(
+      supabaseClockDeps.onArrive("job-b", iso(25 * MIN), "job-a", iso(0), "staff-1", null, { entryId: "e-1", travelId: "t-1" })
+    ).resolves.toBeUndefined();
+  });
+
+  it("marks a no-signal failure transient, so the queue keeps it instead of counting it toward dropping", async () => {
+    mockInsertResult.value = { error: { code: "", message: "TypeError: Network request failed" }, status: 0 };
+    await expect(supabaseClockDeps.onArrive("job-b", iso(0), null, null, "staff-1", null)).rejects.toMatchObject({ transient: true });
+  });
+
+  it("a departure replayed late does NOT close an entry opened after it (a second visit)", async () => {
+    // Left at 10:00 (queued, offline); came back and was clocked in again at
+    // 11:00; the 10:00 departure finally replays at 11:05.
+    mockMaybeSingleResult.data = { id: "entry-2", clock_in: iso(60 * MIN) };
+    await supabaseClockDeps.onDepart("job-a", iso(0), "staff-1");
     expect(mockUpdate).not.toHaveBeenCalled();
   });
 });

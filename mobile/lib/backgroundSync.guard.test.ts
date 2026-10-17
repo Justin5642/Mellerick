@@ -35,6 +35,9 @@ describe("backgroundSync registration", () => {
     jest.doMock("./data/createDataLayer", () => ({ createDataLayer: jest.fn() }));
     jest.doMock("./data/gateway.supabase", () => ({ supabaseGateway: {}, apiBridge: {} }));
     jest.doMock("./data/net/connectivity", () => ({ netInfoConnectivity: {} }));
+    // The task also replays the background auto-clock's queue; that module has
+    // its own guard test (backgroundClockTask.guard.test.ts).
+    jest.doMock("./backgroundClockTask", () => ({ replayBackgroundClockQueue: jest.fn() }));
   }
 
   it("imports WITHOUT THROWING when expo-task-manager is missing", () => {

@@ -1,6 +1,9 @@
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import type { Session } from "@supabase/supabase-js";
 import { supabase } from "./supabase";
+import { setOutboxOwner } from "./data/outboxOwner";
+import { removeDeviceToken } from "./push/deviceTokens";
+import { clearImageCaches } from "./imageCache";
 import {
   clearCachedProfile,
   decideProfileResult,
@@ -17,6 +20,15 @@ interface AuthContextValue {
   session: Session | null;
   profile: Profile | null;
   loading: boolean;
+  /**
+   * True only when Supabase POSITIVELY says nobody is signed in: the stored
+   * session read cleanly and was empty, or a real SIGNED_OUT event fired.
+   * `!loading && !session` is not the same thing — a technician opening the
+   * app with no signal and an expired access token gets no session back from
+   * a FAILED refresh, and wiping their offline job mirror on that basis would
+   * take their jobs away exactly when they cannot re-download them.
+   */
+  confirmedSignedOut: boolean;
   /**
    * Set when the profile read FAILED, as distinct from "this account has no
    * role". Without it the two are indistinguishable downstream, and
@@ -42,6 +54,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
   const [loading, setLoading] = useState(true);
+  const [confirmedSignedOut, setConfirmedSignedOut] = useState(false);
   const [profileError, setProfileError] = useState<unknown>(null);
   // Mirrors `profile` for use inside the auth listener, which closes over the
   // first render's state and would otherwise always see null.
@@ -54,8 +67,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     supabase.auth.getSession().then(
-      ({ data: { session } }) => {
+      ({ data: { session }, error }) => {
         setSession(session);
+        setConfirmedSignedOut(!session && !error);
+        setOutboxOwner(session?.user.id ?? null);
         if (session) void loadProfile(session.user.id);
         else setLoading(false);
       },
@@ -74,6 +89,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     const { data: listener } = supabase.auth.onAuthStateChange((event, session) => {
       setSession(session);
+      if (session) setConfirmedSignedOut(false);
+      else if (event === "SIGNED_OUT") setConfirmedSignedOut(true);
+      // Queued writes are stamped with, and replayed only for, this user.
+      setOutboxOwner(session?.user.id ?? null);
       if (session) {
         // THE EVENT MATTERS. It used to be discarded, so TOKEN_REFRESHED — which
         // Supabase emits roughly hourly, on its own schedule — was handled
@@ -260,7 +279,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }
 
+  // The unsynced-work warning and the outbox wipe live one layer up, in
+  // lib/useSignOut.ts — this provider sits above DataProvider and cannot see
+  // the queue. Screens call useSignOut(), not this directly.
   async function signOut() {
+    // FIRST, while the session still exists: the push-token row is deletable
+    // only by its owner. Otherwise the office keeps pushing this person's jobs
+    // to a phone they have left. Bounded and best-effort — offline, sign-out
+    // still happens.
+    await removeDeviceToken();
     // Cleared here as well as in the SIGNED_OUT handler: a sign-out that fails
     // half-way (offline revoke) must still not leave this person's role on the
     // device for whoever opens the app next.
@@ -269,6 +296,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // revoked the person's other sessions, so signing out on one device
     // logged them out everywhere.
     await supabase.auth.signOut({ scope: "local" });
+    // Job photos, receipts and signatures sit in expo-image's disk cache keyed
+    // by storage path; they must not stay viewable on a phone with nobody
+    // signed in. Never throws.
+    await clearImageCaches();
   }
 
   return (
@@ -277,6 +308,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         session,
         profile,
         loading,
+        confirmedSignedOut,
         profileError,
         reloadProfile: () => {
           // `session` is read from render scope rather than a ref: this closure
