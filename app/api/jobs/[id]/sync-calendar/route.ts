@@ -6,6 +6,11 @@ import { canManageJobBilling } from "@/lib/api/job-authz";
 import { reportError } from "@/lib/monitoring";
 import { buildCalendarEventBody, type CalendarJob } from "@/lib/calendar-event";
 
+// A user is waiting on this request while it calls an outside service (Xero,
+// Google, the email provider, or the PDF renderer). Without a cap a hung
+// upstream held the spinner for minutes; 30s turns that into a clear error.
+export const maxDuration = 30;
+
 export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   // Any authenticated staff member can trigger a calendar sync for a job they
   // can see; the route previously had no auth check at all.
@@ -58,7 +63,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
         const { error: clearError } = await supabase.from("jobs").update({ google_event_id: null }).eq("id", id);
         if (clearError) {
           console.error("Calendar sync: event deleted but job still references it:", clearError.message);
-          return NextResponse.json({ removed: true, linkCleared: false, warning: clearError.message });
+          return NextResponse.json({ removed: true, linkCleared: false, warning: "Job still references the deleted calendar event" });
         }
       }
       return NextResponse.json({ removed: true });
@@ -120,9 +125,10 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     }
 
     return NextResponse.json({ created: true, eventId: res.data.id });
-  } catch (err: any) {
+  } catch (err: unknown) {
     console.error("Calendar sync error:", err);
     reportError(err, { route: "api/jobs/sync-calendar", integration: "google-calendar" });
-    return NextResponse.json({ error: err.message ?? "Calendar sync failed" }, { status: 500 });
+    // Google's error text is logged and reported above, not returned.
+    return NextResponse.json({ error: "Calendar sync failed" }, { status: 500 });
   }
 }

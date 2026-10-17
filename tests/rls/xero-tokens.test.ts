@@ -46,6 +46,12 @@ describe("xero_tokens RLS (migration 0034)", () => {
     expect(data?.length).toBeGreaterThan(0);
   });
 
+  it("never returns the refresh token, even to an admin (0075: server-only)", async () => {
+    const { data, error } = await users.admin!.client.from("xero_tokens").select("refresh_token");
+    expect(error).not.toBeNull();
+    expect(data).toBeNull();
+  });
+
   it("returns NO rows to a technician (RLS blocks the read)", async () => {
     const { data } = await users.technician!.client.from("xero_tokens").select("id, access_token");
     // Under RLS a blocked select yields an empty set, not an error.

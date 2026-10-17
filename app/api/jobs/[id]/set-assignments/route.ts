@@ -24,7 +24,11 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     p_job_id: id,
     p_staff_ids: staffIds,
   });
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) {
+    // Postgres text (constraint names, function internals) stays server-side.
+    console.error("set_job_assignments failed:", error.message);
+    return NextResponse.json({ error: "Technician assignment could not be saved" }, { status: 500 });
+  }
 
   // Same silent-RLS-drop check as setJobAssignments in lib/schedule-dispatch.ts —
   // the admin client bypasses RLS so a mismatch here would mean a bad staff id,

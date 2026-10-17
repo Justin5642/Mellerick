@@ -19,9 +19,10 @@ export async function GET(request: NextRequest) {
   try {
     const result = await pollGoogleCalendarChanges(supabase);
     return NextResponse.json(result);
-  } catch (err: any) {
+  } catch (err: unknown) {
     console.error("Calendar poll-sync error:", err);
     reportError(err, { route: "api/google/poll-calendar", integration: "google-calendar", cron: true });
-    return NextResponse.json({ error: err.message ?? "Calendar poll sync failed" }, { status: 500 });
+    // Logged and reported above; the caller (cron) needs only the outcome.
+    return NextResponse.json({ error: "Calendar poll sync failed" }, { status: 500 });
   }
 }

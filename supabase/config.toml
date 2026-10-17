@@ -175,7 +175,15 @@ enable_refresh_token_rotation = true
 # Requires enable_refresh_token_rotation = true.
 refresh_token_reuse_interval = 10
 # Allow/disallow new user signups to your project.
-enable_signup = true
+# OFF: nobody self-registers. Staff accounts are created only by an admin via
+# app/api/staff/invite (inviteUserByEmail — GoTrue's admin invite endpoint does
+# not consult this flag) and tests use auth.admin.createUser, which also
+# bypasses it. Left on, anyone holding the public anon key could call
+# /auth/v1/signup and mint an authenticated session. This file only configures
+# the LOCAL stack: the hosted project needs the same switch turned off in the
+# Dashboard (Authentication -> Sign In / Providers -> "Allow new users to sign
+# up") — see HANDOVER §7.
+enable_signup = false
 # Allow/disallow anonymous sign-ins to your project.
 enable_anonymous_sign_ins = false
 # Allow/disallow testing manual linking of accounts
@@ -220,6 +228,10 @@ web3 = 30
 
 [auth.email]
 # Allow/disallow new user signups via email to your project.
+# Deliberately still TRUE despite the name: the CLI maps this key to
+# GOTRUE_EXTERNAL_EMAIL_ENABLED — the whole email provider, password sign-in
+# included. Turning it off would break every email+password login locally and
+# in CI. Public sign-up is closed by [auth] enable_signup above instead.
 enable_signup = true
 # If enabled, a user will be required to confirm any email change on both the old, and new email
 # addresses. If disabled, only the new email is required to confirm.

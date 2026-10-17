@@ -108,7 +108,8 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       contentType: "application/pdf",
     });
     if (uploadError) {
-      return NextResponse.json({ error: `Failed to save certificate: ${uploadError.message}` }, { status: 500 });
+      console.error("Backflow certificate upload failed:", uploadError.message);
+      return NextResponse.json({ error: "Failed to save certificate" }, { status: 500 });
     }
 
     const authorityLabel = getWaterAuthorityLabel(device.water_authority);
@@ -147,13 +148,20 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       .eq("id", id);
 
     if (updateError) {
-      return NextResponse.json({ error: updateError.message }, { status: 500 });
+      // The email HAS gone; only the record of it failed. Say that, not the
+      // Postgres text.
+      console.error("Backflow test submitted but not marked:", updateError.message);
+      return NextResponse.json(
+        { error: "Report emailed to the water authority, but the test could not be marked as submitted" },
+        { status: 500 }
+      );
     }
 
     return NextResponse.json({ success: true, sentTo: to });
-  } catch (err: any) {
+  } catch (err: unknown) {
     console.error("Submit backflow test error:", err);
     reportError(err, { route: "api/backflow/tests/submit", integration: "resend" });
-    return NextResponse.json({ error: err.message ?? "Failed to submit backflow test" }, { status: 500 });
+    // Resend / storage / PDF text is logged and reported above, not returned.
+    return NextResponse.json({ error: "Failed to submit backflow test" }, { status: 500 });
   }
 }

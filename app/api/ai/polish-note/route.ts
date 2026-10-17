@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireUser } from "@/lib/api/guards";
 import { polishNoteText, POLISH_MAX_CHARS } from "@/lib/ai/polish-note";
 import { reportError, reportFailure } from "@/lib/monitoring";
+import { consumeRateLimit, rateLimitedResponse, POLISH_NOTE_LIMIT } from "@/lib/api/rate-limit";
 
 // Cleans up rough, often voice-dictated technician job notes into clear,
 // professional wording before they're saved to the job's permanent record.
@@ -36,12 +37,18 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: `Note is too long to polish (max ${POLISH_MAX_CHARS.toLocaleString()} characters).` }, { status: 413 });
   }
 
+  // Shared across instances (lib/api/rate-limit.ts); counted only once the
+  // request is valid and about to cost money.
+  if (!(await consumeRateLimit(userId, POLISH_NOTE_LIMIT))) {
+    return rateLimitedResponse();
+  }
+
   try {
     const polished = await polishNoteText(text);
     return NextResponse.json({ polished });
-  } catch (err: any) {
+  } catch (err: unknown) {
     console.error("Polish note error:", err);
     reportError(err, { route: "api/ai/polish-note", integration: "anthropic" });
-    return NextResponse.json({ error: err.message ?? "AI polish failed" }, { status: 502 });
+    return NextResponse.json({ error: "AI polish failed" }, { status: 502 });
   }
 }

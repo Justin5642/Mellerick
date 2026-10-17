@@ -92,7 +92,7 @@ export async function syncJobBilling(admin: SupabaseClient, jobId: string) {
       .select("id, staff_id, clock_in, clock_out, entry_type, rate_override")
       .eq("job_id", jobId),
     admin.from("billing_rate_config").select("*").eq("id", true).maybeSingle(),
-    admin.from("job_items").select("id, source, time_entry_id").eq("job_id", jobId).in("source", ["auto_labour", "auto_callout"]),
+    admin.from("job_items").select("id, source, time_entry_id, staff_id, name, description, quantity, unit_price").eq("job_id", jobId).in("source", ["auto_labour", "auto_callout"]),
   ]);
 
   // A DISCARDED ERROR HERE CHANGES WHAT A CUSTOMER IS CHARGED.
@@ -186,7 +186,13 @@ export async function syncJobBilling(admin: SupabaseClient, jobId: string) {
   }
 
   // Upsert one auto_labour row per billable entry, keyed by time_entry_id.
+  //
+  // This runs every time the Line Items tab opens. It used to write every row
+  // every time, one awaited round trip after another, even when nothing had
+  // changed. A row whose priced fields already match is now left alone, and
+  // the writes that remain go out together.
   const keptTimeEntryIds = new Set<string>();
+  const writes: Promise<void>[] = [];
   for (const entry of billable) {
     const profile = profileByStaff.get(entry.staff_id);
     const tradeLevel: "qualified" | "apprentice" = profile?.trade_level === "apprentice" ? "apprentice" : "qualified";
@@ -222,12 +228,21 @@ export async function syncJobBilling(admin: SupabaseClient, jobId: string) {
 
     const existing = (existingAutoItems ?? []).find((i) => i.source === "auto_labour" && i.time_entry_id === entry.id);
     if (existing) {
-      requireWrite(await admin.from("job_items").update(labourRow).eq("id", existing.id), "labour line update");
+      if (!labourRowUnchanged(existing, labourRow)) {
+        writes.push(
+          Promise.resolve(admin.from("job_items").update(labourRow).eq("id", existing.id)).then((res) =>
+            requireWrite(res, "labour line update")
+          )
+        );
+      }
     } else {
-      requireWrite(await admin.from("job_items").insert(labourRow), "labour line insert");
+      writes.push(
+        Promise.resolve(admin.from("job_items").insert(labourRow)).then((res) => requireWrite(res, "labour line insert"))
+      );
     }
     keptTimeEntryIds.add(entry.id);
   }
+  await Promise.all(writes);
 
   // Remove stale auto_labour rows whose entry is no longer billable (deleted,
   // switched to travel, or re-opened).
@@ -263,4 +278,20 @@ export async function syncJobBilling(admin: SupabaseClient, jobId: string) {
   }
 
   return { billableEntries: billable.length, labourItems: keptTimeEntryIds.size };
+}
+
+// Whether an existing auto_labour line already says exactly what a fresh
+// computation would write. Numbers are compared as numbers: PostgREST returns
+// numeric columns as numbers or strings depending on precision.
+function labourRowUnchanged(
+  existing: { staff_id?: string | null; name?: string | null; description?: string | null; quantity?: unknown; unit_price?: unknown },
+  next: { staff_id: string; name: string; description: string; quantity: number; unit_price: number }
+): boolean {
+  return (
+    existing.staff_id === next.staff_id &&
+    existing.name === next.name &&
+    existing.description === next.description &&
+    Number(existing.quantity) === next.quantity &&
+    Number(existing.unit_price) === next.unit_price
+  );
 }

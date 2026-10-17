@@ -5,6 +5,7 @@ import { createClient } from "@/lib/supabase/client";
 import { toast } from "sonner";
 import { plausibleClockedHours } from "@/lib/time-entry-hours";
 import { TIME_ENTRY_SELECT_WITH_STAFF } from "@/lib/time-entry-columns";
+import { canEditTimeEntry } from "@/lib/time-entry-access";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -112,6 +113,10 @@ export function JobTime({ jobId, currentUserId, timeEntries: initial, pos, site,
   }, [entries]);
 
   async function assignCostCenter(entryId: string, costCenterId: string) {
+    // Same rule as the disabled picker below — a second check so a stale
+    // render cannot slip a write through for someone else's entry.
+    const target = entries.find((e) => e.id === entryId);
+    if (!target || !canEditTimeEntry(target, currentUserId, isAdmin)) return;
     setAssigningId(entryId);
     const { data, error } = await supabase
       .from("time_entries")
@@ -344,11 +349,10 @@ export function JobTime({ jobId, currentUserId, timeEntries: initial, pos, site,
           <div className="space-y-2">
             {entries.map(entry => {
               const isTravel = entry.entry_type === "travel";
-              const isMine = entry.staff_id === currentUserId;
               // Admins can open any entry (e.g. to re-attribute time logged by
               // the wrong person, or correct a tech's hours); everyone else
-              // can only edit their own.
-              const canEdit = isMine || !!isAdmin;
+              // can only edit their own. Gates the stage picker too.
+              const canEdit = canEditTimeEntry(entry, currentUserId, isAdmin);
               return (
                 <div key={entry.id} className={`py-2.5 px-3 rounded-lg text-sm space-y-1.5 ${isTravel ? "bg-blue-50/60" : "bg-slate-50"}`}>
                   <button
@@ -384,7 +388,7 @@ export function JobTime({ jobId, currentUserId, timeEntries: initial, pos, site,
                     <Select
                       value={entry.cost_center_id ?? "none"}
                       onValueChange={(v) => assignCostCenter(entry.id, v ?? "none")}
-                      disabled={assigningId === entry.id}
+                      disabled={!canEdit || assigningId === entry.id}
                     >
                       <SelectTrigger className="h-7 text-xs w-56 bg-white"><SelectValue placeholder="Assign to stage..." /></SelectTrigger>
                       <SelectContent>
