@@ -8,6 +8,11 @@ import { formatDate } from "@/lib/date";
 import { escapeHtml } from "@/lib/html";
 import { reportError } from "@/lib/monitoring";
 
+// A user is waiting on this request while it calls an outside service (Xero,
+// Google, the email provider, or the PDF renderer). Without a cap a hung
+// upstream held the spinner for minutes; 30s turns that into a clear error.
+export const maxDuration = 30;
+
 export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await params;

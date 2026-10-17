@@ -75,6 +75,13 @@ jobs:
           node-version-file: .node-version
           cache: npm
       - run: npm ci
+      # Next's incremental build cache. Keyed on the lockfile and the source, so a
+      # change still rebuilds what changed; restore-keys reuse the nearest one.
+      - uses: actions/cache@v4
+        with:
+          path: .next/cache
+          key: nextjs-${{ runner.os }}-${{ hashFiles('package-lock.json') }}-${{ hashFiles('app/**', 'components/**', 'lib/**') }}
+          restore-keys: nextjs-${{ runner.os }}-${{ hashFiles('package-lock.json') }}-
       - run: npm run build
         env:
           # Dummy values — build only needs the vars to exist, no live calls happen
@@ -122,25 +129,7 @@ jobs:
           version: 2.109.1
       - run: npm ci
       - name: Disable automatic repo migrations for local CI bootstrap
-        run: |
-          python - <<'PY'
-          from pathlib import Path
-          path = Path("supabase/config.toml")
-          lines = path.read_text().splitlines()
-          in_block = False
-          for i, line in enumerate(lines):
-              stripped = line.strip()
-              if stripped == "[db.migrations]":
-                  in_block = True
-              elif in_block and stripped.startswith("["):
-                  in_block = False
-              elif in_block and stripped == "enabled = true":
-                  lines[i] = line.replace("true", "false", 1)
-                  path.write_text("\n".join(lines) + "\n")
-                  break
-          else:
-              raise SystemExit("Could not disable db.migrations.enabled in supabase/config.toml")
-          PY
+        run: python scripts/ci-disable-auto-migrations.py
       - name: Start Supabase local stack
         run: supabase start -x studio,imgproxy,inbucket,edge-runtime,realtime,vector,logflare
       - name: Apply the FULL migration history
@@ -189,7 +178,10 @@ jobs:
           npm run test:rls
 
   e2e:
-    needs: build
+    # No `needs: build`. This job builds the app itself (against the local
+    # stack's URL, which the build job cannot know), so waiting for `build`
+    # only put a whole second build on the critical path. Branch protection
+    # still requires both to pass.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -201,27 +193,22 @@ jobs:
         with:
           version: 2.109.1
       - run: npm ci
-      - run: npx playwright install --with-deps chromium
+      # The browser download is ~150 MB and identical run to run; cache it by
+      # Playwright version. System packages are not cacheable, so a hit still
+      # runs install-deps.
+      - id: pw-version
+        run: echo "version=$(node -p "require('@playwright/test/package.json').version")" >> "$GITHUB_OUTPUT"
+      - id: pw-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ steps.pw-version.outputs.version }}
+      - if: steps.pw-cache.outputs.cache-hit != 'true'
+        run: npx playwright install --with-deps chromium
+      - if: steps.pw-cache.outputs.cache-hit == 'true'
+        run: npx playwright install-deps chromium
       - name: Disable automatic repo migrations for local CI bootstrap
-        run: |
-          python - <<'PY'
-          from pathlib import Path
-          path = Path("supabase/config.toml")
-          lines = path.read_text().splitlines()
-          in_block = False
-          for i, line in enumerate(lines):
-              stripped = line.strip()
-              if stripped == "[db.migrations]":
-                  in_block = True
-              elif in_block and stripped.startswith("["):
-                  in_block = False
-              elif in_block and stripped == "enabled = true":
-                  lines[i] = line.replace("true", "false", 1)
-                  path.write_text("\n".join(lines) + "\n")
-                  break
-          else:
-              raise SystemExit("Could not disable db.migrations.enabled in supabase/config.toml")
-          PY
+        run: python scripts/ci-disable-auto-migrations.py
       - name: Start Supabase
         run: supabase start -x studio,imgproxy,inbucket,edge-runtime,realtime,vector,logflare
       - name: Apply the FULL migration history
