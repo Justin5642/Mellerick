@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { google } from "googleapis";
+import { oauth2 as googleOAuth2 } from "@googleapis/oauth2";
 import { getGoogleOAuthClient } from "@/lib/google";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { requireAdmin } from "@/lib/api/guards";
@@ -40,7 +40,7 @@ export async function GET(request: NextRequest) {
     }
 
     oauth2Client.setCredentials(tokens);
-    const oauth2 = google.oauth2({ version: "v2", auth: oauth2Client });
+    const oauth2 = googleOAuth2({ version: "v2", auth: oauth2Client });
     const { data: userinfo } = await oauth2.userinfo.get();
 
     // Token tables are service-role only once migration 0075 (a draft, not

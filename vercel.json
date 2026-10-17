@@ -4,7 +4,7 @@
     "sin1"
   ],
   "buildCommand": "next build",
-  "installCommand": "npm install",
+  "installCommand": "npm ci",
   "crons": [
     {
       "path": "/api/google/poll-calendar",

@@ -1,4 +1,6 @@
-import { google, type calendar_v3 } from "googleapis";
+// The per-API packages, not the 200 MB `googleapis` umbrella — this app only
+// uses Calendar (here) and OAuth2 userinfo (app/api/google/callback).
+import { auth, calendar, type calendar_v3 } from "@googleapis/calendar";
 import { createClient } from "@/lib/supabase/server";
 import { buildCalendarEventTiming, eventMatchesJob, instanceMatchesJob } from "@/lib/calendar-event";
 import { shiftDateKey } from "@/lib/date";
@@ -29,7 +31,7 @@ const SCOPES = [
 ];
 
 export function getGoogleOAuthClient() {
-  return new google.auth.OAuth2(
+  return new auth.OAuth2(
     process.env.GOOGLE_CLIENT_ID,
     process.env.GOOGLE_CLIENT_SECRET,
     process.env.GOOGLE_REDIRECT_URI
@@ -94,7 +96,7 @@ export async function getGoogleCalendarClient(supabaseClient?: any) {
     }
   }
 
-  return google.calendar({ version: "v3", auth: oauth2Client });
+  return calendar({ version: "v3", auth: oauth2Client });
 }
 
 /**
