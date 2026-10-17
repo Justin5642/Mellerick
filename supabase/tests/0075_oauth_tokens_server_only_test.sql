@@ -12,6 +12,22 @@ begin;
 
 create temp table result(scenario text, expected text, actual text) on commit drop;
 
+-- Runs one statement as the impersonated user and reports ALLOWED / BLOCKED.
+-- The role is switched back BEFORE anything is written to `result`, which the
+-- impersonated role cannot write.
+create function pg_temp.attempt(stmt text) returns text
+language plpgsql as $$
+begin
+  perform set_config('role', 'authenticated', true);
+  execute stmt;
+  perform set_config('role', 'postgres', true);
+  return 'ALLOWED';
+exception when others then
+  perform set_config('role', 'postgres', true);
+  return 'BLOCKED';
+end;
+$$;
+
 do $$
 declare
   off uuid;
@@ -27,37 +43,15 @@ begin
 
   perform set_config('request.jwt.claims',
                      json_build_object('sub', off::text, 'role', 'authenticated')::text, true);
-  perform set_config('role', 'authenticated', true);
 
-  begin
-    perform refresh_token from xero_tokens limit 1;
-    insert into result values ('office reads xero refresh_token', 'BLOCKED', 'ALLOWED');
-  exception when insufficient_privilege then
-    insert into result values ('office reads xero refresh_token', 'BLOCKED', 'BLOCKED');
-  end;
-
-  begin
-    perform access_token from google_tokens limit 1;
-    insert into result values ('office reads google access_token', 'BLOCKED', 'ALLOWED');
-  exception when insufficient_privilege then
-    insert into result values ('office reads google access_token', 'BLOCKED', 'BLOCKED');
-  end;
-
-  begin
-    update xero_tokens set tenant_id = 'attacker-org';
-    insert into result values ('office repoints the Xero org', 'BLOCKED', 'ALLOWED');
-  exception when insufficient_privilege then
-    insert into result values ('office repoints the Xero org', 'BLOCKED', 'BLOCKED');
-  end;
-
-  begin
-    perform tenant_name from xero_tokens limit 1;
-    insert into result values ('office reads connection status', 'ALLOWED', 'ALLOWED');
-  exception when others then
-    insert into result values ('office reads connection status', 'ALLOWED', 'BLOCKED');
-  end;
-
-  perform set_config('role', 'postgres', true);
+  insert into result values ('office reads xero refresh_token', 'BLOCKED',
+    pg_temp.attempt('select refresh_token from xero_tokens'));
+  insert into result values ('office reads google access_token', 'BLOCKED',
+    pg_temp.attempt('select access_token from google_tokens'));
+  insert into result values ('office repoints the Xero org', 'BLOCKED',
+    pg_temp.attempt($q$update xero_tokens set tenant_id = 'attacker-org'$q$));
+  insert into result values ('office reads connection status', 'ALLOWED',
+    pg_temp.attempt('select tenant_name, updated_at from xero_tokens'));
 end;
 $$;
 
