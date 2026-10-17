@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { requireOfficeOrAdmin } from "@/lib/api/guards";
 
 // Saves the office-configured Xero account code that invoice line items post
@@ -11,7 +11,9 @@ export async function POST(request: NextRequest) {
   if (!guard.ok) return guard.response;
 
   const { accountCode } = await request.json();
-  const supabase = await createClient();
+  // Token tables are service-role only once migration 0075 (a draft, not
+  // applied yet) is in; the guard above has already authorised the caller.
+  const supabase = createAdminClient();
 
   const { data: tokenRow } = await supabase.from("xero_tokens").select("id").single();
   if (!tokenRow) return NextResponse.json({ error: "Connect Xero first" }, { status: 400 });
