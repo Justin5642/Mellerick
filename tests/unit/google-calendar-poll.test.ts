@@ -31,7 +31,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 // then the times match, so nothing is written. It settles in one round rather
 // than oscillating.
 //
-// WHY MOCK `googleapis` RATHER THAN `getGoogleCalendarClient`. The client
+// WHY MOCK `@googleapis/calendar` RATHER THAN `getGoogleCalendarClient`. The client
 // factory lives in the same module as the function under test, so vi.mock
 // cannot replace it without replacing the subject too. Mocking the transport
 // underneath means the real token refresh, the real paging loop, the real
@@ -42,7 +42,7 @@ const eventsList = vi.fn();
 const eventsPatch = vi.fn(async (..._args: unknown[]) => ({ data: {} }));
 const eventsGet = vi.fn(async (..._args: unknown[]): Promise<{ data: unknown }> => ({ data: null }));
 
-vi.mock("googleapis", () => {
+vi.mock("@googleapis/calendar", () => {
   class OAuth2 {
     setCredentials() {}
     generateAuthUrl() {
@@ -53,16 +53,14 @@ vi.mock("googleapis", () => {
     }
   }
   return {
-    google: {
-      auth: { OAuth2 },
-      calendar: () => ({
-        events: {
-          list: (...a: unknown[]) => eventsList(...a),
-          patch: (...a: unknown[]) => eventsPatch(...a),
-          get: (...a: unknown[]) => eventsGet(...a),
-        },
-      }),
-    },
+    auth: { OAuth2 },
+    calendar: () => ({
+      events: {
+        list: (...a: unknown[]) => eventsList(...a),
+        patch: (...a: unknown[]) => eventsPatch(...a),
+        get: (...a: unknown[]) => eventsGet(...a),
+      },
+    }),
   };
 });
 
