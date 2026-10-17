@@ -61,6 +61,12 @@ describe("mayOpen", () => {
     expect(mayOpen("technician", "/dashboard/backflow/xyz/test/new")).toBe(true);
   });
 
+  it("keeps job creation office-only for technicians (0074)", () => {
+    expect(mayOpen("technician", "/dashboard/jobs/new")).toBe(false);
+    expect(mayOpen("office", "/dashboard/jobs/new")).toBe(true);
+    expect(mayOpen("admin", "/dashboard/jobs/new")).toBe(true);
+  });
+
   it("does not let a prefix match open a different section", () => {
     // "/dashboard/jobs" must not admit "/dashboard/jobs-report" — the check is
     // on a path SEGMENT, not a string prefix.

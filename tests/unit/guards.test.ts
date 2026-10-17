@@ -28,11 +28,11 @@ function req(headers: Record<string, string> = {}) {
   return new NextRequest("http://test.local/api/x", { method: "POST", headers });
 }
 
-function roleRow(role: string | null) {
+function roleRow(role: string | null, is_active: boolean | null = true) {
   const chain = {
     select: vi.fn(() => chain),
     eq: vi.fn(() => chain),
-    single: vi.fn(async () => ({ data: role ? { role } : null, error: null })),
+    single: vi.fn(async () => ({ data: role ? { role, is_active } : null, error: null })),
   };
   return chain;
 }
@@ -69,12 +69,20 @@ describe("requireUser", () => {
     if (!r.ok) expect(r.response.status).toBe(401);
   });
 
-  it("passes an authenticated caller and never consults the service-role client", async () => {
+  it("passes an authenticated, active caller", async () => {
     serverGetUser.mockResolvedValue({ data: { user: { id: "u-web" } } });
+    adminFrom.mockReturnValue(roleRow("technician"));
     const r = await requireUser(req());
     expect(r.ok).toBe(true);
     if (r.ok) expect(r.userId).toBe("u-web");
-    expect(adminFrom).not.toHaveBeenCalled();
+  });
+
+  it("403s a deactivated caller", async () => {
+    serverGetUser.mockResolvedValue({ data: { user: { id: "u-web" } } });
+    adminFrom.mockReturnValue(roleRow("technician", false));
+    const r = await requireUser(req());
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.response.status).toBe(403);
   });
 });
 
@@ -82,6 +90,14 @@ describe("requireAdmin / requireOfficeOrAdmin", () => {
   it("403s a technician trying an admin route", async () => {
     serverGetUser.mockResolvedValue({ data: { user: { id: "u1" } } });
     adminFrom.mockReturnValue(roleRow("technician"));
+    const r = await requireAdmin(req());
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.response.status).toBe(403);
+  });
+
+  it("403s a deactivated admin", async () => {
+    serverGetUser.mockResolvedValue({ data: { user: { id: "u1" } } });
+    adminFrom.mockReturnValue(roleRow("admin", false));
     const r = await requireAdmin(req());
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.response.status).toBe(403);

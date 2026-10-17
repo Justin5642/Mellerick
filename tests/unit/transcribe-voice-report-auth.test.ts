@@ -29,8 +29,14 @@ const updateSpy = vi.fn();
 const downloadSpy = vi.fn();
 
 vi.mock("@/lib/api/guards", () => ({
-  getCallerId: (...a: unknown[]) => getCallerId(...a),
-  requireUser: vi.fn(),
+  // The route authenticates through requireUser; drive it from getCallerId so
+  // the tests below keep choosing the caller with one mock.
+  requireUser: async (...a: unknown[]) => {
+    const id = await getCallerId(...a);
+    return id
+      ? { ok: true, userId: id, role: null }
+      : { ok: false, response: new Response(null, { status: 401 }) };
+  },
   requireAdmin: vi.fn(),
   requireOfficeOrAdmin: vi.fn(),
 }));
