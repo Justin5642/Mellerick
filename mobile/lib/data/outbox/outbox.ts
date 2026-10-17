@@ -61,8 +61,30 @@ export class Outbox {
      * this is how the office hears about it (lib/monitoring). Must not throw —
      * and if it does, the outbox carries on regardless.
      */
-    private onDeadLetter?: (op: Operation, reason: string) => void
+    private onDeadLetter?: (op: Operation, reason: string) => void,
+    /**
+     * Who is signed in right now (null when nobody is). New operations are
+     * stamped with it, and only that user's operations are selected to run —
+     * see WriteOperation.userId. Omitted (unit tests, previews) means no
+     * ownership at all: every operation is eligible, as before this existed.
+     */
+    private owner?: () => string | null
   ) {}
+
+  /**
+   * True when `op` may run under the current session. An unowned operation
+   * (queued before ownership existed, or while no user was known) is eligible
+   * for whoever is signed in — adoptUnowned() then stamps it so it stays theirs.
+   */
+  private isOwned(op: Operation, current: string | null | undefined): boolean {
+    if (current === undefined) return true; // no owner function: ownership off
+    if (current === null) return false; // nobody signed in: nothing runs
+    return op.userId == null || op.userId === current;
+  }
+
+  private currentOwner(): string | null | undefined {
+    return this.owner ? this.owner() : undefined;
+  }
 
   private changeListeners = new Set<() => void>();
 
@@ -101,9 +123,15 @@ export class Outbox {
   // Add an operation. Side-effects with an existing pending coalesceKey update
   // that op's payload instead of adding a duplicate (only the latest matters).
   async enqueue(op: Operation): Promise<void> {
+    // Stamp the owner unless the caller already did (tests, and any future path
+    // that queues on someone's behalf).
+    const current = this.currentOwner();
+    if (op.userId === undefined && current !== undefined) op = { ...op, userId: current };
     if (op.kind === "side_effect") {
       const existing = await this.store.findByCoalesceKey(op.coalesceKey);
-      if (existing && existing.kind === "side_effect") {
+      // Never coalesce onto ANOTHER user's queued side effect: its payload would
+      // be replaced but it would still run under (and wait for) its own owner.
+      if (existing && existing.kind === "side_effect" && (existing.userId ?? null) === (op.userId ?? null)) {
         // Latest trigger wins — adopt its payload AND its dependency, so a
         // billing-sync re-triggered by a clock-out waits for the clock-out's
         // write, not the stale clock-in write it first coalesced onto.
@@ -188,14 +216,97 @@ export class Outbox {
   // Manually retry every terminally-failed ("dead") op — resets it (and any dead
   // dependents) to pending with a fresh attempt budget. Triggered by the user
   // tapping the sync badge's Retry. The next drain picks them up.
+  //
+  // A DEAD WRITE THAT A NEWER WRITE HAS ALREADY OVERTAKEN IS NOT REVIVED.
+  // nextReady's per-row FIFO deliberately does not block on dead ops, so while
+  // op A (job -> in_progress) sat dead, op B (job -> completed) for the same row
+  // ran and landed. Reviving A would replay it AFTER B and silently revert the
+  // job to in_progress — the exact lost update the FIFO exists to prevent, now
+  // triggered by the person pressing Retry. A is marked done instead, with the
+  // reason kept in `error` so support can still see what happened; its
+  // dependents are then free to run, in row order, like any other op.
   async retryDead(): Promise<void> {
     const all = await this.store.all();
     for (const o of all) {
-      if (o.status === "dead") {
-        await this.store.update(o.id, { status: "pending", attempts: 0, nextAttemptAt: 0, error: null });
+      if (o.status !== "dead") continue;
+      if (o.kind === "write" && supersededByNewerWrite(o, all)) {
+        await this.store.update(o.id, { status: "done", error: "superseded: a newer write to this row already synced" });
+        continue;
+      }
+      await this.store.update(o.id, { status: "pending", attempts: 0, transientFailures: 0, nextAttemptAt: 0, error: null });
+    }
+    this.notifyChange();
+  }
+
+  /**
+   * Stamp every unowned, unfinished operation with the current user. Called at
+   * the start of each drain, so operations queued by a build that predates
+   * ownership are adopted by the first person to sign in after the upgrade —
+   * the same person who would have replayed them before — instead of being
+   * dropped or left runnable by whoever signs in later.
+   */
+  async adoptUnowned(): Promise<void> {
+    const current = this.currentOwner();
+    if (!current) return;
+    const all = await this.store.all();
+    for (const o of all) {
+      if (o.userId == null && o.status !== "done") await this.store.update(o.id, { userId: current });
+    }
+  }
+
+  /**
+   * Operations `userId` would lose by signing out now: everything of theirs
+   * (or unowned) that has not reached the server, dead ones included — a dead
+   * write is still work that has not synced.
+   */
+  async unsyncedCountFor(userId: string): Promise<number> {
+    const all = await this.store.all();
+    return all.filter((o) => o.status !== "done" && (o.userId == null || o.userId === userId)).length;
+  }
+
+  /**
+   * Remove every operation belonging to `userId` (and every unowned one), for a
+   * sign-out the user has CONFIRMED. Other users' operations are left alone: one
+   * person signing out must not destroy another's unsynced work. Returns how
+   * many were removed.
+   */
+  async clearForOwner(userId: string): Promise<number> {
+    const all = await this.store.all();
+    let removed = 0;
+    for (const o of all) {
+      if (o.userId == null || o.userId === userId) {
+        await this.store.remove(o.id);
+        removed++;
       }
     }
     this.notifyChange();
+    return removed;
+  }
+
+  /**
+   * Milliseconds until the earliest backed-off operation of the current user
+   * becomes due, or null when nothing is waiting on a backoff. The sync engine
+   * schedules its next drain from this, so a write that failed while ONLINE is
+   * retried on time rather than at the next reconnect or app launch.
+   *
+   * Only operations whose backoff is still running count. One that is already
+   * due but was not run is blocked on a dependency or on its row's FIFO, and a
+   * timer for it would fire immediately, forever. Clamped to MAX_BACKOFF_MS for
+   * the same lying-clock reason as isDue.
+   */
+  async msUntilNextRetry(): Promise<number | null> {
+    const now = this.clock.now();
+    const current = this.currentOwner();
+    const all = await this.store.all();
+    let soonest: number | null = null;
+    for (const o of all) {
+      if (o.status !== "pending" && o.status !== "failed") continue;
+      if (!this.isOwned(o, current)) continue;
+      if (o.nextAttemptAt <= now) continue;
+      const wait = Math.min(o.nextAttemptAt - now, MAX_BACKOFF_MS);
+      if (soonest === null || wait < soonest) soonest = wait;
+    }
+    return soonest;
   }
 
   // Every operation, for read-only callers that need to reason over what is
@@ -237,8 +348,12 @@ export class Outbox {
   // dependency (if any) has completed. Returns undefined if nothing is ready.
   async nextReady(): Promise<Operation | undefined> {
     const now = this.clock.now();
-    const all = await this.store.all();
-    const doneIds = new Set(all.filter((o) => o.status === "done").map((o) => o.id));
+    const everything = await this.store.all();
+    const doneIds = new Set(everything.filter((o) => o.status === "done").map((o) => o.id));
+    // Another user's operations are invisible here — neither runnable nor
+    // blocking. They wait, untouched, for their owner to sign back in.
+    const current = this.currentOwner();
+    const all = everything.filter((o) => this.isOwned(o, current));
 
     // PER-ROW FIFO — the fix for a lost update across a retry.
     //
@@ -299,7 +414,22 @@ export class Outbox {
   // Record a failure and schedule the next attempt with exponential backoff.
   // Past MAX_ATTEMPTS the op is parked in the terminal "dead" state rather than
   // retried forever.
-  async markFailed(op: Operation, error: string): Promise<void> {
+  //
+  // A TRANSIENT failure (outbox/errors.ts — no signal, a timeout, a 5xx) is
+  // backed off the same way but never charged an attempt and never goes dead:
+  // it says nothing about whether the write is good, and a long dead zone must
+  // not dead-letter perfectly valid work.
+  async markFailed(op: Operation, error: string, opts: { transient?: boolean } = {}): Promise<void> {
+    if (opts.transient) {
+      const transientFailures = (op.transientFailures ?? 0) + 1;
+      await this.store.update(op.id, {
+        status: "failed",
+        transientFailures,
+        nextAttemptAt: this.clock.now() + backoffMs(op.attempts + transientFailures),
+        error,
+      });
+      return;
+    }
     const attempts = op.attempts + 1;
     const status: OpStatus = attempts >= MAX_ATTEMPTS ? "dead" : "failed";
     await this.store.update(op.id, {
@@ -357,11 +487,19 @@ export class Outbox {
         .map((o) => o.dependsOn)
         .filter((id): id is string => Boolean(id))
     );
+    // A done write to a row that also has a DEAD write is the evidence
+    // retryDead uses to refuse reviving that dead write over it (see
+    // supersededByNewerWrite). Pruning it would erase the evidence and let a
+    // Retry pressed eight days later revert the row.
+    const rowsWithDeadWrites = new Set(
+      all.filter((o): o is WriteOperation => o.kind === "write" && o.status === "dead").map((o) => `${o.table}:${o.rowId}`)
+    );
     const cutoff = this.clock.now() - retainMs;
     let removed = 0;
     for (const o of all) {
       if (o.status !== "done") continue;
       if (stillNeeded.has(o.id)) continue;
+      if (o.kind === "write" && rowsWithDeadWrites.has(`${o.table}:${o.rowId}`)) continue;
       if (o.createdAt > cutoff) continue;
       await this.store.remove(o.id);
       removed++;
@@ -406,3 +544,17 @@ export class Outbox {
 }
 
 export type { OpStatus };
+
+// True when a later write to the same row has already reached the server — so
+// replaying `op` now would overwrite it with older data. See retryDead.
+function supersededByNewerWrite(op: WriteOperation, all: Operation[]): boolean {
+  return all.some(
+    (o) =>
+      o.kind === "write" &&
+      o.id !== op.id &&
+      o.status === "done" &&
+      o.table === op.table &&
+      o.rowId === op.rowId &&
+      (o.createdAt > op.createdAt || (o.createdAt === op.createdAt && o.id > op.id))
+  );
+}

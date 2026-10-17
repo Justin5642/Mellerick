@@ -16,6 +16,7 @@ import { listMyJobs } from "../../lib/data/reads/jobs";
 import { ScreenError } from "../../design/components/ScreenError";
 import { openNavigation } from "../../lib/open-external-url";
 import { useAuth } from "../../lib/auth-context";
+import { useSignOut } from "../../lib/useSignOut";
 import { colors, statusColors } from "../../lib/theme";
 import { occupiesDay } from "../../lib/scheduling";
 import { BUSINESS_TIME_ZONE } from "../../lib/date";
@@ -35,7 +36,9 @@ interface Job {
 
 export function MyJobsScreen() {
   const router = useRouter();
-  const { profile, signOut } = useAuth();
+  const { profile } = useAuth();
+  // Warns about unsynced work and clears it on a confirmed sign-out.
+  const signOut = useSignOut();
   const [jobs, setJobs] = useState<Job[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);

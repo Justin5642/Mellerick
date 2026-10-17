@@ -4,6 +4,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { useRouter, type Href } from "expo-router";
 import { colors } from "../../lib/theme";
 import { useAuth } from "../../lib/auth-context";
+import { useSignOut } from "../../lib/useSignOut";
 import { useIsAdmin } from "../../design/guards/useRole";
 
 interface Item {
@@ -34,7 +35,9 @@ const ADMIN: Item[] = [
 
 export default function MoreScreen() {
   const router = useRouter();
-  const { profile, signOut } = useAuth();
+  const { profile } = useAuth();
+  // Warns about unsynced work and clears it on a confirmed sign-out.
+  const signOut = useSignOut();
   const isAdmin = useIsAdmin();
 
   return (

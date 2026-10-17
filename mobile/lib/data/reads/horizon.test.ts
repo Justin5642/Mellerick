@@ -9,7 +9,7 @@
 const remoteTables: string[] = [];
 jest.mock("../../supabase", () => {
   const builder: Record<string, unknown> = {};
-  for (const m of ["select", "eq", "neq", "in", "is", "not", "or", "gte", "lt", "lte", "order", "range", "limit", "single"]) {
+  for (const m of ["select", "eq", "neq", "in", "is", "not", "or", "ilike", "gte", "lt", "lte", "order", "range", "limit", "single"]) {
     builder[m] = jest.fn(() => builder);
   }
   (builder as { then?: unknown }).then = (resolve: (v: unknown) => unknown) =>
@@ -204,7 +204,8 @@ describe("paged lists", () => {
   it("searchJobs: fewer than 50 local matches may hide older ones → network", async () => {
     mirror(HORIZON, [["FROM jobs j", []]]);
     await searchJobs("smith");
-    expect(remoteTables).toEqual(["jobs"]);
+    // Customer and site matches are resolved to ids first (server-side search).
+    expect(remoteTables).toEqual(["customers", "sites", "jobs"]);
   });
 
   it("listMyJobs stays local under a window — open jobs are always synced", async () => {

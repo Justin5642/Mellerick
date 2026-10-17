@@ -1,6 +1,7 @@
 import type { Outbox } from "./outbox";
 import { selectOrphanAttachments } from "./orphanAttachments";
 import type { Operation, WriteOperation } from "./types";
+import { isTransientFailure } from "./errors";
 import type { SupabaseGateway, ApiBridge } from "../gateway";
 import type { Connectivity } from "../net/connectivity";
 
@@ -91,6 +92,8 @@ export class Processor {
       // Recover any op stranded "inflight" by a crash mid-dispatch (drains are
       // serialized, so at this point an inflight op can only be a leftover).
       await this.outbox.reclaimInflight();
+      // Operations queued before ownership existed become the signed-in user's.
+      await this.outbox.adoptUnowned();
       // Surface dependents whose dependency died so they don't hang forever.
       await this.outbox.cascadeDeadDependencies();
       let op: Operation | undefined;
@@ -107,7 +110,11 @@ export class Processor {
           await this.outbox.markDone(op.id);
         } catch (err) {
           if (generation !== this.generation) return;
-          await this.outbox.markFailed(op, err instanceof Error ? err.message : String(err));
+          // A network/timeout/5xx failure is backed off without spending the
+          // attempt budget — see outbox/errors.ts.
+          await this.outbox.markFailed(op, err instanceof Error ? err.message : String(err), {
+            transient: isTransientFailure(err),
+          });
         }
       }
       if (generation !== this.generation) return;
@@ -126,6 +133,11 @@ export class Processor {
         if (__DEV__) console.warn("[outbox] prune failed (harmless, will retry next drain):", e);
       }
     }
+  }
+
+  /** When the next backed-off operation is due — see Outbox.msUntilNextRetry. */
+  msUntilNextRetry(): Promise<number | null> {
+    return this.outbox.msUntilNextRetry();
   }
 
   // Delete staged attachment files that no operation will ever upload: a file

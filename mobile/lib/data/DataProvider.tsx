@@ -1,10 +1,13 @@
 import React, { createContext, useContext, useEffect, useState } from "react";
+import { AppState } from "react-native";
 import { SqliteOutboxStore } from "./outbox/sqliteStore";
 import { supabaseGateway, apiBridge } from "./gateway.supabase";
 import { supabase } from "../supabase";
 import { netInfoConnectivity } from "./net/connectivity";
 import { createDataLayer, type DataLayer } from "./createDataLayer";
 import { reportDeadLetter, reportSyncError } from "../monitoring";
+import { getOutboxOwner, onOutboxOwnerChange } from "./outboxOwner";
+import { replayBackgroundClockQueue } from "../backgroundClockTask";
 
 // Nullable while the SQLite outbox opens (a few ms on cold start). Consumers
 // guard on null; write hooks stay disabled until the layer is ready.
@@ -20,6 +23,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     let cancelled = false;
     let built: DataLayer | undefined;
+    const unsubscribers: (() => void)[] = [];
     (async () => {
       const store = await SqliteOutboxStore.open();
       if (cancelled) return;
@@ -45,7 +49,27 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
         // the background refresh and 401 every op. getSession() is a no-op read
         // when the token is still valid, and refreshes it when it isn't.
         ensureSession: () => supabase.auth.getSession(),
+        // Ops are stamped with, and only replayed for, the signed-in user.
+        owner: getOutboxOwner,
+        // Back from the pocket: drain. Connectivity never changed, so nothing
+        // else would until the next mutation.
+        onForeground: (cb) => {
+          const sub = AppState.addEventListener("change", (state) => {
+            if (state === "active") cb();
+          });
+          return () => sub.remove();
+        },
       });
+      const layer = built;
+      // The owner is unknown for the first few ms of a cold start (auth reads
+      // the stored session asynchronously), so the start-up drain selects
+      // nothing; drain again the moment they are known, and on any change of
+      // user.
+      unsubscribers.push(onOutboxOwnerChange(() => layer.engine.requestDrain()));
+      // The background auto-clock's queued arrivals/departures ride on the same
+      // triggers as the outbox: whenever a drain settles, replay them too.
+      // Never throws.
+      unsubscribers.push(layer.engine.onSettled(() => void replayBackgroundClockQueue()));
       built.engine.start();
       setLayer(built);
     })().catch((e) => {
@@ -56,6 +80,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     });
     return () => {
       cancelled = true;
+      for (const unsubscribe of unsubscribers) unsubscribe();
       built?.engine.stop();
     };
   }, []);

@@ -1,6 +1,7 @@
 import * as Location from "expo-location";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { planBackgroundClockActions, type LocationReading, type PendingDeparture } from "./backgroundClockPlan";
+import { planBackgroundClockActions, type ClockAction, type LocationReading, type PendingDeparture } from "./backgroundClockPlan";
+import { CLOCK_QUEUE_KEY, parseClockQueue, type ClockQueueStore } from "./backgroundClockQueue";
 import type { TrackedSite } from "./geofenceState";
 import {
   GATE_RECHECK_MS,
@@ -67,9 +68,18 @@ export interface BackgroundClockDeps {
     fromAt: string | null,
     staffId: string,
     /** The arriving job's scheduled stage. */
-    costCenterId: string | null
+    costCenterId: string | null,
+    /** Client ids for the rows this creates, so a replay cannot duplicate them. */
+    ids?: { entryId: string; travelId: string }
   ): Promise<void>;
   onDepart(jobId: string, at: string, staffId: string): Promise<void>;
+  /**
+   * Durably queue planned actions with their original timestamps (see
+   * lib/backgroundClockQueue.ts). Must not resolve until they are on disk.
+   */
+  enqueueActions(actions: ClockAction[], staffId: string): Promise<void>;
+  /** Apply whatever is queued, in order. Never throws for a failed write. */
+  replayPending(): Promise<void>;
 }
 
 /**
@@ -92,27 +102,32 @@ export async function applyBackgroundBatch(
   ]);
   const plan = planBackgroundClockActions(batch, sites, previousInside, previousDeparture);
 
-  // Actions are applied in order and SEQUENTIALLY: a depart must land before the
-  // arrival that follows it, or the technician is briefly clocked in at two jobs
-  // and the reconciliation picks an arbitrary winner.
-  for (const action of plan.actions) {
-    if (action.type === "depart") {
-      await deps.onDepart(action.jobId, action.at, staffId);
-    } else {
-      await deps.onArrive(action.jobId, action.at, action.fromJobId, action.fromAt, staffId, action.costCenterId);
-    }
-  }
+  // QUEUE FIRST, with the readings' own timestamps. This used to WRITE first
+  // and persist the geofence state only if every write succeeded, on the theory
+  // that a failure would be "re-derived on the next delivery". It never was —
+  // not faithfully: the next delivery plans from its own readings, so an
+  // offline arrival came back stamped with whenever signal returned, or not at
+  // all if the technician had left by then. The queue (lib/backgroundClockQueue)
+  // remembers the action exactly as planned, so a dead zone delays the write
+  // but no longer changes or loses it.
+  await deps.enqueueActions(plan.actions, staffId);
 
-  // Persisted only AFTER the writes are enqueued. If the process dies partway,
-  // the stale value makes the next batch re-derive the same transition — a
-  // duplicate the write path already de-duplicates — rather than skipping it,
-  // which would lose the entry outright. Re-doing beats losing for payroll.
+  // ...and only then advance the state, unconditionally: the transition is now
+  // recorded, and re-deriving it later would stamp it later. If the process
+  // dies between the two writes, the next batch re-derives the same transition
+  // and the queue drops it as a duplicate of the action it already holds.
   if (plan.insideJobId !== previousInside) {
     await deps.writeInside(plan.insideJobId);
   }
   if (plan.pendingDeparture?.at !== previousDeparture?.at || plan.pendingDeparture?.jobId !== previousDeparture?.jobId) {
     await deps.writePendingDeparture(plan.pendingDeparture);
   }
+
+  // Applied in order and SEQUENTIALLY: a depart must land before the arrival
+  // that follows it, or the technician is briefly clocked in at two jobs and
+  // the reconciliation picks an arbitrary winner. Earlier deliveries' leftovers
+  // go first, for the same reason.
+  await deps.replayPending();
 }
 
 export const storageDeps = {
@@ -150,12 +165,26 @@ export const storageDeps = {
   readStaffId: async () => AsyncStorage.getItem(STAFF_KEY),
 };
 
+/** The queued clock actions, in AsyncStorage like the rest of this task's state. */
+export const clockQueueStore: ClockQueueStore = {
+  read: async () => parseClockQueue(await AsyncStorage.getItem(CLOCK_QUEUE_KEY)),
+  write: async (actions) =>
+    actions.length === 0
+      ? AsyncStorage.removeItem(CLOCK_QUEUE_KEY)
+      : AsyncStorage.setItem(CLOCK_QUEUE_KEY, JSON.stringify(actions)),
+};
+
 /**
  * Publish the data the background task needs. Called from the foreground
  * provider, which is the only place that knows the session and the job list.
  */
 export async function publishBackgroundClockContext(staffId: string | null, sites: TrackedSite[]): Promise<void> {
   if (!staffId) {
+    // The queued clock actions (CLOCK_QUEUE_KEY) are deliberately NOT cleared
+    // here. This runs on ANY loss of session — an expired refresh token
+    // included — and those actions are the technician's unsynced hours. They
+    // carry their staff id, replay only under that person's session, and are
+    // removed only by a sign-out they confirmed (lib/signOutFlow.ts).
     await AsyncStorage.multiRemove([STAFF_KEY, SITES_KEY, INSIDE_KEY, DEPARTURE_KEY, ON_THE_CLOCK_KEY, WAKE_AT_KEY]);
     return;
   }

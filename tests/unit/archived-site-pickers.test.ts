@@ -20,6 +20,7 @@ const SCAN_DIRS = ["app", "components", "lib", "mobile/app", "mobile/components"
 const DISPLAY_ONLY: Record<string, string> = {
   "app/dashboard/jobs/page.tsx": "jobs list search — finds jobs at any site, archived included",
   "app/dashboard/customers/[id]/page.tsx": "customer page lists every site with an archive/restore button",
+  "mobile/lib/data/reads/jobs.ts": "Search tab (searchJobs) — matches site ids to find jobs at any site, archived included",
 };
 
 function walk(dir: string, out: string[] = []): string[] {

@@ -16,6 +16,7 @@ import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import * as ImagePicker from "expo-image-picker";
 import { supabase } from "../../lib/supabase";
+import { fetchWithTimeout } from "../../lib/fetchWithTimeout";
 import { prepareImage } from "../../lib/imageUpload";
 import { colors } from "../../lib/theme";
 import { WATER_AUTHORITIES, DEVICE_TYPES, PROTECTION_TYPES } from "../../lib/backflow";
@@ -156,11 +157,18 @@ export default function NewBackflowDeviceScreen() {
       if (!imageBase64) throw new Error("Couldn't prepare the photo — please try again.");
       const { data: sessionData } = await supabase.auth.getSession();
       const accessToken = sessionData.session?.access_token;
-      const res = await fetch(`${API_BASE_URL}/api/backflow/scan-data-plate`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
-        body: JSON.stringify({ imageBase64, mimeType: "image/jpeg" }),
-      });
+      // Bounded so a dead connection ends in "Scan failed" instead of an
+      // endless spinner. 60s, not the default 30: the request carries the photo
+      // up and waits on a vision model reading it.
+      const res = await fetchWithTimeout(
+        `${API_BASE_URL}/api/backflow/scan-data-plate`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
+          body: JSON.stringify({ imageBase64, mimeType: "image/jpeg" }),
+        },
+        60_000
+      );
       const data = await res.json();
       if (!res.ok) throw new Error(data?.error ?? "Failed to read data plate");
 
