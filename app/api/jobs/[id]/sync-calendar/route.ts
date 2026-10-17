@@ -6,6 +6,11 @@ import { canManageJobBilling } from "@/lib/api/job-authz";
 import { reportError } from "@/lib/monitoring";
 import { buildCalendarEventBody, type CalendarJob } from "@/lib/calendar-event";
 
+// A user is waiting on this request while it calls an outside service (Xero,
+// Google, the email provider, or the PDF renderer). Without a cap a hung
+// upstream held the spinner for minutes; 30s turns that into a clear error.
+export const maxDuration = 30;
+
 export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   // Any authenticated staff member can trigger a calendar sync for a job they
   // can see; the route previously had no auth check at all.

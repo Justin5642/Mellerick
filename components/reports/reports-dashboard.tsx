@@ -1,19 +1,19 @@
 "use client";
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import {
-  ResponsiveContainer,
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  Legend,
-  PieChart,
-  Pie,
-  Cell,
-} from "recharts";
+import dynamic from "next/dynamic";
+
+// Charts load separately (reports-charts.tsx) so the numbers render without
+// waiting for recharts; each chart box keeps its height while it loads.
+const chartLoading = () => <div className="h-full w-full animate-pulse rounded bg-slate-100" />;
+const RevenueBarChart = dynamic(() => import("./reports-charts").then((m) => m.RevenueBarChart), {
+  ssr: false,
+  loading: chartLoading,
+});
+const StatusPieChart = dynamic(() => import("./reports-charts").then((m) => m.StatusPieChart), {
+  ssr: false,
+  loading: chartLoading,
+});
 import { DollarSign, TrendingUp, AlertTriangle, Target, Briefcase, Users, HeartPulse, Truck } from "lucide-react";
 import { jobStatusChartColors, quoteStatusChartColors } from "@/lib/badge-colors";
 
@@ -127,17 +127,7 @@ export function ReportsDashboard({
         <CardHeader><CardTitle className="text-base">Revenue by Month</CardTitle></CardHeader>
         <CardContent>
           <div className="h-72">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={revenueByMonth}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                <XAxis dataKey="month" tick={{ fontSize: 12 }} />
-                <YAxis tick={{ fontSize: 12 }} tickFormatter={(v) => `$${v}`} />
-                <Tooltip formatter={(value: any) => money(Number(value))} />
-                <Legend />
-                <Bar dataKey="paid" name="Paid" fill="#22c55e" radius={[4, 4, 0, 0]} />
-                <Bar dataKey="outstanding" name="Outstanding" fill="#3b82f6" radius={[4, 4, 0, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
+            <RevenueBarChart data={revenueByMonth} />
           </div>
         </CardContent>
       </Card>
@@ -150,16 +140,7 @@ export function ReportsDashboard({
               <p className="text-sm text-slate-400 py-12 text-center">No quotes yet</p>
             ) : (
               <div className="h-64">
-                <ResponsiveContainer width="100%" height="100%">
-                  <PieChart>
-                    <Pie data={quotePieData} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={90} label={(d: any) => `${d.name} (${d.value})`}>
-                      {quotePieData.map((entry) => (
-                        <Cell key={entry.name} fill={quoteStatusChartColors[entry.name] ?? "#94a3b8"} />
-                      ))}
-                    </Pie>
-                    <Tooltip />
-                  </PieChart>
-                </ResponsiveContainer>
+                <StatusPieChart data={quotePieData} colorFor={(e) => quoteStatusChartColors[e.name] ?? "#94a3b8"} />
               </div>
             )}
           </CardContent>
@@ -172,16 +153,7 @@ export function ReportsDashboard({
               <p className="text-sm text-slate-400 py-12 text-center">No jobs yet</p>
             ) : (
               <div className="h-64">
-                <ResponsiveContainer width="100%" height="100%">
-                  <PieChart>
-                    <Pie data={jobPieData} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={90} label={(d: any) => `${d.name} (${d.value})`}>
-                      {jobPieData.map((entry: any) => (
-                        <Cell key={entry.key} fill={jobStatusChartColors[entry.key] ?? "#94a3b8"} />
-                      ))}
-                    </Pie>
-                    <Tooltip />
-                  </PieChart>
-                </ResponsiveContainer>
+                <StatusPieChart data={jobPieData} colorFor={(e) => jobStatusChartColors[e.key ?? ""] ?? "#94a3b8"} />
               </div>
             )}
           </CardContent>
