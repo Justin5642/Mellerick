@@ -26,7 +26,8 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 
   const { data, error } = await supabase.storage.from("backflow-certificates").createSignedUrl(test.certificate_storage_path, 300);
   if (error || !data?.signedUrl) {
-    return NextResponse.json({ error: error?.message ?? "Failed to create signed URL" }, { status: 500 });
+    console.error("Backflow certificate signed URL failed:", error?.message);
+    return NextResponse.json({ error: "Failed to create signed URL" }, { status: 500 });
   }
 
   const wantsJson = request.nextUrl.searchParams.get("json") === "1";

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getXeroClient } from "@/lib/xero";
-import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { requireAdmin } from "@/lib/api/guards";
 import { isValidOAuthState, XERO_STATE_COOKIE } from "@/lib/oauth-state";
 import { replaceSingletonToken } from "@/lib/oauth-token-store";
@@ -39,7 +39,9 @@ export async function GET(request: NextRequest) {
     const connections = await connectionsRes.json();
     const tenant = connections[0];
 
-    const supabase = await createClient();
+    // Token tables are service-role only once migration 0075 (a draft, not
+    // applied yet) is in; the guard above has already authorised the caller.
+    const supabase = createAdminClient();
 
     // Insert-then-retire, and both results checked. This used to delete the
     // existing row first and insert second, with neither result inspected and

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { requireAdmin } from "@/lib/api/guards";
 
 export async function POST(request: NextRequest) {
@@ -8,7 +8,9 @@ export async function POST(request: NextRequest) {
   const guard = await requireAdmin(request);
   if (!guard.ok) return guard.response;
 
-  const supabase = await createClient();
+  // Token tables are service-role only once migration 0075 (a draft, not
+  // applied yet) is in; the guard above has already authorised the caller.
+  const supabase = createAdminClient();
   const { error } = await supabase
     .from("google_tokens")
     .delete()

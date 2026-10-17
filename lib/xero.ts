@@ -1,4 +1,18 @@
 import { XeroClient, Invoice } from "xero-node";
+import { createAdminClient } from "@/lib/supabase/admin";
+// The OAuth token tables are read and written ONLY through the service role.
+// Migration 0075 (a draft, not applied yet) revokes the token columns from
+// every signed-in user once it is, so an office account or an XSS on the
+// dashboard cannot lift the refresh token.
+// Every caller of this module is already authorised by its route — admin,
+// office/admin, a job-scoped check, or the cron secret — so this is a read of
+// the org's single connection on behalf of someone allowed to use it. The
+// client a caller passes in is still used for everything else (jobs,
+// invoices), so those writes keep running under the caller's own RLS.
+function tokenClient() {
+  return createAdminClient();
+}
+
 
 /**
  * Turns a thrown xero-node error into the message Xero actually gave us.
@@ -75,7 +89,7 @@ export function getXeroClient() {
  */
 export async function getRefreshedXero(supabaseClient?: any) {
   const supabase = supabaseClient ?? (await (await import("@/lib/supabase/server")).createClient());
-  const { data: tokenRow } = await supabase.from("xero_tokens").select("*").single();
+  const { data: tokenRow } = await tokenClient().from("xero_tokens").select("*").single();
   if (!tokenRow) throw new Error("Xero not connected");
 
   const xero = getXeroClient();
@@ -99,7 +113,7 @@ export async function getRefreshedXero(supabaseClient?: any) {
     // invalidated — the integration is then permanently broken and the only fix
     // is reconnecting by hand. Same shape as the OAuth token-swap defect this
     // campaign opened on, one layer down.
-    const { error: persistError } = await supabase
+    const { error: persistError } = await tokenClient()
       .from("xero_tokens")
       .update({
         access_token: newTokenSet.access_token!,
@@ -140,7 +154,7 @@ export async function getRefreshedXero(supabaseClient?: any) {
  * "Sync now" button, same pattern as pollGoogleCalendarChanges.
  */
 export async function pollXeroInvoicePayments(supabase: any) {
-  const { data: tokenRow } = await supabase.from("xero_tokens").select("*").single();
+  const { data: tokenRow } = await tokenClient().from("xero_tokens").select("*").single();
   if (!tokenRow) return { skipped: true, reason: "Xero not connected" };
 
   const { data: candidates } = await supabase
@@ -153,7 +167,7 @@ export async function pollXeroInvoicePayments(supabase: any) {
     // Nothing to reconcile, so nothing is lost if this write is refused — but
     // an unchecked one means the watermark silently stops advancing and every
     // later run re-scans from the same point forever.
-    const { error } = await supabase
+    const { error } = await tokenClient()
       .from("xero_tokens")
       .update({ xero_invoice_last_synced_at: new Date().toISOString() })
       .eq("id", tokenRow.id);
@@ -229,7 +243,7 @@ export async function pollXeroInvoicePayments(supabase: any) {
   // Holding the watermark back re-checks a handful of already-correct invoices
   // on the next run, which costs one extra API page. That is the cheaper error.
   if (failed.length === 0) {
-    const { error } = await supabase
+    const { error } = await tokenClient()
       .from("xero_tokens")
       .update({ xero_invoice_last_synced_at: new Date().toISOString() })
       .eq("id", tokenRow.id);
