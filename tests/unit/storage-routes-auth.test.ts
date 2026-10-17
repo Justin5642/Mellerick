@@ -22,15 +22,6 @@ const single = vi.fn();
 
 vi.mock("@/lib/api/guards", () => ({
   requireUser: (...a: unknown[]) => requireUser(...a),
-  // transcribe-voice-report now uses the SHARED getCallerId rather than a local
-  // Bearer-only copy. Delegating to the same anonGetUser these tests already
-  // drive keeps the two 401 cases below meaning exactly what they meant before.
-  getCallerId: async (req: NextRequest) => {
-    const h = req.headers.get("authorization") ?? "";
-    if (!h.startsWith("Bearer ")) return null;
-    const { data, error } = await anonGetUser();
-    return error || !data?.user ? null : data.user.id;
-  },
   requireAdmin: vi.fn(),
   requireOfficeOrAdmin: vi.fn(),
   requireCronSecret: vi.fn(),
@@ -128,6 +119,18 @@ describe("GET /api/backflow/tests/[id]/certificate", () => {
 
 describe("POST /api/jobs/[id]/transcribe-voice-report — path ownership", () => {
   const validUser = () => anonGetUser.mockResolvedValue({ data: { user: { id: "tech-1" } }, error: null });
+
+  // transcribe-voice-report authenticates through requireUser (which also
+  // refuses deactivated staff). Drive it from the same Bearer/anonGetUser seam
+  // so the two 401 cases below mean exactly what they meant before.
+  beforeEach(() => {
+    requireUser.mockImplementation(async (req: NextRequest) => {
+      const h = req.headers.get("authorization") ?? "";
+      if (!h.startsWith("Bearer ")) return DENIED;
+      const { data, error } = await anonGetUser();
+      return error || !data?.user ? DENIED : { ok: true, userId: data.user.id, role: null };
+    });
+  });
 
   it("returns 401 without a Bearer token", async () => {
     const res = await transcribePOST(

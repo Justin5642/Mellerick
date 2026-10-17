@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server";
-import { createClient as createSupabaseClient } from "@supabase/supabase-js";
+import { requireUser } from "@/lib/api/guards";
 import { polishNoteText, POLISH_MAX_CHARS } from "@/lib/ai/polish-note";
 import { reportError, reportFailure } from "@/lib/monitoring";
 
@@ -14,19 +13,11 @@ import { reportError, reportFailure } from "@/lib/monitoring";
 // lib/supabase/server) and from the mobile app (no cookies — instead
 // attaches its Supabase session access token as a Bearer header). Same
 // dual-path auth as app/api/jobs/[id]/transcribe-voice-report/route.ts.
-async function getAuthenticatedUserId(request: NextRequest) {
-  const authHeader = request.headers.get("authorization") ?? "";
-  const token = authHeader.startsWith("Bearer ") ? authHeader.slice("Bearer ".length) : null;
-  if (token) {
-    const anonClient = createSupabaseClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!, {
-      auth: { autoRefreshToken: false, persistSession: false },
-    });
-    const { data, error } = await anonClient.auth.getUser(token);
-    return error || !data.user ? null : data.user.id;
-  }
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  return user?.id ?? null;
+// requireUser: Bearer token (mobile) or cookie (web), and refuses a
+// deactivated profile.
+async function getAuthenticatedUserId(request: NextRequest): Promise<string | null> {
+  const guard = await requireUser(request);
+  return guard.ok ? guard.userId : null;
 }
 
 export async function POST(request: NextRequest) {

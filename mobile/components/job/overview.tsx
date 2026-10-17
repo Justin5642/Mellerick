@@ -108,7 +108,9 @@ interface Job {
   overtime_category?: string | null;
 }
 
-export function JobOverviewTab({ job, currentUserId }: { job: Job; currentUserId: string | null }) {
+// readOnly: view-only (not assigned — see JobNotesTab). Hides the edit card
+// and the hours scoreboard, which records an overtime reason.
+export function JobOverviewTab({ job, currentUserId, readOnly = false }: { job: Job; currentUserId: string | null; readOnly?: boolean }) {
   const [status, setStatus] = useState(job.status);
   const [priority, setPriority] = useState(job.priority);
   const [description, setDescription] = useState(job.description ?? "");
@@ -173,8 +175,9 @@ export function JobOverviewTab({ job, currentUserId }: { job: Job; currentUserId
   return (
     <View style={styles.container}>
       <ScheduleNoteBanner jobId={job.id} />
-      <JobHoursScoreboard job={job} currentUserId={currentUserId} />
+      {!readOnly && <JobHoursScoreboard job={job} currentUserId={currentUserId} />}
 
+      {!readOnly && <>
       <Text style={styles.sectionTitle}>Status & Priority</Text>
       <View style={styles.card}>
         <SelectField label="Status" value={status} options={STATUS_OPTIONS} onChange={setStatus} />
@@ -202,6 +205,7 @@ export function JobOverviewTab({ job, currentUserId }: { job: Job; currentUserId
           <Text style={styles.saveButtonText}>{saving ? "Saving..." : "Save Changes"}</Text>
         </TouchableOpacity>
       </View>
+      </>}
 
       <Text style={styles.sectionTitle}>Customer</Text>
       <View style={styles.card}>

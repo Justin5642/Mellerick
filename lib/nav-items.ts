@@ -42,7 +42,13 @@ export function navItemsFor(role: string | undefined): NavItem[] {
   return role === "technician" ? NAV_ITEMS.filter((i) => i.tech) : NAV_ITEMS;
 }
 
+/** Pages under a technician section that are still office-only. Creating a
+ *  job is already office-only in the mobile app; migration 0074 (a draft, not
+ *  applied yet) makes it so in the database too. */
+const TECH_DENIED = ["/dashboard/jobs/new"];
+
 /** Whether a role may open a given dashboard path. */
 export function mayOpen(role: string | undefined, path: string): boolean {
+  if (role === "technician" && TECH_DENIED.some((d) => path === d || path.startsWith(`${d}/`))) return false;
   return navItemsFor(role).some((i) => path === i.href || path.startsWith(`${i.href}/`));
 }

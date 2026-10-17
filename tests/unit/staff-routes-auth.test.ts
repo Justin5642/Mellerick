@@ -10,10 +10,11 @@ import { NextRequest } from "next/server";
 // user — a technician holding the anon key — could POST directly and mint
 // themselves an admin account. That is privilege escalation, not a data leak.
 //
-// The checks are correct today. They are hand-rolled rather than using the
-// shared requireAdmin() helper, which makes them easy to lose in a refactor and
-// impossible to notice: the route keeps working for admins, and the hole only
-// exists for everyone else. These tests exist to make that loss loud.
+// They now all go through the shared requireAdmin() guard (they used to be
+// hand-rolled, and the hand-rolled copies ignored profiles.is_active, so a
+// deactivated admin kept inviting staff). A refactor that drops the guard keeps
+// the route working for admins — the hole only exists for everyone else. These
+// tests exist to make that loss loud.
 //
 // London school: drive each handler through the guard seams and assert the
 // matrix — unauthenticated 401, non-admin 403, and crucially that the
@@ -24,6 +25,20 @@ const adminConstructed = vi.fn();
 const inviteUserByEmail = vi.fn();
 const updateUserById = vi.fn();
 let profileRole: string | null = null;
+let profileActive: boolean | null = true;
+
+// The profile row the guard reads (through the service-role client — see
+// lib/api/guards.ts getActiveCallerRole).
+function profileChain() {
+  const chain: Record<string, unknown> = {};
+  chain.select = vi.fn(() => chain);
+  chain.eq = vi.fn(() => chain);
+  chain.single = vi.fn(async () => ({
+    data: profileRole ? { role: profileRole, is_active: profileActive } : null,
+    error: null,
+  }));
+  return chain;
+}
 
 vi.mock("@/lib/supabase/server", () => ({
   createClient: vi.fn(async () => ({
@@ -62,13 +77,14 @@ vi.mock("@supabase/supabase-js", () => ({
 vi.mock("@/lib/supabase/admin", () => ({
   createAdminClient: vi.fn(() => {
     adminConstructed();
-    return { auth: { admin: { inviteUserByEmail, updateUserById, deleteUser: vi.fn() } }, from: vi.fn() };
+    return { auth: { admin: { inviteUserByEmail, updateUserById, deleteUser: vi.fn() } }, from: vi.fn(profileChain) };
   }),
 }));
 
 import { POST as invitePOST } from "@/app/api/staff/invite/route";
 import { POST as resendPOST } from "@/app/api/staff/resend-invite/route";
 import { POST as updatePOST } from "@/app/api/staff/update/route";
+import { POST as setActivePOST } from "@/app/api/staff/set-active/route";
 
 function post(body: Record<string, unknown>) {
   return new NextRequest("http://localhost/api/staff/x", {
@@ -84,6 +100,7 @@ const asAnonymous = () => serverGetUser.mockResolvedValue({ data: { user: null }
 beforeEach(() => {
   vi.clearAllMocks();
   profileRole = null;
+  profileActive = true;
   process.env.NEXT_PUBLIC_SUPABASE_URL = "https://unit-test.supabase.co";
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY = "anon";
   process.env.SUPABASE_SERVICE_ROLE_KEY = "svc";
@@ -93,6 +110,7 @@ const ROUTES: [string, (r: NextRequest) => Promise<Response>, Record<string, unk
   ["invite", invitePOST, { full_name: "Mallory", email: "m@example.com", role: "admin" }],
   ["resend-invite", resendPOST, { email: "m@example.com" }],
   ["update", updatePOST, { id: "u1", full_name: "Mallory", role: "admin" }],
+  ["set-active", setActivePOST, { id: "u1", active: true }],
 ];
 
 describe.each(ROUTES)("POST /api/staff/%s — admin only", (name, handler, body) => {
@@ -125,14 +143,22 @@ describe.each(ROUTES)("POST /api/staff/%s — admin only", (name, handler, body)
     expect(res.status).toBe(403);
   });
 
+  it("rejects a DEACTIVATED admin with 403", async () => {
+    asUser();
+    profileRole = "admin";
+    profileActive = false;
+    const res = await handler(post(body));
+    expect(res.status).toBe(403);
+  });
+
   // The status code alone is not enough. A route could return 403 while having
-  // already reached auth.admin — this asserts the privileged client is never
-  // even built on a rejected request.
-  it("never constructs the service-role client when authorization fails", async () => {
+  // already reached auth.admin — this asserts no privileged action runs on a
+  // rejected request. (The service-role client IS built, by the guard, to read
+  // the caller's own role — that is a read, not an action.)
+  it("never reaches auth.admin when authorization fails", async () => {
     asUser();
     profileRole = "technician";
     await handler(post(body));
-    expect(adminConstructed).not.toHaveBeenCalled();
     expect(inviteUserByEmail).not.toHaveBeenCalled();
     expect(updateUserById).not.toHaveBeenCalled();
   });

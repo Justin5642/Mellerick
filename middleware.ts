@@ -63,9 +63,24 @@ export async function middleware(request: NextRequest) {
   const path = request.nextUrl.pathname;
 
   if (user && path.startsWith("/dashboard")) {
-    const { data: profile } = await supabase.from("profiles").select("role").eq("id", user.id).single();
+    const { data: profile } = await supabase.from("profiles").select("role, is_active").eq("id", user.id).single();
 
-    if (profile?.role === "technician") {
+    // Deactivated: end the session here rather than render anything. The auth
+    // user is also banned (app/api/staff/set-active), so no refresh succeeds,
+    // but an access token already issued stays valid up to an hour — this
+    // closes that window on the web.
+    if (profile?.is_active === false) {
+      await supabase.auth.signOut();
+      const redirect = NextResponse.redirect(new URL("/login", request.url));
+      response.cookies.getAll().forEach((c) => redirect.cookies.set(c));
+      return redirect;
+    }
+
+    // Deny by default: only a confirmed office/admin skips the technician
+    // gate. A failed profile read, a missing row, or an unknown role used to
+    // fall through to every /dashboard page.
+    const role = profile?.role;
+    if (role !== "admin" && role !== "office") {
       if (!mayOpen("technician", path)) {
         const url = request.nextUrl.clone();
         url.pathname = "/dashboard/my-jobs";
