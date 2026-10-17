@@ -5,6 +5,11 @@ import { callerClient } from "@/lib/api/caller-client";
 import { Invoice, LineItem, Contact, LineAmountTypes } from "xero-node";
 import { reportError } from "@/lib/monitoring";
 
+// A user is waiting on this request while it calls an outside service (Xero,
+// Google, the email provider, or the PDF renderer). Without a cap a hung
+// upstream held the spinner for minutes; 30s turns that into a clear error.
+export const maxDuration = 30;
+
 // Manual, per-expense "push to Xero" action — same pattern/UX as the
 // existing /api/xero/push-invoice (manual button, never automatic). Creates
 // a Xero Bill (ACCPAY) for the supplier, coded to the office-configured

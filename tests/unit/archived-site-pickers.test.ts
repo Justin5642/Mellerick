@@ -18,7 +18,7 @@ const SCAN_DIRS = ["app", "components", "lib", "mobile/app", "mobile/components"
 
 // path -> why its `sites` read is not a picker for a new record.
 const DISPLAY_ONLY: Record<string, string> = {
-  "app/dashboard/jobs/page.tsx": "jobs list search — finds jobs at any site, archived included",
+  "components/jobs/jobs-list-client.tsx": "jobs list search — finds jobs at any site, archived included",
   "app/dashboard/customers/[id]/page.tsx": "customer page lists every site with an archive/restore button",
 };
 

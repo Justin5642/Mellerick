@@ -4,6 +4,11 @@ import { callerClient } from "@/lib/api/caller-client";
 import { pollXeroInvoicePayments } from "@/lib/xero";
 import { reportError } from "@/lib/monitoring";
 
+// A user is waiting on this request while it calls an outside service (Xero,
+// Google, the email provider, or the PDF renderer). Without a cap a hung
+// upstream held the spinner for minutes; 30s turns that into a clear error.
+export const maxDuration = 30;
+
 // Manual trigger for the Settings page's "Sync now" button — same logic as the
 // cron poll route. Previously auth'd by getUser() ONLY (any signed-in user,
 // including a technician, could trigger a Xero payments sync); now office/admin

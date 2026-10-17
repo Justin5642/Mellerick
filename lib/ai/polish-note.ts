@@ -35,7 +35,9 @@ let client: Anthropic | null = null;
 async function polishWith(model: Anthropic.Model, text: string): Promise<Anthropic.Message> {
   // Lazily constructed so a missing ANTHROPIC_API_KEY surfaces as a request
   // error rather than crashing module load for every route that imports this.
-  client ??= new Anthropic();
+  // A technician is waiting on this; the SDK default (10 minutes, 2 retries)
+  // turned a slow API into a frozen screen.
+  client ??= new Anthropic({ timeout: 25_000, maxRetries: 1 });
   return client.messages.create({
     model,
     max_tokens: 4000,

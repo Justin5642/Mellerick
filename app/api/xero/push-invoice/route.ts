@@ -5,6 +5,11 @@ import { callerClient } from "@/lib/api/caller-client";
 import { Invoice, LineItem, Contact, Invoices, LineAmountTypes } from "xero-node";
 import { reportError } from "@/lib/monitoring";
 
+// A user is waiting on this request while it calls an outside service (Xero,
+// Google, the email provider, or the PDF renderer). Without a cap a hung
+// upstream held the spinner for minutes; 30s turns that into a clear error.
+export const maxDuration = 30;
+
 export async function POST(request: NextRequest) {
   try {
     const { invoiceId } = await request.json();

@@ -424,6 +424,13 @@ longer upload audio to OpenAI Whisper. Speech is recognised where it is spoken:
 - **Web Photos tab** (`components/job/job-photos.tsx`) likewise signs every
   unsigned photo in ONE `createSignedUrls` per load (it was one request per
   thumbnail) and renders thumbnails `loading="lazy"` / `decoding="async"`.
+  Since 17 Oct 2026 it also **resizes before upload** with the same limits as
+  mobile (`lib/image-resize.ts`, 1600px / JPEG 0.7, HEIC or undecodable files
+  go up unchanged), uploads three at a time, and **reuses signed URLs** across
+  visits to the tab (`lib/signed-url-cache.ts`) so the browser cache hits.
+  Photos uploaded before then (incl. the ~6.4k Simpro imports) are still
+  full-size originals in the grid; shrinking those needs a one-off backfill
+  or Supabase image transforms (plan unconfirmed).
 - `expo-image-manipulator` is a native module: it reaches devices only through a
   **new dev client / `eas build`**, never an OTA update.
 

@@ -9,6 +9,12 @@ import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Image as ImageIcon, Upload, Trash2, X, ZoomIn } from "lucide-react";
 import { formatDate } from "@/lib/date";
 import { photoTagColors } from "@/lib/badge-colors";
+import { resizeImageForUpload } from "@/lib/image-resize";
+import { getCachedSignedUrl, putCachedSignedUrl } from "@/lib/signed-url-cache";
+
+const SIGNED_URL_TTL_S = 3600;
+// Uploads run a few at a time rather than strictly one after another.
+const UPLOAD_CONCURRENCY = 3;
 
 interface Props {
   jobId: string;
@@ -23,7 +29,16 @@ export function JobPhotos({ jobId, photos, onUpdate, currentUserId }: Props) {
   const [uploading, setUploading] = useState(false);
   const [photoType, setPhotoType] = useState<string>("general");
   const [lightbox, setLightbox] = useState<string | null>(null);
-  const [signedUrls, setSignedUrls] = useState<Record<string, string>>({});
+  // Seeded from the shared cache, so revisiting the tab reuses the same URLs
+  // (and therefore the browser's cached images) instead of re-signing.
+  const [signedUrls, setSignedUrls] = useState<Record<string, string>>(() => {
+    const seeded: Record<string, string> = {};
+    for (const p of photos) {
+      const url = p.storage_path ? getCachedSignedUrl("job-photos", p.storage_path) : null;
+      if (url) seeded[p.storage_path] = url;
+    }
+    return seeded;
+  });
   // Paths already sent for signing, so a re-render (or a new photos array
   // after an upload) never re-signs one that is in flight or done.
   const requestedPaths = useRef<Set<string>>(new Set());
@@ -34,16 +49,19 @@ export function JobPhotos({ jobId, photos, onUpdate, currentUserId }: Props) {
   useEffect(() => {
     const paths = photos
       .map((p) => p.storage_path as string)
-      .filter((path) => path && !requestedPaths.current.has(path));
+      .filter((path) => path && !requestedPaths.current.has(path) && !getCachedSignedUrl("job-photos", path));
     if (paths.length === 0) return;
     paths.forEach((path) => requestedPaths.current.add(path));
     createClient()
       .storage.from("job-photos")
-      .createSignedUrls(paths, 3600)
+      .createSignedUrls(paths, SIGNED_URL_TTL_S)
       .then(({ data }) => {
         const next: Record<string, string> = {};
         for (const item of data ?? []) {
-          if (item.path && item.signedUrl) next[item.path] = item.signedUrl;
+          if (item.path && item.signedUrl) {
+            next[item.path] = item.signedUrl;
+            putCachedSignedUrl("job-photos", item.path, item.signedUrl, SIGNED_URL_TTL_S);
+          }
         }
         // A path that came back unsigned is released so the lightbox's
         // single-path fallback (getUrl) or a later load can retry it.
@@ -54,8 +72,9 @@ export function JobPhotos({ jobId, photos, onUpdate, currentUserId }: Props) {
 
   async function getUrl(path: string) {
     if (signedUrls[path]) return signedUrls[path];
-    const { data } = await supabase.storage.from("job-photos").createSignedUrl(path, 3600);
+    const { data } = await supabase.storage.from("job-photos").createSignedUrl(path, SIGNED_URL_TTL_S);
     if (data?.signedUrl) {
+      putCachedSignedUrl("job-photos", path, data.signedUrl, SIGNED_URL_TTL_S);
       setSignedUrls((prev) => ({ ...prev, [path]: data.signedUrl }));
       return data.signedUrl;
     }
@@ -73,10 +92,13 @@ export function JobPhotos({ jobId, photos, onUpdate, currentUserId }: Props) {
     // says otherwise. On a job where photos are the evidence of what was done,
     // the technician has no reason to look again.
     const failed: string[] = [];
-    for (const file of Array.from(files)) {
-      const path = `${jobId}/${Date.now()}_${file.name.replace(/[^a-zA-Z0-9._-]/g, "_")}`;
+    const uploadOne = async (original: File) => {
+      // Resized first (lib/image-resize.ts): the original is what made every
+      // later view of this photo slow.
+      const file = await resizeImageForUpload(original);
+      const path = `${jobId}/${Date.now()}_${Math.random().toString(36).slice(2, 8)}_${file.name.replace(/[^a-zA-Z0-9._-]/g, "_")}`;
       const { error: uploadError } = await supabase.storage.from("job-photos").upload(path, file);
-      if (uploadError) { failed.push(file.name); continue; }
+      if (uploadError) { failed.push(original.name); return; }
 
       const { error: rowError } = await supabase.from("job_photos").insert({
         job_id: jobId,
@@ -86,9 +108,15 @@ export function JobPhotos({ jobId, photos, onUpdate, currentUserId }: Props) {
       });
       if (rowError) {
         console.error("job-photos: file uploaded but row not recorded", path, rowError);
-        failed.push(file.name);
+        failed.push(original.name);
       }
-    }
+    };
+    const queue = Array.from(files);
+    await Promise.all(
+      Array.from({ length: Math.min(UPLOAD_CONCURRENCY, queue.length) }, async () => {
+        for (let next = queue.shift(); next; next = queue.shift()) await uploadOne(next);
+      })
+    );
 
     const { data } = await supabase.from("job_photos").select("*, profiles(full_name)").eq("job_id", jobId).order("created_at", { ascending: false });
     onUpdate(data ?? []);
