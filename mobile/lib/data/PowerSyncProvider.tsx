@@ -51,16 +51,18 @@ function asLocalRole(role: string | undefined | null): LocalRole {
 }
 
 export function PowerSyncProvider({ children }: { children: React.ReactNode }) {
-  const { session, profile, loading } = useAuth();
+  const { session, profile, loading, confirmedSignedOut } = useAuth();
   const layer = useDataLayer();
   // A DEACTIVATED account gets no role here, which routes it down the sign-out
   // branch and wipes the mirror: app/_layout.tsx only hides the screens, and an
   // office user switched off in staff.tsx must not keep invoice rows on disk.
   const role = profile?.is_active === true ? asLocalRole(profile.role) : null;
   const userId = session?.user?.id ?? null;
-  // Only a FINISHED auth load with no session is "signed out" — see
-  // powersyncTransition's `signedOut`.
-  const signedOut = !loading && !session;
+  // Only a CONFIRMED sign-out wipes the mirror — not merely "no session", which
+  // is also what an offline launch with an expired token looks like (see
+  // confirmedSignedOut in lib/auth-context.tsx and powersyncTransition's
+  // `signedOut`).
+  const signedOut = !loading && !session && confirmedSignedOut;
   // Who is connected / synced / vouched-for — see lib/data/powersyncTransition.
   const state = useRef<TransitionState>({ connected: null, synced: null, trusted: null });
   // All connect/disconnect work appends here — one transition at a time.

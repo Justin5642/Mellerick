@@ -21,6 +21,15 @@ interface AuthContextValue {
   profile: Profile | null;
   loading: boolean;
   /**
+   * True only when Supabase POSITIVELY says nobody is signed in: the stored
+   * session read cleanly and was empty, or a real SIGNED_OUT event fired.
+   * `!loading && !session` is not the same thing — a technician opening the
+   * app with no signal and an expired access token gets no session back from
+   * a FAILED refresh, and wiping their offline job mirror on that basis would
+   * take their jobs away exactly when they cannot re-download them.
+   */
+  confirmedSignedOut: boolean;
+  /**
    * Set when the profile read FAILED, as distinct from "this account has no
    * role". Without it the two are indistinguishable downstream, and
    * app/_layout.tsx renders the fail-closed "No role assigned — contact your
@@ -45,6 +54,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
   const [loading, setLoading] = useState(true);
+  const [confirmedSignedOut, setConfirmedSignedOut] = useState(false);
   const [profileError, setProfileError] = useState<unknown>(null);
   // Mirrors `profile` for use inside the auth listener, which closes over the
   // first render's state and would otherwise always see null.
@@ -57,8 +67,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     supabase.auth.getSession().then(
-      ({ data: { session } }) => {
+      ({ data: { session }, error }) => {
         setSession(session);
+        setConfirmedSignedOut(!session && !error);
         setOutboxOwner(session?.user.id ?? null);
         if (session) void loadProfile(session.user.id);
         else setLoading(false);
@@ -78,6 +89,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     const { data: listener } = supabase.auth.onAuthStateChange((event, session) => {
       setSession(session);
+      if (session) setConfirmedSignedOut(false);
+      else if (event === "SIGNED_OUT") setConfirmedSignedOut(true);
       // Queued writes are stamped with, and replayed only for, this user.
       setOutboxOwner(session?.user.id ?? null);
       if (session) {
@@ -295,6 +308,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         session,
         profile,
         loading,
+        confirmedSignedOut,
         profileError,
         reloadProfile: () => {
           // `session` is read from render scope rather than a ref: this closure
