@@ -923,6 +923,8 @@ register `device_tokens`, and the `send-push` edge function is deployed. Since
 `0077`, trigger on `job_assignments`); tapping it opens the job from mobile
 build 15. Turning it on needs a one-time secret + vault + redeploy step — see
 **`docs/push-notifications.md`**.
+Shared phones: `claim_device_token()` (migration `0078`) hands a phone's token
+to whoever signs in on it, so one person's alerts never go to another's phone.
 
 **`mobile/eas.json`** — `appleId`, `ascAppId` and `appleTeamId` are filled, and
 the App Store Connect API key lives on EAS's servers: build 14 (19 Oct 2026)

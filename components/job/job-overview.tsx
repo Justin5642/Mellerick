@@ -22,6 +22,8 @@ import { AddSiteDialog } from "@/components/site-add-dialog";
 interface Props {
   job: any;
   staff: any[];
+  /** A technician viewing a job they are not assigned to: every field read-only. */
+  readOnly?: boolean;
 }
 
 // Radix/shadcn's SelectItem can't take value="", so an explicit "Unassigned"
@@ -35,7 +37,7 @@ const NO_SITE_VALUE = "__no_site__";
 // the Customer page — same pattern used on the New Job form.
 const ADD_NEW_SITE_VALUE = "__add_new_site__";
 
-export function JobOverview({ job, staff }: Props) {
+export function JobOverview({ job, staff, readOnly = false }: Props) {
   const router = useRouter();
   const supabase = createClient();
   const [saving, setSaving] = useState(false);
@@ -149,6 +151,9 @@ export function JobOverview({ job, staff }: Props) {
     <div className="p-6 grid grid-cols-1 lg:grid-cols-3 gap-6">
       {/* Left — editable fields */}
       <div className="lg:col-span-2 space-y-4">
+        {/* A disabled fieldset disables every input, select and button in both
+            cards in one place; links (call, email, maps) stay usable. */}
+        <fieldset disabled={readOnly} className="space-y-4 min-w-0">
         <Card>
           <CardHeader><CardTitle className="text-base">Job Details</CardTitle></CardHeader>
           <CardContent className="space-y-4">
@@ -266,13 +271,16 @@ export function JobOverview({ job, staff }: Props) {
               <Label>Internal Notes</Label>
               <Textarea value={form.notes} onChange={(e) => set("notes", e.target.value)} rows={2} placeholder="Notes for the technician..." />
             </div>
-            <div className="flex justify-end">
-              <Button onClick={save} disabled={saving} className="gap-2">
-                <Save className="w-4 h-4" />{saving ? "Saving..." : "Save Changes"}
-              </Button>
-            </div>
+            {!readOnly && (
+              <div className="flex justify-end">
+                <Button onClick={save} disabled={saving} className="gap-2">
+                  <Save className="w-4 h-4" />{saving ? "Saving..." : "Save Changes"}
+                </Button>
+              </div>
+            )}
           </CardContent>
         </Card>
+        </fieldset>
       </div>
 
       {/* Right — customer & site info */}

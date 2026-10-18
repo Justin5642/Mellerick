@@ -22,9 +22,11 @@ interface Props {
   photos: any[];
   onUpdate: (photos: any[]) => void;
   currentUserId: string;
+  /** A technician viewing a job they are not assigned to: view only. */
+  readOnly?: boolean;
 }
 
-export function JobPhotos({ jobId, photos, onUpdate, currentUserId }: Props) {
+export function JobPhotos({ jobId, photos, onUpdate, currentUserId, readOnly = false }: Props) {
   const supabase = createClient();
   const inputRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
@@ -218,6 +220,7 @@ export function JobPhotos({ jobId, photos, onUpdate, currentUserId }: Props) {
           <h2 className="text-base font-semibold text-slate-900">Photos</h2>
           <p className="text-sm text-slate-500">{photos.length} photo{photos.length !== 1 ? "s" : ""}</p>
         </div>
+        {!readOnly && (
         <div className="flex items-center gap-2">
           <Select value={photoType} onValueChange={(v) => setPhotoType(v ?? "general")}>
             <SelectTrigger className="w-32 h-9 text-sm">
@@ -235,12 +238,13 @@ export function JobPhotos({ jobId, photos, onUpdate, currentUserId }: Props) {
             {uploading ? "Uploading..." : "Upload Photos"}
           </Button>
         </div>
+        )}
       </div>
 
       {photos.length === 0 ? (
         <div
           className="flex flex-col items-center justify-center py-16 text-slate-400 border-2 border-dashed border-slate-200 rounded-xl cursor-pointer hover:bg-slate-50 transition-colors"
-          onClick={() => inputRef.current?.click()}
+          onClick={readOnly ? undefined : () => inputRef.current?.click()}
         >
           <ImageIcon className="w-12 h-12 mb-3 opacity-40" />
           <p className="text-sm font-medium">No photos yet</p>
@@ -253,7 +257,7 @@ export function JobPhotos({ jobId, photos, onUpdate, currentUserId }: Props) {
               key={photo.id}
               photo={photo}
               onOpen={() => openLightbox(photo.storage_path)}
-              onDelete={() => handleDelete(photo)}
+              onDelete={readOnly ? undefined : () => handleDelete(photo)}
               url={signedUrls[thumbPathFor(photo.storage_path)] ?? signedUrls[photo.storage_path] ?? ""}
               tagColors={photoTagColors}
             />
@@ -285,12 +289,14 @@ function PhotoCard({ photo, onOpen, onDelete, url, tagColors }: any) {
           {photo.photo_type}
         </span>
       </div>
-      <button
-        className="absolute top-1.5 right-1.5 w-6 h-6 rounded-full bg-red-500 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity hover:bg-red-600"
-        onClick={(e) => { e.stopPropagation(); onDelete(); }}
-      >
-        <X className="w-3 h-3" />
-      </button>
+      {onDelete && (
+        <button
+          className="absolute top-1.5 right-1.5 w-6 h-6 rounded-full bg-red-500 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity hover:bg-red-600"
+          onClick={(e) => { e.stopPropagation(); onDelete(); }}
+        >
+          <X className="w-3 h-3" />
+        </button>
+      )}
       <div className="absolute bottom-0 left-0 right-0 bg-black/50 text-white text-xs p-1 opacity-0 group-hover:opacity-100 transition-opacity truncate">
         {formatDate(photo.created_at)}
       </div>

@@ -9,23 +9,37 @@ export const REGISTERED_TOKEN_KEY = "mellerick.push.registeredToken";
 // How long sign-out will wait on the server before giving up on the delete.
 const REMOVE_TIMEOUT_MS = 5_000;
 
-// Upsert this device's Expo push token so the backend can target it for pushes.
-// Keyed on the token (a re-registering device updates its user + timestamp).
-// Online-only device metadata — best-effort: a failure (offline, or the
-// device_tokens table not yet migrated on the backend) is swallowed so it can
-// never block sign-in or app use. See the PROPOSED device_tokens migration.
+// Register this device's Expo push token for the signed-in user.
+//
+// claim_device_token() (migration 0078, a draft, not applied yet) hands the
+// token to whoever is signed in now. The plain upsert below could not: on a
+// shared or handed-down phone the row still belonged to the previous person,
+// RLS refused the update, and the new person's job notifications kept going to
+// the previous person. Until 0078 is applied the RPC does not exist, so this
+// falls back to the old upsert (which works for a phone with one user).
+//
+// Online-only device metadata — best-effort: a failure is swallowed so it can
+// never block sign-in or app use. updated_at is owned by the DB (0036).
 export async function upsertDeviceToken(input: { token: string; platform: string; userId: string }): Promise<boolean> {
   try {
-    // updated_at is owned by the DB (default now() on insert + a BEFORE UPDATE
-    // trigger on conflict), not the device clock — see 0036_device_tokens.sql.
-    const { error } = await supabase
-      .from("device_tokens")
-      .upsert({ token: input.token, user_id: input.userId, platform: input.platform }, { onConflict: "token" });
+    const claim = await supabase.rpc("claim_device_token", { p_token: input.token, p_platform: input.platform });
+    let error = claim.error;
+    if (error && isMissingFunction(error)) {
+      ({ error } = await supabase
+        .from("device_tokens")
+        .upsert({ token: input.token, user_id: input.userId, platform: input.platform }, { onConflict: "token" }));
+    }
     if (!error) await AsyncStorage.setItem(REGISTERED_TOKEN_KEY, input.token).catch(() => {});
     return !error;
   } catch {
     return false;
   }
+}
+
+// PostgREST reports an RPC the database does not have as PGRST202 (or the
+// underlying 42883). Anything else is a real refusal and must not fall back.
+function isMissingFunction(error: { code?: string; message?: string }): boolean {
+  return error.code === "PGRST202" || error.code === "42883";
 }
 
 /**
