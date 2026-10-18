@@ -510,9 +510,13 @@ longer upload audio to OpenAI Whisper. Speech is recognised where it is spoken:
   mobile (`lib/image-resize.ts`, 1600px / JPEG 0.7, HEIC or undecodable files
   go up unchanged), uploads three at a time, and **reuses signed URLs** across
   visits to the tab (`lib/signed-url-cache.ts`) so the browser cache hits.
-  Photos uploaded before then (incl. the ~6.4k Simpro imports) are still
-  full-size originals in the grid; shrinking those needs a one-off backfill
-  or Supabase image transforms (plan unconfirmed).
+- **Grid thumbnails (18 Oct 2026).** Both grids (web `job-photos.tsx`, mobile
+  `components/job/photos.tsx`) show `<jobId>/thumbs/<file>` (~400px JPEG,
+  `lib/photo-thumbs.ts` / `mobile/lib/photoThumbs.ts`) when it exists and fall
+  back to the original; the viewer/lightbox always opens the original. Made by
+  `scripts/generate-photo-thumbnails.mjs` (dry run by default, `--commit` to
+  upload; never touches an original; idempotent). Re-run it now and then to
+  cover new uploads — those are already ≤1600px, so it is not urgent.
 - `expo-image-manipulator` is a native module: it reaches devices only through a
   **new dev client / `eas build`**, never an OTA update.
 
