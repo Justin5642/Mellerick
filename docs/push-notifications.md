@@ -10,6 +10,9 @@ earlier builds just open the app).
 Nothing is sent for: import scripts and the SQL editor, completed or cancelled
 jobs, assigning yourself, or re-saving a crew that already includes the person.
 
+**Status:** switched on in production 19 Oct 2026 (steps 1–4 done, live test
+push delivered). The steps are kept for a new project or a rotated secret.
+
 ## One-time setup, in this order
 
 Run from the repo root. Use the pinned CLI (`supabase@2.109.1`); see HANDOVER for
