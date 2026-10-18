@@ -11,6 +11,7 @@ import { formatDate } from "@/lib/date";
 import { photoTagColors } from "@/lib/badge-colors";
 import { resizeImageForUpload } from "@/lib/image-resize";
 import { getCachedSignedUrl, putCachedSignedUrl } from "@/lib/signed-url-cache";
+import { thumbPathFor } from "@/lib/photo-thumbs";
 
 const SIGNED_URL_TTL_S = 3600;
 // Uploads run a few at a time rather than strictly one after another.
@@ -29,45 +30,65 @@ export function JobPhotos({ jobId, photos, onUpdate, currentUserId }: Props) {
   const [uploading, setUploading] = useState(false);
   const [photoType, setPhotoType] = useState<string>("general");
   const [lightbox, setLightbox] = useState<string | null>(null);
-  // Seeded from the shared cache, so revisiting the tab reuses the same URLs
-  // (and therefore the browser's cached images) instead of re-signing.
+  // Signed URLs keyed by storage key — a photo's original path, or its
+  // thumbnail's (lib/photo-thumbs.ts). Seeded from the shared cache, so
+  // revisiting the tab reuses the same URLs (and the browser's cached images).
   const [signedUrls, setSignedUrls] = useState<Record<string, string>>(() => {
     const seeded: Record<string, string> = {};
     for (const p of photos) {
-      const url = p.storage_path ? getCachedSignedUrl("job-photos", p.storage_path) : null;
-      if (url) seeded[p.storage_path] = url;
+      if (!p.storage_path) continue;
+      for (const key of [thumbPathFor(p.storage_path), p.storage_path]) {
+        const url = getCachedSignedUrl("job-photos", key);
+        if (url) seeded[key] = url;
+      }
     }
     return seeded;
   });
-  // Paths already sent for signing, so a re-render (or a new photos array
+  // Photos already sent for signing, so a re-render (or a new photos array
   // after an upload) never re-signs one that is in flight or done.
   const requestedPaths = useRef<Set<string>>(new Set());
 
-  // ONE createSignedUrls for every photo not yet signed, instead of a
-  // createSignedUrl round trip per thumbnail (the mobile Photos tab does the
-  // same — HANDOVER §3). Runs again when photos change, signing only new ones.
+  // The grid shows THUMBNAILS: one createSignedUrls for every unsigned photo's
+  // thumbnail, then one more for the originals of any photo that has no
+  // thumbnail yet (Storage reports a missing object per item, not as a
+  // request error). The ~9.7k imported Simpro photos are 3–8 MB originals;
+  // their ~40 KB thumbnails are what make this tab fast. The lightbox always
+  // opens the original (getUrl below).
   useEffect(() => {
-    const paths = photos
+    const todo = photos
       .map((p) => p.storage_path as string)
-      .filter((path) => path && !requestedPaths.current.has(path) && !getCachedSignedUrl("job-photos", path));
-    if (paths.length === 0) return;
-    paths.forEach((path) => requestedPaths.current.add(path));
-    createClient()
-      .storage.from("job-photos")
-      .createSignedUrls(paths, SIGNED_URL_TTL_S)
-      .then(({ data }) => {
-        const next: Record<string, string> = {};
-        for (const item of data ?? []) {
-          if (item.path && item.signedUrl) {
-            next[item.path] = item.signedUrl;
-            putCachedSignedUrl("job-photos", item.path, item.signedUrl, SIGNED_URL_TTL_S);
-          }
+      .filter(
+        (path) =>
+          path &&
+          !requestedPaths.current.has(path) &&
+          !getCachedSignedUrl("job-photos", thumbPathFor(path)) &&
+          !getCachedSignedUrl("job-photos", path)
+      );
+    if (todo.length === 0) return;
+    todo.forEach((path) => requestedPaths.current.add(path));
+    const client = createClient();
+    const sign = async (keys: string[]) => {
+      const { data } = await client.storage.from("job-photos").createSignedUrls(keys, SIGNED_URL_TTL_S);
+      const out: Record<string, string> = {};
+      for (const item of data ?? []) {
+        if (item.path && item.signedUrl && !item.error) {
+          out[item.path] = item.signedUrl;
+          putCachedSignedUrl("job-photos", item.path, item.signedUrl, SIGNED_URL_TTL_S);
         }
-        // A path that came back unsigned is released so the lightbox's
-        // single-path fallback (getUrl) or a later load can retry it.
-        paths.forEach((path) => { if (!next[path]) requestedPaths.current.delete(path); });
-        if (Object.keys(next).length > 0) setSignedUrls((prev) => ({ ...prev, ...next }));
+      }
+      return out;
+    };
+    void (async () => {
+      const next = await sign(todo.map(thumbPathFor));
+      const noThumb = todo.filter((path) => !next[thumbPathFor(path)]);
+      if (noThumb.length > 0) Object.assign(next, await sign(noThumb));
+      // A photo that came back with neither is released so the lightbox's
+      // single-path fallback (getUrl) or a later load can retry it.
+      todo.forEach((path) => {
+        if (!next[thumbPathFor(path)] && !next[path]) requestedPaths.current.delete(path);
       });
+      if (Object.keys(next).length > 0) setSignedUrls((prev) => ({ ...prev, ...next }));
+    })();
   }, [photos]);
 
   async function getUrl(path: string) {
@@ -233,7 +254,7 @@ export function JobPhotos({ jobId, photos, onUpdate, currentUserId }: Props) {
               photo={photo}
               onOpen={() => openLightbox(photo.storage_path)}
               onDelete={() => handleDelete(photo)}
-              url={signedUrls[photo.storage_path] ?? ""}
+              url={signedUrls[thumbPathFor(photo.storage_path)] ?? signedUrls[photo.storage_path] ?? ""}
               tagColors={photoTagColors}
             />
           ))}
@@ -250,8 +271,9 @@ export function JobPhotos({ jobId, photos, onUpdate, currentUserId }: Props) {
 }
 
 function PhotoCard({ photo, onOpen, onDelete, url, tagColors }: any) {
-  // The URL is signed in one batch by JobPhotos. Lazy + async decode so a long
-  // grid of full-size originals only downloads and decodes what is on screen.
+  // The URL is the photo's thumbnail when it has one (else the original),
+  // signed in one batch by JobPhotos. Lazy + async decode so a long grid only
+  // downloads and decodes what is on screen.
   return (
     <div className="group relative aspect-square rounded-lg overflow-hidden bg-slate-100 cursor-pointer" onClick={onOpen}>
       {url && <img src={url} alt="" loading="lazy" decoding="async" className="w-full h-full object-cover" />}

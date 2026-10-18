@@ -25,6 +25,7 @@ import { useDataLayer } from "../../lib/data/DataProvider";
 import { useSyncSettled } from "../../lib/data/hooks/useSyncSettled";
 import { reconcileRows } from "../../lib/data/reconcile";
 import { listJobPhotos, signJobPhotoUrls } from "../../lib/data/reads/jobPhotos";
+import { thumbPathFor } from "../../lib/photoThumbs";
 import { prepareImageForUpload } from "../../lib/imageUpload";
 
 interface Photo {
@@ -74,6 +75,10 @@ export function JobPhotosTab({
 }) {
   const [photos, setPhotos] = useState<Photo[]>([]);
   const [urls, setUrls] = useState<Record<string, string>>({});
+  // Grid thumbnails (lib/photoThumbs.ts), keyed by the PHOTO's storage path.
+  // Kept apart from `urls` (originals) and cached under the thumbnail's own
+  // path, so the full-size viewer can never be handed a thumbnail.
+  const [thumbs, setThumbs] = useState<Record<string, string>>({});
   const [uploading, setUploading] = useState(false);
   const [locating, setLocating] = useState(false);
   const [photoType, setPhotoType] = useState<(typeof PHOTO_TYPES)[number]>("general");
@@ -104,6 +109,11 @@ export function JobPhotosTab({
         delete next[path];
         return next;
       });
+      setThumbs((prev) => {
+        const next = { ...prev };
+        delete next[path];
+        return next;
+      });
       markUrlFailed(path);
     },
     [markUrlFailed]
@@ -115,41 +125,89 @@ export function JobPhotosTab({
   // (useSyncSettled) no longer re-signs the whole grid.
   const resolvedRef = useRef<Set<string>>(new Set());
 
-  // Give each listed photo an image source, cheapest first:
-  //   1. expo-image's disk cache, keyed by storage path — a photo seen before
-  //      renders from the device with no network at all, offline included;
-  //   2. otherwise ONE batched createSignedUrls for the rest (online only).
+  // Give each listed photo a GRID image, cheapest first:
+  //   1. expo-image's disk cache — the thumbnail's, else the original's — so a
+  //      photo seen before renders with no network at all, offline included;
+  //   2. otherwise ONE batched createSignedUrls for the thumbnails, and one more
+  //      for the originals of photos that have no thumbnail yet (online only).
+  // The ~9.7k imported Simpro photos are 3–8 MB originals; a technician looking
+  // up an old job on mobile data now pulls ~40 KB thumbnails instead.
   // A signed URL is NOT a cache identity (every call mints a new token); the
   // <Image> cacheKey is the storage path, so a fresh token never re-downloads.
   const resolveSources = useCallback(
     async (paths: string[]) => {
       const todo = paths.filter((p) => !resolvedRef.current.has(p));
       if (todo.length === 0) return;
+      const foundThumb: Record<string, string> = {};
       const found: Record<string, string> = {};
+      const asFile = (cached: string) => (cached.startsWith("file:") ? cached : `file://${cached}`);
       await Promise.all(
         todo.map(async (path) => {
           try {
+            const t = await Image.getCachePathAsync(thumbPathFor(path));
+            if (t) {
+              foundThumb[path] = asFile(t);
+              return;
+            }
             const cached = await Image.getCachePathAsync(path);
-            if (cached) found[path] = cached.startsWith("file:") ? cached : `file://${cached}`;
+            if (cached) found[path] = asFile(cached);
           } catch {
             // Not cached / lookup unsupported: fall through to signing.
           }
         })
       );
-      const toSign = todo.filter((p) => !found[p]);
+      const toSign = todo.filter((p) => !foundThumb[p] && !found[p]);
       if (toSign.length > 0 && (await netInfoConnectivity.isOnline())) {
         try {
-          Object.assign(found, await signJobPhotoUrls(toSign));
+          const signedThumbs = await signJobPhotoUrls(toSign.map(thumbPathFor));
+          for (const p of toSign) {
+            const u = signedThumbs[thumbPathFor(p)];
+            if (u) foundThumb[p] = u;
+          }
+          const noThumb = toSign.filter((p) => !foundThumb[p]);
+          if (noThumb.length > 0) Object.assign(found, await signJobPhotoUrls(noThumb));
         } catch {
           // Leave them unresolved; markUrlFailed below says so per cell.
         }
-        for (const p of toSign) if (!found[p]) markUrlFailed(p);
+        for (const p of toSign) if (!found[p] && !foundThumb[p]) markUrlFailed(p);
       }
-      for (const p of Object.keys(found)) resolvedRef.current.add(p);
+      for (const p of [...Object.keys(found), ...Object.keys(foundThumb)]) resolvedRef.current.add(p);
+      if (Object.keys(foundThumb).length > 0) setThumbs((prev) => ({ ...prev, ...foundThumb }));
       if (Object.keys(found).length > 0) setUrls((prev) => ({ ...prev, ...found }));
     },
     [markUrlFailed]
   );
+
+  // The viewer shows the ORIGINAL. A photo the grid drew from its thumbnail has
+  // no original URL yet, so fetch it on open (disk cache first, then one
+  // signing); the thumbnail stands in until it arrives.
+  const viewingPath = viewingPhoto?.storage_path ?? null;
+  const viewingHasOriginal = viewingPath ? !!urls[viewingPath] : true;
+  useEffect(() => {
+    if (!viewingPath || viewingHasOriginal) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const cached = await Image.getCachePathAsync(viewingPath);
+        if (cached) {
+          if (!cancelled) setUrls((prev) => ({ ...prev, [viewingPath]: cached.startsWith("file:") ? cached : `file://${cached}` }));
+          return;
+        }
+      } catch {
+        // Fall through to signing.
+      }
+      if (!(await netInfoConnectivity.isOnline())) return;
+      try {
+        const signed = await signJobPhotoUrls([viewingPath]);
+        if (!cancelled && signed[viewingPath]) setUrls((prev) => ({ ...prev, [viewingPath]: signed[viewingPath] }));
+      } catch {
+        // The thumbnail stays on screen; nothing else to do offline.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [viewingPath, viewingHasOriginal]);
 
   // The list comes from the device mirror (job_photos is synced for every role),
   // with Supabase as the fallback — see lib/data/reads/jobPhotos.ts. We still
@@ -370,13 +428,17 @@ export function JobPhotosTab({
               onPress={() => setViewingPhoto(item)}
               onLongPress={readOnly ? undefined : () => confirmDelete(item)}
             >
-              {urls[item.storage_path] ? (
-                // cacheKey = storage path: the signed URL's token changes on every
-                // sign, so keying on the URL (RN <Image>'s behaviour) re-downloaded
-                // the full image on every visit. expo-image also decodes down to
-                // the cell size, so a grid of thumbnails stays light in memory.
+              {thumbs[item.storage_path] || urls[item.storage_path] ? (
+                // cacheKey = storage path (the thumbnail's own path for a
+                // thumbnail): the signed URL's token changes on every sign, so
+                // keying on the URL re-downloaded the image on every visit.
+                // expo-image also decodes down to the cell size.
                 <Image
-                  source={{ uri: urls[item.storage_path], cacheKey: item.storage_path }}
+                  source={
+                    thumbs[item.storage_path]
+                      ? { uri: thumbs[item.storage_path], cacheKey: thumbPathFor(item.storage_path) }
+                      : { uri: urls[item.storage_path], cacheKey: item.storage_path }
+                  }
                   cachePolicy="memory-disk"
                   recyclingKey={item.storage_path}
                   contentFit="cover"
@@ -484,6 +546,15 @@ export function JobPhotosTab({
                   style={styles.viewerImage}
                   contentFit="contain"
                   onError={() => onImageError(viewingPhoto.storage_path)}
+                />
+              ) : thumbs[viewingPhoto.storage_path] ? (
+                // The original is still on its way (or unreachable offline): show
+                // the thumbnail rather than a spinner.
+                <Image
+                  source={{ uri: thumbs[viewingPhoto.storage_path], cacheKey: thumbPathFor(viewingPhoto.storage_path) }}
+                  cachePolicy="memory-disk"
+                  style={styles.viewerImage}
+                  contentFit="contain"
                 />
               ) : urlFailed[viewingPhoto.storage_path] ? (
                 <View style={[styles.viewerImage, styles.viewerFailed]}>
