@@ -27,8 +27,7 @@ beforeEach(async () => {
   mockUpsert.mockReset();
   mockDeleteEq.mockReset();
   mockRpc.mockReset();
-  // Default: the database does not have claim_device_token yet (0078 is a
-  // draft, not applied yet).
+  // Default: a database without claim_device_token (one missing 0078).
   mockRpc.mockResolvedValue({ error: { code: "PGRST202", message: "not found" } });
   jest.useRealTimers();
 });
@@ -67,7 +66,7 @@ describe("device push tokens", () => {
     await expect(pending).resolves.toBe(false);
   });
 
-  describe("shared phones (0078, a draft, not applied yet)", () => {
+  describe("shared phones (0078)", () => {
     it("claims the token through claim_device_token, so it follows whoever signs in", async () => {
       mockRpc.mockResolvedValue({ error: null });
       await expect(

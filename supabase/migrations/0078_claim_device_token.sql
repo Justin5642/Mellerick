@@ -1,9 +1,9 @@
 -- ============================================================================
 -- Hand a phone's push token to whoever is signed in on it now.
 --
--- STATUS: DRAFT — NOT APPLIED. Safe to apply at any time: the mobile app calls
--- claim_device_token() when it exists and falls back to its old upsert when it
--- does not. Then run supabase/tests/0078_claim_device_token_test.sql.
+-- STATUS: ✅ APPLIED IN PRODUCTION (2026-10-19, via db query --linked). Gate test
+-- supabase/tests/0078_claim_device_token_test.sql passed; verified afterwards
+-- (read-only): function present, executable by authenticated, not by anon.
 --
 -- WHY
 -- device_tokens is keyed on the Expo push token, one per app install, and 0036

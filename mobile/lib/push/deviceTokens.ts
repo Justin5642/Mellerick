@@ -11,12 +11,12 @@ const REMOVE_TIMEOUT_MS = 5_000;
 
 // Register this device's Expo push token for the signed-in user.
 //
-// claim_device_token() (migration 0078, a draft, not applied yet) hands the
-// token to whoever is signed in now. The plain upsert below could not: on a
+// claim_device_token() (migration 0078) hands the token to whoever is signed
+// in now. The plain upsert below could not: on a
 // shared or handed-down phone the row still belonged to the previous person,
 // RLS refused the update, and the new person's job notifications kept going to
-// the previous person. Until 0078 is applied the RPC does not exist, so this
-// falls back to the old upsert (which works for a phone with one user).
+// the previous person. Where the RPC does not exist (a database without
+// 0078), this falls back to the old upsert, which works for a one-user phone.
 //
 // Online-only device metadata — best-effort: a failure is swallowed so it can
 // never block sign-in or app use. updated_at is owned by the DB (0036).
