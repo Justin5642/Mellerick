@@ -52,7 +52,9 @@ export default function ScheduleScreen() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<unknown>(null);
   const [staffError, setStaffError] = useState<unknown>(null);
-  const [reassignAssigneeCount, setReassignAssigneeCount] = useState<number | null>(null);
+  // The crew being edited in the technician picker (ids), seeded from the
+  // job's current job_assignments when the sheet opens.
+  const [crew, setCrew] = useState<string[]>([]);
 
   // Unwrapped rather than defaulted to []: this list's empty state is "Nothing
   // scheduled.", which an office user reads as the day being clear. A failed
@@ -109,36 +111,42 @@ export default function ScheduleScreen() {
     return Array.from(map, ([, data]) => ({ title: businessDayLabel(data[0].day.startIso), data }));
   }, [jobs]);
 
-  // A job can have more than one technician (job_assignments, migration 0059)
-  // even though this sheet only ever picks one. Reassigning here goes through
-  // `assigned_to`, which the database collapses to that single pick — so
-  // before showing the sheet, check whether this job currently has a crew and
-  // warn that picking here will shrink it to one.
+  // Jobs are often done in pairs or more (job_assignments, migration 0059).
+  // The sheet opens with the job's current crew ticked; tapping toggles a
+  // technician, and Save replaces the crew in one write. It used to pick ONE
+  // person through assigned_to, which collapsed any existing crew to them.
   function openReassign(job: SchedJob) {
     setReassignJob(job);
-    setReassignAssigneeCount(null);
+    setCrew(job.assigned_to ? [job.assigned_to] : []);
     supabase
       .from("job_assignments")
-      .select("staff_id", { count: "exact", head: true })
+      .select("staff_id")
       .eq("job_id", job.id)
-      .then(({ count }) => setReassignAssigneeCount(count ?? null));
+      .then(({ data, error: crewError }) => {
+        // Offline / failed read: keep the primary-assignee seed above.
+        if (!crewError && data) setCrew(data.map((r: { staff_id: string }) => r.staff_id));
+      });
   }
 
-  async function onReassign(assignedTo: string | null) {
+  function toggleCrew(staffId: string) {
+    setCrew((cur) => (cur.includes(staffId) ? cur.filter((id) => id !== staffId) : [...cur, staffId]));
+  }
+
+  async function onSaveCrew() {
     const job = reassignJob;
     if (!job || busy || !schedule.ready) return;
     setBusy(true);
     try {
-      const tech = staff.find((s) => s.id === assignedTo);
-      await schedule.reassign(job.id, assignedTo);
+      await schedule.setCrew(job.id, crew);
       // Optimistic: reflect the change immediately (the outbox syncs in the
       // background — offline, a server reload would show stale data).
+      const names = crew.map((id) => staff.find((s) => s.id === id)?.full_name).filter(Boolean).join(", ");
       setJobs((cur) =>
-        cur.map((j) => (j.id === job.id ? { ...j, assigned_to: assignedTo, profiles: assignedTo ? { full_name: tech?.full_name ?? "" } : null } : j))
+        cur.map((j) => (j.id === job.id ? { ...j, assigned_to: crew[0] ?? null, profiles: crew.length ? { full_name: names } : null } : j))
       );
       setReassignJob(null);
     } catch (e) {
-      Alert.alert("Couldn't reassign", e instanceof Error ? e.message : "Please try again.");
+      Alert.alert("Couldn't save the crew", e instanceof Error ? e.message : "Please try again.");
     } finally {
       setBusy(false);
     }
@@ -288,7 +296,7 @@ export default function ScheduleScreen() {
         <View style={styles.overlay}>
           <View style={styles.pickerSheet}>
             <View style={styles.pickerHead}>
-              <Text style={styles.sheetTitle}>Assign to</Text>
+              <Text style={styles.sheetTitle}>Crew</Text>
               {busy ? <ActivityIndicator color={colors.blue600} /> : null}
             </View>
             {staffError ? (
@@ -297,32 +305,33 @@ export default function ScheduleScreen() {
                 <Text style={styles.staffErrorText}>Couldn&apos;t load the technician list. Tap to retry.</Text>
               </TouchableOpacity>
             ) : null}
-            {reassignAssigneeCount !== null && reassignAssigneeCount > 1 ? (
-              <View style={styles.staffErrorRow}>
-                <Ionicons name="warning-outline" size={18} color={colors.orange700} />
-                <Text style={styles.staffErrorText}>
-                  This job has {reassignAssigneeCount} technicians assigned. Picking one here replaces the whole
-                  crew with just them — manage multiple technicians from the web app instead.
-                </Text>
-              </View>
-            ) : null}
+            <Text style={styles.staffRole}>Tap everyone working on this job, then Save.</Text>
             <ScrollView style={{ maxHeight: 360 }}>
-              <TouchableOpacity style={styles.staffRow} onPress={() => onReassign(null)} disabled={busy}>
-                <Ionicons name="close-circle-outline" size={18} color={colors.slate500} />
-                <Text style={styles.staffName}>Unassign</Text>
-                {!reassignJob?.assigned_to && <Ionicons name="checkmark" size={18} color={colors.blue600} />}
-              </TouchableOpacity>
-              {staff.map((s) => (
-                <TouchableOpacity key={s.id} style={styles.staffRow} onPress={() => onReassign(s.id)} disabled={busy}>
-                  <Ionicons name="person-circle-outline" size={18} color={colors.slate500} />
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.staffName}>{s.full_name}</Text>
-                    <Text style={styles.staffRole}>{s.role}</Text>
-                  </View>
-                  {reassignJob?.assigned_to === s.id && <Ionicons name="checkmark" size={18} color={colors.blue600} />}
-                </TouchableOpacity>
-              ))}
+              {staff.map((s) => {
+                const on = crew.includes(s.id);
+                return (
+                  <TouchableOpacity
+                    key={s.id}
+                    style={styles.staffRow}
+                    onPress={() => toggleCrew(s.id)}
+                    disabled={busy}
+                    accessibilityRole="checkbox"
+                    accessibilityState={{ checked: on }}
+                  >
+                    <Ionicons name={on ? "checkbox" : "square-outline"} size={20} color={on ? colors.blue600 : colors.slate400} />
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.staffName}>{s.full_name}</Text>
+                      <Text style={styles.staffRole}>{s.role}</Text>
+                    </View>
+                  </TouchableOpacity>
+                );
+              })}
             </ScrollView>
+            <TouchableOpacity style={styles.saveCrewBtn} onPress={onSaveCrew} disabled={busy}>
+              <Text style={styles.saveCrewText}>
+                {crew.length === 0 ? "Save — unassigned" : `Save — ${crew.length} technician${crew.length === 1 ? "" : "s"}`}
+              </Text>
+            </TouchableOpacity>
             <TouchableOpacity style={styles.cancelBtn} onPress={() => setReassignJob(null)} disabled={busy}>
               <Text style={styles.cancelText}>Cancel</Text>
             </TouchableOpacity>
@@ -378,6 +387,8 @@ const styles = StyleSheet.create({
   staffErrorText: { flex: 1, fontSize: 12, color: colors.orange700, lineHeight: 16 },
   staffName: { fontSize: 15, fontWeight: "600", color: colors.slate900 },
   staffRole: { fontSize: 12, color: colors.slate400, textTransform: "capitalize", marginTop: 1 },
+  saveCrewBtn: { marginTop: 12, paddingVertical: 12, borderRadius: 10, alignItems: "center", backgroundColor: colors.blue600 },
+  saveCrewText: { color: "#fff", fontWeight: "700", fontSize: 15 },
   cancelBtn: { marginTop: 12, paddingVertical: 12, borderRadius: 10, backgroundColor: colors.bg, alignItems: "center", borderWidth: 1, borderColor: colors.border },
   cancelText: { fontSize: 14, fontWeight: "600", color: colors.slate700 },
 });

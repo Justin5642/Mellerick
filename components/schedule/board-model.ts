@@ -156,6 +156,18 @@ export function planBoardMove(job: BoardJob, source: BoardCell, target: BoardCel
   return crew || dates ? { crew, dates } : null;
 }
 
+/**
+ * Shift-drop / Shift-paste: ADD the target technician to the crew instead of
+ * swapping. Jobs are often done in pairs or more; a plain move swaps the
+ * source technician for the target, so building a crew used to mean opening
+ * the Schedule dialog. Adding someone never moves the job's dates.
+ * Null when there is nothing to add (the Unassigned column, or already on it).
+ */
+export function planBoardAdd(job: BoardJob, target: BoardCell): BoardMovePlan | null {
+  if (!target.staffId || job.crew.includes(target.staffId)) return null;
+  return { crew: [...job.crew, target.staffId], dates: null };
+}
+
 /** The job as it will look once a plan lands — for the optimistic update. */
 export function applyBoardMove(job: BoardJob, plan: BoardMovePlan): BoardJob {
   const next: BoardJob = { ...job };

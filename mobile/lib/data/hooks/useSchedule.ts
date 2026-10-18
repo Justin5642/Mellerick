@@ -26,6 +26,7 @@ export function useSchedule() {
       [run]
     ),
     clearSchedule: useCallback((jobId: string) => run((r) => r.clearSchedule(jobId)), [run]),
+    setCrew: useCallback((jobId: string, staffIds: string[]) => run((r) => r.setCrew(jobId, staffIds)), [run]),
     schedule: useCallback(
       (jobId: string, staffIds: string[], columns: ScheduleColumns, costCenterId: string | null = null) =>
         run((r) => r.schedule(jobId, staffIds, columns, costCenterId)),

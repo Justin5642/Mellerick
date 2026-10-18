@@ -58,6 +58,21 @@ describe("ScheduleRepository", () => {
     expect(writes(ops)[0].payload).toEqual({ scheduled_start: "2026-07-29T23:00:00.000Z", scheduled_end: null });
   });
 
+  it("setCrew sets a whole crew without touching assigned_to or the times", async () => {
+    const { outbox, ops } = captureOutbox();
+    await makeRepo(outbox).setCrew("j1", ["t1", "t2", "t1"]);
+    expect(writes(ops)).toHaveLength(0); // no jobs write: assigned_to would collapse the crew (0059)
+    const assign = sides(ops).find((o) => o.effect === "assign-technicians")!;
+    expect(assign.payload).toEqual({ jobId: "j1", staffIds: ["t1", "t2"] }); // de-duplicated
+    expect(assign.coalesceKey).toBe("assign-technicians:j1");
+  });
+
+  it("setCrew with nobody unassigns the whole crew", async () => {
+    const { outbox, ops } = captureOutbox();
+    await makeRepo(outbox).setCrew("j1", []);
+    expect(sides(ops)[0].payload).toEqual({ jobId: "j1", staffIds: [] });
+  });
+
   it("schedule writes the window and both 0071 flags in ONE job update, then assign-technicians gated on it", async () => {
     const { outbox, ops } = captureOutbox();
     const cols = buildScheduleColumns({ startDateKey: "2026-10-19", endDateKey: "2026-10-21", startTime: "", endTime: "", allDay: true });

@@ -10,6 +10,7 @@ import {
   formatHours,
   parseBoardTarget,
   planBoardMove,
+  planBoardAdd,
   totalHours,
   weekCellId,
   type BoardJob,
@@ -98,6 +99,22 @@ describe("parseBoardTarget", () => {
     expect(parseBoardTarget("staff:", "2026-10-21")).toBeNull();
     expect(parseBoardTarget("something-else", "2026-10-21")).toBeNull();
     expect(parseBoardTarget("staff:alice::not-a-date", "2026-10-21")).toBeNull();
+  });
+});
+
+describe("planBoardAdd — Shift-drop adds a technician instead of swapping", () => {
+  it("adds the target technician to the existing crew and leaves the dates alone", () => {
+    const plan = planBoardAdd(monToWed(), { staffId: "dan", dateKey: "2026-10-26" });
+    expect(plan).toEqual({ crew: [...monToWed().crew, "dan"], dates: null });
+  });
+
+  it("does nothing for someone already on the crew", () => {
+    const j = monToWed();
+    expect(planBoardAdd(j, { staffId: j.crew[0], dateKey: "2026-10-20" })).toBeNull();
+  });
+
+  it("does nothing when dropped on Unassigned", () => {
+    expect(planBoardAdd(monToWed(), { staffId: null, dateKey: "2026-10-20" })).toBeNull();
   });
 });
 
