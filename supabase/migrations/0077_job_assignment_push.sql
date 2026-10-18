@@ -1,10 +1,11 @@
 -- ============================================================================
 -- Push a notification to a technician when they are assigned a job.
 --
--- STATUS: DRAFT — NOT APPLIED. Apply ONLY after the send-push edge function is
--- redeployed with --no-verify-jwt and PUSH_INTERNAL_SECRET is set, and the two
--- vault secrets below exist — see docs/push-notifications.md. Without the
--- secrets this trigger does nothing (it never blocks an assignment).
+-- STATUS: ✅ APPLIED IN PRODUCTION (2026-10-19, via db query --linked), after
+-- PUSH_INTERNAL_SECRET was set, both vault secrets were created and send-push
+-- was redeployed with --no-verify-jwt (docs/push-notifications.md). Gate test
+-- passed; a live test push to an admin's device returned sent: 1. Without the
+-- vault secrets this trigger does nothing (it never blocks an assignment).
 --
 -- WHY
 -- Everything else for push was in place — APNs/FCM credentials in EAS, the

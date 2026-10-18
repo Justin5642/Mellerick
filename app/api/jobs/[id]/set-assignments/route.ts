@@ -20,7 +20,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   }
 
   // Marked as a real assignment so the job_assignments trigger notifies the
-  // newly assigned technicians (migration 0077, a draft, not applied yet). The
+  // newly assigned technicians (migration 0077). The
   // service role is otherwise treated as a script and sends nothing.
   const supabase = createAdminClient({ headers: { "x-mellerick-assignment": "1" } });
   const { data, error } = await supabase.rpc("set_job_assignments", {

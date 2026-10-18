@@ -8,8 +8,7 @@ import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 //
 // `headers` are sent on every request this client makes; Postgres sees them as
 // current_setting('request.headers'). Used to mark a service-role write as a
-// real user action (see /api/jobs/[id]/set-assignments, and migration 0077 —
-// a draft, not applied yet).
+// real user action (see /api/jobs/[id]/set-assignments and migration 0077).
 export function createAdminClient(options?: { headers?: Record<string, string> }): SupabaseClient {
   return createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
