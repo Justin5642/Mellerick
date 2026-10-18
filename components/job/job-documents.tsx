@@ -28,9 +28,11 @@ interface Props {
   onUpdate: (docs: any[]) => void;
   currentUserId: string;
   isOffice: boolean;
+  /** A technician viewing a job they are not assigned to: download only. */
+  readOnly?: boolean;
 }
 
-export function JobDocuments({ jobId, documents, onUpdate, currentUserId, isOffice }: Props) {
+export function JobDocuments({ jobId, documents, onUpdate, currentUserId, isOffice, readOnly = false }: Props) {
   const supabase = createClient();
   const inputRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
@@ -146,10 +148,12 @@ export function JobDocuments({ jobId, documents, onUpdate, currentUserId, isOffi
         <div>
           <input ref={inputRef} type="file" multiple className="hidden" onChange={handleUpload}
             accept=".pdf,.doc,.docx,.dwg,.dxf,.png,.jpg,.jpeg,.xlsx,.xls" />
-          <Button onClick={() => inputRef.current?.click()} disabled={uploading} className="gap-2">
-            <Upload className="w-4 h-4" />
-            {uploading ? "Uploading..." : "Upload Files"}
-          </Button>
+          {!readOnly && (
+            <Button onClick={() => inputRef.current?.click()} disabled={uploading} className="gap-2">
+              <Upload className="w-4 h-4" />
+              {uploading ? "Uploading..." : "Upload Files"}
+            </Button>
+          )}
         </div>
       </div>
 
@@ -157,10 +161,10 @@ export function JobDocuments({ jobId, documents, onUpdate, currentUserId, isOffi
         <Card className={dragActive ? "border-blue-400 bg-blue-50/40" : undefined}>
           <CardContent
             className={`flex flex-col items-center justify-center py-16 cursor-pointer transition-colors ${dragActive ? "text-blue-500" : "text-slate-400 hover:bg-slate-50"}`}
-            onClick={() => inputRef.current?.click()}
-            onDragOver={handleDragOver}
-            onDragLeave={handleDragLeave}
-            onDrop={handleDrop}
+            onClick={readOnly ? undefined : () => inputRef.current?.click()}
+            onDragOver={readOnly ? undefined : handleDragOver}
+            onDragLeave={readOnly ? undefined : handleDragLeave}
+            onDrop={readOnly ? undefined : handleDrop}
           >
             <FileText className="w-12 h-12 mb-3 opacity-40" />
             <p className="text-sm font-medium">{dragActive ? "Drop files to upload" : "No documents yet"}</p>
@@ -208,9 +212,11 @@ export function JobDocuments({ jobId, documents, onUpdate, currentUserId, isOffi
                   <Button variant="ghost" size="sm" onClick={() => handleDownload(doc)} className="h-8 w-8 p-0 text-slate-500 hover:text-blue-600">
                     <Download className="w-4 h-4" />
                   </Button>
+                  {!readOnly && (
                   <Button variant="ghost" size="sm" onClick={() => handleDelete(doc)} disabled={deleting === doc.id} className="h-8 w-8 p-0 text-slate-500 hover:text-red-600">
                     <Trash2 className="w-4 h-4" />
                   </Button>
+                  )}
                 </div>
               </CardContent>
             </Card>

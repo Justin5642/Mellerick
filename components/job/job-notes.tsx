@@ -19,9 +19,11 @@ interface Props {
   currentUserId: string;
   stageNotes: any[];
   onUpdateStageNotes: (notes: any[]) => void;
+  /** A technician viewing a job they are not assigned to: read, don't write. */
+  readOnly?: boolean;
 }
 
-export function JobNotes({ jobId, notes, onUpdate, currentUserId, stageNotes, onUpdateStageNotes }: Props) {
+export function JobNotes({ jobId, notes, onUpdate, currentUserId, stageNotes, onUpdateStageNotes, readOnly = false }: Props) {
   const supabase = createClient();
   const [content, setContent] = useState("");
   const [saving, setSaving] = useState(false);
@@ -164,6 +166,8 @@ export function JobNotes({ jobId, notes, onUpdate, currentUserId, stageNotes, on
           </div>
         )}
 
+        {!readOnly && (
+          <>
         <div className="flex flex-col sm:flex-row gap-2">
           <Select value={stageForNewNote} onValueChange={(v) => setStageForNewNote(v ?? "")}>
             <SelectTrigger className="sm:w-44"><SelectValue placeholder="Select stage..." /></SelectTrigger>
@@ -210,6 +214,8 @@ export function JobNotes({ jobId, notes, onUpdate, currentUserId, stageNotes, on
             {stageSaving ? "..." : "Add stage note"}
           </Button>
         </div>
+          </>
+        )}
 
         <div className="flex flex-wrap gap-1.5">
           <button
@@ -269,6 +275,7 @@ export function JobNotes({ jobId, notes, onUpdate, currentUserId, stageNotes, on
       </div>
 
       {/* Add note */}
+      {!readOnly && (
       <div className="flex flex-col gap-2">
         <Textarea
           value={content}
@@ -297,6 +304,7 @@ export function JobNotes({ jobId, notes, onUpdate, currentUserId, stageNotes, on
           </Button>
         </div>
       </div>
+      )}
 
       {/* Notes list */}
       {notes.length === 0 ? (

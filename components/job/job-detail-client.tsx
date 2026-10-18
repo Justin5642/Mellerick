@@ -5,6 +5,7 @@ import dynamic from "next/dynamic";
 import { useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { isJobViewOnly, VIEW_ONLY_TABS } from "@/lib/job-view-only";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ArrowLeft, Briefcase, FileText, Image, List, MessageSquare, PenLine, ClipboardList, Clock, Receipt, GitPullRequestArrow, DollarSign, Truck, TrendingUp, Trash2, CalendarClock } from "lucide-react";
@@ -109,6 +110,11 @@ export function JobDetailClient({ job, currentUserId, photos: initialPhotos, doc
   const [activeTab, setActiveTab] = useState(
     requestedTab && TAB_VALUES.includes(requestedTab) && (isOffice || requestedTab !== "po") ? requestedTab : "overview"
   );
+  // A technician on a job they are not assigned to (e.g. opened from the Jobs
+  // list) may look but not change anything. The database refuses their writes
+  // (migration 0074), so the page stops offering them, as the mobile app does.
+  const viewOnly = isJobViewOnly(isOffice, currentAssignedIds, currentUserId);
+  const shownTab = viewOnly && !VIEW_ONLY_TABS.includes(activeTab) ? "overview" : activeTab;
   const highlightVariationId = searchParams.get("variation");
   const [deleteOpen, setDeleteOpen] = useState(false);
   // `?schedule=1` (the Schedule page's To-do list "Schedule" action) opens the
@@ -237,10 +243,12 @@ export function JobDetailClient({ job, currentUserId, photos: initialPhotos, doc
                 poAllocatedHours={sumAllocatedHours(purchaseOrders)}
               />
             )}
-            <Button size="sm" className="gap-1.5" onClick={() => { setScheduleMounted(true); setScheduleOpen(true); }}>
-              <CalendarClock className="w-4 h-4" />
-              Schedule Job
-            </Button>
+            {!viewOnly && (
+              <Button size="sm" className="gap-1.5" onClick={() => { setScheduleMounted(true); setScheduleOpen(true); }}>
+                <CalendarClock className="w-4 h-4" />
+                Schedule Job
+              </Button>
+            )}
             {unbilledVariations.length > 0 && (
               <span
                 className="text-xs font-medium px-2.5 py-1 rounded-full bg-orange-100 text-orange-700"
@@ -269,7 +277,12 @@ export function JobDetailClient({ job, currentUserId, photos: initialPhotos, doc
 
       {/* Tabs */}
       <div className="flex-1 overflow-hidden">
-        <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v ?? "overview")} className="h-full flex flex-col">
+        {viewOnly && (
+          <div className="mx-6 mt-4 rounded-md bg-blue-50 px-4 py-2 text-sm font-medium text-blue-700">
+            View only — you&apos;re not assigned to this job.
+          </div>
+        )}
+        <Tabs value={shownTab} onValueChange={(v) => setActiveTab(v ?? "overview")} className="h-full flex flex-col">
           <div className="bg-white border-b px-6 overflow-x-auto">
             <TabsList className="h-auto bg-transparent p-0 gap-0 flex w-max min-w-full">
               {[
@@ -285,7 +298,7 @@ export function JobDetailClient({ job, currentUserId, photos: initialPhotos, doc
                 { value: "items", label: "Line Items", icon: List },
                 { value: "notes", label: "Notes", icon: MessageSquare },
                 { value: "signature", label: "Signature", icon: PenLine },
-              ].map(({ value, label, icon: Icon }) => (
+              ].filter(({ value }) => !viewOnly || VIEW_ONLY_TABS.includes(value)).map(({ value, label, icon: Icon }) => (
                 <TabsTrigger
                   key={value}
                   value={value}
@@ -301,7 +314,7 @@ export function JobDetailClient({ job, currentUserId, photos: initialPhotos, doc
           <div className="flex-1 overflow-y-auto">
             <TabsContent value="overview" className="m-0 h-full">
               {/* Technicians: hours-only scoreboard (no $), same placement as mobile. */}
-              {!isOffice && (techAllocatedHours > 0 || techAllocatedHoursError) && (
+              {!isOffice && !viewOnly && (techAllocatedHours > 0 || techAllocatedHoursError) && (
                 <div className="px-6 pt-6">
                   <JobHoursScoreboard
                     jobId={job.id}
@@ -314,7 +327,7 @@ export function JobDetailClient({ job, currentUserId, photos: initialPhotos, doc
                   />
                 </div>
               )}
-              <JobOverview job={job} staff={staff} />
+              <JobOverview job={job} staff={staff} readOnly={viewOnly} />
             </TabsContent>
             {isOffice && (
             <TabsContent value="po" className="m-0 h-full">
@@ -368,10 +381,10 @@ export function JobDetailClient({ job, currentUserId, photos: initialPhotos, doc
               </TabsContent>
             )}
             <TabsContent value="documents" className="m-0 h-full">
-              <JobDocuments jobId={job.id} documents={documents} onUpdate={setDocuments} currentUserId={currentUserId} isOffice={isOffice} />
+              <JobDocuments jobId={job.id} documents={documents} onUpdate={setDocuments} currentUserId={currentUserId} isOffice={isOffice} readOnly={viewOnly} />
             </TabsContent>
             <TabsContent value="photos" className="m-0 h-full">
-              <JobPhotos jobId={job.id} photos={photos} onUpdate={setPhotos} currentUserId={currentUserId} />
+              <JobPhotos jobId={job.id} photos={photos} onUpdate={setPhotos} currentUserId={currentUserId} readOnly={viewOnly} />
             </TabsContent>
             <TabsContent value="items" className="m-0 h-full">
               <JobLineItems jobId={job.id} lineItems={lineItems} pricingItems={pricingItems} onUpdate={setLineItems} />
@@ -384,6 +397,7 @@ export function JobDetailClient({ job, currentUserId, photos: initialPhotos, doc
                 currentUserId={currentUserId}
                 stageNotes={stageNotes}
                 onUpdateStageNotes={setStageNotes}
+                readOnly={viewOnly}
               />
             </TabsContent>
             <TabsContent value="signature" className="m-0 h-full">

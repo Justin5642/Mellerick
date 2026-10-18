@@ -8,8 +8,10 @@ jest.mock("@react-native-async-storage/async-storage", () =>
 
 const mockUpsert = jest.fn();
 const mockDeleteEq = jest.fn();
+const mockRpc = jest.fn();
 jest.mock("../supabase", () => ({
   supabase: {
+    rpc: (...a: unknown[]) => mockRpc(...a),
     from: () => ({
       upsert: (...a: unknown[]) => mockUpsert(...a),
       delete: () => ({ eq: (...a: unknown[]) => mockDeleteEq(...a) }),
@@ -24,6 +26,10 @@ beforeEach(async () => {
   await AsyncStorage.clear();
   mockUpsert.mockReset();
   mockDeleteEq.mockReset();
+  mockRpc.mockReset();
+  // Default: the database does not have claim_device_token yet (0078 is a
+  // draft, not applied yet).
+  mockRpc.mockResolvedValue({ error: { code: "PGRST202", message: "not found" } });
   jest.useRealTimers();
 });
 
@@ -59,5 +65,29 @@ describe("device push tokens", () => {
     const pending = removeDeviceToken();
     await jest.advanceTimersByTimeAsync(5_000);
     await expect(pending).resolves.toBe(false);
+  });
+
+  describe("shared phones (0078, a draft, not applied yet)", () => {
+    it("claims the token through claim_device_token, so it follows whoever signs in", async () => {
+      mockRpc.mockResolvedValue({ error: null });
+      await expect(
+        upsertDeviceToken({ token: "ExponentPushToken[shared]", platform: "android", userId: "u2" })
+      ).resolves.toBe(true);
+      expect(mockRpc).toHaveBeenCalledWith("claim_device_token", { p_token: "ExponentPushToken[shared]", p_platform: "android" });
+      expect(mockUpsert).not.toHaveBeenCalled();
+      expect(await AsyncStorage.getItem(REGISTERED_TOKEN_KEY)).toBe("ExponentPushToken[shared]");
+    });
+
+    it("falls back to the plain upsert only when the function does not exist yet", async () => {
+      mockUpsert.mockResolvedValue({ error: null });
+      await expect(upsertDeviceToken({ token: "ExponentPushToken[x]", platform: "ios", userId: "u1" })).resolves.toBe(true);
+      expect(mockUpsert).toHaveBeenCalled();
+    });
+
+    it("does not fall back when the claim is refused for a real reason", async () => {
+      mockRpc.mockResolvedValue({ error: { code: "42501", message: "account is not active" } });
+      await expect(upsertDeviceToken({ token: "ExponentPushToken[x]", platform: "ios", userId: "u1" })).resolves.toBe(false);
+      expect(mockUpsert).not.toHaveBeenCalled();
+    });
   });
 });
