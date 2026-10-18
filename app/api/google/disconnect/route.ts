@@ -8,8 +8,8 @@ export async function POST(request: NextRequest) {
   const guard = await requireAdmin(request);
   if (!guard.ok) return guard.response;
 
-  // Token tables are service-role only once migration 0075 (a draft, not
-  // applied yet) is in; the guard above has already authorised the caller.
+  // Token tables are service-role only (migration 0075); the guard above has
+  // already authorised the caller.
   const supabase = createAdminClient();
   const { error } = await supabase
     .from("google_tokens")

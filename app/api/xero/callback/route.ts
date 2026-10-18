@@ -39,8 +39,8 @@ export async function GET(request: NextRequest) {
     const connections = await connectionsRes.json();
     const tenant = connections[0];
 
-    // Token tables are service-role only once migration 0075 (a draft, not
-    // applied yet) is in; the guard above has already authorised the caller.
+    // Token tables are service-role only (migration 0075); the guard above has
+    // already authorised the caller.
     const supabase = createAdminClient();
 
     // Insert-then-retire, and both results checked. This used to delete the

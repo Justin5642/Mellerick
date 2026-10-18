@@ -102,8 +102,8 @@ lowercase. Reset links use `appUrl()` (`lib/env.ts`: `APP_URL` →
 `NEXT_PUBLIC_APP_URL` → production), never the request Host. `/api/backflow/
 scan-data-plate` accepts only JPEG/PNG/WebP ≤ 5 MB, and it and `/api/ai/
 polish-note` are rate limited per user through `consume_rate_limit()`
-(migration `0076`, **DRAFT — NOT APPLIED**; until applied they fail open and log
-"rate limiter unavailable"). API routes log DB/SDK error text and return fixed
+(migration `0076`, applied 2026-10-18; if the limiter is ever unavailable they
+fail open and log "rate limiter unavailable"). API routes log DB/SDK error text and return fixed
 sentences (guard: `tests/unit/no-raw-error-responses.test.ts`). The Time tab's
 stage picker is disabled on entries you could not edit. Public sign-up is off
 in `supabase/config.toml` — the hosted switch is a §7 item.
@@ -585,6 +585,12 @@ not", and guessing would inject phantom rows into the office queue.
 **Consequence: the Ready-to-Invoice queue contains only jobs signed off after the
 migration.** Office staff should be told this.
 
+**0073–0076 applied 2026-10-18** (SQL editor, one at a time, each gate test passed,
+ledger rows added by hand; effects re-verified read-only). The SQL editor does **not**
+hold an explicit `BEGIN … ROLLBACK` across statements, so gate tests meant to be pasted
+there must be one self-undoing `DO` block — see the header of
+`supabase/tests/0073_deactivation_test.sql` for the pattern.
+
 ### ⚠ Committed is not applied — and an edited migration never re-runs
 
 This has now caused a real credential exposure, so it is worth stating plainly.
@@ -873,11 +879,7 @@ a shippable release.
 | **`max_slot_wal_keep_size`** | Justin / Avi | Supabase instance config, no SQL path. Without it a slot can be invalidated again — which cost 24 hours of silent, invisible outage on 3–4 August. `npm run check:sync` now turns that failure mode into one command. |
 | **EAS env vars** | Justin / Avi | `eas env:create` for the two `EXPO_PUBLIC_*` values, or a cloud build ships an app pointed at `undefined`. See SHIPPING.md **STEP ZERO**. The app now refuses to start in that state rather than failing mysteriously later. |
 | **Sentry (error monitoring)** | Justin | Optional, and off until a DSN is set — see §12. Create a free Sentry org with a Next.js project (and a React Native project for the app), then set the DSNs in Vercel and EAS. Without it, failures like the weeks-long silent "Polish with AI" outage are still only discovered by accident. |
-| **Apply migration `0073`** | Justin | Deactivated staff lose access + the four `_public` views refuse `anon` (17 Oct 2026 audit). Apply alone, run `supabase/tests/0073_deactivation_test.sql`, flip its STATUS line. Until then the web side already refuses inactive staff (middleware, `lib/api/guards.ts`, login ban via `/api/staff/set-active`); RLS does not yet. |
-| **Apply migration `0074`** | Justin | Technician write scope (17 Oct 2026, rules agreed with Justin): techs change only assigned jobs; customers office-only edits; no tech deletes of backflow devices/tests; time entries audited in `time_entry_changes` and locked once billed. Apply alone after 0073, run `supabase/tests/0074_technician_write_scope_test.sql`, flip its STATUS line. Mobile already shows other people's jobs view-only. |
-| **Apply migration `0075`** | Justin | Xero/Google OAuth tokens become server-only (17 Oct 2026 audit). **Order matters: deploy the app change first** (it moves every token read/write to the service role), then apply 0075 alone and run `supabase/tests/0075_oauth_tokens_server_only_test.sql`. Applied before the deploy, it breaks Xero push, both OAuth callbacks and calendar sync. |
 | **Turn off public sign-up** | Justin | Dashboard → Authentication → Sign In / Providers → untick **"Allow new users to sign up"**. `supabase/config.toml` now has `[auth] enable_signup = false`, but that file only configures the local stack — the hosted project still lets anyone with the anon key call `/auth/v1/signup`. Invites keep working (GoTrue's admin invite does not check this switch). Leave the **Email provider** itself enabled. |
-| **Apply `0076`** | Justin | Shared per-user rate limit for the AI routes. `supabase db push`, run `supabase/tests/0076_api_rate_limits_test.sql`, then flip its STATUS line. Until then the routes fail open (no limit) and log "rate limiter unavailable". |
 | **`APP_URL`** (optional) | Justin | Origin for emailed reset links. Unset = `https://mellerick-app.vercel.app`, which is right for production. Set it only for a different domain, or `http://localhost:3000` in `.env.local` to test resets locally. |
 | **Maestro flow 02** | Avi | Needs `ADMIN_EMAIL` / `ADMIN_PASSWORD` in the environment. The login subflow deliberately skips when a session already exists, so a password never passes through a script — which is why flows 01/03/04 could be run and 02 could not. |
 

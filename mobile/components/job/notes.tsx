@@ -69,8 +69,7 @@ function optimisticStageNote(id: string, stage: string, content: string): StageN
 }
 
 // readOnly: a technician viewing a job they are not assigned to (opened from
-// Search). Migration 0074 (a draft, not applied yet) makes the database refuse
-// their notes there; until then they would still save. Either way the
+// Search). The database refuses their notes there (migration 0074), so the
 // composers are hidden rather than letting a note fail to sync later.
 export function JobNotesTab({ jobId, currentUserId, readOnly = false }: { jobId: string; currentUserId: string; readOnly?: boolean }) {
   const [notes, setNotes] = useState<Note[]>([]);

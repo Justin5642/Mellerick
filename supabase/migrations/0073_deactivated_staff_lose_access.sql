@@ -1,8 +1,10 @@
 -- ============================================================================
 -- Deactivated staff lose access, and the four "_public" views refuse anon.
 --
--- STATUS: DRAFT — NOT APPLIED. Apply to production on its own, then run
--- supabase/tests/0073_deactivation_test.sql and flip this line.
+-- STATUS: ✅ APPLIED IN PRODUCTION (2026-10-18, via SQL editor, one at a time in order
+-- 0073 → 0076). Verified afterwards (read-only): ledger row present,
+-- is_office_or_admin() checks is_active, anon has no SELECT on the _public
+-- views. Gate test supabase/tests/0073_deactivation_test.sql passed.
 --
 -- 1. DEACTIVATION DID NOTHING ON THE SERVER
 -- The staff screen sets profiles.is_active = false and reports "Staff member

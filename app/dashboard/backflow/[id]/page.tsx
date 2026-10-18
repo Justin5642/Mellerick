@@ -80,7 +80,7 @@ export default async function BackflowDevicePage({ params }: { params: Promise<{
           <Link prefetch={false} href={`/dashboard/backflow/${id}/test/new`}>
             <Button className="gap-2"><Plus className="w-4 h-4" />Log Test</Button>
           </Link>
-          {/* Office/admin only. Migration 0074 (draft, not applied yet) makes the database refuse a technician too. */}
+          {/* Office/admin only — the database refuses a technician too (0074). */}
           {isOffice && <DeleteDeviceButton deviceId={id} customerName={device.customers?.name ?? "this customer"} />}
         </div>
       </div>

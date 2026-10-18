@@ -218,9 +218,8 @@ export default function JobDetailScreen() {
   }
 
   // A technician on a job they are not assigned to (opened from Search) may
-  // look but not change anything. Migration 0074 (a draft, not applied yet)
-  // makes the database refuse it, and a refused write would otherwise sit
-  // failed in the outbox.
+  // look but not change anything. The database refuses it (migration 0074),
+  // and a refused write would otherwise sit failed in the outbox.
   const viewOnly =
     !isOfficeOrAdmin && assignmentKnown && !!userId && !assignedStaff.some((a) => a.id === userId);
   const visibleTabs = viewOnly ? TABS.filter((t) => VIEW_ONLY_TABS.has(t.key)) : TABS;
