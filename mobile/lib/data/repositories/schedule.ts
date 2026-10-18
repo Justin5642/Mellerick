@@ -111,6 +111,29 @@ export class ScheduleRepository {
     await this.outbox.enqueue(assign);
   }
 
+  /**
+   * Set a job's whole crew (any number of technicians, or none) without
+   * touching its times. Goes through the same assign-technicians side effect
+   * as schedule() → set_job_assignments, which only ADDS people new to the
+   * crew (so they alone get the "New job assigned" push, 0077) and removes the
+   * rest. reassign() above writes assigned_to, which collapses the crew to one
+   * person; this is what the Schedule tab's crew picker uses instead.
+   */
+  async setCrew(jobId: string, staffIds: string[]): Promise<void> {
+    const assign: SideEffectOperation = {
+      kind: "side_effect",
+      id: this.ids.newId(),
+      effect: "assign-technicians",
+      coalesceKey: `assign-technicians:${jobId}`,
+      payload: { jobId, staffIds: [...new Set(staffIds)] },
+      status: "pending",
+      attempts: 0,
+      nextAttemptAt: 0,
+      createdAt: this.time.nowMs(),
+    };
+    await this.outbox.enqueue(assign);
+  }
+
   private async updateJob(jobId: string, payload: Record<string, unknown>): Promise<string> {
     const opId = this.ids.newId();
     const op: WriteOperation = {

@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   DndContext,
   DragOverlay,
@@ -44,6 +44,7 @@ import {
   formatHours,
   parseBoardTarget,
   planBoardMove,
+  planBoardAdd,
   totalHours,
   weekCellId,
   type BoardCell,
@@ -468,6 +469,24 @@ export function TeamScheduleView({
   );
   const weekRangeLabel = useMemo(() => formatWeekRangeLabel(weekKeys), [weekKeys]);
 
+  // Shift held = ADD the technician to the crew instead of moving the job to
+  // them. Tracked from the keyboard because a drop event does not carry
+  // modifier keys reliably across pointer and touch sensors.
+  const shiftHeld = useRef(false);
+  useEffect(() => {
+    const down = (e: KeyboardEvent) => { if (e.key === "Shift") shiftHeld.current = true; };
+    const up = (e: KeyboardEvent) => { if (e.key === "Shift") shiftHeld.current = false; };
+    const blur = () => { shiftHeld.current = false; };
+    window.addEventListener("keydown", down);
+    window.addEventListener("keyup", up);
+    window.addEventListener("blur", blur);
+    return () => {
+      window.removeEventListener("keydown", down);
+      window.removeEventListener("keyup", up);
+      window.removeEventListener("blur", blur);
+    };
+  }, []);
+
   // Esc leaves cut mode.
   useEffect(() => {
     if (!cut) return;
@@ -483,7 +502,8 @@ export function TeamScheduleView({
     [staffById],
   );
 
-  function describeMove(job: BoardJob, plan: BoardMovePlan, source: BoardCell, target: BoardCell) {
+  function describeMove(job: BoardJob, plan: BoardMovePlan, source: BoardCell, target: BoardCell, mode: "move" | "add" = "move") {
+    if (mode === "add") return `#${job.job_number} ${nameOf(target.staffId)} added to the crew`;
     const changes: string[] = [];
     if (plan.crew) {
       if (!target.staffId) changes.push(plan.crew.length === 0 ? "unassigned" : `${nameOf(source.staffId)} taken off`);
@@ -505,10 +525,10 @@ export function TeamScheduleView({
    * to refuse, and refusing it first leaves nothing changed. If the dates are
    * then refused, the crew is put back so the job is not left half-moved.
    */
-  async function moveJob(jobId: string, source: BoardCell, target: BoardCell) {
+  async function moveJob(jobId: string, source: BoardCell, target: BoardCell, mode: "move" | "add" = "move") {
     const job = jobs.find((j) => j.id === jobId);
     if (!job) return;
-    const plan = planBoardMove(job, source, target);
+    const plan = mode === "add" ? planBoardAdd(job, target) : planBoardMove(job, source, target);
     if (!plan) return; // dropped back where it came from
 
     setJobs((prev) => prev.map((j) => (j.id === jobId ? applyBoardMove(j, plan) : j)));
@@ -543,7 +563,7 @@ export function TeamScheduleView({
       calendarSynced = await pushJobToCalendar(jobId);
     }
 
-    const what = describeMove(job, plan, source, target);
+    const what = describeMove(job, plan, source, target, mode);
     // A re-date the calendar never heard about is the state that used to let
     // the poll write the old time back. Saying so is the difference between
     // a user retrying now and finding the job moved back tomorrow.
@@ -557,7 +577,7 @@ export function TeamScheduleView({
     const pickup = cut;
     setCut(null);
     const target = parseBoardTarget(targetId, selectedDateKey);
-    if (target) void moveJob(pickup.jobId, pickup.source, target);
+    if (target) void moveJob(pickup.jobId, pickup.source, target, shiftHeld.current ? "add" : "move");
   }
 
   function handleDragStart(event: DragStartEvent) {
@@ -572,7 +592,7 @@ export function TeamScheduleView({
     const pickup = active.data.current as Pickup | undefined;
     const target = parseBoardTarget(over.id as string, selectedDateKey);
     if (!pickup || !target) return;
-    void moveJob(pickup.jobId, pickup.source, target);
+    void moveJob(pickup.jobId, pickup.source, target, shiftHeld.current ? "add" : "move");
   }
 
   const onPick = cut ? placeCut : undefined;
@@ -658,8 +678,8 @@ export function TeamScheduleView({
         ) : (
           <p className="text-xs text-slate-400 mb-3">
             {viewMode === "day"
-              ? "Press and hold a job and drag it onto a technician — or double-click it, then click the technician — to move it to them."
-              : "Press and hold a job and drag it onto another technician and/or day — or double-click it, then click the cell — to move it."}
+              ? "Press and hold a job and drag it onto a technician — or double-click it, then click the technician — to move it to them. Hold Shift as you drop to add them to the crew instead."
+              : "Press and hold a job and drag it onto another technician and/or day — or double-click it, then click the cell — to move it. Hold Shift as you drop on a technician to add them to the crew instead."}
           </p>
         )}
 
