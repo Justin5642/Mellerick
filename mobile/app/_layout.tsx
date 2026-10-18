@@ -21,6 +21,7 @@ import {
 import { AuthProvider, useAuth } from "../lib/auth-context";
 import { useSignOut } from "../lib/useSignOut";
 import { usePushRegistration } from "../lib/push/usePushRegistration";
+import { useNotificationTaps } from "../lib/push/notificationTaps";
 import { LocationTrackingProvider } from "../lib/location-tracking";
 import { DataProvider } from "../lib/data/DataProvider";
 import { PowerSyncProvider } from "../lib/data/PowerSyncProvider";
@@ -48,6 +49,7 @@ function RootNavigation() {
   // Register for push once signed in (best-effort; no-op without a device /
   // permission / credentials / the device_tokens table — never blocks the UI).
   usePushRegistration();
+  useNotificationTaps();
   const role = profile?.role;
   const isTech = role === "technician";
   const isOffice = role === "office" || role === "admin";

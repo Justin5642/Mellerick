@@ -917,13 +917,17 @@ needs come from the Apple account, which now exists. `eas build --platform ios`
 will produce an `.ipa`. What still gates *submission* is the App Store Connect
 app record, which yields the `ascAppId` for `eas.json`.
 
-**Push notifications** — fully implemented and tested; cannot deliver without an
-APNs `.p8` from Apple and an FCM service-account JSON from Firebase. The `.p8`
-downloads **once only**.
+**Push notifications** — APNs and FCM credentials are in EAS (Aug 2026), phones
+register `device_tokens`, and the `send-push` edge function is deployed. Since
+19 Oct 2026 a job assignment triggers a "New job assigned" push (migration
+`0077`, trigger on `job_assignments`); tapping it opens the job from mobile
+build 15. Turning it on needs a one-time secret + vault + redeploy step — see
+**`docs/push-notifications.md`**.
 
-**`mobile/eas.json` placeholders** — `appleTeamId` is filled. `appleId` and
-`ascAppId` are still `*_HERE`; `eas submit --platform ios` fails until they are.
-`ascAppId` only exists once the App Store Connect app record is created.
+**`mobile/eas.json`** — `appleId`, `ascAppId` and `appleTeamId` are filled, and
+the App Store Connect API key lives on EAS's servers: build 14 (19 Oct 2026)
+built and auto-submitted to TestFlight with `eas build --platform ios
+--profile production --auto-submit`.
 
 **Store assets** — screenshots (4 per platform, demo-safe data) and an Android
 feature graphic (1024×500). Listing copy, privacy answers and the privacy policy

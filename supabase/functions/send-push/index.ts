@@ -60,8 +60,11 @@ Deno.serve(async (req: Request) => {
     if (!token) return json({ error: "Not authenticated" }, 401);
     const { data: userData } = await admin.auth.getUser(token);
     if (!userData.user) return json({ error: "Not authenticated" }, 401);
-    const { data: profile } = await admin.from("profiles").select("role").eq("id", userData.user.id).single();
-    if (!profile || (profile.role !== "office" && profile.role !== "admin")) return json({ error: "Forbidden" }, 403);
+    const { data: profile } = await admin.from("profiles").select("role, is_active").eq("id", userData.user.id).single();
+    // A deactivated office user is refused like everyone else (0073).
+    if (!profile || profile.is_active === false || (profile.role !== "office" && profile.role !== "admin")) {
+      return json({ error: "Forbidden" }, 403);
+    }
     authorized = true;
   }
 

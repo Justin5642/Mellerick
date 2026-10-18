@@ -19,7 +19,10 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     return NextResponse.json({ error: "staffIds must be a string array" }, { status: 400 });
   }
 
-  const supabase = createAdminClient();
+  // Marked as a real assignment so the job_assignments trigger notifies the
+  // newly assigned technicians (migration 0077, a draft, not applied yet). The
+  // service role is otherwise treated as a script and sends nothing.
+  const supabase = createAdminClient({ headers: { "x-mellerick-assignment": "1" } });
   const { data, error } = await supabase.rpc("set_job_assignments", {
     p_job_id: id,
     p_staff_ids: staffIds,
