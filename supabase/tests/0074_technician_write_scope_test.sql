@@ -181,6 +181,8 @@ begin
   end if;
   foreach line in array res loop
     parts := string_to_array(line, '|');
+    -- format('%s', <boolean>) writes t / f; compare as true / false.
+    parts[3] := case parts[3] when 't' then 'true' when 'f' then 'false' else parts[3] end;
     if parts[2] is distinct from parts[3] then
       n_fail := n_fail + 1;
       failures := failures || format(E'\n  - %s: expected %s, got %s', parts[1], parts[2], parts[3]);
