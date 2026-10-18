@@ -12,6 +12,8 @@ export interface ExpoMessage {
   to: string;
   title: string;
   body: string;
+  /** "default" plays the device's notification sound; without it iOS delivers silently. */
+  sound?: "default";
   data?: Record<string, unknown>;
 }
 
@@ -35,7 +37,7 @@ export function chunk<T>(items: T[], size = MAX_PER_REQUEST): T[][] {
 export function buildMessages(tokens: string[], n: PushNotification): ExpoMessage[] {
   return tokens
     .filter((t) => typeof t === "string" && (t.startsWith("ExponentPushToken[") || t.startsWith("ExpoPushToken[")))
-    .map((to) => ({ to, title: n.title, body: n.body, ...(n.data ? { data: n.data } : {}) }));
+    .map((to) => ({ to, title: n.title, body: n.body, sound: "default", ...(n.data ? { data: n.data } : {}) }));
 }
 
 // POST the messages to Expo in batches. `fetchFn` is injected (global fetch in

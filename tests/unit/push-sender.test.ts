@@ -8,6 +8,10 @@ function jsonResponse(body: unknown, ok = true, status = 200): Response {
 }
 
 describe("buildMessages", () => {
+  it("asks for the default sound — iOS delivers a push with no `sound` silently", () => {
+    expect(buildMessages(["ExponentPushToken[a]"], notif)[0].sound).toBe("default");
+  });
+
   it("keeps only well-formed Expo tokens and stamps the notification", () => {
     const msgs = buildMessages(["ExponentPushToken[a]", "garbage", "ExpoPushToken[b]", ""], notif);
     expect(msgs.map((m) => m.to)).toEqual(["ExponentPushToken[a]", "ExpoPushToken[b]"]);
