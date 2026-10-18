@@ -43,8 +43,7 @@ export function navItemsFor(role: string | undefined): NavItem[] {
 }
 
 /** Pages under a technician section that are still office-only. Creating a
- *  job is already office-only in the mobile app; migration 0074 (a draft, not
- *  applied yet) makes it so in the database too. */
+ *  job is office-only in the mobile app and in the database (migration 0074). */
 const TECH_DENIED = ["/dashboard/jobs/new"];
 
 /** Whether a role may open a given dashboard path. */

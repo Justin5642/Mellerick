@@ -1,10 +1,12 @@
 -- ============================================================================
 -- Xero and Google OAuth tokens: server-only.
 --
--- STATUS: DRAFT — NOT APPLIED. Deploy the app change FIRST (it moves every
--- token read/write to the service role), then apply this alone and run
--- supabase/tests/0075_oauth_tokens_server_only_test.sql. Applying this before
--- the deploy breaks Xero push, the Xero/Google callbacks and calendar sync.
+-- STATUS: ✅ APPLIED IN PRODUCTION (2026-10-18, via SQL editor, one at a time in order
+-- 0073 → 0076). Verified afterwards (read-only): ledger row present,
+-- authenticated cannot SELECT refresh_token, can still SELECT google_email.
+-- Applied after the app change (#72) was live, as required: before it, this
+-- would have broken Xero push, the OAuth callbacks and calendar sync. Gate
+-- test supabase/tests/0075_oauth_tokens_server_only_test.sql passed.
 --
 -- WHY
 -- 0042 lets office/admin read and write the whole token row with their own

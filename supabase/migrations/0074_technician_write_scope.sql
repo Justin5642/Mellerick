@@ -2,8 +2,10 @@
 -- Technician write scope: assigned jobs only, office-only customer edits,
 -- no technician deletes of compliance records, audited time entries.
 --
--- STATUS: DRAFT — NOT APPLIED. Apply alone (after 0073), then run
--- supabase/tests/0074_technician_write_scope_test.sql and flip this line.
+-- STATUS: ✅ APPLIED IN PRODUCTION (2026-10-18, via SQL editor, one at a time in order
+-- 0073 → 0076). Verified afterwards (read-only): ledger row present,
+-- all 3 triggers installed, time_entry_changes exists. Gate test
+-- supabase/tests/0074_technician_write_scope_test.sql passed.
 --
 -- WHY
 -- The 17 Oct 2026 audit found nine tables still governed by the baseline

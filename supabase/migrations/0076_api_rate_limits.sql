@@ -1,9 +1,11 @@
 -- ============================================================================
 -- Per-user rate limit for the paid AI routes, shared across serverless instances.
 --
--- STATUS: DRAFT — NOT APPLIED. Handed over for Justin to apply. Until it is,
--- the routes that call consume_rate_limit() fail OPEN (allow the request and
--- log "rate limiter unavailable") — see lib/api/rate-limit.ts.
+-- STATUS: ✅ APPLIED IN PRODUCTION (2026-10-18, via SQL editor, one at a time in order
+-- 0073 → 0076). Verified afterwards (read-only): ledger row present,
+-- consume_rate_limit() exists. Gate test supabase/tests/0076_api_rate_limits_test.sql
+-- passed. If it is ever missing, the routes fail OPEN (allow and log
+-- "rate limiter unavailable") — see lib/api/rate-limit.ts.
 --
 -- WHY. /api/backflow/scan-data-plate (Claude vision) and /api/ai/polish-note
 -- (Claude text) each spend real money per call and are open to every signed-in

@@ -10,8 +10,7 @@ import { requireAdmin } from "@/lib/api/guards";
 // auth user: Supabase then refuses new sign-ins and token refreshes, so the
 // person is out within one access-token lifetime (≤1 hour) even on a device
 // that never re-checks the flag. Middleware and lib/api/guards.ts refuse an
-// inactive profile immediately on the web; migration 0073 (a draft, not applied
-// yet) does the same in RLS once it is.
+// inactive profile immediately on the web; migration 0073 does the same in RLS.
 
 // ~100 years: Supabase has no "forever" ban, and this is what its docs suggest.
 const BAN_FOREVER = "876000h";
