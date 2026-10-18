@@ -1,12 +1,9 @@
 import { createClient } from "@/lib/supabase/server";
 import { getViewer } from "@/lib/auth/viewer";
-import {
-  JobsListClient,
-  BASE_COLUMNS,
-  LIST_COLUMNS,
-  PAGE_SIZE,
-  latestStageByJob,
-} from "@/components/jobs/jobs-list-client";
+import { JobsListClient } from "@/components/jobs/jobs-list-client";
+// From a plain module, never from the "use client" file: a server component
+// importing a value from a client module gets a reference, not the value.
+import { BASE_COLUMNS, LIST_COLUMNS, PAGE_SIZE, latestStageByJob } from "@/lib/jobs-list";
 
 export const dynamic = "force-dynamic";
 
