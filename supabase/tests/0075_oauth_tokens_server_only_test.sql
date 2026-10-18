@@ -32,9 +32,13 @@ do $$
 declare
   off uuid;
 begin
-  select id into off from profiles where role = 'office' and coalesce(is_active, true) limit 1;
+  -- Prefer an office user; fall back to an admin when the database has none
+  -- (production has no office-role staff). Admins pass the same
+  -- is_office_or_admin() checks, so every assertion means the same thing.
+  select id into off from profiles where role in ('office', 'admin') and coalesce(is_active, true)
+    order by (role = 'office') desc limit 1;
   if off is null then
-    raise exception 'fixture missing: need an active office user';
+    raise exception 'fixture missing: need an active office user or admin';
   end if;
 
   perform set_config('request.jwt.claims', '', true);

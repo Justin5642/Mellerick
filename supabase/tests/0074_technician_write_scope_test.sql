@@ -55,9 +55,13 @@ declare
   other_note uuid := gen_random_uuid();
 begin
   select id into tech from profiles where role = 'technician' and coalesce(is_active, true) limit 1;
-  select id into off  from profiles where role = 'office'     and coalesce(is_active, true) limit 1;
+  -- Prefer an office user; fall back to an admin when the database has none
+  -- (production has no office-role staff). Admins pass the same
+  -- is_office_or_admin() checks, so every assertion means the same thing.
+  select id into off  from profiles where role in ('office', 'admin') and coalesce(is_active, true)
+    order by (role = 'office') desc limit 1;
   if tech is null or off is null then
-    raise exception 'fixture missing: need an active technician and office user';
+    raise exception 'fixture missing: need an active technician and an office user or admin';
   end if;
 
   -- Fixtures, written as postgres with no JWT (RLS and the triggers' early
