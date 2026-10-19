@@ -109,6 +109,27 @@ describe("splitMyJobEntries", () => {
     expect(upcoming.map((e) => e.bookingId)).toEqual([thu.id]);
   });
 
+  it("puts past-dated open jobs in Earlier at the bottom, so the next job leads Upcoming", () => {
+    const entries = myJobEntries(
+      [
+        job("old", at("2026-10-07", "07:00"), at("2026-10-07", "15:00")),
+        job("older", at("2026-09-30", "07:00"), at("2026-09-30", "15:00")),
+        job("next", at("2026-10-21", "07:00"), at("2026-10-21", "11:00")),
+      ],
+      [],
+      "dave",
+      "2026-10-19"
+    );
+    const { upcoming, earlier } = splitMyJobEntries(entries, "2026-10-19");
+    expect(upcoming.map((e) => e.job.id)).toEqual(["next"]);
+    expect(earlier.map((e) => e.job.id)).toEqual(["old", "older"]); // most recent first
+  });
+
+  it("a multi-day job still running today is Today, not Earlier", () => {
+    const entries = myJobEntries([job("mw", at("2026-10-17", "07:00"), at("2026-10-21", "15:00"))], [], "dave", "2026-10-19");
+    expect(splitMyJobEntries(entries, "2026-10-19").earlier).toHaveLength(0);
+  });
+
   it("puts unscheduled entries last in Upcoming, keeping their order", () => {
     const entries = myJobEntries(
       [job("u1"), job("s1", at("2026-10-23", "07:00"), at("2026-10-23", "09:00")), job("u2")],

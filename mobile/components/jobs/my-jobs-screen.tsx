@@ -134,7 +134,7 @@ export function MyJobsScreen() {
   // for them is two cards), or the job's own window where they have none
   // (lib/bookings.ts myJobEntries says exactly when).
   const todayKey = businessTodayKey();
-  const { today: todayJobs, upcoming: upcomingJobs } = splitMyJobEntries(
+  const { today: todayJobs, upcoming: upcomingJobs, earlier: earlierJobs } = splitMyJobEntries(
     myJobEntries(jobs, bookings, userId ?? "", todayKey),
     todayKey
   );
@@ -236,6 +236,11 @@ export function MyJobsScreen() {
             ? [{ type: "header" as const, key: "upcoming-header", label: `Upcoming (${upcomingJobs.length})` }]
             : []),
           ...upcomingJobs.map((e) => ({ type: "job" as const, key: e.key, entry: e })),
+          // Past-dated but not finished: last, so the next job is always on top.
+          ...(earlierJobs.length > 0
+            ? [{ type: "header" as const, key: "earlier-header", label: `Earlier — not finished (${earlierJobs.length})` }]
+            : []),
+          ...earlierJobs.map((e) => ({ type: "job" as const, key: e.key, entry: e })),
         ]}
         keyExtractor={(item) => item.key}
         contentContainerStyle={styles.listContent}

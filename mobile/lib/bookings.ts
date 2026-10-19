@@ -144,20 +144,34 @@ function dayOn(window: ScheduledJobWindow, dateKey: string) {
 }
 
 /**
- * Today / Upcoming, by the ENTRY's own time (a booking's window, not the
- * job's). Today is every entry that books today, in that day's start order;
- * Upcoming is the rest, soonest first, unscheduled last — the order the
- * job-level list had from its SQL.
+ * Today / Upcoming / Earlier, by the ENTRY's own time (a booking's window, not
+ * the job's). Today is every entry that books today, in that day's start
+ * order; Upcoming is what is still ahead, soonest first, unscheduled last.
+ *
+ * Earlier is an entry whose last booked day is already past but whose job is
+ * still open. These used to sit at the TOP of Upcoming (oldest first), pushing
+ * the technician's actual next job down the list (Justin, 19 Oct 2026). They
+ * now come last, most recent first — still visible, out of the way.
  */
 export function splitMyJobEntries<J extends MyJobWindow>(
   entries: MyJobEntry<J>[],
   todayKey: string
-): { today: MyJobEntry<J>[]; upcoming: MyJobEntry<J>[] } {
+): { today: MyJobEntry<J>[]; upcoming: MyJobEntry<J>[]; earlier: MyJobEntry<J>[] } {
   const today: { e: MyJobEntry<J>; start: string }[] = [];
   const upcoming: MyJobEntry<J>[] = [];
+  const earlier: { e: MyJobEntry<J>; lastDay: string }[] = [];
   for (const e of entries) {
     const d = dayOn(e.window, todayKey);
-    if (d) today.push({ e, start: d.startIso });
+    if (d) {
+      today.push({ e, start: d.startIso });
+      continue;
+    }
+    // Past = the window has ENDED before today. Judged by the end, not by
+    // scheduleDays(): a continuous (non-daily) block is drawn on its start day
+    // only, so a Fri–Wed block would otherwise read as finished on Monday.
+    const endIso = e.window.scheduled_end ?? e.window.scheduled_start;
+    const lastDay = endIso ? dateKeyInBusinessTZ(endIso) : null;
+    if (lastDay !== null && lastDay < todayKey) earlier.push({ e, lastDay });
     else upcoming.push(e);
   }
   today.sort((a, b) => a.start.localeCompare(b.start));
@@ -173,7 +187,8 @@ export function splitMyJobEntries<J extends MyJobWindow>(
       return a.i - b.i;
     })
     .map((x) => x.e);
-  return { today: today.map((x) => x.e), upcoming: sortedUpcoming };
+  earlier.sort((a, b) => b.lastDay.localeCompare(a.lastDay));
+  return { today: today.map((x) => x.e), upcoming: sortedUpcoming, earlier: earlier.map((x) => x.e) };
 }
 
 // ---------------------------------------------------------------------------
