@@ -117,6 +117,19 @@ values ('dddddddd-0000-0000-0000-000000000001', 'aaaaaaaa-0000-0000-0000-0000000
         'CI Invoice', 1000.00, 100.00, 1100.00)
 on conflict (id) do nothing;
 
+-- A part-payment, so the money sweep has an invoice_payments row to check
+-- (0081). Guarded: a production-only bootstrap (PROD_ONLY) may not have the
+-- table yet. Leaves the invoice "sent" with $400 still owing.
+do $$
+begin
+  if to_regclass('public.invoice_payments') is not null then
+    insert into invoice_payments (id, invoice_id, amount, method)
+    values ('dddddddd-0000-0000-0000-0000000000a1', 'dddddddd-0000-0000-0000-000000000001', 700.00, 'bank_transfer')
+    on conflict (id) do nothing;
+  end if;
+end;
+$$;
+
 insert into quotes (id, customer_id, site_id, title, subtotal, tax_amount, total)
 values ('eeeeeeee-0000-0000-0000-000000000001', 'aaaaaaaa-0000-0000-0000-000000000001', 'bbbbbbbb-0000-0000-0000-000000000001',
         'CI Quote', 500.00, 50.00, 550.00)
