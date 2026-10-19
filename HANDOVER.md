@@ -136,7 +136,7 @@ mirrored at `mobile/lib/scheduling.ts` and pinned identical by
   web → ship mobile. Web and the calendar poll select these columns; only the
   Jobs list and the schedule board fall back (42703) if they are ever missing.
 
-**Job bookings — web (stage 2; needs migration `0079`, a DRAFT not yet applied).**
+**Job bookings — web (stage 2; migration `0079` applied 2026-10-19, live).**
 Each technician's own time and cost centre on a job is a row in `job_bookings`;
 the job's window and crew are derived from them by 0079's triggers. **Apply
 0079 (and run its test) BEFORE merging this to `main`.** Without the table the
@@ -230,7 +230,7 @@ windows) — all 16 technician-visible streams are money-free:
   `tech_sites` / `backflow_sites`, `backflow_devices`, `backflow_tests`,
   `tech_job_assignments`, `tech_job_photos`, `tech_job_notes`,
   `tech_job_stage_notes` — no monetary column in the selected sets
-- `tech_job_bookings` (added for build 16; drafts 0079/0080 not applied yet,
+- `tech_job_bookings` (added for build 16; 0079/0080 applied 2026-10-19,
   stream not deployed yet) — 10 named columns: who, when, cost-centre **id**;
   no money column exists on `job_bookings`
 
@@ -432,13 +432,13 @@ Load-bearing properties:
   wedge the FIFO queue forever — but it logs a warning naming the table, so a
   vanished row is traceable.
 
-### Job bookings on the phone (build 16 — NOT LIVE: needs 0079 + 0080 + a stream deploy)
+### Job bookings on the phone (build 16; 0079 + 0080 applied 2026-10-19 — the stream deploy is the last step)
 
-`job_bookings` (draft `0079`, not applied yet) holds each technician's own
+`job_bookings` (`0079`, applied 2026-10-19) holds each technician's own
 window and cost centre on a job; the job-level schedule and crew are derived
 from it. The phone side (branch `feat/job-bookings-mobile`):
 
-- **Sync.** Draft `0080` (not applied yet) adds `job_bookings` to the
+- **Sync.** `0080` (applied 2026-10-19) adds `job_bookings` to the
   `powersync` publication and gives it `sync_office` with the 0068 child
   triggers, the job cascade and a block in `sync_window_refresh()`. It also
   re-hangs two 0079 triggers with `WHEN` clauses so a flag-only write (the
@@ -974,7 +974,7 @@ a shippable release.
 | **Sentry (error monitoring)** | Justin | Optional, and off until a DSN is set — see §12. Create a free Sentry org with a Next.js project (and a React Native project for the app), then set the DSNs in Vercel and EAS. Without it, failures like the weeks-long silent "Polish with AI" outage are still only discovered by accident. |
 | **Turn off public sign-up** | Justin | Dashboard → Authentication → Sign In / Providers → untick **"Allow new users to sign up"**. `supabase/config.toml` now has `[auth] enable_signup = false`, but that file only configures the local stack — the hosted project still lets anyone with the anon key call `/auth/v1/signup`. Invites keep working (GoTrue's admin invite does not check this switch). Leave the **Email provider** itself enabled. |
 | **`APP_URL`** (optional) | Justin | Origin for emailed reset links. Unset = `https://mellerick-app.vercel.app`, which is right for production. Set it only for a different domain, or `http://localhost:3000` in `.env.local` to test resets locally. |
-| **Job bookings rollout (build 16)** | Justin | In this order: apply `0079` then `supabase/tests/0079_job_bookings_test.sql`; apply `0080` then `supabase/tests/0080_job_bookings_sync_test.sql`; deploy `mobile/powersync/sync-streams.yaml` (`docs/powersync-deploy.md`); then ship build 16. Builds ≤15 keep working throughout (0079 translates their job-level writes). |
+| **Deploy the job bookings sync streams** | Justin | `0079` and `0080` are applied (19 Oct 2026). Last step: paste `mobile/powersync/sync-streams.yaml` into the PowerSync dashboard → Validate → Deploy (`docs/powersync-deploy.md`). Build 16 works before it (reads bookings from the server instead of the device), so it is not urgent, but offline bookings need it. |
 | **Maestro flow 02** | Avi | Needs `ADMIN_EMAIL` / `ADMIN_PASSWORD` in the environment. The login subflow deliberately skips when a session already exists, so a password never passes through a script — which is why flows 01/03/04 could be run and 02 could not. |
 
 ### QA fixture — do not delete

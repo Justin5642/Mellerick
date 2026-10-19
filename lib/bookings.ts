@@ -1,6 +1,6 @@
 // Job bookings — each technician's own time and cost centre on a job.
 //
-// job_bookings (migration 0079, a DRAFT that is NOT APPLIED to production yet)
+// job_bookings (migration 0079 to production yet)
 // is the source of truth for scheduling once it is applied: jobs.scheduled_*
 // and the crew (job_assignments) are derived from it by triggers. This file is
 // the web's one door to it: the pure rules (what a booking's window means, how
@@ -102,7 +102,7 @@ export function compareBookings(a: JobBooking, b: JobBooking): number {
 
 /**
  * What PostgREST answers when job_bookings does not exist yet — the table
- * comes from 0079, a draft that is not applied. Readers fall back on the
+ * comes from 0079. Readers fall back on the
  * job-level window (bookingsFromJobWindow) instead of showing an empty
  * schedule, the same way the board fell back while 0071 was unapplied.
  * 42P01 undefined table; PGRST205 table not in the schema cache; PGRST200 an
@@ -113,8 +113,7 @@ export function isBookingsTableMissing(error: { code?: string | null } | null | 
 }
 
 /**
- * The bookings a job would have under 0079's own conversion (still a draft,
- * not applied): one per crew member on the job's window, or one unassigned
+ * The bookings a job would have under 0079's own conversion: one per crew member on the job's window, or one unassigned
  * booking when there is no crew. Used only as the read fallback above; the
  * ids are synthetic ("legacy:…") and never written.
  */
@@ -210,7 +209,7 @@ export interface BookingSavePlan {
  *
  * Order of the WRITES is the caller's (saveBookingPlan): inserts and updates
  * first, deletes last, so a technician moved from one row to another never
- * passes through "no bookings" — the 0079 trigger (draft, not applied) would
+ * passes through "no bookings" — the 0079 trigger would
  * take them off the crew and the insert would put them back with a fresh
  * "New job assigned" push.
  */

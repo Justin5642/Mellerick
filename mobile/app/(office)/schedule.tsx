@@ -33,8 +33,7 @@ interface SchedJob {
 }
 
 /**
- * What a row schedules: one booking (migration 0079 — a draft, not applied
- * yet), or the whole job where there are no bookings (before 0079, or a job
+ * What a row schedules: one booking (migration 0079), or the whole job where there are no bookings (before 0079, or a job
  * the bookings read could not cover).
  */
 interface SchedItem {
@@ -87,7 +86,7 @@ export default function ScheduleScreen() {
   const router = useRouter();
   const schedule = useSchedule();
   const [jobs, setJobs] = useState<SchedJob[]>([]);
-  // NULL before 0079 is applied (a draft, not applied yet): one row per job.
+  // NULL before 0079 is applied: one row per job.
   const [bookings, setBookings] = useState<JobBooking[] | null>(null);
   const [staff, setStaff] = useState<AssignableStaff[]>([]);
   const [refreshing, setRefreshing] = useState(false);
@@ -198,7 +197,7 @@ export default function ScheduleScreen() {
     setBusy(true);
     try {
       const { synced } = await schedule.setCrew(job.id, crew);
-      // With bookings (0079 — a draft, not applied yet), the database turns a
+      // With bookings (0079 yet), the database turns a
       // crew change into booking changes (a removed person's bookings go; an
       // added one gets the shared window if there is one). Re-read once it
       // has landed so the rows show what it decided.

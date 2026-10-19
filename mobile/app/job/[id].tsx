@@ -75,7 +75,7 @@ export default function JobDetailScreen() {
   // POSITIVE answer that the tech is not on the crew; offline or on a failed
   // read the screen stays editable, so a tech's own job never locks up.
   const [assignmentKnown, setAssignmentKnown] = useState(false);
-  // The job's bookings (migration 0079 — a draft, not applied yet): who works
+  // The job's bookings (migration 0079 yet): who works
   // it, when, and against which cost centre. NULL until bookings exist (or
   // when they could not be read) — the header then shows the job-level
   // schedule as before.

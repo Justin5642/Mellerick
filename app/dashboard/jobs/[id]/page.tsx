@@ -50,7 +50,7 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
 
   // The job's bookings (each technician's own time and cost centre), named
   // from the staff list above — so chained off it, alongside the main batch.
-  // job_bookings is from 0079, a draft not applied yet: on a database without
+  // job_bookings is from 0079 yet: on a database without
   // it `missingTable` is set and the client derives the list from the job's
   // own window instead.
   const bookingsPromise = staffForDisplayPromise.then((staffList) => loadJobBookings(supabase, id, staffList));

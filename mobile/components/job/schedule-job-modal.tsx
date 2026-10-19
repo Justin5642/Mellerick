@@ -36,7 +36,7 @@ interface Props {
   costCenters?: JobCostCentre[];
   currentScheduledCostCenterId?: string | null;
   /**
-   * The job's bookings (migration 0079 — a draft, not applied yet). NULL
+   * The job's bookings (migration 0079 yet). NULL
    * means bookings do not exist yet: the dialog is then the single-schedule
    * form it always was, writing the job-level schedule. An array (even
    * empty) turns it into the bookings list editor.
@@ -73,7 +73,7 @@ function friendlyTime(hhmm: string): string {
 }
 
 /**
- * BOOKINGS (0079 — a draft, not applied yet): once a job has bookings, this is
+ * BOOKINGS (0079 yet): once a job has bookings, this is
  * a bookings list editor like the website's — each row one person's window
  * and cost centre, with Add (technician(s), window, cost centre — one booking
  * per technician), Edit and Delete. Each change is a job_bookings insert /

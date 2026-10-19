@@ -40,7 +40,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     }
 
     // One event per booking (lib/calendar-booking-sync.ts). job_bookings is
-    // from 0079, a draft not applied yet; until it is, `bookingsMissing` and
+    // from 0079 yet; until it is, `bookingsMissing` and
     // the single job-level event below carries on exactly as before.
     const synced = await syncJobCalendar(supabase, calendar as unknown as BookingSyncCalendar, id);
     if (synced.notFound) return NextResponse.json({ error: "Job not found" }, { status: 404 });

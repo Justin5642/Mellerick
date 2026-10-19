@@ -1,4 +1,4 @@
-// Per-technician job bookings (migration 0079 — a DRAFT, not applied yet), as
+// Per-technician job bookings (migration 0079 yet), as
 // pure rules. No I/O: reads live in lib/data/reads/bookings.ts, writes in
 // ScheduleRepository.
 //

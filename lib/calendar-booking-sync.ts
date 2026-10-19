@@ -2,7 +2,7 @@
 // ("#2530 Rough-in — Dave"), agreed with Justin 19 Oct 2026. Called by
 // /api/jobs/[id]/sync-calendar after every change to a job's schedule.
 //
-// job_bookings comes from migration 0079, a DRAFT that is NOT APPLIED yet.
+// job_bookings comes from migration 0079 yet.
 // Until it is, syncJobCalendar reports `bookingsMissing` and the route keeps
 // pushing the old single job-level event, so merging this before the apply
 // changes nothing in anyone's calendar.
@@ -129,7 +129,7 @@ export type BookingSyncCalendar = {
 };
 
 export interface BookingSyncResult {
-  /** job_bookings is not in this database (0079 is a draft, not applied) — the caller falls back to the job-level event. */
+  /** job_bookings is not in this database (0079) — the caller falls back to the job-level event. */
   bookingsMissing?: boolean;
   notFound?: boolean;
   created: number;

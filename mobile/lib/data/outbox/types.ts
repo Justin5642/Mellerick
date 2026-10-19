@@ -26,7 +26,7 @@ export type Aggregate =
   | "cost_center_template"
   | "job_item"
   | "job_expense"
-  // job_bookings (0079 — a draft, not applied yet): plain id-keyed rows, so
+  // job_bookings (0079 yet): plain id-keyed rows, so
   // the ordinary insert / update / delete replay applies unchanged.
   | "job_booking";
 

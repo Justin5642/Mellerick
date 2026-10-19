@@ -291,8 +291,7 @@ export function JobTimeTab({
   // The stage picked when this job was scheduled — manual clock-in defaults to
   // it instead of landing unassigned.
   scheduledCostCenterId?: string | null;
-  // This technician's own bookings on the job (0079 — a draft, not applied
-  // yet; null/absent before then). A clock-in defaults to the cost centre of
+  // This technician's own bookings on the job (0079; null/absent before then). A clock-in defaults to the cost centre of
   // the booking covering now, then the nearest one today, then the job's.
   myBookings?: BookingWindow[] | null;
 }) {

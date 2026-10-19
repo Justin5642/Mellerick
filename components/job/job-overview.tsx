@@ -56,8 +56,7 @@ export function JobOverview({ job, readOnly = false, bookings, bookingsError, on
     notes: job.notes ?? "",
   });
   // The schedule is NOT edited here any more. It is the job's bookings — each
-  // technician's own time and cost centre (job_bookings; 0079 is a draft, not
-  // applied yet) — shown read-only below and changed in the Schedule dialog.
+  // technician's own time and cost centre (job_bookings, 0079) — shown read-only below and changed in the Schedule dialog.
   // This form used to write the job's one window and its assigned_to: with
   // bookings, the window write is translated into "everyone on this window"
   // and the assigned_to write collapses the crew (0059), so either one,

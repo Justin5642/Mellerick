@@ -134,7 +134,7 @@ describe("ScheduleRepository", () => {
   });
 });
 
-// Bookings (migration 0079 — a draft, not applied yet): plain job_bookings
+// Bookings (migration 0079 yet): plain job_bookings
 // rows through the outbox; the database derives the job and the crew.
 describe("ScheduleRepository bookings", () => {
   const cols = buildScheduleColumns({ startDateKey: "2026-10-19", endDateKey: "2026-10-21", startTime: "", endTime: "", allDay: true });

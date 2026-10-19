@@ -44,7 +44,7 @@ export function MyJobsScreen() {
   const signOut = useSignOut();
   const [jobs, setJobs] = useState<Job[]>([]);
   const [userId, setUserId] = useState<string | null>(null);
-  // Bookings on these jobs (migration 0079 — a draft, not applied yet). NULL
+  // Bookings on these jobs (migration 0079 yet). NULL
   // = none exist yet or they could not be read: every card then shows the
   // job's own window, exactly as before bookings.
   const [bookings, setBookings] = useState<Booking[] | null>(null);

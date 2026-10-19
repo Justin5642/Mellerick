@@ -105,7 +105,7 @@ describe("listJobBookings", () => {
     expect(mockCalls.filter((c) => c.method === "eq")).toEqual([{ table: "job_bookings", method: "eq", args: ["job_id", "j1"] }]);
   });
 
-  it("remote: null (not an error, not []) before 0079 is applied — draft, not applied yet", async () => {
+  it("remote: null (not an error, not []) before 0079 is applied", async () => {
     mockAnswers = { job_bookings: MISSING };
     expect(await listJobBookings("j1")).toBeNull();
   });
@@ -156,7 +156,7 @@ describe("listMyJobBookings", () => {
     expect(mockCalls.some((c) => c.table === "job_bookings")).toBe(true);
   });
 
-  it("remote: null before 0079 is applied (a draft, not applied yet); no query at all for no jobs", async () => {
+  it("remote: null before 0079 is applied; no query at all for no jobs", async () => {
     mockAnswers = { job_bookings: MISSING };
     expect(await listMyJobBookings("dave", jobs)).toBeNull();
     mockCalls.length = 0;

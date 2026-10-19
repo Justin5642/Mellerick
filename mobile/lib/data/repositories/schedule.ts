@@ -144,7 +144,7 @@ export class ScheduleRepository {
   }
 
   // -------------------------------------------------------------------------
-  // Bookings (migration 0079 — a DRAFT, not applied yet). The schedule editor
+  // Bookings (migration 0079 yet). The schedule editor
   // writes job_bookings rows; the database derives the job-level schedule and
   // the crew from them (a newly booked technician joins the crew, which sends
   // the "New job assigned" push; one whose last booking goes leaves it). So

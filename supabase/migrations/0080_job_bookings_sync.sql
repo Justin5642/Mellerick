@@ -1,11 +1,9 @@
 -- ============================================================================
 -- Job bookings on the phone: replicate job_bookings to devices (PowerSync).
 --
--- STATUS: DRAFT — NOT APPLIED. Stage 3 of 3 (phone app, build 16). Apply
--- AFTER 0079 (it refuses to run without the job_bookings table), then run
--- supabase/tests/0080_job_bookings_sync_test.sql, then deploy
--- mobile/powersync/sync-streams.yaml (docs/powersync-deploy.md). Build 16
--- reads bookings from the device mirror; every older build ignores the table.
+-- STATUS: ✅ APPLIED IN PRODUCTION (2026-10-19, via db query --linked). Gate test
+-- passed; verified job_bookings is in the powersync publication with
+-- sync_office set. Sync streams are deployed separately (docs/powersync-deploy.md).
 --
 -- WHY
 -- 0079 made job_bookings the source of truth for who works a job, when, and
