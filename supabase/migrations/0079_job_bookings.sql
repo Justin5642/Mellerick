@@ -59,8 +59,13 @@ create table if not exists job_bookings (
   google_event_id text,
   created_by uuid default auth.uid() references profiles(id) on delete set null,
   created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now(),
-  constraint job_bookings_window check (ends_at is null or ends_at >= starts_at)
+  updated_at timestamptz not null default now()
+  -- NO check that ends_at >= starts_at, on purpose. jobs never had one, and
+  -- production already holds a job (#2520) whose end is before its start. A
+  -- check here aborted this migration's conversion on that row, and would also
+  -- make every old-style client write that carries such a window fail with a
+  -- database error (the translation trigger inserts bookings inside the
+  -- client's own statement). The booking editors validate new windows instead.
 );
 
 create index if not exists job_bookings_job_idx on job_bookings (job_id, starts_at);

@@ -16,19 +16,14 @@ import {
 } from "@dnd-kit/core";
 import { toast } from "sonner";
 import { createClient } from "@/lib/supabase/client";
-// Every move goes through these: applyScheduleChange writes the dates AND
-// pushes the job to Google Calendar (writing the table directly here is what
-// left the calendar stale, which the poll in lib/google.ts then "corrected" by
-// undoing the drag); setJobAssignments replaces the crew through the
-// set_job_assignments RPC. Never write assigned_to from here — the 0059
-// trigger collapses the whole crew down to that one technician.
-import {
-  applyScheduleChange,
-  pushJobToCalendar,
-  setJobAssignments,
-  type ScheduleWriteClient,
-} from "@/lib/schedule-dispatch";
-import { occupiesDay } from "@/lib/scheduling";
+// Every move writes ONE booking row (lib/bookings.ts) and then pushes the job
+// to Google Calendar (pushJobToCalendar — a move the calendar never hears
+// about is what the poll in lib/google.ts used to "correct" by undoing it).
+// The crew and the job's own window follow from the bookings in the database
+// (triggers in 0079, a draft not applied yet), so nothing here writes
+// assigned_to, job_assignments or jobs.scheduled_* any more.
+import { pushJobToCalendar } from "@/lib/schedule-dispatch";
+import { insertBookings, updateBooking, type BookingWriteClient } from "@/lib/bookings";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -40,19 +35,21 @@ import {
   buildBoardIndex,
   columnId,
   dayOfLabel,
-  daysByJob,
+  daysByBooking,
   formatHours,
+  jobDaysFromBookings,
   parseBoardTarget,
   planBoardMove,
   planBoardAdd,
   totalHours,
   weekCellId,
+  type BoardBooking,
   type BoardCell,
   type BoardEntry,
   type BoardJob,
-  type BoardMovePlan,
+  type BookingPatch,
 } from "./board-model";
-import { Navigation, Users, LayoutList, ListTodo, ChevronLeft, ChevronRight, GripVertical, CalendarDays, CalendarRange, Scissors, X } from "lucide-react";
+import { Navigation, LayoutList, ListTodo, ChevronLeft, ChevronRight, GripVertical, CalendarDays, CalendarRange, Scissors, X } from "lucide-react";
 import {
   formatTime,
   formatDate,
@@ -70,8 +67,8 @@ type StaffMember = {
   role: string;
 };
 
-/** A job picked up — by drag or by double-click — and the cell it came from. */
-type Pickup = { jobId: string; source: BoardCell };
+/** A booking picked up — by drag or by double-click — and the cell it came from. */
+type Pickup = { bookingId: string; source: BoardCell };
 
 function wazeUrl(site: BoardJob["sites"]): string | null {
   if (!site) return null;
@@ -137,7 +134,7 @@ function formatWeekRangeLabel(weekKeys: string[]) {
 }
 
 /**
- * The hours on the card's own day. For a multi-day job that is that day's
+ * The hours on the card's own day. For a multi-day booking that is that day's
  * block (7:00–15:30), not the first-day start and last-day end the row holds.
  */
 function EntryTime({ entry }: { entry: BoardEntry }) {
@@ -163,12 +160,12 @@ type PlacedProps = {
   onCut: (pickup: Pickup) => void;
 };
 
-function isCutHere(cut: Pickup | null, jobId: string, source: BoardCell) {
-  return !!cut && cut.jobId === jobId && cut.source.staffId === source.staffId && cut.source.dateKey === source.dateKey;
+function isCutHere(cut: Pickup | null, bookingId: string, source: BoardCell) {
+  return !!cut && cut.bookingId === bookingId && cut.source.staffId === source.staffId && cut.source.dateKey === source.dateKey;
 }
 
 function JobCardBody({ entry }: { entry: BoardEntry }) {
-  const { job } = entry;
+  const { job, booking } = entry;
   const dayOf = dayOfLabel(entry);
   return (
     <>
@@ -185,6 +182,9 @@ function JobCardBody({ entry }: { entry: BoardEntry }) {
       <p className="text-sm font-medium mt-1 group-hover:text-blue-600 transition-colors truncate">
         #{job.job_number} — {job.title}
       </p>
+      {booking.cost_center_name && (
+        <p className="text-xs font-medium text-cyan-700 truncate">{booking.cost_center_name}</p>
+      )}
       <p className="text-xs text-slate-500 truncate">
         {dayOf && <span className="font-medium text-violet-600">{dayOf}</span>}
         {dayOf && job.customers?.name && " · "}
@@ -202,15 +202,16 @@ const JOB_CARD_CLASS =
 // the sensor's activation delay) starts a drag; a quick tap opens the job; a
 // double-click cuts it for pasting (BoardJobLink).
 //
-// The draggable id is per PLACEMENT, not per job: a crew job sits in several
-// technicians' columns at once and dnd-kit needs each node's id to be unique.
+// The draggable id is per PLACEMENT, not per booking: a multi-day booking
+// sits in several day cells at once and dnd-kit needs each node's id to be
+// unique.
 function DraggableJobCard({ entry, source, cut, onCut }: PlacedProps) {
-  const { job } = entry;
+  const { job, booking } = entry;
   const { setNodeRef, listeners, isDragging } = useDraggable({
-    id: `${job.id}@${weekCellId(source.staffId, source.dateKey)}`,
-    data: { jobId: job.id, source, entry },
+    id: `${booking.id}@${weekCellId(source.staffId, source.dateKey)}`,
+    data: { bookingId: booking.id, source, entry },
   });
-  const isCut = isCutHere(cut, job.id, source);
+  const isCut = isCutHere(cut, booking.id, source);
   return (
     <div
       ref={setNodeRef}
@@ -232,7 +233,7 @@ function DraggableJobCard({ entry, source, cut, onCut }: PlacedProps) {
         href={`/dashboard/jobs/${job.id}`}
         className={JOB_CARD_CLASS}
         cutActive={!!cut}
-        onCut={() => onCut({ jobId: job.id, source })}
+        onCut={() => onCut({ bookingId: booking.id, source })}
       >
         <JobCardBody entry={entry} />
       </BoardJobLink>
@@ -272,7 +273,7 @@ function DroppableColumn({
 // staff (rows) x day (columns), so each cell is narrow; this trades the
 // full job card's detail for a glanceable time + job + customer stack.
 function WeekJobChipBody({ entry }: { entry: BoardEntry }) {
-  const { job } = entry;
+  const { job, booking } = entry;
   const dayOf = dayOfLabel(entry);
   return (
     <>
@@ -283,6 +284,7 @@ function WeekJobChipBody({ entry }: { entry: BoardEntry }) {
       <p className="text-[11px] font-medium text-slate-700 truncate">
         #{job.job_number} {job.title}
       </p>
+      {booking.cost_center_name && <p className="text-[10px] font-medium text-cyan-700 truncate">{booking.cost_center_name}</p>}
       {dayOf && <p className="text-[10px] font-medium text-violet-600 truncate">{dayOf}</p>}
       {job.customers?.name && <p className="text-[10px] text-slate-400 truncate">{job.customers.name}</p>}
     </>
@@ -294,14 +296,14 @@ const WEEK_CHIP_CLASS =
 
 // Draggable wrapper for a week chip — same long-press-to-drag and
 // double-click-to-cut pattern as DraggableJobCard on the day board. One per
-// placement: a Mon–Wed crew job of two shows six chips.
+// placement: two technicians each booked Mon–Wed on a job show six chips.
 function DraggableWeekJobChip({ entry, source, cut, onCut }: PlacedProps) {
-  const { job } = entry;
+  const { job, booking } = entry;
   const { setNodeRef, listeners, isDragging } = useDraggable({
-    id: `${job.id}@${weekCellId(source.staffId, source.dateKey)}`,
-    data: { jobId: job.id, source, entry },
+    id: `${booking.id}@${weekCellId(source.staffId, source.dateKey)}`,
+    data: { bookingId: booking.id, source, entry },
   });
-  const isCut = isCutHere(cut, job.id, source);
+  const isCut = isCutHere(cut, booking.id, source);
   return (
     <div
       ref={setNodeRef}
@@ -318,7 +320,7 @@ function DraggableWeekJobChip({ entry, source, cut, onCut }: PlacedProps) {
         href={`/dashboard/jobs/${job.id}`}
         className={WEEK_CHIP_CLASS}
         cutActive={!!cut}
-        onCut={() => onCut({ jobId: job.id, source })}
+        onCut={() => onCut({ bookingId: booking.id, source })}
       >
         <WeekJobChipBody entry={entry} />
       </BoardJobLink>
@@ -363,34 +365,48 @@ function DroppableWeekCell({
   );
 }
 
-function crewNames(job: BoardJob, staffById: Map<string, StaffMember>) {
-  return job.crew.map((id) => staffById.get(id)?.full_name).filter(Boolean).join(", ");
+/** Everyone booked on a job, in booking order, once each. */
+function bookedNames(bookings: readonly BoardBooking[], staffById: Map<string, StaffMember>) {
+  const names: string[] = [];
+  for (const b of bookings) {
+    const name = b.staff_id ? staffById.get(b.staff_id)?.full_name : null;
+    if (name && !names.includes(name)) names.push(name);
+  }
+  return names.join(", ");
 }
 
 export function TeamScheduleView({
-  jobs: initialJobs,
+  jobs,
+  bookings: initialBookings,
+  bookingsReadOnly,
   staff,
   todoJobs,
   todoError,
 }: {
   jobs: BoardJob[];
+  bookings: BoardBooking[];
+  /** The bookings were derived from the job windows (job_bookings not in this database yet); moves are refused. */
+  bookingsReadOnly: boolean;
   staff: StaffMember[];
   todoJobs: TodoJob[];
   todoError: string | null;
 }) {
-  // Narrowed to the methods the dispatcher uses. Not cosmetic: matching the
-  // fully-generic typed client against the dispatcher's structural parameter
-  // makes TypeScript give up with TS2589 ("type instantiation is excessively
+  // Narrowed to the methods lib/bookings.ts uses. Not cosmetic: matching the
+  // fully-generic typed client against a structural parameter makes
+  // TypeScript give up with TS2589 ("type instantiation is excessively
   // deep"). This says exactly what this component does with the client —
-  // .from().update().eq() and the set_job_assignments RPC — rather than
-  // widening anything to `any`.
-  const supabase = createClient() as unknown as ScheduleWriteClient;
-  const [tab, setTab] = useState("team");
+  // insert/update on job_bookings — rather than widening anything to `any`.
+  const supabase = createClient() as unknown as BookingWriteClient;
+  // Week is the default view (Justin, 19 Oct 2026): the board opens on the
+  // whole week, and Day is its own tab beside it rather than a toggle inside
+  // one "Team" tab that always reopened on today.
+  const [tab, setTab] = useState("week");
   // Every job passed in here already has a scheduled_start (the page query
   // filters that) — jobs with no time yet stay in the general Jobs list
   // until someone schedules them, rather than flooding this board's
-  // Unassigned column.
-  const [jobs, setJobs] = useState<BoardJob[]>(initialJobs);
+  // Unassigned column. The cards are their bookings.
+  const [bookings, setBookings] = useState<BoardBooking[]>(initialBookings);
+  const jobsById = useMemo(() => new Map(jobs.map((j) => [j.id, j])), [jobs]);
   // The card being dragged, for the overlay.
   const [activeEntry, setActiveEntry] = useState<BoardEntry | null>(null);
   // The job double-clicked for cut & paste; the next cell clicked receives it.
@@ -398,7 +414,7 @@ export function TeamScheduleView({
 
   const todayKey = useMemo(() => dateKeyInBusinessTZ(new Date()), []);
   const [selectedDateKey, setSelectedDateKey] = useState(todayKey);
-  const [viewMode, setViewMode] = useState<"day" | "week">("day");
+  const viewMode: "day" | "week" = tab === "day" ? "day" : "week";
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { delay: 200, tolerance: 8 } })
@@ -406,23 +422,47 @@ export function TeamScheduleView({
 
   const staffById = useMemo(() => new Map(staff.map((s) => [s.id, s])), [staff]);
 
-  // Everything below is derived from jobs/staff/the selected period and was
-  // rebuilt on every render — including the one a drag start triggers. Each
-  // collection is memoised on its real inputs, and each job's booked days
-  // (lib/scheduling.ts scheduleDays) are worked out once per job, not once per
-  // use: stepping between days or weeks re-buckets without recomputing them.
-  const jobDays = useMemo(() => daysByJob(jobs), [jobs]);
+  // Everything below is derived from bookings/staff/the selected period and
+  // was rebuilt on every render — including the one a drag start triggers.
+  // Each collection is memoised on its real inputs, and each booking's booked
+  // days (lib/scheduling.ts scheduleDays) are worked out once per booking, not
+  // once per use: stepping between days or weeks re-buckets without
+  // recomputing them.
+  const bookingDays = useMemo(() => daysByBooking(bookings), [bookings]);
+  const bookingsByJob = useMemo(() => {
+    const map = new Map<string, BoardBooking[]>();
+    for (const b of bookings) {
+      const list = map.get(b.job_id);
+      if (list) list.push(b);
+      else map.set(b.job_id, [b]);
+    }
+    return map;
+  }, [bookings]);
+  // The List tab's days for each job: the union of its bookings' days.
+  const jobDays = useMemo(() => {
+    const map = new Map<string, ReturnType<typeof jobDaysFromBookings>>();
+    for (const job of jobs) map.set(job.id, jobDaysFromBookings(bookingsByJob.get(job.id) ?? [], bookingDays));
+    return map;
+  }, [jobs, bookingsByJob, bookingDays]);
 
   // Read every render, as isTodayInBusinessTZ did, so a board left open past
   // midnight still re-splits today/upcoming on its next render. "Today" is
-  // any job booked today — a multi-day job in its second day included.
+  // any job with a booking today — a multi-day booking in its second day
+  // included.
   const liveTodayKey = dateKeyInBusinessTZ(new Date());
   const { todayJobsLive, upcomingJobsLive } = useMemo(() => {
     const today: BoardJob[] = [];
     const upcoming: BoardJob[] = [];
-    for (const job of jobs) (occupiesDay(job, liveTodayKey) ? today : upcoming).push(job);
+    for (const job of jobs) {
+      const days = jobDays.get(job.id) ?? [];
+      if (days.length === 0) continue;
+      (days.some((d) => d.dateKey === liveTodayKey) ? today : upcoming).push(job);
+    }
+    // Upcoming in order of the job's first booked day, which can differ from
+    // the page's scheduled_start order once a booking has been moved here.
+    upcoming.sort((a, b) => (jobDays.get(a.id)![0].startIso < jobDays.get(b.id)![0].startIso ? -1 : 1));
     return { todayJobsLive: today, upcomingJobsLive: upcoming };
-  }, [jobs, liveTodayKey]);
+  }, [jobs, jobDays, liveTodayKey]);
 
   // Week grid — staff (rows) x the 7 days (Mon-Sun) containing
   // selectedDateKey. The day board is the same index over one day.
@@ -432,7 +472,10 @@ export function TeamScheduleView({
     () => (viewMode === "week" ? weekKeys : [selectedDateKey]),
     [viewMode, weekKeys, selectedDateKey],
   );
-  const board = useMemo(() => buildBoardIndex(jobs, visibleKeys, jobDays), [jobs, visibleKeys, jobDays]);
+  const board = useMemo(
+    () => buildBoardIndex(bookings, jobsById, visibleKeys, bookingDays),
+    [bookings, jobsById, visibleKeys, bookingDays],
+  );
 
   // Booked hours per technician over the period showing — one day, or the
   // week's total.
@@ -455,7 +498,10 @@ export function TeamScheduleView({
     [staff, periodHours],
   );
 
-  const cutJob = useMemo(() => (cut ? jobs.find((j) => j.id === cut.jobId) ?? null : null), [cut, jobs]);
+  const cutJob = useMemo(() => {
+    const booking = cut ? bookings.find((b) => b.id === cut.bookingId) : undefined;
+    return booking ? jobsById.get(booking.job_id) ?? null : null;
+  }, [cut, bookings, jobsById]);
   const isSelectedToday = selectedDateKey === todayKey;
   const isCurrentPeriod = viewMode === "week" ? weekKeySet.has(todayKey) : isSelectedToday;
   const selectedDateLabel = useMemo(
@@ -469,8 +515,8 @@ export function TeamScheduleView({
   );
   const weekRangeLabel = useMemo(() => formatWeekRangeLabel(weekKeys), [weekKeys]);
 
-  // Shift held = ADD the technician to the crew instead of moving the job to
-  // them. Tracked from the keyboard because a drop event does not carry
+  // Shift held = ADD a copy of the booking for the target technician instead
+  // of moving it to them. Tracked from the keyboard because a drop event does not carry
   // modifier keys reliably across pointer and touch sensors.
   const shiftHeld = useRef(false);
   useEffect(() => {
@@ -502,82 +548,87 @@ export function TeamScheduleView({
     [staffById],
   );
 
-  function describeMove(job: BoardJob, plan: BoardMovePlan, source: BoardCell, target: BoardCell, mode: "move" | "add" = "move") {
-    if (mode === "add") return `#${job.job_number} ${nameOf(target.staffId)} added to the crew`;
+  function describeMove(job: BoardJob, patch: BookingPatch, source: BoardCell, target: BoardCell) {
     const changes: string[] = [];
-    if (plan.crew) {
-      if (!target.staffId) changes.push(plan.crew.length === 0 ? "unassigned" : `${nameOf(source.staffId)} taken off`);
-      else if (!source.staffId) changes.push(`assigned to ${nameOf(target.staffId)}`);
-      else if (job.crew.includes(target.staffId)) changes.push(`${nameOf(source.staffId)} taken off`);
-      else changes.push(`${nameOf(source.staffId)} swapped for ${nameOf(target.staffId)}`);
+    if (patch.staff_id !== undefined) {
+      changes.push(
+        target.staffId
+          ? `${source.staffId ? `${nameOf(source.staffId)}'s booking` : "booking"} moved to ${nameOf(target.staffId)}`
+          : `${nameOf(source.staffId)}'s booking unassigned`,
+      );
     }
-    if (plan.dates) changes.push(`moved to ${formatDate(anchorForDateKey(target.dateKey), { weekday: "short", day: "numeric", month: "short" })}`);
+    if (patch.starts_at) changes.push(`moved to ${formatDate(anchorForDateKey(target.dateKey), { weekday: "short", day: "numeric", month: "short" })}`);
     return `#${job.job_number} ${changes.join(" and ")}`;
   }
 
-  /**
-   * The one move both gestures make — a drop and a paste land here, in either
-   * view. What changes is decided by planBoardMove (board-model.ts): the
-   * source technician is swapped for the target on the crew, and the job
-   * starts on the target day when that day differs.
-   *
-   * Crew first, then dates: set_job_assignments is the write RLS is likelier
-   * to refuse, and refusing it first leaves nothing changed. If the dates are
-   * then refused, the crew is put back so the job is not left half-moved.
-   */
-  async function moveJob(jobId: string, source: BoardCell, target: BoardCell, mode: "move" | "add" = "move") {
-    const job = jobs.find((j) => j.id === jobId);
-    if (!job) return;
-    const plan = mode === "add" ? planBoardAdd(job, target) : planBoardMove(job, source, target);
-    if (!plan) return; // dropped back where it came from
-
-    setJobs((prev) => prev.map((j) => (j.id === jobId ? applyBoardMove(j, plan) : j)));
-    const rollback = (error: string) => {
-      setJobs((prev) => prev.map((j) => (j.id === jobId ? job : j)));
-      toast.error(error);
-    };
-
-    if (plan.crew) {
-      const assigned = await setJobAssignments(supabase, jobId, plan.crew);
-      if (!assigned.ok) return rollback(assigned.error);
-    }
-
-    let calendarSynced: boolean;
-    if (plan.dates) {
-      const result = await applyScheduleChange(supabase, jobId, plan.dates);
-      if (!result.ok) {
-        if (plan.crew) {
-          const restored = await setJobAssignments(supabase, jobId, job.crew);
-          if (!restored.ok) {
-            setJobs((prev) => prev.map((j) => (j.id === jobId ? { ...job, crew: plan.crew! } : j)));
-            toast.error(`${result.error} The crew change did save — check the job's technicians.`);
-            return;
-          }
-        }
-        return rollback(result.error);
-      }
-      calendarSynced = result.calendarSynced;
-    } else {
-      // A crew-only move still pushes — see "WHY BOTH DRAG KINDS PUSH" in
-      // lib/schedule-dispatch.ts.
-      calendarSynced = await pushJobToCalendar(jobId);
-    }
-
-    const what = describeMove(job, plan, source, target, mode);
+  /** Say whether Google heard about it — see the toast rule in moveBooking. */
+  function announce(what: string, calendarSynced: boolean) {
     // A re-date the calendar never heard about is the state that used to let
     // the poll write the old time back. Saying so is the difference between
-    // a user retrying now and finding the job moved back tomorrow.
+    // a user retrying now and finding the booking moved back tomorrow.
     if (calendarSynced) toast.success(what);
     else toast.warning(`${what} — Google Calendar not updated`);
   }
 
-  // Paste: a click on any cell while a job is cut.
+  /**
+   * The one move both gestures make — a drop and a paste land here, in either
+   * view. A plain move changes the dragged BOOKING only (planBoardMove): its
+   * technician becomes the target row's, and it starts on the target day
+   * when that day differs. Shift adds a copy for the target technician
+   * instead (planBoardAdd). One row written either way, so there is no
+   * half-done state to unwind — the old crew-then-dates pair needed one.
+   */
+  async function moveBooking(bookingId: string, source: BoardCell, target: BoardCell, mode: "move" | "add" = "move") {
+    const booking = bookings.find((b) => b.id === bookingId);
+    const job = booking ? jobsById.get(booking.job_id) : undefined;
+    // A Shift-drop copy still waiting for its real id cannot be moved yet.
+    if (!booking || !job || bookingId.startsWith("pending:")) return;
+    if (bookingsReadOnly) {
+      toast.error("Bookings aren't set up in this database yet — change this job from its Schedule dialog.");
+      return;
+    }
+
+    if (mode === "add") {
+      const copy = planBoardAdd(booking, source, target, bookingsByJob.get(job.id) ?? []);
+      if (!copy) return; // Unassigned, or they already have exactly this booking
+      // A stand-in until the insert returns the real row (and its id).
+      const tempId = `pending:${bookingId}:${target.staffId}:${Date.now()}`;
+      setBookings((prev) => [...prev, { ...copy, id: tempId, cost_center_name: booking.cost_center_name }]);
+      const inserted = await insertBookings(supabase, [copy]);
+      if (!inserted.ok) {
+        setBookings((prev) => prev.filter((b) => b.id !== tempId));
+        toast.error(inserted.error);
+        return;
+      }
+      const real = inserted.rows[0];
+      setBookings((prev) => prev.map((b) => (b.id === tempId ? { ...real, cost_center_name: booking.cost_center_name } : b)));
+      announce(`#${job.job_number} booked for ${nameOf(target.staffId)} too`, await pushJobToCalendar(job.id));
+      return;
+    }
+
+    const patch = planBoardMove(booking, source, target);
+    if (!patch) return; // dropped back where it came from
+
+    setBookings((prev) => prev.map((b) => (b.id === bookingId ? applyBoardMove(b, patch) : b)));
+    const result = await updateBooking(supabase, bookingId, patch);
+    if (!result.ok) {
+      setBookings((prev) => prev.map((b) => (b.id === bookingId ? booking : b)));
+      toast.error(result.error);
+      return;
+    }
+    // A technician-only move still pushes — the event's title names the
+    // technician (lib/calendar-event.ts), and see "WHY BOTH DRAG KINDS PUSH"
+    // in lib/schedule-dispatch.ts.
+    announce(describeMove(job, patch, source, target), await pushJobToCalendar(job.id));
+  }
+
+  // Paste: a click on any cell while a booking is cut.
   function placeCut(targetId: string) {
     if (!cut) return;
     const pickup = cut;
     setCut(null);
     const target = parseBoardTarget(targetId, selectedDateKey);
-    if (target) void moveJob(pickup.jobId, pickup.source, target, shiftHeld.current ? "add" : "move");
+    if (target) void moveBooking(pickup.bookingId, pickup.source, target, shiftHeld.current ? "add" : "move");
   }
 
   function handleDragStart(event: DragStartEvent) {
@@ -592,7 +643,7 @@ export function TeamScheduleView({
     const pickup = active.data.current as Pickup | undefined;
     const target = parseBoardTarget(over.id as string, selectedDateKey);
     if (!pickup || !target) return;
-    void moveJob(pickup.jobId, pickup.source, target, shiftHeld.current ? "add" : "move");
+    void moveBooking(pickup.bookingId, pickup.source, target, shiftHeld.current ? "add" : "move");
   }
 
   const onPick = cut ? placeCut : undefined;
@@ -600,14 +651,18 @@ export function TeamScheduleView({
   return (
     <Tabs value={tab} onValueChange={(v) => typeof v === "string" && setTab(v)}>
       <TabsList variant="line">
-        <TabsTrigger value="team" className="gap-1.5"><Users className="w-3.5 h-3.5" />Team</TabsTrigger>
+        <TabsTrigger value="week" className="gap-1.5"><CalendarRange className="w-3.5 h-3.5" />Week</TabsTrigger>
+        <TabsTrigger value="day" className="gap-1.5"><CalendarDays className="w-3.5 h-3.5" />Day</TabsTrigger>
         <TabsTrigger value="list" className="gap-1.5"><LayoutList className="w-3.5 h-3.5" />List</TabsTrigger>
         <TabsTrigger value="todo" className="gap-1.5">
           <ListTodo className="w-3.5 h-3.5" />To-do list{todoJobs.length > 0 ? ` (${todoJobs.length})` : ""}
         </TabsTrigger>
       </TabsList>
 
-      <TabsContent value="team" className="mt-4">
+      {/* Week and Day share one board; `viewMode` follows the tab. Not a
+          TabsContent, so switching between them keeps the board mounted. */}
+      {(tab === "week" || tab === "day") && (
+      <div className="mt-4">
         <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
           <div className="flex items-center gap-2">
             <Button
@@ -637,26 +692,6 @@ export function TeamScheduleView({
             )}
           </div>
 
-          <div className="inline-flex rounded-md border border-slate-200 p-0.5 bg-slate-50">
-            <Button
-              size="sm"
-              variant={viewMode === "day" ? "default" : "ghost"}
-              className="h-7 px-3 gap-1.5"
-              onClick={() => setViewMode("day")}
-            >
-              <CalendarDays className="w-3.5 h-3.5" />
-              Day
-            </Button>
-            <Button
-              size="sm"
-              variant={viewMode === "week" ? "default" : "ghost"}
-              className="h-7 px-3 gap-1.5"
-              onClick={() => setViewMode("week")}
-            >
-              <CalendarRange className="w-3.5 h-3.5" />
-              Week
-            </Button>
-          </div>
         </div>
 
         {cutJob ? (
@@ -678,8 +713,8 @@ export function TeamScheduleView({
         ) : (
           <p className="text-xs text-slate-400 mb-3">
             {viewMode === "day"
-              ? "Press and hold a job and drag it onto a technician — or double-click it, then click the technician — to move it to them. Hold Shift as you drop to add them to the crew instead."
-              : "Press and hold a job and drag it onto another technician and/or day — or double-click it, then click the cell — to move it. Hold Shift as you drop on a technician to add them to the crew instead."}
+              ? "Each card is one technician's booking. Press and hold it and drag it onto a technician — or double-click it, then click the technician — to move that booking to them. Hold Shift as you drop to book them on the same time as well."
+              : "Each card is one technician's booking. Press and hold it and drag it onto another technician and/or day — or double-click it, then click the cell — to move that booking. Hold Shift as you drop on a technician to book them as well."}
           </p>
         )}
 
@@ -710,8 +745,8 @@ export function TeamScheduleView({
                             <CardTitle className="text-sm truncate">Unassigned</CardTitle>
                             <p className={cn("text-xs", unassigned.length > 0 ? "text-amber-600" : "text-slate-400")}>
                               {unassigned.length === 0
-                                ? "Move a job here to take a technician off it"
-                                : `${unassigned.length} job${unassigned.length === 1 ? "" : "s"} need a tech`}
+                                ? "Move a booking here to unassign it"
+                                : `${unassigned.length} booking${unassigned.length === 1 ? "" : "s"} need a tech`}
                             </p>
                           </div>
                         </div>
@@ -719,11 +754,11 @@ export function TeamScheduleView({
                       <CardContent className="space-y-2">
                         {unassigned.length === 0 ? (
                           <p className="text-slate-400 text-xs text-center py-6 border border-dashed border-slate-200 rounded-lg">
-                            No unassigned jobs
+                            No unassigned bookings
                           </p>
                         ) : (
                           unassigned.map((entry) => (
-                            <DraggableJobCard key={entry.job.id} entry={entry} source={source} cut={cut} onCut={setCut} />
+                            <DraggableJobCard key={entry.booking.id} entry={entry} source={source} cut={cut} onCut={setCut} />
                           ))
                         )}
                       </CardContent>
@@ -768,7 +803,7 @@ export function TeamScheduleView({
                           </p>
                         ) : (
                           memberEntries.map((entry) => (
-                            <DraggableJobCard key={entry.job.id} entry={entry} source={source} cut={cut} onCut={setCut} />
+                            <DraggableJobCard key={entry.booking.id} entry={entry} source={source} cut={cut} onCut={setCut} />
                           ))
                         )}
                       </CardContent>
@@ -821,7 +856,7 @@ export function TeamScheduleView({
                   <DroppableWeekCell key={key} id={weekCellId(null, key)} isToday={key === todayKey} onPick={onPick}>
                     {(board.unassigned.get(key) ?? []).map((entry) => (
                       <DraggableWeekJobChip
-                        key={entry.job.id}
+                        key={entry.booking.id}
                         entry={entry}
                         source={{ staffId: null, dateKey: key }}
                         cut={cut}
@@ -858,7 +893,7 @@ export function TeamScheduleView({
                         >
                           {(memberDays?.get(key) ?? []).map((entry) => (
                             <DraggableWeekJobChip
-                              key={entry.job.id}
+                              key={entry.booking.id}
                               entry={entry}
                               source={{ staffId: member.id, dateKey: key }}
                               cut={cut}
@@ -888,7 +923,8 @@ export function TeamScheduleView({
             </DragOverlay>
           </DndContext>
         )}
-      </TabsContent>
+      </div>
+      )}
 
       <TabsContent value="list" className="mt-4 space-y-6">
         <Card>
@@ -903,7 +939,7 @@ export function TeamScheduleView({
                   const index = days.findIndex((d) => d.dateKey === liveTodayKey);
                   const today = days[index];
                   const dayOf = today ? dayOfLabel({ dayNumber: index + 1, dayCount: days.length }) : null;
-                  const names = crewNames(job, staffById);
+                  const names = bookedNames(bookingsByJob.get(job.id) ?? [], staffById);
                   return (
                     <Link prefetch={false} key={job.id} href={`/dashboard/jobs/${job.id}`} className="flex items-center gap-4 px-6 py-4 hover:bg-slate-50 transition-colors group">
                       <div className="text-center w-16 flex-shrink-0">
@@ -936,12 +972,13 @@ export function TeamScheduleView({
                 {upcomingJobsLive.map((job) => {
                   const days = jobDays.get(job.id) ?? [];
                   const multiDay = days.length > 1;
-                  const names = crewNames(job, staffById);
+                  const names = bookedNames(bookingsByJob.get(job.id) ?? [], staffById);
+                  const first = days[0];
                   return (
                     <Link prefetch={false} key={job.id} href={`/dashboard/jobs/${job.id}`} className="flex items-center gap-4 px-6 py-4 hover:bg-slate-50 transition-colors group">
                       <div className="text-center w-20 flex-shrink-0">
-                        <p className="text-xs font-bold text-slate-700">{formatDate(job.scheduled_start!)}</p>
-                        <p className="text-xs text-slate-400">{formatTime(job.scheduled_start!)}</p>
+                        <p className="text-xs font-bold text-slate-700">{formatDate(first.startIso)}</p>
+                        <p className="text-xs text-slate-400">{formatTime(first.startIso)}</p>
                       </div>
                       <div className="flex-1 min-w-0">
                         <p className="font-medium text-sm group-hover:text-blue-600 transition-colors truncate">#{job.job_number} — {job.title}</p>

@@ -139,6 +139,55 @@ type PolledJob = {
 };
 
 /**
+ * What an event is linked to. Since job bookings (0079 — a draft, not applied
+ * yet) each BOOKING has its own event (job_bookings.google_event_id); a job
+ * not re-synced since then still has its single LEGACY event
+ * (jobs.google_event_id). The reconciliation rules are the same for both —
+ * newer side wins, multi-day series are the app's — so the poll works on the
+ * job-shaped `window` either way and only the writes differ by `kind`.
+ */
+type PollTarget = {
+  kind: "booking" | "job";
+  /** The booking id or the job id — the row the writes go to. */
+  id: string;
+  jobId: string;
+  window: PolledJob;
+};
+
+type PolledBooking = {
+  id: string;
+  job_id: string;
+  starts_at: string;
+  ends_at: string | null;
+  daily: boolean;
+  all_day: boolean;
+  updated_at: string | null;
+};
+
+/** A booking as the job-shaped window the reconciliation reads. */
+function bookingAsWindow(b: PolledBooking): PolledJob {
+  return {
+    id: b.id,
+    scheduled_start: b.starts_at,
+    scheduled_end: b.ends_at,
+    schedule_daily: b.daily,
+    schedule_all_day: b.all_day,
+    status: "scheduled",
+    updated_at: b.updated_at,
+  };
+}
+
+/** Job-shaped schedule columns as a booking patch (only the keys present). */
+function bookingColumns(cols: Partial<ScheduleColumns>): Record<string, unknown> {
+  const patch: Record<string, unknown> = {};
+  if (cols.scheduled_start !== undefined) patch.starts_at = cols.scheduled_start;
+  if (cols.scheduled_end !== undefined) patch.ends_at = cols.scheduled_end;
+  if (cols.schedule_daily !== undefined) patch.daily = cols.schedule_daily;
+  if (cols.schedule_all_day !== undefined) patch.all_day = cols.schedule_all_day;
+  return patch;
+}
+
+/**
  * What an event says the job's columns should be, when the event is the newer
  * writer. A timed event is its own start/end. An ALL-DAY event (start.date,
  * end.date exclusive) is the standard shift on each of its dates — the same
@@ -209,6 +258,18 @@ function sameInstant(a: string | null | undefined, b: string | null | undefined)
  *   - the series itself changed: job newer → the job is pushed back onto the
  *     master; event newer → logged and skipped, because reverse-engineering a
  *     recurrence rule into "start date, end date, daily hours" is guesswork.
+ *
+ * BOOKINGS (0079, a draft not applied yet). An event is first looked up as a
+ * booking's (job_bookings.google_event_id), and every rule above applies to
+ * that booking instead of the job: a Google-side move moves THAT booking, a
+ * deletion deletes it (the database then re-derives the job and crew), and
+ * the "newer side wins" stamp is the booking's own updated_at. Only an event
+ * no booking claims falls back to the job's legacy single event — the job
+ * has not been re-synced since bookings arrived — which keeps the old
+ * job-level writes, EXCEPT when the job's bookings no longer share one window:
+ * a job-level write would then be translated into "everyone on this window"
+ * and flatten them, so it is skipped (`legacySkipped`) and the next sync
+ * replaces the legacy event with per-booking ones.
  */
 export async function pollGoogleCalendarChanges(supabase: any) {
   const { data: tokenRow } = await tokenClient().from("google_tokens").select("*").single();
@@ -238,6 +299,9 @@ export async function pollGoogleCalendarChanges(supabase: any) {
   // Google-side edits to a recurring (multi-day) job's event that were
   // deliberately NOT written back — the app owns multi-day schedules.
   let seriesSkipped = 0;
+  // Legacy job-level events not written back because the job's bookings no
+  // longer share one window (see BOOKINGS above).
+  let legacySkipped = 0;
 
   // If we don't have a sync token yet, scope the initial listing to "from
   // now on" so we don't walk years of calendar history on the first run.
@@ -251,60 +315,109 @@ export async function pollGoogleCalendarChanges(supabase: any) {
   // `updated_at` is what makes the direction of a change knowable; without
   // it every comparison below degrades to "the times differ", which is the
   // bug this guard exists to close.
-  const findJob = async (eventId: string): Promise<PolledJob | null> => {
-    const { data } = await supabase
+  const findTarget = async (eventId: string): Promise<PollTarget | null> => {
+    // A database without job_bookings (0079 is a draft, not applied yet)
+    // answers with an error here; that simply means "no booking claims it".
+    const { data: booking } = await supabase
+      .from("job_bookings")
+      .select("id, job_id, starts_at, ends_at, daily, all_day, updated_at")
+      .eq("google_event_id", eventId)
+      .maybeSingle();
+    if (booking) {
+      const b = booking as PolledBooking;
+      return { kind: "booking", id: b.id, jobId: b.job_id, window: bookingAsWindow(b) };
+    }
+    const { data: job } = await supabase
       .from("jobs")
       .select("id, scheduled_start, scheduled_end, schedule_daily, schedule_all_day, status, updated_at")
       .eq("google_event_id", eventId)
       .maybeSingle();
-    return data ?? null;
+    return job ? { kind: "job", id: job.id, jobId: job.id, window: job as PolledJob } : null;
   };
 
-  const dropLink = async (jobId: string) => {
-    const { error: linkError } = await supabase.from("jobs").update({ google_event_id: null }).eq("id", jobId);
-    // Left set, the job keeps pointing at an event that no longer exists,
+  /**
+   * Whether a write-back to a LEGACY job event would flatten the job's
+   * bookings — true when they no longer share one window. A failed read (no
+   * table yet) means there are no bookings to flatten.
+   */
+  const legacyWriteWouldFlatten = async (target: PollTarget): Promise<boolean> => {
+    if (target.kind !== "job") return false;
+    const { data } = await supabase
+      .from("job_bookings")
+      .select("starts_at, ends_at, daily, all_day, cost_center_id")
+      .eq("job_id", target.jobId);
+    const windows = new Set(
+      ((data ?? []) as { starts_at: string; ends_at: string | null; daily: boolean; all_day: boolean; cost_center_id: string | null }[]).map(
+        (b) => `${Date.parse(b.starts_at)}|${b.ends_at ? Date.parse(b.ends_at) : ""}|${b.daily}|${b.all_day}|${b.cost_center_id ?? ""}`,
+      ),
+    );
+    if (windows.size <= 1) return false;
+    console.warn(
+      `Calendar poll: job ${target.jobId}'s old single event changed in Google, but its bookings ` +
+        `have different windows; not written back. The next sync replaces it with one event per booking.`
+    );
+    legacySkipped++;
+    return true;
+  };
+
+  const linkTable = (target: PollTarget) => (target.kind === "booking" ? "job_bookings" : "jobs");
+
+  const dropLink = async (target: PollTarget) => {
+    const { error: linkError } = await supabase.from(linkTable(target)).update({ google_event_id: null }).eq("id", target.id);
+    // Left set, the row keeps pointing at an event that no longer exists,
     // so /sync-calendar takes its UPDATE branch, 404s, and recreates —
     // producing a duplicate rather than repairing the link.
     if (linkError) linkClearFailed++;
   };
 
   /** The event (or whole series) is gone from Google. */
-  const handleDeletion = async (job: PolledJob, eventUpdated: string | null | undefined) => {
+  const handleDeletion = async (target: PollTarget, eventUpdated: string | null | undefined) => {
+    const job = target.window;
     if (!calendarEventIsNewer(eventUpdated, job.updated_at)) {
-      // Someone deleted the event in Google, but the app touched this job
-      // AFTER that. The event genuinely no longer exists, so the link has
-      // to go — but clearing the schedule too would throw away the newer
-      // edit, which is the whole failure this guard exists to prevent.
+      // Someone deleted the event in Google, but the app touched this
+      // booking/job AFTER that. The event genuinely no longer exists, so the
+      // link has to go — but clearing the schedule too would throw away the
+      // newer edit, which is the whole failure this guard exists to prevent.
       // Re-creating the event needs the job number, title, customer and
       // site that only /sync-calendar assembles, so that stays its job.
-      await dropLink(job.id);
+      await dropLink(target);
       skipped++;
       return;
     }
-    // Event was deleted directly in Google Calendar — clear the schedule so
-    // office staff notice the job needs re-booking, rather than silently
-    // leaving a stale schedule in place. The 0071 flags go with it: an
-    // unscheduled job is neither multi-day nor all-day.
-    const cleared = await supabase
-      .from("jobs")
-      .update({
-        scheduled_start: null,
-        scheduled_end: null,
-        schedule_daily: false,
-        schedule_all_day: false,
-        google_event_id: null,
-      })
-      .eq("id", job.id);
+    if (await legacyWriteWouldFlatten(target)) {
+      await dropLink(target);
+      return;
+    }
+    // Event was deleted directly in Google Calendar. A booking's event: that
+    // booking goes (the database re-derives the job's window and crew; if it
+    // was the last, the job is unscheduled). The legacy job event: clear the
+    // schedule so office staff notice the job needs re-booking, rather than
+    // silently leaving a stale schedule in place. The 0071 flags go with it:
+    // an unscheduled job is neither multi-day nor all-day.
+    const cleared =
+      target.kind === "booking"
+        ? await supabase.from("job_bookings").delete().eq("id", target.id)
+        : await supabase
+            .from("jobs")
+            .update({
+              scheduled_start: null,
+              scheduled_end: null,
+              schedule_daily: false,
+              schedule_all_day: false,
+              google_event_id: null,
+            })
+            .eq("id", target.id);
     // Counting this regardless would report a re-booking prompt the office
     // never actually gets.
     if (cleared.error) {
-      console.error(`Calendar poll: could not clear job ${job.id}:`, cleared.error.message);
+      console.error(`Calendar poll: could not clear ${target.kind} ${target.id}:`, cleared.error.message);
       writeFailed++;
     } else clearedByDeletion++;
   };
 
-  /** The JOB is newer: correct the event (a single event or a series master). */
-  const pushJobOntoEvent = async (job: PolledJob, eventId: string) => {
+  /** The APP is newer: correct the event (a single event or a series master). */
+  const pushJobOntoEvent = async (target: PollTarget, eventId: string) => {
+    const job = target.window;
     const timing = buildCalendarEventTiming(job);
     if (!timing) {
       // The app cleared the schedule. Deleting the event is the right answer
@@ -331,13 +444,13 @@ export async function pollGoogleCalendarChanges(supabase: any) {
       if (code === 404 || code === 410) {
         // The event vanished between the list and the patch. Drop the dead
         // link; the schedule stays, and /sync-calendar recreates the event.
-        await dropLink(job.id);
+        await dropLink(target);
         skipped++;
         return;
       }
       // One uncooperative event must not abort the reconciliation of every
       // other job, but nor may it vanish: it is counted and returned.
-      console.error(`Calendar poll: could not push job ${job.id} onto event ${eventId}:`, e);
+      console.error(`Calendar poll: could not push ${target.kind} ${target.id} onto event ${eventId}:`, e);
       pushFailed++;
     }
   };
@@ -359,16 +472,17 @@ export async function pollGoogleCalendarChanges(supabase: any) {
 
   /**
    * An event belonging to a recurring series, or any event of a multi-day
-   * job. `masterId` is the job's google_event_id.
+   * booking/job. `masterId` is its google_event_id.
    */
-  const handleSeriesEvent = async (event: CalendarEvent, job: PolledJob, masterId: string) => {
+  const handleSeriesEvent = async (event: CalendarEvent, target: PollTarget, masterId: string) => {
+    const job = target.window;
     const isOccurrence = event.id !== masterId;
     let master: CalendarEvent | null;
     if (isOccurrence) {
       try {
         master = await getMaster(masterId);
       } catch (e) {
-        console.error(`Calendar poll: could not read series ${masterId} for job ${job.id}:`, e);
+        console.error(`Calendar poll: could not read series ${masterId} for ${target.kind} ${target.id}:`, e);
         skipped++;
         return;
       }
@@ -379,7 +493,7 @@ export async function pollGoogleCalendarChanges(supabase: any) {
     if (!master || master.status === "cancelled") {
       if (reconciledSeries.has(masterId)) return;
       reconciledSeries.add(masterId);
-      await handleDeletion(job, master?.updated ?? event.updated);
+      await handleDeletion(target, master?.updated ?? event.updated);
       return;
     }
 
@@ -389,13 +503,13 @@ export async function pollGoogleCalendarChanges(supabase: any) {
       reconciledSeries.add(masterId);
       if (calendarEventIsNewer(master.updated, job.updated_at)) {
         console.warn(
-          `Calendar poll: event ${masterId} for job ${job.id} was changed in Google; ` +
+          `Calendar poll: event ${masterId} for ${target.kind} ${target.id} was changed in Google; ` +
             `not written back — the app is the source of truth for multi-day schedules.`
         );
         seriesSkipped++;
         return;
       }
-      await pushJobOntoEvent(job, masterId);
+      await pushJobOntoEvent(target, masterId);
       return;
     }
 
@@ -404,7 +518,7 @@ export async function pollGoogleCalendarChanges(supabase: any) {
     // would turn the whole schedule into that one day.
     if (isOccurrence && !instanceMatchesJob(event, job)) {
       console.warn(
-        `Calendar poll: one occurrence (${event.id}) of job ${job.id}'s calendar series was ` +
+        `Calendar poll: one occurrence (${event.id}) of ${target.kind} ${target.id}'s calendar series was ` +
           `${event.status === "cancelled" ? "deleted" : "edited"} in Google; not written back.`
       );
       seriesSkipped++;
@@ -449,24 +563,25 @@ export async function pollGoogleCalendarChanges(supabase: any) {
       if (!event.id) continue;
 
       // An occurrence of a series is linked through its master's id.
-      let job = await findJob(event.id);
+      let target = await findTarget(event.id);
       let masterId = event.id;
-      if (!job && event.recurringEventId) {
-        job = await findJob(event.recurringEventId);
+      if (!target && event.recurringEventId) {
+        target = await findTarget(event.recurringEventId);
         masterId = event.recurringEventId;
       }
-      if (!job) {
+      if (!target) {
         skipped++;
         continue;
       }
+      const job = target.window;
 
       if (masterId !== event.id || job.schedule_daily || (event.recurrence?.length ?? 0) > 0) {
-        await handleSeriesEvent(event, job, masterId);
+        await handleSeriesEvent(event, target, masterId);
         continue;
       }
 
       if (event.status === "cancelled") {
-        await handleDeletion(job, event.updated);
+        await handleDeletion(target, event.updated);
         continue;
       }
 
@@ -480,12 +595,16 @@ export async function pollGoogleCalendarChanges(supabase: any) {
       if (!changed) continue;
 
       if (calendarEventIsNewer(event.updated, job.updated_at)) {
+        if (await legacyWriteWouldFlatten(target)) continue;
         // THE write this whole function exists to make — and `updated++` ran
         // whether or not it landed, so the poll could report "3 jobs updated"
         // having changed none of them.
-        const applied = await supabase.from("jobs").update(fromEvent).eq("id", job.id);
+        const applied =
+          target.kind === "booking"
+            ? await supabase.from("job_bookings").update(bookingColumns(fromEvent)).eq("id", target.id)
+            : await supabase.from("jobs").update(fromEvent).eq("id", target.id);
         if (applied.error) {
-          console.error(`Calendar poll: could not apply event to job ${job.id}:`, applied.error.message);
+          console.error(`Calendar poll: could not apply event to ${target.kind} ${target.id}:`, applied.error.message);
           writeFailed++;
           continue;
         }
@@ -493,10 +612,10 @@ export async function pollGoogleCalendarChanges(supabase: any) {
         continue;
       }
 
-      // The JOB is the newer writer, so the event is stale. Correct the event
-      // rather than the job — writing the job here is precisely the data loss
-      // this guard exists to stop.
-      await pushJobOntoEvent(job, event.id);
+      // The APP is the newer writer, so the event is stale. Correct the event
+      // rather than the booking/job — writing it here is precisely the data
+      // loss this guard exists to stop.
+      await pushJobOntoEvent(target, event.id);
     }
 
     pageToken = res.data.nextPageToken ?? undefined;
@@ -528,6 +647,7 @@ export async function pollGoogleCalendarChanges(supabase: any) {
     linkClearFailed,
     writeFailed,
     seriesSkipped,
+    legacySkipped,
     initialSync: isInitialSync,
   };
 }
