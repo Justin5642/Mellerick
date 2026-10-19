@@ -403,12 +403,14 @@ describe("every surface that reschedules a job routes through the seam", () => {
   it("the schedule-writing surfaces actually call the dispatcher", () => {
     // Without this the scan above passes for a screen that stopped saving
     // altogether — which is green, and broken.
-    for (const rel of [
-      "components/schedule/team-schedule-view.tsx",
-      "components/job/job-overview.tsx",
-      "components/job/schedule-job-dialog.tsx",
-    ]) {
-      expect(readFileSync(join(ROOT, rel), "utf8"), rel).toContain("applyScheduleChange");
+    expect(readFileSync(join(ROOT, "components/job/job-overview.tsx"), "utf8")).toContain("applyScheduleChange");
+    // The board and the Schedule dialog write BOOKINGS (lib/bookings.ts; the
+    // table is from 0079, a draft not applied yet) and then push the job to
+    // Google themselves — the same "write, then tell the calendar" contract.
+    for (const rel of ["components/schedule/team-schedule-view.tsx", "components/job/schedule-job-dialog.tsx"]) {
+      const src = readFileSync(join(ROOT, rel), "utf8");
+      expect(src, rel).toMatch(/updateBooking|saveBookingPlan/);
+      expect(src, rel).toContain("pushJobToCalendar");
     }
   });
 });

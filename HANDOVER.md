@@ -136,6 +136,46 @@ mirrored at `mobile/lib/scheduling.ts` and pinned identical by
   web → ship mobile. Web and the calendar poll select these columns; only the
   Jobs list and the schedule board fall back (42703) if they are ever missing.
 
+**Job bookings — web (stage 2; needs migration `0079`, a DRAFT not yet applied).**
+Each technician's own time and cost centre on a job is a row in `job_bookings`;
+the job's window and crew are derived from them by 0079's triggers. **Apply
+0079 (and run its test) BEFORE merging this to `main`.** Without the table the
+web still renders (bookings are derived read-only from the job window and
+crew, the board refuses drags with a message, the Schedule dialog cannot save,
+and calendar sync keeps the old single event) — so an early merge degrades
+scheduling to read-only; it does not corrupt anything.
+- **Pure rules + reads/writes:** `lib/bookings.ts` (`bookingWindow` hands a
+  booking to `lib/scheduling.ts` — the 0071 day rules are reused, not forked;
+  `planBookingSave` turns dialog rows into inserts/updates/deletes).
+- **Schedule dialog** (`components/job/schedule-job-dialog.tsx`, office/admin
+  only — RLS): a list of bookings; each row = technicians × cost centre ×
+  days/hours (same `ScheduleFields`). Several technicians on a row = one
+  booking each. Saved rows update in place (keeping their calendar event);
+  writes are inserts/updates first, deletes last; not atomic — a partial
+  failure closes and refreshes. `?schedule=1` still auto-opens it. The
+  Overview tab no longer edits the schedule or Assigned Technician (either
+  write would flatten bookings via the compatibility triggers); it lists the
+  bookings read-only with an "Edit schedule" button.
+- **Board** (`components/schedule/`): cards are bookings, under their own
+  technician (or Unassigned) on each booked day; hours = sum of the tech's
+  bookings. Drag/paste moves THAT booking (`staff_id` and/or dates via
+  `moveSchedule`); Shift-drop inserts a copy for the target tech (same window
+  and cost centre; on another day in Week view it starts there).
+- **Google Calendar:** one event per booking, titled `#<job> <cost centre> —
+  <tech>` (job title when no cost centre, "Unassigned" with no tech), linked
+  by `job_bookings.google_event_id` and tagged with private extended
+  properties `mellerickJobId`/`mellerickBookingId`
+  (`lib/calendar-booking-sync.ts`). A sync updates/creates each booking's
+  event, deletes tagged events no booking links to (so bookings removed by the
+  old-style compatibility trigger leave no strays), and retires the legacy
+  job event — adopted by the booking when the job has exactly one. The poll
+  matches events to bookings first (moves/deletes that booking, same "newer
+  side wins" rules on the booking's `updated_at`); a legacy job event is only
+  written back while the job's bookings still share one window
+  (`legacySkipped` otherwise).
+- Old-style writers (mobile ≤15, New Job, approvals) still write the job-level
+  schedule; 0079 translates them. Mobile build 16 is the next stage.
+
 **Load page data on the server, not in the browser.** A browser→Supabase
 query from Australia costs ~100 ms+; a server query in `sin1` costs ~2 ms. So
 My Jobs, Approvals, Staff, Fleet and Customers are server pages that pass

@@ -5,6 +5,7 @@ import { requireUser } from "@/lib/api/guards";
 import { canManageJobBilling } from "@/lib/api/job-authz";
 import { reportError } from "@/lib/monitoring";
 import { buildCalendarEventBody, type CalendarJob } from "@/lib/calendar-event";
+import { syncJobCalendar, type BookingSyncCalendar } from "@/lib/calendar-booking-sync";
 
 // A user is waiting on this request while it calls an outside service (Xero,
 // Google, the email provider, or the PDF renderer). Without a cap a hung
@@ -38,6 +39,17 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       return NextResponse.json({ skipped: true, reason: "Google Calendar not connected" });
     }
 
+    // One event per booking (lib/calendar-booking-sync.ts). job_bookings is
+    // from 0079, a draft not applied yet; until it is, `bookingsMissing` and
+    // the single job-level event below carries on exactly as before.
+    const synced = await syncJobCalendar(supabase, calendar as unknown as BookingSyncCalendar, id);
+    if (synced.notFound) return NextResponse.json({ error: "Job not found" }, { status: 404 });
+    if (!synced.bookingsMissing) {
+      // Warnings are fixed sentences from the sync, never Google's text.
+      return NextResponse.json({ ...synced, perBooking: true });
+    }
+
+    // ---- Before bookings: one event for the whole job ----------------------
     const { data: job } = await supabase
       .from("jobs")
       .select("*, customers(name), sites(address_line1, suburb, state, postcode)")
