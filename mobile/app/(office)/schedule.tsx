@@ -8,9 +8,9 @@ import { supabase } from "../../lib/supabase";
 import { colors } from "../../lib/theme";
 import { JobListRow } from "../../design/components/JobListRow";
 import { ScreenError } from "../../design/components/ScreenError";
-import { businessDayLabel, formatBusinessTime, computeRescheduleWithTime, localDateKey, toBusinessInputValue } from "../../lib/date";
+import { businessDayLabel, formatBusinessTime, computeRescheduleWithTime, dateKeyInBusinessTZ, localDateKey, toBusinessInputValue } from "../../lib/date";
 import { moveSchedule, scheduleDays, type ScheduleDay } from "../../lib/scheduling";
-import { formatScheduleSummary } from "../../lib/scheduleDisplay";
+import { businessTodayKey, formatScheduleSummary } from "../../lib/scheduleDisplay";
 import { useSchedule } from "../../lib/data/hooks/useSchedule";
 import { listAssignableStaff, type AssignableStaff } from "../../lib/data/reads/schedule";
 import { unwrapRows } from "../../lib/data/reads/unwrap";
@@ -157,17 +157,29 @@ export default function ScheduleScreen() {
 
   // ... and, with bookings, one row per booked day of each BOOKING: Dave on
   // Mon–Tue and Sam on Monday morning are separate rows with their own times.
+  //
+  // Today and what's ahead come first, soonest at the top, so the next job is
+  // the first thing on screen. Rows whose time has already ENDED (open jobs
+  // left on a past date) used to lead the list, oldest first, and pushed the
+  // next job to the bottom (Justin, 19 Oct 2026); they now sit in one
+  // "Earlier — not finished" section at the end, most recent first.
   const sections = useMemo(() => {
+    const todayKey = businessTodayKey();
     const rows = items
       .flatMap((item) => scheduleDays(item.window).map((day, index, all) => ({ item, day, index, count: all.length })))
       .sort((a, b) => a.day.startIso.localeCompare(b.day.startIso));
+    const isPast = (r: SchedRow) => dateKeyInBusinessTZ(r.day.endIso) < todayKey;
     const map = new Map<string, SchedRow[]>();
-    for (const r of rows) {
+    for (const r of rows.filter((r) => !isPast(r))) {
       const arr = map.get(r.day.dateKey);
       if (arr) arr.push(r);
       else map.set(r.day.dateKey, [r]);
     }
-    return Array.from(map, ([, data]) => ({ title: businessDayLabel(data[0].day.startIso), data }));
+    const ahead = Array.from(map, ([, data]) => ({ title: businessDayLabel(data[0].day.startIso), data, earlier: false }));
+    const earlier = rows.filter(isPast).reverse();
+    return earlier.length > 0
+      ? [...ahead, { title: `Earlier — not finished (${earlier.length})`, data: earlier, earlier: true }]
+      : ahead;
   }, [items]);
 
   // Jobs are often done in pairs or more (job_assignments, migration 0059).
@@ -332,12 +344,14 @@ export default function ScheduleScreen() {
         stickySectionHeadersEnabled={false}
         ListEmptyComponent={<Text style={styles.empty}>Nothing scheduled.</Text>}
         renderSectionHeader={({ section }) => <Text style={styles.dayHead}>{section.title}</Text>}
-        renderItem={({ item: { item, day, index, count } }) => (
+        renderItem={({ item: { item, day, index, count }, section }) => (
           <View style={styles.card}>
             <JobListRow
               jobNumber={item.job.job_number}
               title={item.job.title}
-              subtitle={`${item.job.customers?.name ?? "—"} · ${item.who ?? "Unassigned"}${count > 1 ? ` · Day ${index + 1} of ${count}` : ""}`}
+              // Rows under "Earlier" have no day heading above them, so they
+              // carry their own date.
+              subtitle={`${section.earlier ? `${businessDayLabel(day.startIso)} · ` : ""}${item.job.customers?.name ?? "—"} · ${item.who ?? "Unassigned"}${count > 1 ? ` · Day ${index + 1} of ${count}` : ""}`}
               status={item.job.status}
               leading={
                 <View style={styles.timeCol}>
