@@ -1,7 +1,7 @@
 // What a customer still owes, and how late it is.
 //
 // An invoice's balance is its total less amount_paid. amount_paid is kept
-// current two ways (migration 0081, a draft, not applied yet): by recorded
+// current two ways (migration 0081): by recorded
 // payments for invoices that are not in Xero, and by the Xero poll
 // (lib/xero.ts) for those that are. Everything here reads that one column, so
 // the two sources never need adding together.

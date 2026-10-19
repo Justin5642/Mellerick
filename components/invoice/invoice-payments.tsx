@@ -29,8 +29,8 @@ function money(n: number) {
 //
 // Only for invoices NOT in Xero: for those, Xero is the record and the app's
 // poll keeps amount_paid current (lib/xero.ts); the database refuses a manual
-// payment on them (migration 0081, a draft, not applied yet). `payments` is
-// null when the invoice_payments table does not exist yet — the card then
+// payment on them (migration 0081). `payments` is null when the
+// invoice_payments table does not exist (a database without 0081) — the card then
 // says so rather than offering a form that cannot save.
 export function InvoicePayments({
   invoiceId,

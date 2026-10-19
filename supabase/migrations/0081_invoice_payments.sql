@@ -1,8 +1,8 @@
 -- ============================================================================
 -- Record payments against invoices that are not in Xero.
 --
--- STATUS: DRAFT — NOT APPLIED. Apply, then run
--- supabase/tests/0081_invoice_payments_test.sql.
+-- STATUS: ✅ APPLIED IN PRODUCTION (2026-10-19, via db query --linked). Gate test
+-- supabase/tests/0081_invoice_payments_test.sql passed.
 --
 -- WHY
 -- Payment tracking was built around Xero: an invoice pushed to Xero is marked

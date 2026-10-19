@@ -16,8 +16,7 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<{ 
 
   if (!invoice) notFound();
 
-  // A database without invoice_payments (migration 0081, a draft, not applied
-  // yet) answers 42P01 / PGRST205: the payments card then says so instead of
+  // A database without invoice_payments (migration 0081) answers 42P01 / PGRST205: the payments card then says so instead of
   // offering a form that cannot save. Any other error is logged and shows the
   // same way rather than taking the invoice page down.
   if (paymentsRes.error) console.error("invoice page: payments unavailable", paymentsRes.error);
