@@ -7,10 +7,13 @@ import { Plus, AlertCircle } from "lucide-react";
 import Link from "next/link";
 import { InvoiceList } from "@/components/invoice/invoice-list";
 import { INVOICE_LIST_COLUMNS, INVOICE_PAGE_SIZE, type InvoiceListRow } from "@/lib/invoice-list";
+import { OwedToUs } from "@/components/invoice/owed-to-us";
+import { OWED_STATUSES, summarizeOwed, type OwedInvoice } from "@/lib/invoice-payments";
+import { dateKeyInBusinessTZ } from "@/lib/date";
 
 export default async function InvoicesPage() {
   const supabase = await createClient();
-  const [{ data: invoices, count: invoiceCount }, { data: readyJobs }, { data: unbilledVariations }] = await Promise.all([
+  const [{ data: invoices, count: invoiceCount }, { data: readyJobs }, { data: unbilledVariations }, owedRes] = await Promise.all([
     // First page only, with the total for the header. Every invoice with every
     // column used to load here; the rest now come 50 at a time via Load more
     // (components/invoice/invoice-list.tsx, same columns and order).
@@ -30,7 +33,15 @@ export default async function InvoicesPage() {
       .select("id, total_amount, jobs(id, job_number, title, customer_id, customers(name))")
       .in("status", ["approved", "auto_approved"])
       .is("invoice_id", null),
+    // Every invoice still waiting on money, for "Owed to us". Bounded by what
+    // is unpaid, not by history, so it stays small as invoices accumulate.
+    supabase
+      .from("invoices")
+      .select("id, invoice_number, title, total, amount_paid, due_date, status, customers(name)")
+      .in("status", OWED_STATUSES),
   ]);
+  if (owedRes.error) console.error("invoices page: owed summary unavailable", owedRes.error);
+  const owed = owedRes.error ? null : summarizeOwed((owedRes.data ?? []) as unknown as OwedInvoice[], dateKeyInBusinessTZ(new Date()));
 
   // Merge both sources into one queue, keyed by job, so a job needing its
   // very first invoice and a job with a leftover unbilled variation both
@@ -100,6 +111,8 @@ export default async function InvoicesPage() {
           </CardContent>
         </Card>
       )}
+
+      {owed && <OwedToUs summary={owed} />}
 
       <InvoiceList initialInvoices={(invoices ?? []) as InvoiceListRow[]} total={totalInvoices} />
     </div>

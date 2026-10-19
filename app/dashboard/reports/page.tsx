@@ -2,6 +2,7 @@ export const dynamic = "force-dynamic";
 
 import { getViewer } from "@/lib/auth/viewer";
 import { createClient } from "@/lib/supabase/server";
+import { balanceOf } from "@/lib/invoice-payments";
 import { ReportsDashboard } from "@/components/reports/reports-dashboard";
 import { computeLoadedCost } from "@/lib/staff-cost";
 import { computeEquipmentCost } from "@/lib/equipment-cost";
@@ -82,7 +83,7 @@ export default async function ReportsPage() {
   });
 
   const [invoicesResult, quotesResult, jobsResult, profilesResult, equipmentResult, equipmentUsageResult, viewer, adminReads] = await Promise.all([
-    fetchAllRows((c) => supabase.from("invoices").select("total, status, created_at, customer_id, customers(name)", c).order("id")),
+    fetchAllRows((c) => supabase.from("invoices").select("total, amount_paid, status, created_at, customer_id, customers(name)", c).order("id")),
     fetchAllRows((c) => supabase.from("quotes").select("total, status", c).order("id")),
     fetchAllRows((c) => supabase.from("jobs").select("status, assigned_to", c).order("id")),
     fetchAllRows((c) => supabase.from("profiles").select("id, full_name", c).eq("is_active", true).order("id")),
@@ -242,17 +243,18 @@ export default async function ReportsPage() {
   const revenueByMonth = monthKeys.map((key) => {
     const monthInvoices = invoicesData.filter((inv: any) => monthKey(inv.created_at) === key);
     const paid = monthInvoices.filter((inv: any) => inv.status === "paid").reduce((s: number, i: any) => s + Number(i.total), 0);
+    // What is still owing (part-payments taken off), as on the Invoices page.
     const outstanding = monthInvoices
       .filter((inv: any) => inv.status === "sent" || inv.status === "overdue")
-      .reduce((s: number, i: any) => s + Number(i.total), 0);
+      .reduce((s: number, i: any) => s + balanceOf(i), 0);
     return { month: monthLabel(key), paid, outstanding };
   });
 
   const totalRevenuePaid = invoicesData.filter((i: any) => i.status === "paid").reduce((s: number, i: any) => s + Number(i.total), 0);
   const totalOutstanding = invoicesData
     .filter((i: any) => i.status === "sent" || i.status === "overdue")
-    .reduce((s: number, i: any) => s + Number(i.total), 0);
-  const totalOverdue = invoicesData.filter((i: any) => i.status === "overdue").reduce((s: number, i: any) => s + Number(i.total), 0);
+    .reduce((s: number, i: any) => s + balanceOf(i), 0);
+  const totalOverdue = invoicesData.filter((i: any) => i.status === "overdue").reduce((s: number, i: any) => s + balanceOf(i), 0);
 
   // ---- Quote conversion ----
   const quoteStatusCounts: Record<string, number> = { draft: 0, sent: 0, accepted: 0, declined: 0, expired: 0 };
