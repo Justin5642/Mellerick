@@ -117,7 +117,7 @@ describe("ownership — queued work belongs to whoever queued it", () => {
   });
 
   it("the sync badge counts only the signed-in user's items, not the last person's", async () => {
-    const owner = { current: "alice" };
+    const owner: { current: string | null } = { current: "alice" };
     const { box, store } = ownedBox(owner);
     await box.enqueue(write("a1"));
     await box.enqueue(write("a2"));
