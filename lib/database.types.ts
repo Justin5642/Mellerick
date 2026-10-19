@@ -957,6 +957,73 @@ export type Database = {
           },
         ]
       }
+      job_bookings: {
+        Row: {
+          all_day: boolean
+          cost_center_id: string | null
+          created_at: string
+          created_by: string | null
+          daily: boolean
+          ends_at: string | null
+          google_event_id: string | null
+          id: string
+          job_id: string
+          staff_id: string | null
+          starts_at: string
+          updated_at: string
+        }
+        Insert: {
+          all_day?: boolean
+          cost_center_id?: string | null
+          created_at?: string
+          created_by?: string | null
+          daily?: boolean
+          ends_at?: string | null
+          google_event_id?: string | null
+          id?: string
+          job_id: string
+          staff_id?: string | null
+          starts_at: string
+          updated_at?: string
+        }
+        Update: {
+          all_day?: boolean
+          cost_center_id?: string | null
+          created_at?: string
+          created_by?: string | null
+          daily?: boolean
+          ends_at?: string | null
+          google_event_id?: string | null
+          id?: string
+          job_id?: string
+          staff_id?: string | null
+          starts_at?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "job_bookings_job_id_fkey"
+            columns: ["job_id"]
+            isOneToOne: false
+            referencedRelation: "jobs"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "job_bookings_staff_id_fkey"
+            columns: ["staff_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "job_bookings_cost_center_id_fkey"
+            columns: ["cost_center_id"]
+            isOneToOne: false
+            referencedRelation: "po_cost_centers"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       job_documents: {
         Row: {
           created_at: string | null
