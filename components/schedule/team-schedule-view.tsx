@@ -49,7 +49,7 @@ import {
   type BoardJob,
   type BookingPatch,
 } from "./board-model";
-import { Navigation, Users, LayoutList, ListTodo, ChevronLeft, ChevronRight, GripVertical, CalendarDays, CalendarRange, Scissors, X } from "lucide-react";
+import { Navigation, LayoutList, ListTodo, ChevronLeft, ChevronRight, GripVertical, CalendarDays, CalendarRange, Scissors, X } from "lucide-react";
 import {
   formatTime,
   formatDate,
@@ -397,7 +397,10 @@ export function TeamScheduleView({
   // deep"). This says exactly what this component does with the client —
   // insert/update on job_bookings — rather than widening anything to `any`.
   const supabase = createClient() as unknown as BookingWriteClient;
-  const [tab, setTab] = useState("team");
+  // Week is the default view (Justin, 19 Oct 2026): the board opens on the
+  // whole week, and Day is its own tab beside it rather than a toggle inside
+  // one "Team" tab that always reopened on today.
+  const [tab, setTab] = useState("week");
   // Every job passed in here already has a scheduled_start (the page query
   // filters that) — jobs with no time yet stay in the general Jobs list
   // until someone schedules them, rather than flooding this board's
@@ -411,7 +414,7 @@ export function TeamScheduleView({
 
   const todayKey = useMemo(() => dateKeyInBusinessTZ(new Date()), []);
   const [selectedDateKey, setSelectedDateKey] = useState(todayKey);
-  const [viewMode, setViewMode] = useState<"day" | "week">("day");
+  const viewMode: "day" | "week" = tab === "day" ? "day" : "week";
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { delay: 200, tolerance: 8 } })
@@ -648,14 +651,18 @@ export function TeamScheduleView({
   return (
     <Tabs value={tab} onValueChange={(v) => typeof v === "string" && setTab(v)}>
       <TabsList variant="line">
-        <TabsTrigger value="team" className="gap-1.5"><Users className="w-3.5 h-3.5" />Team</TabsTrigger>
+        <TabsTrigger value="week" className="gap-1.5"><CalendarRange className="w-3.5 h-3.5" />Week</TabsTrigger>
+        <TabsTrigger value="day" className="gap-1.5"><CalendarDays className="w-3.5 h-3.5" />Day</TabsTrigger>
         <TabsTrigger value="list" className="gap-1.5"><LayoutList className="w-3.5 h-3.5" />List</TabsTrigger>
         <TabsTrigger value="todo" className="gap-1.5">
           <ListTodo className="w-3.5 h-3.5" />To-do list{todoJobs.length > 0 ? ` (${todoJobs.length})` : ""}
         </TabsTrigger>
       </TabsList>
 
-      <TabsContent value="team" className="mt-4">
+      {/* Week and Day share one board; `viewMode` follows the tab. Not a
+          TabsContent, so switching between them keeps the board mounted. */}
+      {(tab === "week" || tab === "day") && (
+      <div className="mt-4">
         <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
           <div className="flex items-center gap-2">
             <Button
@@ -685,26 +692,6 @@ export function TeamScheduleView({
             )}
           </div>
 
-          <div className="inline-flex rounded-md border border-slate-200 p-0.5 bg-slate-50">
-            <Button
-              size="sm"
-              variant={viewMode === "day" ? "default" : "ghost"}
-              className="h-7 px-3 gap-1.5"
-              onClick={() => setViewMode("day")}
-            >
-              <CalendarDays className="w-3.5 h-3.5" />
-              Day
-            </Button>
-            <Button
-              size="sm"
-              variant={viewMode === "week" ? "default" : "ghost"}
-              className="h-7 px-3 gap-1.5"
-              onClick={() => setViewMode("week")}
-            >
-              <CalendarRange className="w-3.5 h-3.5" />
-              Week
-            </Button>
-          </div>
         </div>
 
         {cutJob ? (
@@ -936,7 +923,8 @@ export function TeamScheduleView({
             </DragOverlay>
           </DndContext>
         )}
-      </TabsContent>
+      </div>
+      )}
 
       <TabsContent value="list" className="mt-4 space-y-6">
         <Card>
