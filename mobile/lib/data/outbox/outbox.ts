@@ -524,22 +524,34 @@ export class Outbox {
     );
   }
 
+  // The badge counts below are for the SIGNED-IN user only. They used to count
+  // every operation on the phone, so on a shared phone the next person saw the
+  // previous person's unsynced items as their own "N pending" — work they could
+  // neither see nor retry, since only the owner's operations run (isOwned).
+  // With ownership off (no owner function: tests, previews) they count all, as
+  // before. The outbox is small (it drains as it goes), so filtering a full read
+  // is cheaper than a second indexed query path.
+  private async countOwned(statuses: OpStatus[]): Promise<number> {
+    const current = this.currentOwner();
+    if (current === undefined) {
+      const counts = await Promise.all(statuses.map((s) => this.store.countByStatus(s)));
+      return counts.reduce((a, b) => a + b, 0);
+    }
+    const all = await this.store.all();
+    return all.filter((o) => statuses.includes(o.status) && this.isOwned(o, current)).length;
+  }
+
   async pendingCount(): Promise<number> {
-    const [pending, failed, inflight] = await Promise.all([
-      this.store.countByStatus("pending"),
-      this.store.countByStatus("failed"),
-      this.store.countByStatus("inflight"),
-    ]);
-    return pending + failed + inflight;
+    return this.countOwned(["pending", "failed", "inflight"]);
   }
 
   async failedCount(): Promise<number> {
-    return this.store.countByStatus("failed");
+    return this.countOwned(["failed"]);
   }
 
   // Terminally-failed writes that gave up retrying — surfaced as needs-attention.
   async deadCount(): Promise<number> {
-    return this.store.countByStatus("dead");
+    return this.countOwned(["dead"]);
   }
 }
 

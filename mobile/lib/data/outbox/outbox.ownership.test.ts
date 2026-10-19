@@ -116,6 +116,31 @@ describe("ownership — queued work belongs to whoever queued it", () => {
     expect(await box.unsyncedCountFor("bob")).toBe(1);
   });
 
+  it("the sync badge counts only the signed-in user's items, not the last person's", async () => {
+    const owner: { current: string | null } = { current: "alice" };
+    const { box, store } = ownedBox(owner);
+    await box.enqueue(write("a1"));
+    await box.enqueue(write("a2"));
+    await store.update("a2", { status: "dead" });
+    owner.current = "bob";
+    await box.enqueue(write("b1"));
+    expect(await box.pendingCount()).toBe(1); // bob's own, not alice's a1
+    expect(await box.deadCount()).toBe(0); // alice's dead write is not bob's problem
+    owner.current = "alice";
+    expect(await box.pendingCount()).toBe(1);
+    expect(await box.deadCount()).toBe(1);
+    owner.current = null;
+    expect(await box.pendingCount()).toBe(0); // signed out: nothing is "yours"
+  });
+
+  it("the badge counts unowned (pre-update) items for whoever is signed in, as the drain does", async () => {
+    const store = new InMemoryOutboxStore();
+    await store.insert(write("legacy"));
+    const owner = { current: "bob" };
+    const box = new Outbox(store, mockClock(), undefined, () => owner.current);
+    expect(await box.pendingCount()).toBe(1);
+  });
+
   it("clearForOwner removes that user's (and unowned) operations only", async () => {
     const owner = { current: "alice" };
     const { box, store } = ownedBox(owner);
