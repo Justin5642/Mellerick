@@ -25,6 +25,7 @@ declare
   mon timestamptz := date_trunc('day', now()) + interval '7 days 7 hours';
   long_ago timestamptz := now() - interval '3 years';
   replica_ok boolean := true;
+  job_ctid text;
   line text;
   parts text[];
   failures text := '';
@@ -84,9 +85,15 @@ begin
     --    and is NOT activity: no updated_at bump on the booking or its job, no
     --    re-derive of the job, no rebuild of its bookings. Under 0079's
     --    triggers alone each of these failed.
+    -- The job row's physical address (ctid) changes on ANY update, so it shows
+    -- a re-derive even inside this one transaction, where now() — and so
+    -- updated_at — cannot move. Needs no special privilege.
+    select ctid::text into job_ctid from jobs where id = j;
     update job_bookings set sync_office = false where id = b;
     select * into r from job_bookings where id = b;
     res := res || format('refresh-style write: booking leaves the window|false|%s', r.sync_office);
+    res := res || format('refresh-style write: job not re-derived (row untouched)|%s|%s',
+      job_ctid, (select ctid::text from jobs where id = j));
     res := res || format('refresh-style write: bookings not rebuilt|%s|%s',
       b, (select string_agg(id::text, ',') from job_bookings where job_id = j));
     if replica_ok then
