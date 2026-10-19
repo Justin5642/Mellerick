@@ -6,6 +6,7 @@ import { notFound } from "next/navigation";
 import { JobDetailClient } from "@/components/job/job-detail-client";
 import { TIME_ENTRY_SELECT_WITH_STAFF } from "@/lib/time-entry-columns";
 import { sumAllocatedHours } from "@/lib/hours-scoreboard";
+import { loadJobBookings } from "@/lib/bookings";
 
 export default async function JobDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -46,6 +47,13 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
       ];
     },
   );
+
+  // The job's bookings (each technician's own time and cost centre), named
+  // from the staff list above — so chained off it, alongside the main batch.
+  // job_bookings is from 0079 yet: on a database without
+  // it `missingTable` is set and the client derives the list from the job's
+  // own window instead.
+  const bookingsPromise = staffForDisplayPromise.then((staffList) => loadJobBookings(supabase, id, staffList));
 
   // Role-dependent reads, chained off the viewer alone so they run alongside
   // the main batch instead of after it. The role gates are unchanged: a
@@ -112,6 +120,7 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
     { data: equipmentUsage },
     { data: jobAssignments },
     staffForDisplay,
+    bookingsResult,
     { user, isAdmin, isOffice, techAllocatedHours, techAllocatedHoursError, staffCostProfiles, jobInvoices, minMarginPct },
   ] = await Promise.all([
     // Only per-job rows load here. The shared catalogs (pricing_items,
@@ -135,6 +144,7 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
     supabase.from("equipment_usage_log").select("*").eq("job_id", id).order("usage_date", { ascending: false }),
     jobAssignmentsPromise,
     staffForDisplayPromise,
+    bookingsPromise,
     roleDataPromise,
   ]);
 
@@ -166,6 +176,9 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
       jobInvoices={jobInvoices}
       minMarginPct={minMarginPct}
       currentAssignedIds={currentAssignedIds}
+      bookings={bookingsResult.bookings}
+      bookingsReady={!bookingsResult.missingTable}
+      bookingsError={bookingsResult.missingTable ? null : bookingsResult.error}
     />
   );
 }

@@ -970,6 +970,7 @@ export type Database = {
           job_id: string
           staff_id: string | null
           starts_at: string
+          sync_office: boolean
           updated_at: string
         }
         Insert: {
@@ -984,6 +985,7 @@ export type Database = {
           job_id: string
           staff_id?: string | null
           starts_at: string
+          sync_office?: boolean
           updated_at?: string
         }
         Update: {
@@ -998,6 +1000,7 @@ export type Database = {
           job_id?: string
           staff_id?: string | null
           starts_at?: string
+          sync_office?: boolean
           updated_at?: string
         }
         Relationships: [

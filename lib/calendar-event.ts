@@ -121,6 +121,67 @@ export function buildCalendarEventBody(job: CalendarJob) {
 }
 
 // ---------------------------------------------------------------------------
+// One event per BOOKING
+// ---------------------------------------------------------------------------
+// With job_bookings (migration 0079 yet) each booking
+// is its own event: "#2530 Rough-in — Dave". The timing rules are the job's,
+// unchanged — a booking's window means what a job's did — so the booking is
+// handed to buildCalendarEventTiming in the job-shaped form.
+//
+// Every booking event carries private extended properties naming its job and
+// booking. They are what lets a sync find events the app made but no longer
+// links to — a booking deleted by an old-style schedule write (the
+// compatibility trigger rebuilds bookings, dropping their google_event_id),
+// or an insert whose link write failed — and delete or re-link them instead
+// of leaving a stray event in someone's calendar for ever.
+
+/** Private extended-property keys on every booking event. */
+export const EVENT_JOB_KEY = "mellerickJobId";
+export const EVENT_BOOKING_KEY = "mellerickBookingId";
+
+export interface CalendarBooking {
+  id: string;
+  starts_at: string;
+  ends_at: string | null;
+  daily: boolean;
+  all_day?: boolean;
+}
+
+/**
+ * "#2530 Rough-in — Dave". The cost centre names the stage; with none, the
+ * job title stands in ("#2530 Hot water service — Dave"). No technician:
+ * "Unassigned", so the office can see the gap in the calendar too.
+ */
+export function bookingEventSummary(
+  job: Pick<CalendarJob, "job_number" | "title">,
+  costCenterName: string | null | undefined,
+  staffName: string | null | undefined,
+): string {
+  const what = costCenterName?.trim() || job.title?.trim() || "Job";
+  return `#${job.job_number} ${what} — ${staffName?.trim() || "Unassigned"}`;
+}
+
+/** The full event body for one booking. Null only for a booking without a start, which the table forbids. */
+export function buildBookingEventBody(
+  job: CalendarJob & { id: string },
+  booking: CalendarBooking,
+  names: { staffName?: string | null; costCenterName?: string | null },
+) {
+  const base = buildCalendarEventBody({
+    ...job,
+    scheduled_start: booking.starts_at,
+    scheduled_end: booking.ends_at,
+    schedule_daily: booking.daily,
+  });
+  if (!base) return null;
+  return {
+    ...base,
+    summary: bookingEventSummary(job, names.costCenterName, names.staffName),
+    extendedProperties: { private: { [EVENT_JOB_KEY]: job.id, [EVENT_BOOKING_KEY]: booking.id } },
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Reading an event back (poll)
 // ---------------------------------------------------------------------------
 

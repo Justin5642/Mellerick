@@ -136,6 +136,46 @@ mirrored at `mobile/lib/scheduling.ts` and pinned identical by
   web → ship mobile. Web and the calendar poll select these columns; only the
   Jobs list and the schedule board fall back (42703) if they are ever missing.
 
+**Job bookings — web (stage 2; migration `0079` applied 2026-10-19, live).**
+Each technician's own time and cost centre on a job is a row in `job_bookings`;
+the job's window and crew are derived from them by 0079's triggers. **Apply
+0079 (and run its test) BEFORE merging this to `main`.** Without the table the
+web still renders (bookings are derived read-only from the job window and
+crew, the board refuses drags with a message, the Schedule dialog cannot save,
+and calendar sync keeps the old single event) — so an early merge degrades
+scheduling to read-only; it does not corrupt anything.
+- **Pure rules + reads/writes:** `lib/bookings.ts` (`bookingWindow` hands a
+  booking to `lib/scheduling.ts` — the 0071 day rules are reused, not forked;
+  `planBookingSave` turns dialog rows into inserts/updates/deletes).
+- **Schedule dialog** (`components/job/schedule-job-dialog.tsx`, office/admin
+  only — RLS): a list of bookings; each row = technicians × cost centre ×
+  days/hours (same `ScheduleFields`). Several technicians on a row = one
+  booking each. Saved rows update in place (keeping their calendar event);
+  writes are inserts/updates first, deletes last; not atomic — a partial
+  failure closes and refreshes. `?schedule=1` still auto-opens it. The
+  Overview tab no longer edits the schedule or Assigned Technician (either
+  write would flatten bookings via the compatibility triggers); it lists the
+  bookings read-only with an "Edit schedule" button.
+- **Board** (`components/schedule/`): cards are bookings, under their own
+  technician (or Unassigned) on each booked day; hours = sum of the tech's
+  bookings. Drag/paste moves THAT booking (`staff_id` and/or dates via
+  `moveSchedule`); Shift-drop inserts a copy for the target tech (same window
+  and cost centre; on another day in Week view it starts there).
+- **Google Calendar:** one event per booking, titled `#<job> <cost centre> —
+  <tech>` (job title when no cost centre, "Unassigned" with no tech), linked
+  by `job_bookings.google_event_id` and tagged with private extended
+  properties `mellerickJobId`/`mellerickBookingId`
+  (`lib/calendar-booking-sync.ts`). A sync updates/creates each booking's
+  event, deletes tagged events no booking links to (so bookings removed by the
+  old-style compatibility trigger leave no strays), and retires the legacy
+  job event — adopted by the booking when the job has exactly one. The poll
+  matches events to bookings first (moves/deletes that booking, same "newer
+  side wins" rules on the booking's `updated_at`); a legacy job event is only
+  written back while the job's bookings still share one window
+  (`legacySkipped` otherwise).
+- Old-style writers (mobile ≤15, New Job, approvals) still write the job-level
+  schedule; 0079 translates them. Mobile build 16 is the next stage.
+
 **Load page data on the server, not in the browser.** A browser→Supabase
 query from Australia costs ~100 ms+; a server query in `sin1` costs ~2 ms. So
 My Jobs, Approvals, Staff, Fleet and Customers are server pages that pass
@@ -190,6 +230,9 @@ windows) — all 16 technician-visible streams are money-free:
   `tech_sites` / `backflow_sites`, `backflow_devices`, `backflow_tests`,
   `tech_job_assignments`, `tech_job_photos`, `tech_job_notes`,
   `tech_job_stage_notes` — no monetary column in the selected sets
+- `tech_job_bookings` (added for build 16; 0079/0080 applied 2026-10-19,
+  stream not deployed yet) — 10 named columns: who, when, cost-centre **id**;
+  no money column exists on `job_bookings`
 
 Office/admin streams gate on the caller's own profile row:
 
@@ -388,6 +431,52 @@ Load-bearing properties:
   replay — deliberate, because throwing would dead-letter a legitimate replay and
   wedge the FIFO queue forever — but it logs a warning naming the table, so a
   vanished row is traceable.
+
+### Job bookings on the phone (build 16; 0079 + 0080 applied 2026-10-19 — the stream deploy is the last step)
+
+`job_bookings` (`0079`, applied 2026-10-19) holds each technician's own
+window and cost centre on a job; the job-level schedule and crew are derived
+from it. The phone side (branch `feat/job-bookings-mobile`):
+
+- **Sync.** `0080` (applied 2026-10-19) adds `job_bookings` to the
+  `powersync` publication and gives it `sync_office` with the 0068 child
+  triggers, the job cascade and a block in `sync_window_refresh()`. It also
+  re-hangs two 0079 triggers with `WHEN` clauses so a flag-only write (the
+  nightly refresh) is not activity — without that, every job with a booking
+  would have stayed in both windows forever. Streams: `tech_job_bookings`
+  (follows the job like every `tech_job_*`), `office_job_bookings` (windowed).
+  Deploying the YAML is manual — `docs/powersync-deploy.md`.
+- **Reads** (`lib/data/reads/bookings.ts`) tell three states apart: no table
+  yet (remote PGRST205/42P01 → `null` → every screen shows the job-level
+  schedule, as before); table on the server but not on the device (a scheduled
+  job with zero local bookings is impossible under 0079, so the local read
+  throws `OutsideSyncWindow` and asks Supabase); everything deployed (local,
+  offline). Rules in `lib/bookings.ts`.
+- **My Jobs** shows one card per OWN booking (a job booked twice = two cards,
+  each with its time and stage name), split Today/Upcoming by the booking's
+  day. A job with no booking for them shows the job's window. Past bookings
+  hide while a current one exists on the same job.
+- **Job screen** header lists every booking (who · when · stage), yours in
+  blue as "You".
+- **Office:** the Schedule tab lists one row per booking per day; Reschedule
+  on a booking row moves only that booking. The crew picker stays. The
+  Schedule Job modal is a bookings list editor (add: technician(s) → window →
+  stage → note, one booking each, none = unassigned; edit; delete) writing
+  `job_bookings` insert/update/delete through the outbox
+  (`ScheduleRepository.addBookings/updateBooking/deleteBooking`, aggregate
+  `job_booking`) plus a coalesced `sync-calendar`. Plain uuid-keyed rows, so
+  the existing replay rules apply unchanged. Edits still queued are kept on
+  screen across reloads (`mergePendingBookings`). Before 0079 the modal is the
+  old single-schedule form.
+- **Clock-in cost centre** (manual and geofence, foreground and background):
+  the technician's booking covering the clock-in time, else their nearest
+  booking that day, else `jobs.scheduled_cost_center_id` (`clockInCostCentre`).
+  Geofence sites carry the bookings (`TrackedSite.bookings`, best-effort; a
+  context published by build 15 has none and falls back).
+- **Gaps to know:** a technician's stage NAMES come from the server
+  (`po_cost_centers` is office-only — it carries money), so offline their
+  cards show times without stage names; the IDs, and therefore the clock-in
+  default, work offline.
 
 ### Sync reliability and sign-out (17 October 2026 audit)
 
@@ -885,6 +974,7 @@ a shippable release.
 | **Sentry (error monitoring)** | Justin | Optional, and off until a DSN is set — see §12. Create a free Sentry org with a Next.js project (and a React Native project for the app), then set the DSNs in Vercel and EAS. Without it, failures like the weeks-long silent "Polish with AI" outage are still only discovered by accident. |
 | **Turn off public sign-up** | Justin | Dashboard → Authentication → Sign In / Providers → untick **"Allow new users to sign up"**. `supabase/config.toml` now has `[auth] enable_signup = false`, but that file only configures the local stack — the hosted project still lets anyone with the anon key call `/auth/v1/signup`. Invites keep working (GoTrue's admin invite does not check this switch). Leave the **Email provider** itself enabled. |
 | **`APP_URL`** (optional) | Justin | Origin for emailed reset links. Unset = `https://mellerick-app.vercel.app`, which is right for production. Set it only for a different domain, or `http://localhost:3000` in `.env.local` to test resets locally. |
+| **Deploy the job bookings sync streams** | Justin | `0079` and `0080` are applied (19 Oct 2026). Last step: paste `mobile/powersync/sync-streams.yaml` into the PowerSync dashboard → Validate → Deploy (`docs/powersync-deploy.md`). Build 16 works before it (reads bookings from the server instead of the device), so it is not urgent, but offline bookings need it. |
 | **Maestro flow 02** | Avi | Needs `ADMIN_EMAIL` / `ADMIN_PASSWORD` in the environment. The login subflow deliberately skips when a session already exists, so a password never passes through a script — which is why flows 01/03/04 could be run and 02 could not. |
 
 ### QA fixture — do not delete

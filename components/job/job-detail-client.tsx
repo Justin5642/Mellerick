@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import { useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
@@ -15,8 +15,7 @@ import { DeleteJobDialog } from "./delete-job-dialog";
 import { JobHoursScoreboard } from "./job-hours-scoreboard";
 import { JobTodoControl } from "./job-todo-control";
 import { sumAllocatedHours } from "@/lib/hours-scoreboard";
-import { formatDate } from "@/lib/date";
-import { formatScheduleDates, formatScheduleHours } from "@/lib/schedule-form";
+import { bookingsFromJobWindow, nameBookings, summariseBookings, type JobBookingWithNames } from "@/lib/bookings";
 
 // Overview is the default tab, so it ships in the page bundle. Every other
 // tab is its own chunk, fetched the first time it is shown — Base UI only
@@ -96,9 +95,14 @@ interface Props {
   jobInvoices: any[];
   minMarginPct: number;
   currentAssignedIds: string[];
+  /** The job's bookings (each technician's own time and cost centre). */
+  bookings: JobBookingWithNames[];
+  /** False when job_bookings is not in this database yet (0079). */
+  bookingsReady: boolean;
+  bookingsError: string | null;
 }
 
-export function JobDetailClient({ job, currentUserId, photos: initialPhotos, documents: initialDocuments, notes: initialNotes, stageNotes: initialStageNotes, lineItems: initialLineItems, staff, purchaseOrders: initialPOs, vendorOrders: initialVendorOrders, timeEntries: initialTimeEntries, variations: initialVariations, expenses: initialExpenses, equipmentUsage: initialEquipmentUsage, isAdmin, isOffice, techAllocatedHours, techAllocatedHoursError, staffCostProfiles, jobInvoices, minMarginPct, currentAssignedIds }: Props) {
+export function JobDetailClient({ job, currentUserId, photos: initialPhotos, documents: initialDocuments, notes: initialNotes, stageNotes: initialStageNotes, lineItems: initialLineItems, staff, purchaseOrders: initialPOs, vendorOrders: initialVendorOrders, timeEntries: initialTimeEntries, variations: initialVariations, expenses: initialExpenses, equipmentUsage: initialEquipmentUsage, isAdmin, isOffice, techAllocatedHours, techAllocatedHoursError, staffCostProfiles, jobInvoices, minMarginPct, currentAssignedIds, bookings: loadedBookings, bookingsReady, bookingsError }: Props) {
   // Deep-links like /dashboard/jobs/[id]?tab=variations&variation=[id]
   // (used by the Approvals page's "Price & review" link) land here — read
   // them once on mount so the right tab opens and the right variation is
@@ -120,6 +124,10 @@ export function JobDetailClient({ job, currentUserId, photos: initialPhotos, doc
   // `?schedule=1` (the Schedule page's To-do list "Schedule" action) opens the
   // schedule wizard straight away. Office/admin only — the same people that
   // list reaches; a technician following the link just gets the job page.
+  //
+  // Bookings are written by office/admin only (RLS on job_bookings), so the
+  // Schedule button is theirs too: a technician sees the bookings on the
+  // Overview but cannot change them.
   const autoOpenSchedule = isOffice && searchParams.get("schedule") === "1";
   const [scheduleOpen, setScheduleOpen] = useState(autoOpenSchedule);
   const [scheduleMounted, setScheduleMounted] = useState(autoOpenSchedule);
@@ -130,7 +138,6 @@ export function JobDetailClient({ job, currentUserId, photos: initialPhotos, doc
     url.searchParams.delete("schedule");
     window.history.replaceState(null, "", url.pathname + url.search + url.hash);
   }, [autoOpenSchedule]);
-  const assignedStaff = staff.find((s: any) => s.id === job.assigned_to) ?? null;
 
   const [photos, setPhotos] = useState(initialPhotos);
   const [documents, setDocuments] = useState(initialDocuments);
@@ -173,6 +180,31 @@ export function JobDetailClient({ job, currentUserId, photos: initialPhotos, doc
     (po.po_cost_centers ?? []).map((cc: any) => ({ id: cc.id, name: cc.name, code: cc.code, po_number: po.po_number }))
   );
 
+  // The bookings shown in the header, on Overview and in the Schedule
+  // dialog. Without the bookings table (0079 yet)
+  // they are derived from the job's own window and crew — what the
+  // migration's conversion would create — and are read-only.
+  // Memoised so the dialog (which re-seeds when this list changes) is not
+  // handed a fresh array on every render.
+  const bookings: JobBookingWithNames[] = useMemo(
+    () =>
+      bookingsReady
+        ? loadedBookings
+        : nameBookings(
+            bookingsFromJobWindow(job, currentAssignedIds),
+            staff,
+            new Map(
+              purchaseOrders.flatMap((po: any) => (po.po_cost_centers ?? []).map((cc: any) => [cc.id, cc.name] as [string, string])),
+            ),
+          ),
+    [bookingsReady, loadedBookings, job, currentAssignedIds, staff, purchaseOrders],
+  );
+  const scheduleSummary = summariseBookings(bookings);
+  const openSchedule = () => {
+    setScheduleMounted(true);
+    setScheduleOpen(true);
+  };
+
   const unbilledVariations = variations.filter(
     (v: any) => (v.status === "approved" || v.status === "auto_approved") && !v.invoice_id
   );
@@ -213,19 +245,11 @@ export function JobDetailClient({ job, currentUserId, photos: initialPhotos, doc
                 {""}
               </p>
               <p className="text-xs text-slate-400 mt-1">
-                {assignedStaff && job.scheduled_start ? (
-                  <>
-                    {assignedStaff.full_name} ·{" "}
-                    {/* A multi-day job reads as its range and daily hours
-                        ("Mon 19 – Wed 21 Oct · 7:00–15:30 daily"); a single
-                        block keeps its start, as before. */}
-                    {job.schedule_daily
-                      ? `${formatScheduleDates(job)} · ${formatScheduleHours(job) ?? ""} daily`
-                      : formatDate(job.scheduled_start, { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}
-                  </>
-                ) : (
-                  "Not scheduled"
-                )}
+                {/* Who is booked and over which days, from the bookings:
+                    "Dave · Mon 19 – Tue 20 Oct, 7:00–15:30 daily", or
+                    "Dave, Sam · Mon 19 – Thu 22 Oct (3 bookings)". The
+                    Overview lists each booking. */}
+                {scheduleSummary ?? "Not scheduled"}
               </p>
             </div>
           </div>
@@ -243,8 +267,8 @@ export function JobDetailClient({ job, currentUserId, photos: initialPhotos, doc
                 poAllocatedHours={sumAllocatedHours(purchaseOrders)}
               />
             )}
-            {!viewOnly && (
-              <Button size="sm" className="gap-1.5" onClick={() => { setScheduleMounted(true); setScheduleOpen(true); }}>
+            {isOffice && (
+              <Button size="sm" className="gap-1.5" onClick={openSchedule}>
                 <CalendarClock className="w-4 h-4" />
                 Schedule Job
               </Button>
@@ -327,7 +351,13 @@ export function JobDetailClient({ job, currentUserId, photos: initialPhotos, doc
                   />
                 </div>
               )}
-              <JobOverview job={job} staff={staff} readOnly={viewOnly} />
+              <JobOverview
+                job={job}
+                readOnly={viewOnly}
+                bookings={bookings}
+                bookingsError={bookingsError}
+                onEditSchedule={isOffice ? openSchedule : undefined}
+              />
             </TabsContent>
             {isOffice && (
             <TabsContent value="po" className="m-0 h-full">
@@ -423,14 +453,10 @@ export function JobDetailClient({ job, currentUserId, photos: initialPhotos, doc
           jobNumber={job.job_number}
           jobStatus={job.status}
           staff={staff}
-          currentAssignedIds={currentAssignedIds}
           currentUserId={currentUserId}
-          currentScheduledStart={job.scheduled_start}
-          currentScheduledEnd={job.scheduled_end}
-          currentScheduleDaily={job.schedule_daily}
-          currentScheduleAllDay={job.schedule_all_day}
           costCenters={costCenters}
-          currentScheduledCostCenterId={job.scheduled_cost_center_id}
+          bookings={bookings}
+          bookingsReady={bookingsReady}
         />
       )}
     </div>

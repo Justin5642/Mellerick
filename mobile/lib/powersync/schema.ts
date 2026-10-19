@@ -206,6 +206,27 @@ const job_assignments = new Table({
   },
 });
 
+const job_bookings = new Table({
+  // id (text) is implicit
+  job_id: column.text,
+  staff_id: column.text,
+  cost_center_id: column.text,
+  starts_at: column.text,
+  ends_at: column.text,
+  daily: column.integer,
+  all_day: column.integer,
+  google_event_id: column.text,
+  created_by: column.text,
+  created_at: column.text,
+  updated_at: column.text,
+  sync_office: column.integer,
+}, {
+  indexes: {
+    job_start: ['job_id', 'starts_at'],
+    staff: ['staff_id'],
+  },
+});
+
 const job_expenses = new Table({
   // id (text) is implicit
   job_id: column.text,
@@ -536,6 +557,7 @@ export const AppSchema = new Schema({
   invoice_items,
   invoices,
   job_assignments,
+  job_bookings,
   job_expenses,
   job_items,
   job_notes,

@@ -133,3 +133,71 @@ describe("ScheduleRepository", () => {
     expect(sides(ops)[0].coalesceKey).toBe("sync-calendar:j1");
   });
 });
+
+// Bookings (migration 0079 yet): plain job_bookings
+// rows through the outbox; the database derives the job and the crew.
+describe("ScheduleRepository bookings", () => {
+  const cols = buildScheduleColumns({ startDateKey: "2026-10-19", endDateKey: "2026-10-21", startTime: "", endTime: "", allDay: true });
+
+  it("addBookings inserts one booking per technician on the same window and cost centre", async () => {
+    const { outbox, ops } = captureOutbox();
+    const ids = await makeRepo(outbox).addBookings("j1", ["dave", "sam", "dave"], cols, "cc1");
+
+    const w = writes(ops);
+    expect(w).toHaveLength(2); // de-duplicated
+    expect(ids).toEqual(w.map((x) => x.rowId));
+    for (const [i, staff] of ["dave", "sam"].entries()) {
+      expect(w[i]).toMatchObject({ table: "job_bookings", op: "insert", aggregate: "job_booking" });
+      expect(w[i].payload).toEqual({
+        job_id: "j1",
+        staff_id: staff,
+        cost_center_id: "cc1",
+        starts_at: cols.scheduled_start,
+        ends_at: cols.scheduled_end,
+        daily: true,
+        all_day: true,
+      });
+    }
+    // Never the job-level columns or the crew RPC: the database derives both.
+    expect(w.some((x) => x.table === "jobs")).toBe(false);
+    expect(sides(ops).map((s) => s.effect)).toEqual(["sync-calendar"]);
+    expect(sides(ops)[0]).toMatchObject({ coalesceKey: "sync-calendar:j1", dependsOn: w[1].id });
+  });
+
+  it("addBookings with nobody picked makes one unassigned booking", async () => {
+    const { outbox, ops } = captureOutbox();
+    await makeRepo(outbox).addBookings("j1", [], cols, null);
+    expect(writes(ops).map((w) => w.payload.staff_id)).toEqual([null]);
+  });
+
+  it("updateBooking writes only what changed, keeping the window and flags together", async () => {
+    const { outbox, ops } = captureOutbox();
+    await makeRepo(outbox).updateBooking("j1", "b1", { costCenterId: "cc2" });
+    expect(writes(ops)[0]).toMatchObject({ table: "job_bookings", op: "update", rowId: "b1", payload: { cost_center_id: "cc2" } });
+
+    const second = captureOutbox();
+    await makeRepo(second.outbox).updateBooking("j1", "b1", { staffId: null, columns: cols });
+    expect(writes(second.ops)[0].payload).toEqual({
+      staff_id: null,
+      starts_at: cols.scheduled_start,
+      ends_at: cols.scheduled_end,
+      daily: true,
+      all_day: true,
+    });
+    expect(sides(second.ops)[0].dependsOn).toBe(writes(second.ops)[0].id);
+  });
+
+  it("updateBooking with nothing to change enqueues nothing", async () => {
+    const { outbox, ops } = captureOutbox();
+    await makeRepo(outbox).updateBooking("j1", "b1", {});
+    expect(ops).toEqual([]);
+  });
+
+  it("deleteBooking deletes the row and resyncs the calendar after it", async () => {
+    const { outbox, ops } = captureOutbox();
+    await makeRepo(outbox).deleteBooking("j1", "b1");
+    const w = writes(ops)[0];
+    expect(w).toMatchObject({ table: "job_bookings", op: "delete", rowId: "b1", payload: {} });
+    expect(sides(ops)[0]).toMatchObject({ effect: "sync-calendar", dependsOn: w.id });
+  });
+});

@@ -11,33 +11,35 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
-import { Phone, Mail, MapPin, Calendar, User, Save, Navigation } from "lucide-react";
+import { Phone, Mail, MapPin, User, Save, Navigation, CalendarClock } from "lucide-react";
 import { formatDate } from "@/lib/date";
-import type { ScheduleInput } from "@/lib/scheduling";
-import { formatScheduleDates, sameScheduleInput, scheduleColumnsFromForm, scheduleFormFromJob } from "@/lib/schedule-form";
-import { ScheduleFields } from "./schedule-fields";
+import { formatDateKeyRange } from "@/lib/schedule-form";
+import { scheduleDays } from "@/lib/scheduling";
+import { bookingWindow, describeBooking, type JobBookingWithNames } from "@/lib/bookings";
 import { CustomerPicker } from "@/components/customer-picker";
 import { AddSiteDialog } from "@/components/site-add-dialog";
 
 interface Props {
   job: any;
-  staff: any[];
   /** A technician viewing a job they are not assigned to: every field read-only. */
   readOnly?: boolean;
+  /** The job's bookings — who, which cost centre, when. Shown to everyone. */
+  bookings: JobBookingWithNames[];
+  bookingsError?: string | null;
+  /** Opens the Schedule dialog; absent for anyone who cannot change bookings (not office/admin). */
+  onEditSchedule?: () => void;
 }
 
-// Radix/shadcn's SelectItem can't take value="", so an explicit "Unassigned"
-// option needs a sentinel value that gets translated back to "" (-> null on
-// save) instead of colliding with a real staff id.
-const UNASSIGNED_VALUE = "__unassigned__";
-// Same trick for "no site selected" — a job can exist without a site.
+// Radix/shadcn's SelectItem can't take value="", so "no site selected" — a
+// job can exist without a site — needs a sentinel value that gets translated
+// back to "" (-> null on save) instead of colliding with a real site id.
 const NO_SITE_VALUE = "__no_site__";
 // Sentinel picked from the Site dropdown itself to open the "Add New Site"
 // dialog inline, so a wrong/missing site can be fixed here without a trip to
 // the Customer page — same pattern used on the New Job form.
 const ADD_NEW_SITE_VALUE = "__add_new_site__";
 
-export function JobOverview({ job, staff, readOnly = false }: Props) {
+export function JobOverview({ job, readOnly = false, bookings, bookingsError, onEditSchedule }: Props) {
   const router = useRouter();
   const supabase = createClient();
   const [saving, setSaving] = useState(false);
@@ -50,25 +52,15 @@ export function JobOverview({ job, staff, readOnly = false }: Props) {
     site_id: job.site_id ?? "",
     status: job.status,
     priority: job.priority,
-    assigned_to: job.assigned_to ?? "",
     description: job.description ?? "",
     notes: job.notes ?? "",
   });
-  // The schedule as the job was loaded, and as edited here. Start date, end
-  // date, All day and daily times — the same inputs as the Schedule Job
-  // wizard, writing the same four columns.
-  const [savedSchedule, setSavedSchedule] = useState<ScheduleInput>(() => scheduleFormFromJob(job));
-  const [schedule, setSchedule] = useState<ScheduleInput>(savedSchedule);
-
-  // The Schedule Job wizard writes the same columns and then refreshes the
-  // page; follow it, or this form would show (and compare against) the old
-  // schedule until a reload.
-  useEffect(() => {
-    const fresh = scheduleFormFromJob(job);
-    setSavedSchedule(fresh);
-    setSchedule(fresh);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [job.scheduled_start, job.scheduled_end, job.schedule_daily, job.schedule_all_day]);
+  // The schedule is NOT edited here any more. It is the job's bookings — each
+  // technician's own time and cost centre (job_bookings, 0079) — shown read-only below and changed in the Schedule dialog.
+  // This form used to write the job's one window and its assigned_to: with
+  // bookings, the window write is translated into "everyone on this window"
+  // and the assigned_to write collapses the crew (0059), so either one,
+  // made by an unrelated save of the title, would flatten the bookings.
 
   // Sites belong to a customer, so the site list has to be reloaded whenever
   // the customer changes — same pattern as the "New Job" form. Also runs
@@ -86,6 +78,10 @@ export function JobOverview({ job, staff, readOnly = false }: Props) {
     loadSites();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [form.customer_id]);
+
+  // First to last booked day across every booking.
+  const bookedDays = bookings.flatMap((b) => scheduleDays(bookingWindow(b))).map((d) => d.dateKey).sort();
+  const scheduledRange = bookedDays.length > 0 ? formatDateKeyRange(bookedDays[0], bookedDays[bookedDays.length - 1]) : null;
 
   function set(field: string, value: string | null) {
     setForm((prev) => ({ ...prev, [field]: value ?? "" }));
@@ -107,29 +103,15 @@ export function JobOverview({ job, staff, readOnly = false }: Props) {
       toast.error("Customer is required");
       return;
     }
-    // The schedule is only rewritten when it was edited here. This form saves
-    // on every change of title or status too, and a job whose saved window
-    // the inputs cannot express exactly — a pre-0071 block running past
-    // midnight or over several days — must not be reshaped by an unrelated
-    // save. A blank start date clears all four columns.
-    const scheduleEdited = !sameScheduleInput(schedule, savedSchedule);
-    const built = scheduleColumnsFromForm(schedule, { optional: true });
-    if (scheduleEdited && !built.ok) {
-      toast.error(built.error);
-      return;
-    }
     setSaving(true);
-    // This form changes the schedule and the technician, so it goes through the
-    // same seam the board does: the write and the Google push are one act with
-    // two outcomes. It used to fire the push after `toast.success` and drop the
-    // result, so a job could sit with a time the calendar had never heard of —
-    // which the poll in lib/google.ts then "corrected" by undoing the edit.
+    // Through the same seam the board used: the write and the Google push are
+    // one act with two outcomes. The schedule is no longer edited here, but
+    // the status is — completing or cancelling a job removes its calendar
+    // events — and the title, customer and site are in every event's text.
     const result = await applyScheduleChange(supabase as unknown as ScheduleWriteClient, job.id, {
       ...form,
       title: form.title.trim(),
       site_id: form.site_id || null,
-      assigned_to: form.assigned_to || null,
-      ...(scheduleEdited && built.ok ? built.columns : {}),
     });
     if (!result.ok) {
       toast.error(result.error);
@@ -138,7 +120,6 @@ export function JobOverview({ job, staff, readOnly = false }: Props) {
       // believing the technician's calendar shows the new time.
       if (result.calendarSynced) toast.success("Job updated");
       else toast.warning("Job updated — Google Calendar not updated");
-      if (scheduleEdited) setSavedSchedule(schedule);
       // customer/site changed => the header and the read-only customer/site
       // cards below (which come from the server-fetched `job` prop, not this
       // form's local state) need a re-fetch to reflect the change.
@@ -203,7 +184,7 @@ export function JobOverview({ job, staff, readOnly = false }: Props) {
         </Card>
 
         <Card>
-          <CardHeader><CardTitle className="text-base">Job Status & Assignment</CardTitle></CardHeader>
+          <CardHeader><CardTitle className="text-base">Job Status</CardTitle></CardHeader>
           <CardContent className="space-y-4">
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="space-y-2">
@@ -232,36 +213,6 @@ export function JobOverview({ job, staff, readOnly = false }: Props) {
                   </SelectContent>
                 </Select>
               </div>
-              <div className="space-y-2">
-                <Label>Assigned Technician</Label>
-                <Select
-                  value={form.assigned_to || UNASSIGNED_VALUE}
-                  onValueChange={(v) => set("assigned_to", v === UNASSIGNED_VALUE ? "" : v)}
-                >
-                  <SelectTrigger><SelectValue placeholder="Unassigned" /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value={UNASSIGNED_VALUE}>Unassigned</SelectItem>
-                    {staff.map((s) => <SelectItem key={s.id} value={s.id}>{s.full_name} ({s.role})</SelectItem>)}
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-            <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <Label>Schedule</Label>
-                {schedule.startDateKey && (
-                  <Button
-                    type="button"
-                    variant="link"
-                    size="sm"
-                    className="h-auto p-0 text-xs"
-                    onClick={() => setSchedule({ ...schedule, startDateKey: "", endDateKey: "", allDay: false })}
-                  >
-                    Clear schedule
-                  </Button>
-                )}
-              </div>
-              <ScheduleFields value={schedule} onChange={setSchedule} optional />
             </div>
             <div className="space-y-2">
               <Label>Description</Label>
@@ -281,6 +232,46 @@ export function JobOverview({ job, staff, readOnly = false }: Props) {
           </CardContent>
         </Card>
         </fieldset>
+
+        {/* Outside the fieldset: read-only for everyone, and the Edit button
+            must stay usable for office on a view-only page too. */}
+        <Card>
+          <CardHeader>
+            <div className="flex items-center justify-between gap-2">
+              <CardTitle className="text-base">Schedule</CardTitle>
+              {onEditSchedule && (
+                <Button type="button" variant="outline" size="sm" className="gap-1.5" onClick={onEditSchedule}>
+                  <CalendarClock className="w-4 h-4" />
+                  Edit schedule
+                </Button>
+              )}
+            </div>
+          </CardHeader>
+          <CardContent>
+            {bookingsError && <p className="text-xs text-red-600 mb-2">Bookings could not be loaded.</p>}
+            {bookings.length === 0 ? (
+              <p className="text-sm text-slate-400">Not scheduled.</p>
+            ) : (
+              <ul className="divide-y divide-slate-100">
+                {bookings.map((b) => (
+                  <li key={b.id} className="py-2 flex items-start gap-3">
+                    <User className="w-4 h-4 text-slate-400 mt-0.5 flex-shrink-0" />
+                    <div className="min-w-0">
+                      <p className={b.staff_id ? "text-sm font-medium text-slate-900" : "text-sm font-medium text-amber-700"}>
+                        {b.staff_id ? b.staff_name ?? "Technician" : "Unassigned"}
+                        {b.cost_center_name && <span className="font-normal text-cyan-700"> · {b.cost_center_name}</span>}
+                      </p>
+                      <p className="text-xs text-slate-500">
+                        {describeBooking(b)}
+                        {b.all_day ? " · All day" : ""}
+                      </p>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </CardContent>
+        </Card>
       </div>
 
       {/* Right — customer & site info */}
@@ -349,10 +340,10 @@ export function JobOverview({ job, staff, readOnly = false }: Props) {
               <span className="text-slate-500">Created</span>
               <span>{formatDate(job.created_at)}</span>
             </div>
-            {job.scheduled_start && (
+            {scheduledRange && (
               <div className="flex justify-between">
                 <span className="text-slate-500">Scheduled</span>
-                <span>{job.schedule_daily ? formatScheduleDates(job) : formatDate(job.scheduled_start)}</span>
+                <span>{scheduledRange}</span>
               </div>
             )}
             {job.actual_start && (

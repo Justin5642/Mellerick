@@ -18,9 +18,12 @@ import { openNavigation } from "../../lib/open-external-url";
 import { useAuth } from "../../lib/auth-context";
 import { useSignOut } from "../../lib/useSignOut";
 import { colors, statusColors } from "../../lib/theme";
-import { occupiesDay } from "../../lib/scheduling";
 import { BUSINESS_TIME_ZONE } from "../../lib/date";
-import { businessTodayKey, formatScheduleSummary, scheduleDayOn } from "../../lib/scheduleDisplay";
+import { businessTodayKey, formatScheduleSummary } from "../../lib/scheduleDisplay";
+import { listMyJobBookings } from "../../lib/data/reads/bookings";
+import { getJobCostCentres } from "../../lib/data/reads/jobBilling";
+import { myJobEntries, splitMyJobEntries, type Booking, type MyJobEntry } from "../../lib/bookings";
+import type { ScheduledJobWindow } from "../../lib/scheduling";
 
 interface Job {
   id: string;
@@ -40,6 +43,15 @@ export function MyJobsScreen() {
   // Warns about unsynced work and clears it on a confirmed sign-out.
   const signOut = useSignOut();
   const [jobs, setJobs] = useState<Job[]>([]);
+  const [userId, setUserId] = useState<string | null>(null);
+  // Bookings on these jobs (migration 0079 yet). NULL
+  // = none exist yet or they could not be read: every card then shows the
+  // job's own window, exactly as before bookings.
+  const [bookings, setBookings] = useState<Booking[] | null>(null);
+  // Cost-centre names for the booking cards. A technician reads them from
+  // the server (po_cost_centers is not in their stream — it carries money),
+  // so offline the cards simply show no stage name.
+  const [stageNames, setStageNames] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<unknown>(null);
@@ -59,12 +71,39 @@ export function MyJobsScreen() {
 
       const data = await listMyJobs(user.id);
       setJobs(data);
+      setUserId(user.id);
+
+      // Bookings refine the list; they must never be what empties it. A
+      // failure keeps the job-level cards (and says so in the log).
+      let read: Booking[] | null = null;
+      try {
+        read = await listMyJobBookings(user.id, data.map((j) => j.id));
+      } catch (e) {
+        console.warn("[my-jobs] bookings unavailable; showing job-level times:", e);
+      }
+      setBookings(read);
+      void loadStageNames(read, user.id);
     } catch (e) {
       setError(e);
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
+  }, []);
+
+  const loadStageNames = useCallback(async (read: Booking[] | null, me: string) => {
+    const jobIds = [...new Set((read ?? []).filter((b) => b.staff_id === me && b.cost_center_id).map((b) => b.job_id))];
+    const names: Record<string, string> = {};
+    await Promise.all(
+      jobIds.map(async (jobId) => {
+        try {
+          for (const cc of await getJobCostCentres(jobId)) names[cc.id] = cc.name;
+        } catch {
+          // Offline or refused: the card shows its time without the stage name.
+        }
+      })
+    );
+    setStageNames(names);
   }, []);
 
   useFocusEffect(
@@ -89,16 +128,16 @@ export function MyJobsScreen() {
     return new Date(iso).toLocaleDateString("en-AU", { weekday: "short", day: "numeric", month: "short", timeZone: BUSINESS_TIME_ZONE });
   }
 
-  // "Today" is the Melbourne day, and a job is today's when it is BOOKED today
-  // — a Mon–Wed daily job sits under Today on Tuesday too (migration 0071).
-  // This used the device-local calendar day and the start date alone, so a
-  // phone on another timezone split the list on the wrong midnight and a
-  // multi-day job left Today after its first day.
+  // "Today" is the Melbourne day, and an entry is today's when it is BOOKED
+  // today — a Mon–Wed daily booking sits under Today on Tuesday too (0071).
+  // Each entry is one of the technician's own bookings (a job booked twice
+  // for them is two cards), or the job's own window where they have none
+  // (lib/bookings.ts myJobEntries says exactly when).
   const todayKey = businessTodayKey();
-  const todayJobs = jobs
-    .filter((j) => occupiesDay(j, todayKey))
-    .sort((a, b) => (scheduleDayOn(a, todayKey)?.startIso ?? "").localeCompare(scheduleDayOn(b, todayKey)?.startIso ?? ""));
-  const upcomingJobs = jobs.filter((j) => !occupiesDay(j, todayKey));
+  const { today: todayJobs, upcoming: upcomingJobs } = splitMyJobEntries(
+    myJobEntries(jobs, bookings, userId ?? "", todayKey),
+    todayKey
+  );
 
   function openWaze(job: Job) {
     // openNavigation owns the coordinates-then-address fallback and tells the
@@ -109,9 +148,22 @@ export function MyJobsScreen() {
     void openNavigation(job.sites);
   }
 
-  function JobCard({ job }: { job: Job }) {
+  function WindowLine({ window }: { window: ScheduledJobWindow }) {
+    if (!window.scheduled_start) return null;
+    if (window.schedule_daily) return <Text style={styles.cardMeta}>🕐 {formatScheduleSummary(window)}</Text>;
+    return (
+      <Text style={styles.cardMeta}>
+        🕐 {formatDate(window.scheduled_start)} · {formatTime(window.scheduled_start)}
+        {window.scheduled_end ? ` – ${formatTime(window.scheduled_end)}` : ""}
+      </Text>
+    );
+  }
+
+  function JobCard({ entry }: { entry: MyJobEntry<Job> }) {
+    const { job, window } = entry;
     const sc = statusColors[job.status] ?? statusColors.pending;
     const address = job.sites ? `${job.sites.address_line1}, ${job.sites.suburb}` : null;
+    const stage = entry.costCenterId ? stageNames[entry.costCenterId] : null;
     return (
       <TouchableOpacity style={styles.card} onPress={() => router.push(`/job/${job.id}`)}>
         <View style={styles.cardHeader}>
@@ -124,14 +176,8 @@ export function MyJobsScreen() {
         </View>
         {job.customers?.name && <Text style={styles.cardSubtext}>{job.customers.name}</Text>}
         {address && <Text style={styles.cardMeta}>📍 {address}</Text>}
-        {job.scheduled_start && job.schedule_daily ? (
-          <Text style={styles.cardMeta}>🕐 {formatScheduleSummary(job)}</Text>
-        ) : job.scheduled_start ? (
-          <Text style={styles.cardMeta}>
-            🕐 {formatDate(job.scheduled_start)} · {formatTime(job.scheduled_start)}
-            {job.scheduled_end ? ` – ${formatTime(job.scheduled_end)}` : ""}
-          </Text>
-        ) : null}
+        <WindowLine window={window} />
+        {stage ? <Text style={styles.cardMeta}>🔧 {stage}</Text> : null}
         {job.sites && (
           <TouchableOpacity style={styles.wazeButton} onPress={() => openWaze(job)}>
             <Text style={styles.wazeButtonText}>Navigate</Text>
@@ -185,11 +231,11 @@ export function MyJobsScreen() {
           ...(todayJobs.length > 0
             ? [{ type: "header" as const, key: "today-header", label: `Today (${todayJobs.length})` }]
             : []),
-          ...todayJobs.map((j) => ({ type: "job" as const, key: j.id, job: j })),
+          ...todayJobs.map((e) => ({ type: "job" as const, key: e.key, entry: e })),
           ...(upcomingJobs.length > 0
             ? [{ type: "header" as const, key: "upcoming-header", label: `Upcoming (${upcomingJobs.length})` }]
             : []),
-          ...upcomingJobs.map((j) => ({ type: "job" as const, key: j.id, job: j })),
+          ...upcomingJobs.map((e) => ({ type: "job" as const, key: e.key, entry: e })),
         ]}
         keyExtractor={(item) => item.key}
         contentContainerStyle={styles.listContent}
@@ -198,7 +244,7 @@ export function MyJobsScreen() {
           if (item.type === "header") {
             return <Text style={styles.sectionHeader}>{(item as any).label}</Text>;
           }
-          return <JobCard job={(item as any).job} />;
+          return <JobCard entry={(item as any).entry} />;
         }}
         ListEmptyComponent={
           <Text style={styles.emptyText}>No jobs assigned right now.</Text>

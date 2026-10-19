@@ -14,6 +14,8 @@ import { formatScheduleSummary } from "../../lib/scheduleDisplay";
 import { useSchedule } from "../../lib/data/hooks/useSchedule";
 import { listAssignableStaff, type AssignableStaff } from "../../lib/data/reads/schedule";
 import { unwrapRows } from "../../lib/data/reads/unwrap";
+import { listOpenJobBookingsRemote, type JobBooking } from "../../lib/data/reads/bookings";
+import { bookingWindow } from "../../lib/bookings";
 
 interface SchedJob {
   id: string;
@@ -30,24 +32,68 @@ interface SchedJob {
   profiles?: { full_name: string } | null;
 }
 
-/** One list row: a job on one of its booked days. */
-interface SchedRow {
+/**
+ * What a row schedules: one booking (migration 0079), or the whole job where there are no bookings (before 0079, or a job
+ * the bookings read could not cover).
+ */
+interface SchedItem {
   job: SchedJob;
+  booking: JobBooking | null;
+  /** The booking's window, or the job's. */
+  window: { scheduled_start: string; scheduled_end: string | null; schedule_daily: boolean; schedule_all_day: boolean };
+  /** "Dave", "Unassigned", or the job's primary assignee for a job-level row. */
+  who: string | null;
+}
+
+/** One list row: an item on one of its booked days. */
+interface SchedRow {
+  item: SchedItem;
   day: ScheduleDay;
   index: number;
   count: number;
+}
+
+/** One item per booking; a job with no bookings stays one job-level item. */
+function scheduleItems(jobs: SchedJob[], bookings: JobBooking[] | null): SchedItem[] {
+  const byJob = new Map<string, JobBooking[]>();
+  for (const b of bookings ?? []) {
+    const list = byJob.get(b.job_id);
+    if (list) list.push(b);
+    else byJob.set(b.job_id, [b]);
+  }
+  return jobs.flatMap((job): SchedItem[] => {
+    const list = byJob.get(job.id);
+    if (!list || list.length === 0) {
+      return [
+        {
+          job,
+          booking: null,
+          window: {
+            scheduled_start: job.scheduled_start,
+            scheduled_end: job.scheduled_end,
+            schedule_daily: !!job.schedule_daily,
+            schedule_all_day: !!job.schedule_all_day,
+          },
+          who: job.profiles?.full_name ?? null,
+        },
+      ];
+    }
+    return list.map((b) => ({ job, booking: b, window: bookingWindow(b), who: b.staff_name ?? (b.staff_id ? null : "Unassigned") }));
+  });
 }
 
 export default function ScheduleScreen() {
   const router = useRouter();
   const schedule = useSchedule();
   const [jobs, setJobs] = useState<SchedJob[]>([]);
+  // NULL before 0079 is applied: one row per job.
+  const [bookings, setBookings] = useState<JobBooking[] | null>(null);
   const [staff, setStaff] = useState<AssignableStaff[]>([]);
   const [refreshing, setRefreshing] = useState(false);
-  const [menuJob, setMenuJob] = useState<SchedJob | null>(null);
+  const [menuItem, setMenuItem] = useState<SchedItem | null>(null);
   const [reassignJob, setReassignJob] = useState<SchedJob | null>(null);
-  const [datePickerFor, setDatePickerFor] = useState<SchedJob | null>(null);
-  const [timePickerFor, setTimePickerFor] = useState<SchedJob | null>(null);
+  const [datePickerFor, setDatePickerFor] = useState<SchedItem | null>(null);
+  const [timePickerFor, setTimePickerFor] = useState<SchedItem | null>(null);
   const [pendingDate, setPendingDate] = useState<Date | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<unknown>(null);
@@ -71,6 +117,15 @@ export default function ScheduleScreen() {
       setJobs(unwrapRows(res as never, "ScheduleScreen.load") as unknown as SchedJob[]);
     } catch (e) {
       setError(e);
+      return;
+    }
+    // Bookings split each job into its people's rows. A failure keeps the
+    // job-level rows rather than taking the schedule down.
+    try {
+      setBookings(await listOpenJobBookingsRemote());
+    } catch (e) {
+      console.warn("[schedule] bookings unavailable; listing jobs:", e);
+      setBookings(null);
     }
   }, []);
 
@@ -98,9 +153,13 @@ export default function ScheduleScreen() {
   // One row per booked DAY, not per job (migration 0071): a Mon–Wed daily job
   // appears under Monday, Tuesday and Wednesday with that day's hours, and
   // not under the weekend it skips. A single-day job is one row, as before.
+  const items = useMemo(() => scheduleItems(jobs, bookings), [jobs, bookings]);
+
+  // ... and, with bookings, one row per booked day of each BOOKING: Dave on
+  // Mon–Tue and Sam on Monday morning are separate rows with their own times.
   const sections = useMemo(() => {
-    const rows = jobs
-      .flatMap((job) => scheduleDays(job).map((day, index, all) => ({ job, day, index, count: all.length })))
+    const rows = items
+      .flatMap((item) => scheduleDays(item.window).map((day, index, all) => ({ item, day, index, count: all.length })))
       .sort((a, b) => a.day.startIso.localeCompare(b.day.startIso));
     const map = new Map<string, SchedRow[]>();
     for (const r of rows) {
@@ -109,7 +168,7 @@ export default function ScheduleScreen() {
       else map.set(r.day.dateKey, [r]);
     }
     return Array.from(map, ([, data]) => ({ title: businessDayLabel(data[0].day.startIso), data }));
-  }, [jobs]);
+  }, [items]);
 
   // Jobs are often done in pairs or more (job_assignments, migration 0059).
   // The sheet opens with the job's current crew ticked; tapping toggles a
@@ -137,7 +196,12 @@ export default function ScheduleScreen() {
     if (!job || busy || !schedule.ready) return;
     setBusy(true);
     try {
-      await schedule.setCrew(job.id, crew);
+      const { synced } = await schedule.setCrew(job.id, crew);
+      // With bookings (0079 yet), the database turns a
+      // crew change into booking changes (a removed person's bookings go; an
+      // added one gets the shared window if there is one). Re-read once it
+      // has landed so the rows show what it decided.
+      if (synced && bookings) void load();
       // Optimistic: reflect the change immediately (the outbox syncs in the
       // background — offline, a server reload would show stale data).
       const names = crew.map((id) => staff.find((s) => s.id === id)?.full_name).filter(Boolean).join(", ");
@@ -156,20 +220,21 @@ export default function ScheduleScreen() {
   // daily hours and its NUMBER OF BOOKED DAYS (moveSchedule — a Mon–Wed job
   // moved to Thursday becomes Thu, Fri, Mon). A continuous block takes the
   // picked date and time and keeps its duration, as before.
-  async function applyReschedule(job: SchedJob, dateKey: string, time: { hour: number; minute: number } | null) {
+  async function applyReschedule(item: SchedItem, dateKey: string, time: { hour: number; minute: number } | null) {
     if (!schedule.ready) return;
+    const { job, booking, window } = item;
     setBusy(true);
     try {
       let scheduledStartIso: string;
       let scheduledEndIso: string | null;
-      if (job.schedule_daily) {
-        const moved = moveSchedule(job, dateKey);
+      if (window.schedule_daily) {
+        const moved = moveSchedule(window, dateKey);
         if (!moved) return;
         ({ scheduled_start: scheduledStartIso, scheduled_end: scheduledEndIso } = moved);
       } else {
         ({ scheduledStartIso, scheduledEndIso } = computeRescheduleWithTime(
-          job.scheduled_start,
-          job.scheduled_end,
+          window.scheduled_start,
+          window.scheduled_end,
           dateKey,
           time?.hour ?? 0,
           time?.minute ?? 0
@@ -177,9 +242,22 @@ export default function ScheduleScreen() {
       }
       // A block moved to a different time of day is no longer the standard
       // "All day" shift; a daily job keeps its hours, so keeps the flag.
-      const keptTime = toBusinessInputValue(scheduledStartIso).slice(11) === toBusinessInputValue(job.scheduled_start).slice(11);
-      const allDay = !!job.schedule_all_day && keptTime;
-      await schedule.reschedule(job.id, scheduledStartIso, scheduledEndIso, allDay === !!job.schedule_all_day ? {} : { scheduleAllDay: allDay });
+      const keptTime = toBusinessInputValue(scheduledStartIso).slice(11) === toBusinessInputValue(window.scheduled_start).slice(11);
+      const allDay = window.schedule_all_day && keptTime;
+      if (booking) {
+        // Only this person's booking moves; the database re-derives the
+        // job's overall window from all of them.
+        await schedule.updateBooking(job.id, booking.id, {
+          columns: { scheduled_start: scheduledStartIso, scheduled_end: scheduledEndIso, schedule_daily: window.schedule_daily, schedule_all_day: allDay },
+        });
+        setBookings((cur) =>
+          (cur ?? []).map((b) =>
+            b.id === booking.id ? { ...b, starts_at: scheduledStartIso, ends_at: scheduledEndIso, all_day: allDay } : b
+          )
+        );
+        return;
+      }
+      await schedule.reschedule(job.id, scheduledStartIso, scheduledEndIso, allDay === window.schedule_all_day ? {} : { scheduleAllDay: allDay });
       // Optimistic: update + re-sort by start so it lands in the right day sections.
       setJobs((cur) =>
         cur
@@ -201,34 +279,34 @@ export default function ScheduleScreen() {
   // chains into a second time dialog before anything is applied. A daily job
   // (0071) only picks its new start DATE — its hours and day count move with it.
   function onDatePicked(event: DateTimePickerEvent, selected?: Date) {
-    const job = datePickerFor;
+    const item = datePickerFor;
     if (Platform.OS === "ios") {
-      if (event.type === "set" && selected && job) {
+      if (event.type === "set" && selected && item) {
         void applyReschedule(
-          job,
+          item,
           localDateKey(selected),
-          job.schedule_daily ? null : { hour: selected.getHours(), minute: selected.getMinutes() }
+          item.window.schedule_daily ? null : { hour: selected.getHours(), minute: selected.getMinutes() }
         );
       }
       return;
     }
     setDatePickerFor(null); // Android dialog closes itself
-    if (event.type !== "set" || !selected || !job) return;
-    if (job.schedule_daily) {
-      void applyReschedule(job, localDateKey(selected), null);
+    if (event.type !== "set" || !selected || !item) return;
+    if (item.window.schedule_daily) {
+      void applyReschedule(item, localDateKey(selected), null);
       return;
     }
     setPendingDate(selected);
-    setTimePickerFor(job);
+    setTimePickerFor(item);
   }
 
   function onTimePicked(event: DateTimePickerEvent, selected?: Date) {
-    const job = timePickerFor;
+    const item = timePickerFor;
     const date = pendingDate;
     setTimePickerFor(null);
     setPendingDate(null);
-    if (event.type !== "set" || !selected || !job || !date) return;
-    void applyReschedule(job, localDateKey(date), { hour: selected.getHours(), minute: selected.getMinutes() });
+    if (event.type !== "set" || !selected || !item || !date) return;
+    void applyReschedule(item, localDateKey(date), { hour: selected.getHours(), minute: selected.getMinutes() });
   }
 
   // Checked BEFORE the list, so a failed read can never render as "Nothing
@@ -249,44 +327,48 @@ export default function ScheduleScreen() {
       </View>
       <SectionList
         sections={sections}
-        keyExtractor={(r) => `${r.job.id}:${r.day.dateKey}`}
+        keyExtractor={(r) => `${r.item.job.id}:${r.item.booking?.id ?? "job"}:${r.day.dateKey}`}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.blue600} />}
         stickySectionHeadersEnabled={false}
         ListEmptyComponent={<Text style={styles.empty}>Nothing scheduled.</Text>}
         renderSectionHeader={({ section }) => <Text style={styles.dayHead}>{section.title}</Text>}
-        renderItem={({ item: { job, day, index, count } }) => (
+        renderItem={({ item: { item, day, index, count } }) => (
           <View style={styles.card}>
             <JobListRow
-              jobNumber={job.job_number}
-              title={job.title}
-              subtitle={`${job.customers?.name ?? "—"}${job.profiles?.full_name ? ` · ${job.profiles.full_name}` : " · Unassigned"}${count > 1 ? ` · Day ${index + 1} of ${count}` : ""}`}
-              status={job.status}
+              jobNumber={item.job.job_number}
+              title={item.job.title}
+              subtitle={`${item.job.customers?.name ?? "—"} · ${item.who ?? "Unassigned"}${count > 1 ? ` · Day ${index + 1} of ${count}` : ""}`}
+              status={item.job.status}
               leading={
                 <View style={styles.timeCol}>
                   <Text style={styles.timeStart}>{formatBusinessTime(day.startIso)}</Text>
-                  {job.scheduled_end ? <Text style={styles.timeEnd}>{formatBusinessTime(day.endIso)}</Text> : null}
+                  {item.window.scheduled_end ? <Text style={styles.timeEnd}>{formatBusinessTime(day.endIso)}</Text> : null}
                 </View>
               }
-              onPress={() => setMenuJob(job)}
+              onPress={() => setMenuItem(item)}
             />
           </View>
         )}
       />
 
       {/* Action menu */}
-      <Modal visible={!!menuJob} transparent animationType="fade" onRequestClose={() => setMenuJob(null)}>
-        <TouchableOpacity style={styles.overlay} activeOpacity={1} onPress={() => setMenuJob(null)}>
+      <Modal visible={!!menuItem} transparent animationType="fade" onRequestClose={() => setMenuItem(null)}>
+        <TouchableOpacity style={styles.overlay} activeOpacity={1} onPress={() => setMenuItem(null)}>
           <View style={styles.sheet}>
-            <Text style={styles.sheetTitle} numberOfLines={1}>#{menuJob?.job_number} — {menuJob?.title}</Text>
+            <Text style={styles.sheetTitle} numberOfLines={1}>#{menuItem?.job.job_number} — {menuItem?.job.title}</Text>
             <Text style={styles.sheetSub}>
-              {menuJob?.profiles?.full_name ?? "Unassigned"}
-              {menuJob
-                ? ` · ${menuJob.schedule_daily ? (formatScheduleSummary(menuJob) ?? "") : formatBusinessTime(menuJob.scheduled_start)}`
+              {menuItem?.who ?? "Unassigned"}
+              {menuItem
+                ? ` · ${menuItem.window.schedule_daily ? (formatScheduleSummary(menuItem.window) ?? "") : formatBusinessTime(menuItem.window.scheduled_start)}`
                 : ""}
             </Text>
-            <Action icon="person-outline" label="Reassign technician" onPress={() => { if (menuJob) openReassign(menuJob); setMenuJob(null); }} />
-            <Action icon="calendar-outline" label="Reschedule" onPress={() => { setDatePickerFor(menuJob); setMenuJob(null); }} />
-            <Action icon="open-outline" label="Open job details" onPress={() => { const id = menuJob?.id; setMenuJob(null); if (id) router.push(`/job/${id}`); }} />
+            <Action icon="person-outline" label="Reassign technician" onPress={() => { if (menuItem) openReassign(menuItem.job); setMenuItem(null); }} />
+            <Action
+              icon="calendar-outline"
+              label={menuItem?.booking ? "Reschedule this booking" : "Reschedule"}
+              onPress={() => { setDatePickerFor(menuItem); setMenuItem(null); }}
+            />
+            <Action icon="open-outline" label="Open job details" onPress={() => { const id = menuItem?.job.id; setMenuItem(null); if (id) router.push(`/job/${id}`); }} />
           </View>
         </TouchableOpacity>
       </Modal>
@@ -341,13 +423,13 @@ export default function ScheduleScreen() {
 
       {datePickerFor && (
         <DateTimePicker
-          value={new Date(datePickerFor.scheduled_start)}
-          mode={Platform.OS === "ios" && !datePickerFor.schedule_daily ? "datetime" : "date"}
+          value={new Date(datePickerFor.window.scheduled_start)}
+          mode={Platform.OS === "ios" && !datePickerFor.window.schedule_daily ? "datetime" : "date"}
           onChange={onDatePicked}
         />
       )}
       {timePickerFor && (
-        <DateTimePicker value={pendingDate ?? new Date(timePickerFor.scheduled_start)} mode="time" onChange={onTimePicked} />
+        <DateTimePicker value={pendingDate ?? new Date(timePickerFor.window.scheduled_start)} mode="time" onChange={onTimePicked} />
       )}
     </SafeAreaView>
   );

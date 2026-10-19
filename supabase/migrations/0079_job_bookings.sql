@@ -1,10 +1,10 @@
 -- ============================================================================
 -- Job bookings: each technician's own time and cost centre on a job.
 --
--- STATUS: DRAFT — NOT APPLIED. Stage 1 of 3 (database). Safe to apply before
--- the web and mobile changes: every existing screen keeps writing the job-level
--- schedule, and the compatibility triggers below translate those writes into
--- bookings. Then run supabase/tests/0079_job_bookings_test.sql.
+-- STATUS: ✅ APPLIED IN PRODUCTION (2026-10-19, via db query --linked). Gate test
+-- passed; conversion verified: 15 scheduled jobs → 17 bookings (4 unassigned),
+-- none missing, no pushes. First attempt aborted cleanly on job #2520's
+-- inverted window; the window check was removed (#89) and it re-ran.
 --
 -- WHY
 -- A job had ONE schedule (jobs.scheduled_start/end, schedule_daily/all_day,
@@ -59,8 +59,13 @@ create table if not exists job_bookings (
   google_event_id text,
   created_by uuid default auth.uid() references profiles(id) on delete set null,
   created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now(),
-  constraint job_bookings_window check (ends_at is null or ends_at >= starts_at)
+  updated_at timestamptz not null default now()
+  -- NO check that ends_at >= starts_at, on purpose. jobs never had one, and
+  -- production already holds a job (#2520) whose end is before its start. A
+  -- check here aborted this migration's conversion on that row, and would also
+  -- make every old-style client write that carries such a window fail with a
+  -- database error (the translation trigger inserts bookings inside the
+  -- client's own statement). The booking editors validate new windows instead.
 );
 
 create index if not exists job_bookings_job_idx on job_bookings (job_id, starts_at);

@@ -14,6 +14,7 @@ import { useDataLayer } from "../../lib/data/DataProvider";
 import { useSyncSettled } from "../../lib/data/hooks/useSyncSettled";
 import { reconcileRows } from "../../lib/data/reconcile";
 import { TIME_ENTRY_SELECT_WITH_STAFF } from "../../lib/timeEntryColumns";
+import { clockInCostCentre, type BookingWindow } from "../../lib/bookings";
 
 interface TimeEntry {
   id: string;
@@ -283,12 +284,16 @@ export function JobTimeTab({
   jobId,
   currentUserId,
   scheduledCostCenterId,
+  myBookings,
 }: {
   jobId: string;
   currentUserId: string;
   // The stage picked when this job was scheduled — manual clock-in defaults to
   // it instead of landing unassigned.
   scheduledCostCenterId?: string | null;
+  // This technician's own bookings on the job (0079; null/absent before then). A clock-in defaults to the cost centre of
+  // the booking covering now, then the nearest one today, then the job's.
+  myBookings?: BookingWindow[] | null;
 }) {
   const [entries, setEntries] = useState<TimeEntry[]>([]);
   const [costCenters, setCostCenters] = useState<CostCenterOption[]>([]);
@@ -365,11 +370,13 @@ export function JobTimeTab({
   async function clockIn() {
     if (myOpenEntry || loading || !timeClock.ready) return;
     setLoading(true);
-    const clockInIso = new Date().toISOString();
-    const { id } = await timeClock.clockIn({ jobId, staffId: currentUserId, costCenterId: scheduledCostCenterId ?? null });
+    const now = new Date();
+    const clockInIso = now.toISOString();
+    const costCenterId = clockInCostCentre(myBookings, now.getTime(), scheduledCostCenterId);
+    const { id } = await timeClock.clockIn({ jobId, staffId: currentUserId, costCenterId });
     // Optimistic: show immediately (this is also the offline display path). The
     // server row reconciles in via useSyncSettled once the write lands.
-    setEntries((prev) => [optimisticEntry(id, currentUserId, clockInIso, scheduledCostCenterId ?? null), ...prev]);
+    setEntries((prev) => [optimisticEntry(id, currentUserId, clockInIso, costCenterId), ...prev]);
     setLoading(false);
   }
 

@@ -99,24 +99,45 @@ const TOKEN = {
   calendar_sync_token: "sync-1",
 };
 
+type Booking = {
+  id: string;
+  job_id: string;
+  starts_at: string;
+  ends_at: string | null;
+  daily: boolean;
+  all_day: boolean;
+  updated_at: string | null;
+};
+
 /**
  * Minimal PostgREST-shaped fake. `.eq()` is deliberately BOTH chainable and
  * thenable so an `update().eq()` that nobody reads is still recorded — an
  * earlier fake in this repo returned a plain object there, which quietly
  * absorbed the very call its test existed to catch.
+ *
+ * Table-aware: an event is looked up as a BOOKING's first
+ * (job_bookings.google_event_id), then as a job's legacy event. `jobBookings`
+ * is what a job's own bookings read returns (the legacy flatten guard).
  */
-function makeSupabase(jobsByEventId: Record<string, Job>) {
+function makeSupabase(
+  jobsByEventId: Record<string, Job>,
+  bookingsByEventId: Record<string, Booking> = {},
+  jobBookings: Array<Partial<Booking> & { cost_center_id?: string | null }> = [],
+) {
   const jobUpdates: Array<{ id: string; payload: Record<string, unknown> }> = [];
+  const bookingWrites: Array<{ id: string; payload: Record<string, unknown> | "delete" }> = [];
   const tokenUpdates: Array<Record<string, unknown>> = [];
 
   const from = (table: string) => {
-    let payload: Record<string, unknown> | null = null;
+    let payload: Record<string, unknown> | "delete" | null = null;
+    let filterColumn: string | null = null;
     let filterValue: unknown = null;
 
     const record = () => {
       if (!payload) return;
-      if (table === "jobs") jobUpdates.push({ id: String(filterValue), payload });
-      else tokenUpdates.push(payload);
+      if (table === "jobs") jobUpdates.push({ id: String(filterValue), payload: payload as Record<string, unknown> });
+      else if (table === "job_bookings") bookingWrites.push({ id: String(filterValue), payload });
+      else tokenUpdates.push(payload as Record<string, unknown>);
       payload = null;
     };
 
@@ -126,22 +147,34 @@ function makeSupabase(jobsByEventId: Record<string, Job>) {
         payload = p;
         return api;
       },
-      eq: (_col: string, val: unknown) => {
+      delete: () => {
+        payload = "delete";
+        return api;
+      },
+      eq: (col: string, val: unknown) => {
+        filterColumn = col;
         filterValue = val;
         return api;
       },
       single: async () => ({ data: table === "google_tokens" ? TOKEN : null, error: null }),
-      maybeSingle: async () => ({ data: jobsByEventId[String(filterValue)] ?? null, error: null }),
-      then: (onFulfilled: (v: { data: null; error: null }) => unknown, onRejected?: (e: unknown) => unknown) => {
+      maybeSingle: async () => {
+        const key = String(filterValue);
+        if (table === "job_bookings") return { data: bookingsByEventId[key] ?? null, error: null };
+        if (table === "jobs") return { data: jobsByEventId[key] ?? null, error: null };
+        return { data: null, error: null };
+      },
+      then: (onFulfilled: (v: { data: unknown; error: null }) => unknown, onRejected?: (e: unknown) => unknown) => {
+        const isRead = !payload;
         record();
-        return Promise.resolve({ data: null, error: null }).then(onFulfilled, onRejected);
+        const data = isRead && table === "job_bookings" && filterColumn === "job_id" ? jobBookings : null;
+        return Promise.resolve({ data, error: null }).then(onFulfilled, onRejected);
       },
     };
     return api;
   };
 
   currentClient = { from };
-  return { supabase: { from }, jobUpdates, tokenUpdates };
+  return { supabase: { from }, jobUpdates, bookingWrites, tokenUpdates };
 }
 
 function listReturns(items: unknown[]) {
@@ -550,5 +583,140 @@ describe("pollGoogleCalendarChanges — all-day Google events", () => {
       schedule_daily: false,
       schedule_all_day: true,
     });
+  });
+});
+
+// ============================================================================
+// Job bookings (migration 0079 — a draft, not applied yet): one event PER
+// BOOKING, linked by job_bookings.google_event_id. The same rules apply, to
+// the booking: a newer Google-side move moves THAT booking; a newer deletion
+// deletes it; an older event is corrected from the booking. The job-level
+// columns are never written for a booking's event — the database derives them.
+// ============================================================================
+
+describe("pollGoogleCalendarChanges — per-booking events", () => {
+  const daveBooking = (updatedAt: string | null): Booking => ({
+    id: "bk-dave",
+    job_id: "job1",
+    starts_at: TUESDAY_START,
+    ends_at: TUESDAY_END,
+    daily: false,
+    all_day: false,
+    updated_at: updatedAt,
+  });
+
+  it("moves the BOOKING (not the job) when the event is the newer writer", async () => {
+    listReturns([staleEvent("2026-08-09T11:00:00.000Z")]);
+    const { supabase, jobUpdates, bookingWrites } = makeSupabase({}, { evt1: daveBooking("2026-08-09T10:00:00.000Z") });
+
+    const result = await pollGoogleCalendarChanges(supabase);
+
+    expect(bookingWrites).toEqual([{ id: "bk-dave", payload: { starts_at: MONDAY_START, ends_at: MONDAY_END } }]);
+    expect(jobUpdates).toEqual([]);
+    expect(result).toMatchObject({ updated: 1 });
+  });
+
+  it("prefers the booking over a job that happens to hold the same event id", async () => {
+    // The adopted legacy event: its id moved from the job to the booking. If
+    // the job's link was not cleared yet, the booking still wins.
+    listReturns([staleEvent("2026-08-09T11:00:00.000Z")]);
+    const { supabase, jobUpdates, bookingWrites } = makeSupabase(
+      { evt1: jobDraggedTo("2026-08-09T10:00:00.000Z") },
+      { evt1: daveBooking("2026-08-09T10:00:00.000Z") },
+    );
+
+    await pollGoogleCalendarChanges(supabase);
+
+    expect(bookingWrites).toHaveLength(1);
+    expect(jobUpdates).toEqual([]);
+  });
+
+  it("does NOT write a stale event onto a booking edited more recently — it corrects the event", async () => {
+    listReturns([staleEvent("2026-08-09T09:00:00.000Z")]);
+    const { supabase, bookingWrites } = makeSupabase({}, { evt1: daveBooking("2026-08-09T10:00:00.000Z") });
+
+    const result = await pollGoogleCalendarChanges(supabase);
+
+    expect(bookingWrites).toEqual([]);
+    expect(eventsPatch.mock.calls[0][0]).toMatchObject({
+      eventId: "evt1",
+      requestBody: { start: { dateTime: TUESDAY_START }, end: { dateTime: TUESDAY_END } },
+    });
+    expect(result).toMatchObject({ pushedToCalendar: 1 });
+  });
+
+  it("deletes the booking when its event was deleted in Google after the last app edit", async () => {
+    listReturns([{ id: "evt1", status: "cancelled", updated: "2026-08-09T11:00:00.000Z" }]);
+    const { supabase, jobUpdates, bookingWrites } = makeSupabase({}, { evt1: daveBooking("2026-08-09T10:00:00.000Z") });
+
+    const result = await pollGoogleCalendarChanges(supabase);
+
+    expect(bookingWrites).toEqual([{ id: "bk-dave", payload: "delete" }]);
+    expect(jobUpdates).toEqual([]);
+    expect(result).toMatchObject({ clearedByDeletion: 1 });
+  });
+
+  it("keeps a booking edited after its event was deleted, dropping only the dead link", async () => {
+    listReturns([{ id: "evt1", status: "cancelled", updated: "2026-08-09T09:00:00.000Z" }]);
+    const { supabase, bookingWrites } = makeSupabase({}, { evt1: daveBooking("2026-08-09T10:00:00.000Z") });
+
+    await pollGoogleCalendarChanges(supabase);
+
+    expect(bookingWrites).toEqual([{ id: "bk-dave", payload: { google_event_id: null } }]);
+  });
+
+  it("maps a newer all-day event onto the booking's own columns", async () => {
+    listReturns([
+      { id: "evt1", status: "confirmed", updated: "2026-08-09T11:00:00.000Z", start: { date: "2026-10-19" }, end: { date: "2026-10-22" } },
+    ]);
+    const { supabase, bookingWrites } = makeSupabase({}, { evt1: daveBooking("2026-08-09T10:00:00.000Z") });
+
+    await pollGoogleCalendarChanges(supabase);
+
+    expect(bookingWrites).toEqual([
+      {
+        id: "bk-dave",
+        payload: { starts_at: "2026-10-18T20:00:00.000Z", ends_at: "2026-10-21T04:30:00.000Z", daily: true, all_day: true },
+      },
+    ]);
+  });
+});
+
+describe("pollGoogleCalendarChanges — a legacy job event must not flatten per-technician bookings", () => {
+  it("skips a newer Google edit of the old single event when the job's bookings have different windows", async () => {
+    listReturns([staleEvent("2026-08-09T11:00:00.000Z")]);
+    const { supabase, jobUpdates } = makeSupabase({ evt1: jobDraggedTo("2026-08-09T10:00:00.000Z") }, {}, [
+      { starts_at: MONDAY_START, ends_at: MONDAY_END, daily: false, all_day: false, cost_center_id: "cc1" },
+      { starts_at: TUESDAY_START, ends_at: TUESDAY_END, daily: false, all_day: false, cost_center_id: "cc1" },
+    ]);
+
+    const result = await pollGoogleCalendarChanges(supabase);
+
+    // Written, the compatibility trigger would have put EVERY technician on
+    // Monday 08:00–09:00.
+    expect(jobUpdates).toEqual([]);
+    expect(result).toMatchObject({ legacySkipped: 1, updated: 0 });
+  });
+
+  it("still applies it when every booking shares the one window (the old meaning)", async () => {
+    listReturns([staleEvent("2026-08-09T11:00:00.000Z")]);
+    const shared = { starts_at: TUESDAY_START, ends_at: TUESDAY_END, daily: false, all_day: false, cost_center_id: null };
+    const { supabase, jobUpdates } = makeSupabase({ evt1: jobDraggedTo("2026-08-09T10:00:00.000Z") }, {}, [shared, { ...shared }]);
+
+    await pollGoogleCalendarChanges(supabase);
+
+    expect(jobUpdates).toEqual([{ id: "job1", payload: { scheduled_start: MONDAY_START, scheduled_end: MONDAY_END } }]);
+  });
+
+  it("does not clear the job's schedule for a deleted legacy event when that would flatten bookings", async () => {
+    listReturns([{ id: "evt1", status: "cancelled", updated: "2026-08-09T11:00:00.000Z" }]);
+    const { supabase, jobUpdates } = makeSupabase({ evt1: jobDraggedTo("2026-08-09T10:00:00.000Z") }, {}, [
+      { starts_at: MONDAY_START, ends_at: MONDAY_END, daily: false, all_day: false },
+      { starts_at: TUESDAY_START, ends_at: TUESDAY_END, daily: false, all_day: false },
+    ]);
+
+    await pollGoogleCalendarChanges(supabase);
+
+    expect(jobUpdates).toEqual([{ id: "job1", payload: { google_event_id: null } }]);
   });
 });

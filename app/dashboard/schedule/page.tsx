@@ -5,13 +5,17 @@ import Link from "next/link";
 import { TeamScheduleView } from "@/components/schedule/team-schedule-view";
 import { BUSINESS_TIME_ZONE } from "@/lib/date";
 import type { TodoJob } from "@/components/schedule/todo-list-panel";
-import { crewFromRow, type BoardJob } from "@/components/schedule/board-model";
+import { crewFromRow, type BoardBooking, type BoardJob } from "@/components/schedule/board-model";
 import { allocatedHoursByJob } from "@/lib/todo-list";
+import { BOOKING_COLUMNS, bookingsFromJobWindow, isBookingsTableMissing, type JobBooking } from "@/lib/bookings";
 
 const BOARD_COLUMNS =
-  "id, job_number, title, status, scheduled_start, scheduled_end, assigned_to, job_assignments(staff_id), customers(name), sites(name, address_line1, suburb, state, site_lat, site_lng)";
+  "id, job_number, title, status, scheduled_start, scheduled_end, scheduled_cost_center_id, assigned_to, job_assignments(staff_id), customers(name), sites(name, address_line1, suburb, state, site_lat, site_lng)";
 
-type BoardJobRow = Omit<BoardJob, "crew"> & { job_assignments?: { staff_id: string | null }[] | null };
+type BoardJobRow = Omit<BoardJob, "crew"> & {
+  job_assignments?: { staff_id: string | null }[] | null;
+  job_bookings?: JobBooking[] | null;
+};
 
 export default async function SchedulePage() {
   const supabase = await createClient();
@@ -37,10 +41,20 @@ export default async function SchedulePage() {
   // on_hold still shows here; otherwise a technician's own list could show a
   // job as theirs while the board showed them free.
   //
-  // schedule_daily / schedule_all_day come from the multi-day migration, which
-  // is drafted and NOT APPLIED yet. Until it is, PostgREST rejects the whole
-  // select with 42703 (undefined column), so the board retries once without
-  // them and every job reads as a single-day block — the board's old behaviour.
+  // The cards are BOOKINGS (job_bookings, embedded per job — its one FK to
+  // jobs makes the embed unambiguous). job_bookings comes from 0079, which is
+  // a DRAFT and NOT APPLIED yet; until it is, PostgREST rejects the embed
+  // (isBookingsTableMissing) and the board retries without it, drawing each
+  // job's one window under every crew member as it did before bookings, and
+  // refusing drags (there is no booking row to move).
+  //
+  // schedule_daily / schedule_all_day (0071, applied) keep their own 42703
+  // retry from when they were new: on a database without them every job reads
+  // as a single-day block.
+  //
+  // A scheduled job always has a booking once bookings exist — the derived
+  // scheduled_start is set from them — so the filter below still picks
+  // exactly the jobs that have something to draw.
   const loadBoardJobs = async () => {
     const run = (columns: string) =>
       supabase
@@ -49,11 +63,15 @@ export default async function SchedulePage() {
         .not("scheduled_start", "is", null)
         .not("status", "in", '("completed","cancelled")')
         .order("scheduled_start", { ascending: true, nullsFirst: false });
+    const withBookings = await run(`${BOARD_COLUMNS}, schedule_daily, schedule_all_day, job_bookings(${BOOKING_COLUMNS})`);
+    if (!isBookingsTableMissing(withBookings.error) && withBookings.error?.code !== "42703") {
+      return { ...withBookings, hasBookings: true };
+    }
     const result = await run(`${BOARD_COLUMNS}, schedule_daily, schedule_all_day`);
-    return result.error?.code === "42703" ? run(BOARD_COLUMNS) : result;
+    return { ...(result.error?.code === "42703" ? await run(BOARD_COLUMNS) : result), hasBookings: false };
   };
 
-  const [{ data: jobRows }, { data: staff }, { count: unscheduledCount }, { data: todoRows, error: todoError }] = await Promise.all([
+  const [{ data: jobRows, hasBookings }, { data: staff }, { count: unscheduledCount }, { data: todoRows, error: todoError }] = await Promise.all([
     loadBoardJobs(),
     supabase
       .from("profiles")
@@ -79,12 +97,17 @@ export default async function SchedulePage() {
       .order("todo_listed_at", { ascending: true }),
   ]);
 
-  // The select string is built at runtime (the 42703 fallback), so the client
-  // cannot type the rows; this is the shape both column lists return.
-  const jobs: BoardJob[] = ((jobRows ?? []) as unknown as BoardJobRow[]).map(({ job_assignments, ...job }) => ({
-    ...job,
-    crew: crewFromRow(job.assigned_to, job_assignments),
-  }));
+  // The select string is built at runtime (the fallbacks), so the client
+  // cannot type the rows; this is the shape every column list returns.
+  const rows = (jobRows ?? []) as unknown as BoardJobRow[];
+  const jobs: BoardJob[] = rows.map((row) => {
+    const { job_assignments, ...job } = row;
+    delete job.job_bookings; // drawn from rawBookings below, not carried on the job
+    return { ...job, crew: crewFromRow(job.assigned_to, job_assignments) };
+  });
+  const rawBookings: JobBooking[] = hasBookings
+    ? rows.flatMap((r) => r.job_bookings ?? [])
+    : jobs.flatMap((j) => bookingsFromJobWindow(j, j.crew));
 
   // Two follow-up reads, each needing only the batch above and not each
   // other, so they run together.
@@ -94,22 +117,35 @@ export default async function SchedulePage() {
   // this page never holds a PO value even though office could read one.
   const todoIds = (todoRows ?? []).filter((j) => j.estimated_hours == null).map((j) => j.id);
 
-  // The staff list above is active-only, so a job whose crew includes someone
-  // who's since been deactivated would have no row to render into for them on
-  // the Team board. Append any such profiles (flagged) so every crew member's
-  // jobs always have somewhere to show up.
+  // The staff list above is active-only, so a booking for someone who's
+  // since been deactivated would have no row to render into on the Team
+  // board. Append any such profiles (flagged) so every booking always has
+  // somewhere to show up.
   const activeStaff = staff ?? [];
   const activeIds = new Set(activeStaff.map((s) => s.id));
-  const missingIds = Array.from(new Set(jobs.flatMap((j) => j.crew).filter((id) => !activeIds.has(id))));
+  const missingIds = Array.from(
+    new Set(rawBookings.map((b) => b.staff_id).filter((id): id is string => !!id && !activeIds.has(id))),
+  );
+  // Each card names its cost centre. From the money-free view (0038): this
+  // page is open to technicians, who cannot read po_cost_centers itself.
+  const costCenterIds = Array.from(new Set(rawBookings.map((b) => b.cost_center_id).filter((id): id is string => !!id)));
 
-  const [poRows, missingProfiles] = await Promise.all([
+  const [poRows, missingProfiles, costCenterRows] = await Promise.all([
     todoIds.length > 0
       ? supabase.from("purchase_orders_public").select("job_id, total_hours").in("job_id", todoIds).then(({ data }) => data)
       : null,
     missingIds.length > 0
       ? supabase.from("profiles").select("id, full_name, role").in("id", missingIds).then(({ data }) => data)
       : null,
+    costCenterIds.length > 0
+      ? supabase.from("po_cost_centers_public").select("id, name").in("id", costCenterIds).then(({ data }) => data)
+      : null,
   ]);
+  const costCenterNames = new Map((costCenterRows ?? []).map((cc) => [cc.id, cc.name]));
+  const bookings: BoardBooking[] = rawBookings.map((b) => ({
+    ...b,
+    cost_center_name: b.cost_center_id ? costCenterNames.get(b.cost_center_id) ?? null : null,
+  }));
 
   const poHours = todoIds.length > 0 ? allocatedHoursByJob(poRows ?? []) : new Map<string, number>();
   const todoJobs: TodoJob[] = (todoRows ?? []).map((j) => ({
@@ -159,6 +195,8 @@ export default async function SchedulePage() {
 
       <TeamScheduleView
         jobs={jobs}
+        bookings={bookings}
+        bookingsReadOnly={!hasBookings}
         staff={staffForDisplay}
         todoJobs={todoJobs}
         todoError={todoError?.message ?? null}
