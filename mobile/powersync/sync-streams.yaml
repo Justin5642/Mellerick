@@ -185,6 +185,22 @@ streams:
       FROM job_assignments
       WHERE job_id IN (SELECT id FROM jobs WHERE sync_tech IS NOT false AND id IN (SELECT job_id FROM job_assignments WHERE staff_id = auth.user_id()))
 
+  # Every booking on the technician's jobs (0079 — DRAFT, not applied yet;
+  # 0080, also a draft, adds the table to the publication): each technician's
+  # own window and cost centre, so My Jobs, the job screen and clock-in can
+  # read them offline. Other people's bookings on the same job come too, for
+  # the same reason as tech_job_assignments above. No money column exists on
+  # job_bookings; the columns are listed anyway (§2 rule), and the Google
+  # event id and created_by are left off because no screen needs them.
+  # Until 0079/0080 are applied this stream matches nothing — the table is
+  # not published — and the app falls back to the job-level schedule.
+  tech_job_bookings:
+    auto_subscribe: true
+    query: |
+      SELECT id, job_id, staff_id, cost_center_id, starts_at, ends_at, daily, all_day, created_at, updated_at
+      FROM job_bookings
+      WHERE job_id IN (SELECT id FROM jobs WHERE sync_tech IS NOT false AND id IN (SELECT job_id FROM job_assignments WHERE staff_id = auth.user_id()))
+
   tech_job_photos:
     auto_subscribe: true
     query: |
@@ -293,6 +309,13 @@ streams:
   office_job_assignments:
     auto_subscribe: true
     query: SELECT job_assignments.* FROM job_assignments JOIN profiles ON profiles.id = auth.user_id() WHERE profiles.role = 'office' OR profiles.role = 'admin'
+
+  # WINDOWED like every other job child (sync_office, added by draft 0080 —
+  # not applied yet). The office schedule editor reads a job's bookings from
+  # here offline.
+  office_job_bookings:
+    auto_subscribe: true
+    query: SELECT job_bookings.* FROM job_bookings JOIN profiles ON profiles.id = auth.user_id() WHERE (profiles.role = 'office' OR profiles.role = 'admin') AND job_bookings.sync_office IS NOT false
 
   office_job_items:
     auto_subscribe: true

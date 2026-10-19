@@ -5,7 +5,7 @@
 // DOM.
 //
 // THE BOARD SHOWS BOOKINGS, NOT JOBS. Each technician's row holds their OWN
-// bookings (job_bookings — migration 0079, a draft not applied yet): Dave's
+// bookings (job_bookings — migration 0079 yet): Dave's
 // Mon–Tue rough-in and Sam's Monday morning on the same job are two cards
 // with two different windows. Before bookings, a job's one window was
 // repeated under every crew member, so a pair working different days could

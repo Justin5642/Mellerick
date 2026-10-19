@@ -61,6 +61,7 @@ describe("technician streams", () => {
       "backflow_tests",
       "customers",
       "job_assignments",
+      "job_bookings",
       "job_notes",
       "job_photos",
       "job_stage_notes",

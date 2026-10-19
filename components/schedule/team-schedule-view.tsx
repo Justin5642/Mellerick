@@ -20,7 +20,7 @@ import { createClient } from "@/lib/supabase/client";
 // to Google Calendar (pushJobToCalendar — a move the calendar never hears
 // about is what the poll in lib/google.ts used to "correct" by undoing it).
 // The crew and the job's own window follow from the bookings in the database
-// (triggers in 0079, a draft not applied yet), so nothing here writes
+// (triggers in 0079 yet), so nothing here writes
 // assigned_to, job_assignments or jobs.scheduled_* any more.
 import { pushJobToCalendar } from "@/lib/schedule-dispatch";
 import { insertBookings, updateBooking, type BookingWriteClient } from "@/lib/bookings";

@@ -123,7 +123,7 @@ export function buildCalendarEventBody(job: CalendarJob) {
 // ---------------------------------------------------------------------------
 // One event per BOOKING
 // ---------------------------------------------------------------------------
-// With job_bookings (migration 0079 — a draft, not applied yet) each booking
+// With job_bookings (migration 0079 yet) each booking
 // is its own event: "#2530 Rough-in — Dave". The timing rules are the job's,
 // unchanged — a booking's window means what a job's did — so the booking is
 // handed to buildCalendarEventTiming in the job-shaped form.

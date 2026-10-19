@@ -61,8 +61,8 @@ interface Props {
   /** The job's saved bookings — the list the dialog opens with. */
   bookings: JobBookingWithNames[];
   /**
-   * False when job_bookings is not in this database (0079 is a draft, not
-   * applied yet): the list shown is derived from the job's own window and
+   * False when job_bookings is not in this database (one without 0079):
+   * the list shown is derived from the job's own window and
    * nothing here can be saved.
    */
   bookingsReady: boolean;

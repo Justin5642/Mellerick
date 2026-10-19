@@ -49,6 +49,9 @@ module.exports = {
   // Crew membership (reads/assignedJobs.ts): `j.id IN (SELECT job_id FROM
   // job_assignments WHERE staff_id = ?)` in my-jobs lists and schedule counts.
   job_assignments: { staff: ['staff_id'] },
+  // reads/bookings.ts: a job's bookings (job_id = ? ORDER BY starts_at) and a
+  // technician's own (staff_id = ?) for My Jobs and the clock-in cost centre.
+  job_bookings: { job_start: ['job_id', 'starts_at'], staff: ['staff_id'] },
   // reads/jobPhotos.ts: job_id = ?
   job_photos: { job: ['job_id'] },
 };

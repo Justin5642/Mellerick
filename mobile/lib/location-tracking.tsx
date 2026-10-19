@@ -3,6 +3,7 @@ import { Alert, AppState } from "react-native";
 import * as Location from "expo-location";
 import { supabase } from "./supabase";
 import { listMyJobSites } from "./data/reads/jobs";
+import { withMyBookings } from "./data/reads/bookings";
 import { getOpenWorkEntry } from "./data/reads/clock";
 import { onClockChanged } from "./clockEvents";
 import {
@@ -17,7 +18,7 @@ import { useAuth } from "./auth-context";
 import { useDataLayer } from "./data/DataProvider";
 import type { DataLayer } from "./data/createDataLayer";
 
-import { nextGeofenceState, type TrackedSite } from "./geofenceState";
+import { arrivalCostCentre, nextGeofenceState, type TrackedSite } from "./geofenceState";
 import {
   applyGeofenceTransition,
   type GeofenceTransitionDeps,
@@ -158,7 +159,10 @@ export function LocationTrackingProvider({ children }: { children: ReactNode }) 
       // jobs.assigned_to's primary. The assigned_to-only filter this replaces
       // meant the second technician on a crew job never had its site
       // geofenced, so their arrival and travel there were never auto-recorded.
-      const sites = await listMyJobSites(userId as string);
+      // Each site carries the technician's own bookings on it (best-effort —
+      // see withMyBookings), so an arrival clocks in against the booking it
+      // falls in rather than the job's single scheduled cost centre.
+      const sites = await withMyBookings(userId as string, await listMyJobSites(userId as string));
       if (cancelled) return;
 
       sitesRef.current = sites;
@@ -491,7 +495,7 @@ export function LocationTrackingProvider({ children }: { children: ReactNode }) 
           jobId: target,
           staffId,
           pendingDeparture: departureRef.current,
-          costCenterId: targetSite?.scheduledCostCenterId ?? null,
+          costCenterId: arrivalCostCentre(targetSite, position.timestamp),
         },
         makeTransitionDeps(layer)
       );

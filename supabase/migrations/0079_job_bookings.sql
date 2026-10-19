@@ -1,10 +1,10 @@
 -- ============================================================================
 -- Job bookings: each technician's own time and cost centre on a job.
 --
--- STATUS: DRAFT — NOT APPLIED. Stage 1 of 3 (database). Safe to apply before
--- the web and mobile changes: every existing screen keeps writing the job-level
--- schedule, and the compatibility triggers below translate those writes into
--- bookings. Then run supabase/tests/0079_job_bookings_test.sql.
+-- STATUS: ✅ APPLIED IN PRODUCTION (2026-10-19, via db query --linked). Gate test
+-- passed; conversion verified: 15 scheduled jobs → 17 bookings (4 unassigned),
+-- none missing, no pushes. First attempt aborted cleanly on job #2520's
+-- inverted window; the window check was removed (#89) and it re-ran.
 --
 -- WHY
 -- A job had ONE schedule (jobs.scheduled_start/end, schedule_daily/all_day,

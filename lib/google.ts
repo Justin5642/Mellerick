@@ -139,8 +139,7 @@ type PolledJob = {
 };
 
 /**
- * What an event is linked to. Since job bookings (0079 — a draft, not applied
- * yet) each BOOKING has its own event (job_bookings.google_event_id); a job
+ * What an event is linked to. Since job bookings (0079) each BOOKING has its own event (job_bookings.google_event_id); a job
  * not re-synced since then still has its single LEGACY event
  * (jobs.google_event_id). The reconciliation rules are the same for both —
  * newer side wins, multi-day series are the app's — so the poll works on the
@@ -259,7 +258,7 @@ function sameInstant(a: string | null | undefined, b: string | null | undefined)
  *     master; event newer → logged and skipped, because reverse-engineering a
  *     recurrence rule into "start date, end date, daily hours" is guesswork.
  *
- * BOOKINGS (0079, a draft not applied yet). An event is first looked up as a
+ * BOOKINGS (0079 yet). An event is first looked up as a
  * booking's (job_bookings.google_event_id), and every rule above applies to
  * that booking instead of the job: a Google-side move moves THAT booking, a
  * deletion deletes it (the database then re-derives the job and crew), and
@@ -316,7 +315,7 @@ export async function pollGoogleCalendarChanges(supabase: any) {
   // it every comparison below degrades to "the times differ", which is the
   // bug this guard exists to close.
   const findTarget = async (eventId: string): Promise<PollTarget | null> => {
-    // A database without job_bookings (0079 is a draft, not applied yet)
+    // A database without job_bookings (0079 yet)
     // answers with an error here; that simply means "no booking claims it".
     const { data: booking } = await supabase
       .from("job_bookings")

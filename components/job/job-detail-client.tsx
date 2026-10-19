@@ -97,7 +97,7 @@ interface Props {
   currentAssignedIds: string[];
   /** The job's bookings (each technician's own time and cost centre). */
   bookings: JobBookingWithNames[];
-  /** False when job_bookings is not in this database yet (0079 is a draft, not applied). */
+  /** False when job_bookings is not in this database yet (0079). */
   bookingsReady: boolean;
   bookingsError: string | null;
 }
@@ -181,7 +181,7 @@ export function JobDetailClient({ job, currentUserId, photos: initialPhotos, doc
   );
 
   // The bookings shown in the header, on Overview and in the Schedule
-  // dialog. Without the bookings table (0079 is a draft, not applied yet)
+  // dialog. Without the bookings table (0079 yet)
   // they are derived from the job's own window and crew — what the
   // migration's conversion would create — and are read-only.
   // Memoised so the dialog (which re-seeds when this list changes) is not
