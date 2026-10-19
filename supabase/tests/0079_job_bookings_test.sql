@@ -124,6 +124,16 @@ begin
     res := res || format('legacy crew add: newcomer gets the shared window|1|%s',
       (select count(*) from job_bookings where job_id = j2 and staff_id = t2 and starts_at = mon + interval '1 day'));
 
+    -- 9b. OLD-STYLE write of an inverted window (end before start, as job
+    --     #2520 has in production) must still save, not error.
+    begin
+      update jobs set scheduled_start = mon + interval '1 day', scheduled_end = mon where id = j2;
+      outcome := 'SAVED';
+    exception when others then
+      outcome := 'ERROR: ' || sqlerrm;
+    end;
+    res := res || format('legacy write with end before start still saves|SAVED|%s', outcome);
+
     -- 10. Clearing every booking unschedules the job.
     delete from job_bookings where job_id = j;
     res := res || format('no bookings: job is unscheduled|true|%s',
