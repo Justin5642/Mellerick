@@ -22,13 +22,16 @@ import { formatDate } from "@/lib/date";
 import { formatInvoiceNumber } from "@/lib/utils";
 import { invoiceStatusColors } from "@/lib/badge-colors";
 import { DeleteInvoiceDialog } from "./delete-invoice-dialog";
+import { InvoicePayments, type InvoicePayment } from "./invoice-payments";
 
 interface Props {
   invoice: any;
   xeroConnected: boolean;
+  /** null when the invoice_payments table is not in this database yet. */
+  payments: InvoicePayment[] | null;
 }
 
-export function InvoiceDetail({ invoice, xeroConnected }: Props) {
+export function InvoiceDetail({ invoice, xeroConnected, payments }: Props) {
   const [pushing, setPushing] = useState(false);
   const [pushed, setPushed] = useState(!!invoice.xero_invoice_id);
   const [sending, setSending] = useState(false);
@@ -199,6 +202,15 @@ export function InvoiceDetail({ invoice, xeroConnected }: Props) {
           </CardContent>
         </Card>
       </div>
+
+      <InvoicePayments
+        invoiceId={invoice.id}
+        total={invoice.total}
+        amountPaid={invoice.amount_paid}
+        status={status}
+        inXero={!!invoice.xero_invoice_id}
+        payments={payments}
+      />
 
       <Card>
         <CardContent className="p-0">

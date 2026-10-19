@@ -158,7 +158,7 @@ export async function pollXeroInvoicePayments(supabase: any) {
 
   const { data: candidates } = await supabase
     .from("invoices")
-    .select("id, xero_invoice_id, status, due_date, total")
+    .select("id, xero_invoice_id, status, due_date, total, amount_paid")
     .in("status", ["sent", "overdue"])
     .not("xero_invoice_id", "is", null);
 
@@ -217,16 +217,20 @@ export async function pollXeroInvoicePayments(supabase: any) {
         continue;
       }
 
-      // Still unpaid in Xero -- keep local status current with due_date.
+      // Still unpaid in Xero -- keep local status current with due_date, and
+      // record any PART-payment so "Owed to us" shows the real balance (it
+      // used to show the full total until the last cent landed).
       const isOverdue = local.due_date && local.due_date < today;
-      if (isOverdue && local.status !== "overdue") {
-        const { error } = await supabase.from("invoices").update({ status: "overdue" }).eq("id", local.id);
+      const update: Record<string, unknown> = {};
+      if (isOverdue && local.status !== "overdue") update.status = "overdue";
+      // Due date was pushed out / corrected in Xero -- move back to "sent".
+      else if (!isOverdue && local.status === "overdue") update.status = "sent";
+      const xeroPaid = Number(xInv.amountPaid ?? 0);
+      if (xeroPaid !== Number(local.amount_paid ?? 0)) update.amount_paid = xeroPaid;
+      if (Object.keys(update).length > 0) {
+        const { error } = await supabase.from("invoices").update(update).eq("id", local.id);
         if (error) failed.push(`${local.id}: ${error.message}`);
-        else markedOverdue++;
-      } else if (!isOverdue && local.status === "overdue") {
-        // Due date was pushed out / corrected in Xero -- move back to "sent".
-        const { error } = await supabase.from("invoices").update({ status: "sent" }).eq("id", local.id);
-        if (error) failed.push(`${local.id}: ${error.message}`);
+        else if (update.status === "overdue") markedOverdue++;
       }
     }
   }
