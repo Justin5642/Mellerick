@@ -1,3 +1,5 @@
+import { clockInCostCentre, type BookingWindow } from "./bookings";
+
 // The geofence decision, as a pure function.
 //
 // This logic used to live inside LocationTrackingProvider, closed over three
@@ -21,6 +23,20 @@ export interface TrackedSite {
   lng: number;
   /** The stage this job was scheduled against — new clock-ins at this site default to it. */
   scheduledCostCenterId: string | null;
+  /**
+   * This technician's own bookings on the job (0079 — a draft, not applied
+   * yet), when known. An arrival defaults to the cost centre of the booking
+   * covering it (lib/bookings.ts clockInCostCentre), falling back to
+   * scheduledCostCenterId. Optional: a context published by an older build,
+   * or a site list loaded before bookings exist, simply has none.
+   */
+  bookings?: BookingWindow[];
+}
+
+/** The cost centre an arrival at `site` at `atMs` clocks in against. */
+export function arrivalCostCentre(site: TrackedSite | undefined, atMs: number): string | null {
+  if (!site) return null;
+  return clockInCostCentre(site.bookings, atMs, site.scheduledCostCenterId);
 }
 
 export interface Coords {

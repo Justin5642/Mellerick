@@ -396,6 +396,8 @@ describe("PowerSync sync windows", () => {
     const WINDOWED = [
       "jobs", "job_items", "job_variations", "job_expenses", "job_notes", "job_stage_notes",
       "job_photos", "time_entries", "equipment_usage_log", "invoices", "invoice_items", "quotes", "quote_items",
+      // 0080 (a draft, not applied yet): bookings follow their job like every other child.
+      "job_bookings",
     ];
     const office = Object.entries(streams).filter(([name]) => name.startsWith("office_"));
     for (const [name, def] of office) {

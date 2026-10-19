@@ -25,7 +25,10 @@ export type Aggregate =
   | "variation_type"
   | "cost_center_template"
   | "job_item"
-  | "job_expense";
+  | "job_expense"
+  // job_bookings (0079 — a draft, not applied yet): plain id-keyed rows, so
+  // the ordinary insert / update / delete replay applies unchanged.
+  | "job_booking";
 
 // "upload" uploads the attachment to Storage and writes NO metadata row — used
 // when a server-side route (not the client) later writes the row from the object

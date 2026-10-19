@@ -3,11 +3,20 @@ import type { IdGen } from "../ids";
 import type { WriteOperation, SideEffectOperation } from "../outbox/types";
 import { systemTime, type TimeSource } from "../time";
 import type { ScheduleColumns } from "../../scheduling";
+import { bookingColumns, type BookingWindowColumns } from "../../bookings";
 
 /**
  * How a moved schedule's two flags change (migration 0071). Omitted fields are
  * left as stored — a reschedule never touches what it does not know about.
  */
+/** What an edit to one booking may change. Omitted fields are left as stored. */
+export interface BookingPatch {
+  staffId?: string | null;
+  costCenterId?: string | null;
+  /** The window and both 0071 flags, always together (buildScheduleColumns, or a moved window). */
+  columns?: BookingWindowColumns;
+}
+
 export interface RescheduleFlags {
   scheduleDaily?: boolean;
   scheduleAllDay?: boolean;
@@ -132,6 +141,99 @@ export class ScheduleRepository {
       createdAt: this.time.nowMs(),
     };
     await this.outbox.enqueue(assign);
+  }
+
+  // -------------------------------------------------------------------------
+  // Bookings (migration 0079 — a DRAFT, not applied yet). The schedule editor
+  // writes job_bookings rows; the database derives the job-level schedule and
+  // the crew from them (a newly booked technician joins the crew, which sends
+  // the "New job assigned" push; one whose last booking goes leaves it). So
+  // these never touch jobs.* or set_job_assignments.
+  //
+  // job_bookings is a plain table with a uuid PK, so the outbox's ordinary
+  // replay applies: the insert carries a client-generated id (a replay
+  // collides on job_bookings_pkey and counts as success), an edit or delete
+  // of a booking still queued waits for its insert (Outbox.enqueue), and an
+  // edit that matches no row fails loudly instead of vanishing.
+  // -------------------------------------------------------------------------
+
+  /**
+   * One booking per technician on the same window and cost centre — the
+   * editor's "add" row. No technicians = one unassigned booking.
+   * Returns the new booking ids, in `staffIds` order.
+   */
+  async addBookings(
+    jobId: string,
+    staffIds: string[],
+    columns: ScheduleColumns,
+    costCenterId: string | null
+  ): Promise<string[]> {
+    const people: (string | null)[] = staffIds.length > 0 ? [...new Set(staffIds)] : [null];
+    const ids: string[] = [];
+    let lastOp: string | null = null;
+    for (const staffId of people) {
+      const rowId = this.ids.newId();
+      lastOp = await this.writeBooking("insert", rowId, {
+        job_id: jobId,
+        staff_id: staffId,
+        cost_center_id: costCenterId,
+        ...bookingColumns(columns),
+      });
+      ids.push(rowId);
+    }
+    await this.syncCalendar(jobId, lastOp);
+    return ids;
+  }
+
+  async updateBooking(jobId: string, bookingId: string, patch: BookingPatch): Promise<void> {
+    const payload: Record<string, unknown> = {};
+    if (patch.staffId !== undefined) payload.staff_id = patch.staffId;
+    if (patch.costCenterId !== undefined) payload.cost_center_id = patch.costCenterId;
+    if (patch.columns) Object.assign(payload, bookingColumns(patch.columns));
+    if (Object.keys(payload).length === 0) return;
+    const opId = await this.writeBooking("update", bookingId, payload);
+    await this.syncCalendar(jobId, opId);
+  }
+
+  async deleteBooking(jobId: string, bookingId: string): Promise<void> {
+    const opId = await this.writeBooking("delete", bookingId, {});
+    await this.syncCalendar(jobId, opId);
+  }
+
+  private async writeBooking(op: "insert" | "update" | "delete", rowId: string, payload: Record<string, unknown>): Promise<string> {
+    const opId = this.ids.newId();
+    const write: WriteOperation = {
+      kind: "write",
+      id: opId,
+      rowId,
+      aggregate: "job_booking",
+      op,
+      table: "job_bookings",
+      payload,
+      status: "pending",
+      attempts: 0,
+      nextAttemptAt: 0,
+      createdAt: this.time.nowMs(),
+    };
+    await this.outbox.enqueue(write);
+    return opId;
+  }
+
+  /** Resync the job's calendar once `afterOp` has landed (coalesced per job). */
+  private async syncCalendar(jobId: string, afterOp: string | null): Promise<void> {
+    const cal: SideEffectOperation = {
+      kind: "side_effect",
+      id: this.ids.newId(),
+      effect: "sync-calendar",
+      coalesceKey: `sync-calendar:${jobId}`,
+      payload: { jobId },
+      dependsOn: afterOp,
+      status: "pending",
+      attempts: 0,
+      nextAttemptAt: 0,
+      createdAt: this.time.nowMs(),
+    };
+    await this.outbox.enqueue(cal);
   }
 
   private async updateJob(jobId: string, payload: Record<string, unknown>): Promise<string> {

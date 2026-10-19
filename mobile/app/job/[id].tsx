@@ -20,6 +20,9 @@ import { ScheduleJobModal } from "../../components/job/schedule-job-modal";
 import { getJobStageLabel } from "../../lib/job-stages";
 import { formatScheduleSummary } from "../../lib/scheduleDisplay";
 import { getJobCostCentres, type JobCostCentre } from "../../lib/data/reads/jobBilling";
+import { listJobBookings, type JobBooking } from "../../lib/data/reads/bookings";
+import { bookingWindow, mergePendingBookings } from "../../lib/bookings";
+import { useDataLayer } from "../../lib/data/DataProvider";
 
 const TABS = [
   { key: "overview", label: "Overview" },
@@ -72,6 +75,30 @@ export default function JobDetailScreen() {
   // POSITIVE answer that the tech is not on the crew; offline or on a failed
   // read the screen stays editable, so a tech's own job never locks up.
   const [assignmentKnown, setAssignmentKnown] = useState(false);
+  // The job's bookings (migration 0079 — a draft, not applied yet): who works
+  // it, when, and against which cost centre. NULL until bookings exist (or
+  // when they could not be read) — the header then shows the job-level
+  // schedule as before.
+  const [bookings, setBookings] = useState<JobBooking[] | null>(null);
+  const layer = useDataLayer();
+
+  // Best-effort like the crew and cost centres: bookings are detail on top of
+  // the job, never a reason to fail the screen. Edits still queued in the
+  // outbox are kept (mergePendingBookings), because the device mirror only
+  // learns about a booking once it has synced.
+  const refreshBookings = useCallback(async () => {
+    try {
+      const read = await listJobBookings(id);
+      if (!read) {
+        setBookings(null);
+        return;
+      }
+      const pending = layer ? await layer.outbox.pendingRowIds() : new Set<string>();
+      setBookings((shown) => mergePendingBookings(shown ?? [], read, pending));
+    } catch (e) {
+      console.warn("[job] bookings unavailable; showing the job's own schedule:", e);
+    }
+  }, [id, layer]);
 
   const refreshAssignedStaff = useCallback(async () => {
     try {
@@ -110,6 +137,7 @@ export default function JobDetailScreen() {
       }
 
       await refreshAssignedStaff();
+      await refreshBookings();
 
       try {
         const { data: latestStageNote } = await supabase
@@ -128,7 +156,7 @@ export default function JobDetailScreen() {
     } finally {
       setLoading(false);
     }
-  }, [id, refreshAssignedStaff]);
+  }, [id, refreshAssignedStaff, refreshBookings]);
 
   useFocusEffect(
     useCallback(() => {
@@ -265,7 +293,22 @@ export default function JobDetailScreen() {
         {job.customers?.name}
         {job.sites ? ` · ${job.sites.name}, ${job.sites.suburb}` : ""}
       </Text>
-      <Text style={styles.scheduleSubtitle}>
+      {bookings && bookings.length > 0 ? (
+        // One line per booking — who, when, which stage; your own in blue.
+        <View style={styles.bookingList}>
+          {bookings.map((b) => {
+            const mine = !!userId && b.staff_id === userId;
+            const stage = b.cost_center_id ? costCenters.find((cc) => cc.id === b.cost_center_id)?.name : null;
+            return (
+              <Text key={b.id} style={[styles.scheduleSubtitle, mine && styles.myBooking]} numberOfLines={2}>
+                {mine ? "You" : (b.staff_name ?? "Unassigned")} · {formatScheduleSummary(bookingWindow(b))}
+                {stage ? ` · ${stage}` : ""}
+              </Text>
+            );
+          })}
+        </View>
+      ) : (
+        <Text style={styles.scheduleSubtitle}>
         {assignedStaff.length > 0 && job.scheduled_start && job.schedule_daily
           ? // Multi-day (0071): the range and the hours worked on each day.
             `${assignedStaff.map((a) => a.full_name).join(", ")} · ${formatScheduleSummary(job)}`
@@ -280,6 +323,7 @@ export default function JobDetailScreen() {
             })}`
           : "Not scheduled"}
       </Text>
+      )}
 
       <View style={styles.tabBarWrap}>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.tabBar}>
@@ -299,7 +343,12 @@ export default function JobDetailScreen() {
         )}
         {activeTab === "overview" && <JobOverviewTab job={job} currentUserId={userId} readOnly={viewOnly} />}
         {activeTab === "time" && userId && (
-          <JobTimeTab jobId={job.id} currentUserId={userId} scheduledCostCenterId={job.scheduled_cost_center_id} />
+          <JobTimeTab
+            jobId={job.id}
+            currentUserId={userId}
+            scheduledCostCenterId={job.scheduled_cost_center_id}
+            myBookings={bookings ? bookings.filter((b) => b.staff_id === userId) : null}
+          />
         )}
         {activeTab === "variations" && userId && <JobVariationsTab jobId={job.id} currentUserId={userId} />}
         {activeTab === "photos" && userId && (
@@ -412,6 +461,12 @@ export default function JobDetailScreen() {
         currentScheduleAllDay={!!job.schedule_all_day}
         costCenters={costCenters}
         currentScheduledCostCenterId={job.scheduled_cost_center_id}
+        bookings={bookings}
+        onBookingsChanged={(next) => {
+          setBookings(next);
+          // The crew follows the bookings server-side; re-read it once synced.
+          void refreshAssignedStaff();
+        }}
         onScheduled={(patch) => {
           setJob((j: any) => ({ ...j, ...patch }));
           void refreshAssignedStaff();
@@ -466,6 +521,8 @@ const styles = StyleSheet.create({
   doneText: { color: "#fff", fontWeight: "700", fontSize: 14 },
   subtitle: { fontSize: 13, color: colors.slate500, paddingHorizontal: 16, marginTop: 2 },
   scheduleSubtitle: { fontSize: 12, color: colors.slate400, paddingHorizontal: 16, marginTop: 2 },
+  bookingList: { marginTop: 2 },
+  myBooking: { color: colors.blue600, fontWeight: "700" },
   tabBarWrap: { borderBottomWidth: 1, borderBottomColor: colors.border, marginTop: 12 },
   tabBar: { paddingHorizontal: 12, gap: 4 },
   tab: { paddingHorizontal: 14, paddingVertical: 10, borderBottomWidth: 2, borderBottomColor: "transparent" },

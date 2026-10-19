@@ -190,6 +190,9 @@ windows) — all 16 technician-visible streams are money-free:
   `tech_sites` / `backflow_sites`, `backflow_devices`, `backflow_tests`,
   `tech_job_assignments`, `tech_job_photos`, `tech_job_notes`,
   `tech_job_stage_notes` — no monetary column in the selected sets
+- `tech_job_bookings` (added for build 16; drafts 0079/0080 not applied yet,
+  stream not deployed yet) — 10 named columns: who, when, cost-centre **id**;
+  no money column exists on `job_bookings`
 
 Office/admin streams gate on the caller's own profile row:
 
@@ -388,6 +391,52 @@ Load-bearing properties:
   replay — deliberate, because throwing would dead-letter a legitimate replay and
   wedge the FIFO queue forever — but it logs a warning naming the table, so a
   vanished row is traceable.
+
+### Job bookings on the phone (build 16 — NOT LIVE: needs 0079 + 0080 + a stream deploy)
+
+`job_bookings` (draft `0079`, not applied yet) holds each technician's own
+window and cost centre on a job; the job-level schedule and crew are derived
+from it. The phone side (branch `feat/job-bookings-mobile`):
+
+- **Sync.** Draft `0080` (not applied yet) adds `job_bookings` to the
+  `powersync` publication and gives it `sync_office` with the 0068 child
+  triggers, the job cascade and a block in `sync_window_refresh()`. It also
+  re-hangs two 0079 triggers with `WHEN` clauses so a flag-only write (the
+  nightly refresh) is not activity — without that, every job with a booking
+  would have stayed in both windows forever. Streams: `tech_job_bookings`
+  (follows the job like every `tech_job_*`), `office_job_bookings` (windowed).
+  Deploying the YAML is manual — `docs/powersync-deploy.md`.
+- **Reads** (`lib/data/reads/bookings.ts`) tell three states apart: no table
+  yet (remote PGRST205/42P01 → `null` → every screen shows the job-level
+  schedule, as before); table on the server but not on the device (a scheduled
+  job with zero local bookings is impossible under 0079, so the local read
+  throws `OutsideSyncWindow` and asks Supabase); everything deployed (local,
+  offline). Rules in `lib/bookings.ts`.
+- **My Jobs** shows one card per OWN booking (a job booked twice = two cards,
+  each with its time and stage name), split Today/Upcoming by the booking's
+  day. A job with no booking for them shows the job's window. Past bookings
+  hide while a current one exists on the same job.
+- **Job screen** header lists every booking (who · when · stage), yours in
+  blue as "You".
+- **Office:** the Schedule tab lists one row per booking per day; Reschedule
+  on a booking row moves only that booking. The crew picker stays. The
+  Schedule Job modal is a bookings list editor (add: technician(s) → window →
+  stage → note, one booking each, none = unassigned; edit; delete) writing
+  `job_bookings` insert/update/delete through the outbox
+  (`ScheduleRepository.addBookings/updateBooking/deleteBooking`, aggregate
+  `job_booking`) plus a coalesced `sync-calendar`. Plain uuid-keyed rows, so
+  the existing replay rules apply unchanged. Edits still queued are kept on
+  screen across reloads (`mergePendingBookings`). Before 0079 the modal is the
+  old single-schedule form.
+- **Clock-in cost centre** (manual and geofence, foreground and background):
+  the technician's booking covering the clock-in time, else their nearest
+  booking that day, else `jobs.scheduled_cost_center_id` (`clockInCostCentre`).
+  Geofence sites carry the bookings (`TrackedSite.bookings`, best-effort; a
+  context published by build 15 has none and falls back).
+- **Gaps to know:** a technician's stage NAMES come from the server
+  (`po_cost_centers` is office-only — it carries money), so offline their
+  cards show times without stage names; the IDs, and therefore the clock-in
+  default, work offline.
 
 ### Sync reliability and sign-out (17 October 2026 audit)
 
@@ -885,6 +934,7 @@ a shippable release.
 | **Sentry (error monitoring)** | Justin | Optional, and off until a DSN is set — see §12. Create a free Sentry org with a Next.js project (and a React Native project for the app), then set the DSNs in Vercel and EAS. Without it, failures like the weeks-long silent "Polish with AI" outage are still only discovered by accident. |
 | **Turn off public sign-up** | Justin | Dashboard → Authentication → Sign In / Providers → untick **"Allow new users to sign up"**. `supabase/config.toml` now has `[auth] enable_signup = false`, but that file only configures the local stack — the hosted project still lets anyone with the anon key call `/auth/v1/signup`. Invites keep working (GoTrue's admin invite does not check this switch). Leave the **Email provider** itself enabled. |
 | **`APP_URL`** (optional) | Justin | Origin for emailed reset links. Unset = `https://mellerick-app.vercel.app`, which is right for production. Set it only for a different domain, or `http://localhost:3000` in `.env.local` to test resets locally. |
+| **Job bookings rollout (build 16)** | Justin | In this order: apply `0079` then `supabase/tests/0079_job_bookings_test.sql`; apply `0080` then `supabase/tests/0080_job_bookings_sync_test.sql`; deploy `mobile/powersync/sync-streams.yaml` (`docs/powersync-deploy.md`); then ship build 16. Builds ≤15 keep working throughout (0079 translates their job-level writes). |
 | **Maestro flow 02** | Avi | Needs `ADMIN_EMAIL` / `ADMIN_PASSWORD` in the environment. The login subflow deliberately skips when a session already exists, so a password never passes through a script — which is why flows 01/03/04 could be run and 02 could not. |
 
 ### QA fixture — do not delete

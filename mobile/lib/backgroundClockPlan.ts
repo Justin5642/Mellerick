@@ -1,4 +1,4 @@
-import { nextGeofenceState, type Coords, type TrackedSite } from "./geofenceState";
+import { arrivalCostCentre, nextGeofenceState, type Coords, type TrackedSite } from "./geofenceState";
 
 // Turn a BATCH of background location readings into clock actions.
 //
@@ -117,7 +117,12 @@ export function planBackgroundClockActions(
         at,
         fromJobId: pendingDeparture?.jobId ?? null,
         fromAt: pendingDeparture?.at ?? null,
-        costCenterId: sites.find((s) => s.jobId === state.insideJobId)?.scheduledCostCenterId ?? null,
+        // The reading's own time picks the booking — a batch can arrive
+        // hours after the arrival it records.
+        costCenterId: arrivalCostCentre(
+          sites.find((s) => s.jobId === state.insideJobId),
+          new Date(reading.timestamp).getTime()
+        ),
       });
       // Consumed. Leaving it set would attach the same departure to the NEXT
       // arrival too and invent a second, longer leg.
