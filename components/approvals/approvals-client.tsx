@@ -10,6 +10,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
 import { CheckCircle2, XCircle, ClipboardList, Clock, User, MapPin, ChevronDown, ChevronUp, AlertTriangle, GitPullRequestArrow } from "lucide-react";
 import Link from "next/link";
+import { UnbilledVariations, type UnbilledVariation } from "./unbilled-variations";
 import { formatDate } from "@/lib/date";
 import { moneyTotals } from "@/lib/replace-line-items";
 
@@ -25,12 +26,13 @@ interface Props {
   currentUserId: string;
   jobs: any[];
   pendingVariations: any[];
+  unbilledVariations: UnbilledVariation[];
 }
 
 // The list and both actions. The page (app/dashboard/approvals/page.tsx) loads
 // the rows and the viewer's role on the server and hands them in, so the screen
 // arrives filled instead of fetching after hydration.
-export function ApprovalsClient({ role, currentUserId, jobs: initialJobs, pendingVariations }: Props) {
+export function ApprovalsClient({ role, currentUserId, jobs: initialJobs, pendingVariations, unbilledVariations }: Props) {
   const supabase = createClient();
   const [jobs, setJobs] = useState(initialJobs);
   const [expanded, setExpanded] = useState<string | null>(null);
@@ -71,8 +73,29 @@ export function ApprovalsClient({ role, currentUserId, jobs: initialJobs, pendin
     let invoiceCreated = false;
 
     if (!invoiceId && job) {
-      const { data: items } = await supabase.from("job_items").select("*").eq("job_id", jobId);
-      if (items && items.length > 0) {
+      const { data: jobItems } = await supabase.from("job_items").select("*").eq("job_id", jobId);
+      // Approved variations not yet on an invoice go on this one too. They
+      // used to be left off — only job_items were copied — so an approved
+      // variation stayed unbilled after its job was invoiced (Justin, 20 Oct
+      // 2026: "how do we track it through to the invoicing stage?").
+      const { data: unbilled } = await supabase
+        .from("job_variations")
+        .select("id, custom_name, quantity, unit, rate, total_amount, variation_types(name)")
+        .eq("job_id", jobId)
+        .in("status", ["approved", "auto_approved"])
+        .is("invoice_id", null);
+      // Same line shape as the New Invoice screen's "add variation": one line
+      // at the variation's total, its quantity and rate in the description.
+      const variationLines = (unbilled ?? []).map((v: any) => ({
+        variationId: v.id as string,
+        pricing_item_id: null,
+        name: v.variation_types?.name ?? v.custom_name ?? "Variation",
+        description: `${v.quantity} ${v.unit ?? ""}${v.rate != null ? ` @ $${Number(v.rate).toFixed(2)}` : ""}`.trim(),
+        quantity: 1,
+        unit_price: Number(v.total_amount ?? Number(v.rate ?? 0) * Number(v.quantity ?? 0)),
+      }));
+      const items = [...(jobItems ?? []), ...variationLines];
+      if (items.length > 0) {
         // moneyTotals, not raw floats. The three columns are decimal(10,2) and
         // round INDEPENDENTLY, so summing unrounded and deriving GST from the
         // unrounded subtotal produces a tax invoice whose subtotal plus GST
@@ -120,6 +143,15 @@ export function ApprovalsClient({ role, currentUserId, jobs: initialJobs, pendin
           } else {
             invoiceId = newInvoice.id;
             invoiceCreated = true;
+            // Mark the variations billed, so they leave "Variations to
+            // invoice" and are never offered for a second invoice.
+            const ids = variationLines.map((v) => v.variationId);
+            if (ids.length > 0) {
+              const { error: billErr } = await supabase.from("job_variations").update({ invoice_id: newInvoice.id }).in("id", ids);
+              if (billErr) {
+                toast.error(`Invoice created, but ${ids.length} variation(s) were not marked as billed. Check them on the job before invoicing again.`);
+              }
+            }
           }
         }
       }
@@ -234,6 +266,8 @@ export function ApprovalsClient({ role, currentUserId, jobs: initialJobs, pendin
           View-only — only admins can approve jobs or send them back (approving creates an invoice and pushes it to Xero).
         </div>
       )}
+
+      <UnbilledVariations variations={unbilledVariations} />
 
       {pendingVariations.length > 0 && (
         <div className="space-y-3">

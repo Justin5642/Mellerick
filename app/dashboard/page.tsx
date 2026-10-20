@@ -64,6 +64,7 @@ export default async function DashboardPage() {
     { data: recentJobs },
     { data: scheduledJobs },
     { data: backflowDevices },
+    { data: unbilledVariations },
   ] = await Promise.all([
     supabase.from("jobs").select("*", { count: "exact", head: true }),
     supabase.from("jobs").select("*", { count: "exact", head: true }).in("status", ["pending", "scheduled", "in_progress"]),
@@ -99,6 +100,9 @@ export default async function DashboardPage() {
       .eq("backflow_tests.result", "pass")
       .order("test_date", { referencedTable: "backflow_tests", ascending: false })
       .limit(1, { referencedTable: "backflow_tests" }),
+    // Approved variations not on an invoice yet (Approvals → Variations to invoice).
+    // (The permanent QA fixture job's probe variation is excluded below.)
+    supabase.from("job_variations").select("total_amount, jobs(title)").in("status", ["approved", "auto_approved"]).is("invoice_id", null),
   ]);
 
   // Each job's block TODAY — a multi-day job's times are today's, and the
@@ -133,6 +137,19 @@ export default async function DashboardPage() {
         <StatCard title="Total Jobs" value={totalJobs ?? 0} icon={CheckCircle2} color="bg-green-500" href="/dashboard/jobs" />
         <StatCard title="Customers" value={totalCustomers ?? 0} icon={Users} color="bg-violet-500" href="/dashboard/customers" />
         <StatCard title="Overdue Invoices" value={overdueInvoices ?? 0} icon={AlertCircle} color="bg-red-500" href="/dashboard/invoices" />
+        <StatCard
+          title="Variations to Invoice"
+          value={(() => {
+            const real = ((unbilledVariations ?? []) as { total_amount: number | null; jobs: { title: string | null } | null }[]).filter(
+              (v) => !v.jobs?.title?.startsWith("QA FIXTURE")
+            );
+            const sum = real.reduce((acc, v) => acc + Number(v.total_amount ?? 0), 0);
+            return `${real.length} · $${sum.toLocaleString("en-AU", { maximumFractionDigits: 0 })}`;
+          })()}
+          icon={Receipt}
+          color="bg-emerald-600"
+          href="/dashboard/approvals#unbilled-variations"
+        />
         <StatCard title="Backflow Tests Due" value={backflowDueCount} icon={Droplets} color="bg-cyan-600" href="/dashboard/backflow" />
       </div>
 

@@ -188,6 +188,18 @@ function NewInvoiceForm() {
     loadUnbilledVariations();
   }, [form.job_id]);
 
+  // ?with_variations=1 (the "Create invoice" button on Approvals → Variations
+  // to invoice): put every unbilled variation on the invoice straight away,
+  // once, instead of leaving them as suggestions to click.
+  const autoAddVariations = searchParams.get("with_variations") === "1";
+  const autoAdded = useRef(false);
+  useEffect(() => {
+    if (!autoAddVariations || autoAdded.current || unbilledVariations.length === 0) return;
+    autoAdded.current = true;
+    unbilledVariations.forEach((v) => addVariationToInvoice(v));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoAddVariations, unbilledVariations]);
+
   useEffect(() => {
     // Pre-fill "Description of Works" from the linked job's on-site record so
     // the office starts from what the technician actually wrote rather than a
