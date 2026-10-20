@@ -329,6 +329,16 @@ export function JobOverview({ job, readOnly = false, bookings, bookingsError, on
                   </a>
                 </div>
               </div>
+              {/* The auto clock-in geofence needs the site's coordinates. The
+                  hourly geocoder (/api/sites/geocode-missing) fills them from
+                  the address when it can place it precisely; when it can't
+                  (a brand-new estate street, a typo), say so here. */}
+              {(job.sites.site_lat == null || job.sites.site_lng == null) && (
+                <p className="rounded-md bg-amber-50 px-2.5 py-1.5 text-xs text-amber-800">
+                  No map location for this address, so auto clock-in won&apos;t work here. Check the address is
+                  correct and complete.
+                </p>
+              )}
             </CardContent>
           </Card>
         )}

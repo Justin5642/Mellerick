@@ -31,6 +31,8 @@ export interface CachedProfile {
   email: string;
   role: string;
   is_active: boolean;
+  /** Auto clock-in on site arrival (0082): null = by role. See trackingGate. */
+  auto_clock?: boolean | null;
 }
 
 interface StoredRecord {
@@ -55,6 +57,9 @@ export function toCachedProfile(row: unknown): CachedProfile | null {
     // Anything other than an explicit `true` is treated as inactive: the
     // deactivated screen is the fail-closed direction.
     is_active: r.is_active === true,
+    // Only when set: absent (older caches, before 0082, or never set) means
+    // "by role" — see trackingGate.decideTracking.
+    ...(typeof r.auto_clock === "boolean" ? { auto_clock: r.auto_clock } : {}),
   };
 }
 

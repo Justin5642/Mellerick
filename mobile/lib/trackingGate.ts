@@ -67,6 +67,12 @@ export type TrackingDecision = { track: true; mode: TrackingMode } | { track: fa
 export interface TrackingInputs {
   userId: string | null;
   role: string | null | undefined;
+  /**
+   * The person's auto clock switch (profiles.auto_clock, 0082): true/false is
+   * an admin's explicit choice; null/undefined means "by role" — technicians
+   * on, office and admin off — the only rule before the switch existed.
+   */
+  autoClock?: boolean | null;
   /** Geofence-able sites for this technician's open jobs. */
   siteCount: number;
   onTheClock: boolean;
@@ -83,7 +89,8 @@ export function decideTracking(i: TrackingInputs): TrackingDecision {
   // launching the app with no signal) is not a reason to stop: it fails toward
   // tracking, as before the gate existed. The site list still has to be
   // non-empty, and an office user rarely has jobs of their own.
-  if (i.role != null && i.role !== "technician") return { track: false, reason: "not-technician" };
+  if (i.autoClock === false) return { track: false, reason: "not-technician" };
+  if (i.autoClock !== true && i.role != null && i.role !== "technician") return { track: false, reason: "not-technician" };
   // No site, no geofence. nextGeofenceState treats an empty list as "not loaded"
   // and does nothing with any reading, so tracking here — even on the clock —
   // could not record anything; it would only spend the battery.

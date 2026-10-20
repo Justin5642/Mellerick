@@ -14,7 +14,7 @@ export default async function StaffPage() {
   // renders (StaffClient re-reads the same set after an invite).
   const [viewer, { data: staff, error }, { data: vehicles }] = await Promise.all([
     getViewer(),
-    supabase.from("profiles").select("id, full_name, email, phone, role, is_active").order("full_name"),
+    supabase.from("profiles").select("id, full_name, email, phone, role, is_active, auto_clock").order("full_name"),
     supabase.from("equipment").select("id, name, assigned_to").not("assigned_to", "is", null),
   ]);
 

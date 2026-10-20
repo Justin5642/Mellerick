@@ -8,10 +8,11 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Users, Plus, Mail, Phone, Shield, Wrench, Monitor, RotateCw, DollarSign, Pencil, Truck, KeyRound } from "lucide-react";
+import { Users, Plus, Mail, Phone, Shield, Wrench, Monitor, RotateCw, DollarSign, Pencil, Truck, KeyRound, MapPin } from "lucide-react";
 import { StaffCostDialog } from "@/components/staff/staff-cost-dialog";
 import { StaffEditDialog } from "@/components/staff/staff-edit-dialog";
 import { staffRoleColors } from "@/lib/badge-colors";
+import { autoClockEnabled } from "@/lib/auto-clock";
 
 const roleIcons: Record<string, any> = {
   admin: Shield,
@@ -85,7 +86,7 @@ export function StaffClient({ role, staff: initialStaff, vehicles, fetchError }:
       setShowForm(false);
       setForm({ full_name: "", email: "", phone: "", role: "technician" });
       // Same columns as the page's initial load.
-      const { data: updated } = await supabase.from("profiles").select("id, full_name, email, phone, role, is_active").order("full_name");
+      const { data: updated } = await supabase.from("profiles").select("id, full_name, email, phone, role, is_active, auto_clock").order("full_name");
       setStaff(updated ?? []);
     }
     setSaving(false);
@@ -121,6 +122,23 @@ export function StaffClient({ role, staff: initialStaff, vehicles, fetchError }:
     } else {
       toast.success(`Password reset email sent to ${member.email}`);
     }
+  }
+
+  // Auto clock-in on site arrival (0082). Shows the effective value — by role
+  // until an admin sets it — and a click stores the opposite explicitly.
+  async function toggleAutoClock(member: any) {
+    const next = !autoClockEnabled(member);
+    const res = await fetch("/api/staff/set-auto-clock", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: member.id, enabled: next }),
+    }).catch(() => null);
+    if (!res?.ok) {
+      toast.error("Could not change auto clock for this person.");
+      return;
+    }
+    setStaff((s) => s.map((m) => (m.id === member.id ? { ...m, auto_clock: next } : m)));
+    toast.success(`Auto clock ${next ? "on" : "off"} for ${member.full_name}`);
   }
 
   async function toggleActive(id: string, current: boolean) {
@@ -251,6 +269,17 @@ export function StaffClient({ role, staff: initialStaff, vehicles, fetchError }:
                       <span className={`text-xs px-2 py-0.5 rounded-full font-medium flex items-center gap-1 ${staffRoleColors[member.role]}`}>
                         <RoleIcon className="w-3 h-3" />{member.role}
                       </span>
+                      <button
+                        type="button"
+                        disabled={!isAdmin}
+                        onClick={() => toggleAutoClock(member)}
+                        title={isAdmin ? "Clock this person in and out automatically when they arrive at and leave a job site" : undefined}
+                        className={`text-xs px-2 py-0.5 rounded-full font-medium flex items-center gap-1 border ${
+                          autoClockEnabled(member) ? "border-green-200 bg-green-50 text-green-700" : "border-slate-200 bg-white text-slate-400"
+                        } ${isAdmin ? "hover:opacity-80 cursor-pointer" : "cursor-default"}`}
+                      >
+                        <MapPin className="w-3 h-3" />Auto clock {autoClockEnabled(member) ? "on" : "off"}
+                      </button>
                       {isAdmin && (
                         <Button
                           variant="ghost" size="sm"
