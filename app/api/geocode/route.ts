@@ -40,7 +40,10 @@ export async function GET(request: NextRequest) {
   // wrong place, so it is reported as not found instead.
   let found;
   try {
-    found = await geocodeAddress(address, { signal: AbortSignal.timeout(10_000) });
+    // approx=1: the "Set location on map" dialog centring itself. It never
+    // saves this point — only the pin the user places.
+    const approx = request.nextUrl.searchParams.get("approx") === "1";
+    found = await geocodeAddress(address, { signal: AbortSignal.timeout(10_000), approx });
   } catch (err) {
     console.error("geocode: lookup failed", err);
     return NextResponse.json({ error: "Address lookup is unavailable, try again shortly" }, { status: 502 });

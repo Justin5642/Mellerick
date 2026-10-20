@@ -357,6 +357,7 @@ export function JobDetailClient({ job, currentUserId, photos: initialPhotos, doc
                 bookings={bookings}
                 bookingsError={bookingsError}
                 onEditSchedule={isOffice ? openSchedule : undefined}
+                canEditSite={isOffice}
               />
             </TabsContent>
             {isOffice && (

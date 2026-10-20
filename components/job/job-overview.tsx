@@ -11,6 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
+import { SiteLocationDialog } from "@/components/site-location-dialog";
 import { Phone, Mail, MapPin, User, Save, Navigation, CalendarClock } from "lucide-react";
 import { formatDate } from "@/lib/date";
 import { formatDateKeyRange } from "@/lib/schedule-form";
@@ -28,6 +29,8 @@ interface Props {
   bookingsError?: string | null;
   /** Opens the Schedule dialog; absent for anyone who cannot change bookings (not office/admin). */
   onEditSchedule?: () => void;
+  /** Office/admin: may set the site's map pin (sites are office-writable, 0064). */
+  canEditSite?: boolean;
 }
 
 // Radix/shadcn's SelectItem can't take value="", so "no site selected" — a
@@ -39,7 +42,8 @@ const NO_SITE_VALUE = "__no_site__";
 // the Customer page — same pattern used on the New Job form.
 const ADD_NEW_SITE_VALUE = "__add_new_site__";
 
-export function JobOverview({ job, readOnly = false, bookings, bookingsError, onEditSchedule }: Props) {
+export function JobOverview({ job, readOnly = false, bookings, bookingsError, onEditSchedule, canEditSite = false }: Props) {
+  const [pinOpen, setPinOpen] = useState(false);
   const router = useRouter();
   const supabase = createClient();
   const [saving, setSaving] = useState(false);
@@ -335,9 +339,22 @@ export function JobOverview({ job, readOnly = false, bookings, bookingsError, on
                   (a brand-new estate street, a typo), say so here. */}
               {(job.sites.site_lat == null || job.sites.site_lng == null) && (
                 <p className="rounded-md bg-amber-50 px-2.5 py-1.5 text-xs text-amber-800">
-                  No map location for this address, so auto clock-in won&apos;t work here. Check the address is
-                  correct and complete.
+                  No map location for this address, so auto clock-in won&apos;t work here.
+                  {canEditSite ? " Set it on the map, or check the address is correct." : " Ask the office to set it on the map."}
                 </p>
+              )}
+              {canEditSite && job.site_id && (
+                <Button variant="outline" size="sm" className="gap-1.5 h-8" onClick={() => setPinOpen(true)}>
+                  <MapPin className="w-3.5 h-3.5" />
+                  {job.sites.site_lat == null ? "Set location on map" : "Adjust map pin"}
+                </Button>
+              )}
+              {canEditSite && job.site_id && pinOpen && (
+                <SiteLocationDialog
+                  site={{ id: job.site_id, ...job.sites }}
+                  open={pinOpen}
+                  onOpenChange={setPinOpen}
+                />
               )}
             </CardContent>
           </Card>

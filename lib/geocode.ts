@@ -46,10 +46,19 @@ export interface GeocodeResult {
   lat: number;
   lng: number;
   display: string;
+  /** Building/address-level — safe for a geofence. Always true unless `approx`. */
+  precise: boolean;
 }
 
-/** The address's coordinates, or null when Nominatim cannot place it precisely. Throws on network/HTTP failure. */
-export async function geocodeAddress(address: string, opts: { signal?: AbortSignal } = {}): Promise<GeocodeResult | null> {
+/**
+ * The address's coordinates, or null when Nominatim cannot place it precisely.
+ * `approx: true` also returns a street/suburb match (precise: false) — ONLY for
+ * centring a map, never to save as a site location. Throws on network/HTTP failure.
+ */
+export async function geocodeAddress(
+  address: string,
+  opts: { signal?: AbortSignal; approx?: boolean } = {}
+): Promise<GeocodeResult | null> {
   const res = await fetch(
     `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(address)}&format=jsonv2&limit=1&countrycodes=au`,
     { headers: { "User-Agent": NOMINATIM_USER_AGENT }, signal: opts.signal }
@@ -57,6 +66,8 @@ export async function geocodeAddress(address: string, opts: { signal?: AbortSign
   if (!res.ok) throw new Error(`Nominatim answered ${res.status}`);
   const data = (await res.json()) as { lat: string; lon: string; display_name: string; class?: string; type?: string; addresstype?: string }[];
   const top = data[0];
-  if (!top || !isPreciseEnough(top)) return null;
-  return { lat: parseFloat(top.lat), lng: parseFloat(top.lon), display: top.display_name };
+  if (!top) return null;
+  const precise = isPreciseEnough(top);
+  if (!precise && !opts.approx) return null;
+  return { lat: parseFloat(top.lat), lng: parseFloat(top.lon), display: top.display_name, precise };
 }
