@@ -1857,6 +1857,7 @@ export type Database = {
       }
       profiles: {
         Row: {
+          auto_clock: boolean | null
           avatar_url: string | null
           created_at: string | null
           email: string
@@ -1868,6 +1869,7 @@ export type Database = {
           updated_at: string | null
         }
         Insert: {
+          auto_clock?: boolean | null
           avatar_url?: string | null
           created_at?: string | null
           email: string
@@ -1879,6 +1881,7 @@ export type Database = {
           updated_at?: string | null
         }
         Update: {
+          auto_clock?: boolean | null
           avatar_url?: string | null
           created_at?: string | null
           email?: string
@@ -2102,6 +2105,7 @@ export type Database = {
           address_line2: string | null
           created_at: string | null
           customer_id: string
+          geocode_attempted_at: string | null
           id: string
           is_active: boolean
           name: string
@@ -2120,6 +2124,7 @@ export type Database = {
           address_line2?: string | null
           created_at?: string | null
           customer_id: string
+          geocode_attempted_at?: string | null
           id?: string
           is_active?: boolean
           name: string
@@ -2138,6 +2143,7 @@ export type Database = {
           address_line2?: string | null
           created_at?: string | null
           customer_id?: string
+          geocode_attempted_at?: string | null
           id?: string
           is_active?: boolean
           name?: string

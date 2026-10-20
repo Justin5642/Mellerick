@@ -93,6 +93,7 @@ export function LocationTrackingProvider({ children }: { children: ReactNode }) 
   const layer = useDataLayer();
   const userId = session?.user.id ?? null;
   const role = profile?.role ?? null;
+  const autoClock = profile?.auto_clock ?? null;
 
   const sitesRef = useRef<TrackedSite[]>([]);
   const insideJobIdRef = useRef<string | null>(null);
@@ -325,7 +326,7 @@ export function LocationTrackingProvider({ children }: { children: ReactNode }) 
       const now = new Date();
       const { onTheClock, onSite } = await readOnTheClock(now);
       if (disposed) return;
-      const decision = decideTracking({ userId: staffId, role, siteCount: sitesRef.current.length, onTheClock, now });
+      const decision = decideTracking({ userId: staffId, role, autoClock, siteCount: sitesRef.current.length, onTheClock, now });
 
       // For the background task's own stop check, which runs headless and
       // cannot see the mirror, the outbox or the foreground cursor.
@@ -434,7 +435,7 @@ export function LocationTrackingProvider({ children }: { children: ReactNode }) 
       stopForeground();
       setTracking(false);
     };
-  }, [userId, role]);
+  }, [userId, role, autoClock]);
 
   // Separately from location: drain the outbox periodically while the app is
   // CLOSED. Queued writes otherwise wait for someone to reopen the app, which

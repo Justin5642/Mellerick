@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireUser } from "@/lib/api/guards";
+import { geocodeAddress } from "@/lib/geocode";
 
 // Simple fixed-window in-memory rate limit, keyed per user. Nominatim's usage
 // policy is strict (1 req/sec); this also stops a compromised session from
@@ -34,17 +35,16 @@ export async function GET(request: NextRequest) {
   const address = request.nextUrl.searchParams.get("address");
   if (!address) return NextResponse.json({ error: "No address provided" }, { status: 400 });
 
-  const res = await fetch(
-    `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(address)}&format=json&limit=1&countrycodes=au`,
-    { headers: { "User-Agent": "MellerickApp/1.0 (plumbing-management)" } }
-  );
-
-  const data = await res.json();
-  if (!data[0]) return NextResponse.json({ error: "Address not found" }, { status: 404 });
-
-  return NextResponse.json({
-    lat: parseFloat(data[0].lat),
-    lng: parseFloat(data[0].lon),
-    display: data[0].display_name,
-  });
+  // Same lookup and precision rule as the hourly site geocoder (lib/geocode):
+  // a street- or suburb-level guess would put the auto clock-in geofence in the
+  // wrong place, so it is reported as not found instead.
+  let found;
+  try {
+    found = await geocodeAddress(address, { signal: AbortSignal.timeout(10_000) });
+  } catch (err) {
+    console.error("geocode: lookup failed", err);
+    return NextResponse.json({ error: "Address lookup is unavailable, try again shortly" }, { status: 502 });
+  }
+  if (!found) return NextResponse.json({ error: "Couldn't find that exact address" }, { status: 404 });
+  return NextResponse.json(found);
 }

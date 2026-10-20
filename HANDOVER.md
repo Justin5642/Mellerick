@@ -574,6 +574,22 @@ longer upload audio to OpenAI Whisper. Speech is recognised where it is spoken:
 - **Check on a device:** the first use asks for microphone *and* speech
   recognition permission; a saved voice report shows on the web job page.
 
+### Auto clock-in prerequisites (20 Oct 2026)
+
+Auto clock-in had never fired: 1,441 of 1,443 sites had no coordinates (Simpro
+imports were never geocoded), and it only ran for role = technician.
+- `scripts/geocode-sites.mjs` filled the backlog (OpenStreetMap Nominatim, 1/s,
+  building/address-level matches only — a street or suburb match is treated as
+  not found, because a wrong 150 m fence is worse than none). `lib/geocode.ts`
+  holds the same rule for `/api/geocode` and the hourly
+  `/api/sites/geocode-missing` cron, which fills new sites and retries a failed
+  address weekly (`sites.geocode_attempted_at`, 0082).
+- `profiles.auto_clock` (0082, admin-only like role): NULL = by role, true/false
+  overrides. Staff page shows an "Auto clock on/off" switch; the phone's
+  `trackingGate.decideTracking` honours it (needs build 18).
+- Web and mobile job pages warn when the site has no map location. New estate
+  streets are the usual reason (not yet in OpenStreetMap at house level).
+
 ### Photos — size and caching
 
 - **Every picked or captured image is downscaled before it is queued**: longest

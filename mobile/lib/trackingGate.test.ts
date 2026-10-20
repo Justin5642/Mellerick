@@ -64,6 +64,21 @@ describe("decideTracking", () => {
     }
   });
 
+  it("tracks an admin or office user whose auto clock switch is ON (0082)", () => {
+    for (const role of ["office", "admin"]) {
+      expect(decideTracking(inputs({ role, autoClock: true })).track).toBe(true);
+    }
+  });
+
+  it("stops for a technician whose auto clock switch is OFF", () => {
+    expect(decideTracking(inputs({ role: "technician", autoClock: false }))).toEqual({ track: false, reason: "not-technician" });
+  });
+
+  it("goes by role when the switch was never set (null)", () => {
+    expect(decideTracking(inputs({ role: "technician", autoClock: null })).track).toBe(true);
+    expect(decideTracking(inputs({ role: "admin", autoClock: null })).track).toBe(false);
+  });
+
   it("does NOT stop for an unknown role — a technician whose profile has not loaded (offline launch)", () => {
     expect(decideTracking(inputs({ role: null })).track).toBe(true);
     expect(decideTracking(inputs({ role: undefined })).track).toBe(true);

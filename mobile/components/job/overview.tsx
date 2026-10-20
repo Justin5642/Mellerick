@@ -239,6 +239,14 @@ export function JobOverviewTab({ job, currentUserId, readOnly = false }: { job: 
             <TouchableOpacity onPress={openWaze}>
               <Text style={styles.link}>🧭 Navigate with Waze</Text>
             </TouchableOpacity>
+            {/* Auto clock-in needs the site's coordinates; the office's hourly
+                geocoder fills them from the address when it can (0082). */}
+            {(job.sites.site_lat == null || job.sites.site_lng == null) && (
+              <Text style={styles.noLocation}>
+                No map location for this address — auto clock-in won&apos;t work here. Clock in by hand, and let the
+                office know.
+              </Text>
+            )}
           </View>
         </>
       )}
@@ -326,6 +334,7 @@ const styles = StyleSheet.create({
   saveButtonText: { color: "#fff", fontWeight: "600", fontSize: 14 },
   customerName: { fontSize: 15, fontWeight: "600", color: colors.slate900, marginBottom: 6 },
   link: { color: colors.blue600, fontSize: 13, marginTop: 4 },
+  noLocation: { marginTop: 8, fontSize: 12, color: colors.orange700, backgroundColor: colors.orange100, padding: 8, borderRadius: 8 },
   meta: { fontSize: 13, color: colors.slate500 },
   timelineRow: { flexDirection: "row", justifyContent: "space-between", paddingVertical: 4 },
 });
