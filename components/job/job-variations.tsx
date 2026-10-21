@@ -11,12 +11,14 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Plus, Trash2, Zap, Clock3, CheckCircle2, XCircle, ImageIcon, Paperclip, Upload } from "lucide-react";
 import { formatDate } from "@/lib/date";
+import { loadTechVariations } from "@/lib/variations-public";
 
 interface VariationType {
   id: string;
   name: string;
   unit: string;
-  rate: number;
+  // Absent for technicians: they load variation_types_public (0028).
+  rate?: number;
   auto_approve: boolean;
 }
 
@@ -52,6 +54,7 @@ export function JobVariations({
   jobId,
   variations: initial,
   variationTypes,
+  canPrice,
   currentUserId,
   onUpdate,
   highlightVariationId,
@@ -60,6 +63,12 @@ export function JobVariations({
   variations: Variation[];
   // null while the types are still loading (fetched on first open of this tab).
   variationTypes: VariationType[] | null;
+  /**
+   * Office/admin. Technicians never see a dollar figure here — no rates, totals
+   * or pricing form (Justin, 21 Oct 2026) — and get no approve/reject/delete,
+   * which the database refuses them anyway (0028).
+   */
+  canPrice: boolean;
   currentUserId: string;
   onUpdate: (v: Variation[]) => void;
   highlightVariationId?: string | null;
@@ -120,9 +129,13 @@ export function JobVariations({
       attachmentPath = path;
     }
 
-    const { data, error } = await supabase
+    // The id is made here so a technician, who cannot read the row back from
+    // the priced table, can fetch it from the rate-stripped view instead.
+    const id = crypto.randomUUID();
+    const insert = supabase
       .from("job_variations")
       .insert({
+        id,
         job_id: jobId,
         variation_type_id: isStandard ? typeId : null,
         custom_name: isStandard ? null : customName.trim(),
@@ -136,9 +149,21 @@ export function JobVariations({
         logged_at: new Date().toISOString(),
         attachment_storage_path: attachmentPath,
         attachment_file_name: attachmentPath ? attachmentFile!.name : null,
-      })
-      .select("*, variation_types(name), profiles!job_variations_logged_by_fkey(full_name)")
-      .single();
+      });
+    let data: any = null;
+    let error: { message: string } | null = null;
+    if (canPrice) {
+      ({ data, error } = await insert
+        .select("*, variation_types(name), profiles!job_variations_logged_by_fkey(full_name)")
+        .single());
+    } else {
+      ({ error } = await insert);
+      if (!error) {
+        const read = await loadTechVariations(supabase, { id });
+        data = read.data[0] ?? null;
+        if (!data) error = { message: read.error ?? "Saved, but it could not be shown — refresh the page" };
+      }
+    }
 
     setSaving(false);
     if (error || !data) {
@@ -229,7 +254,7 @@ export function JobVariations({
 
   return (
     <div className="p-6 space-y-6">
-      {totalApprovedValue > 0 && (
+      {canPrice && totalApprovedValue > 0 && (
         <Card className="border-green-100 bg-green-50/40">
           <CardContent className="pt-4 pb-4 space-y-1">
             <div className="flex items-center justify-between">
@@ -262,8 +287,8 @@ export function JobVariations({
                   <p className="font-semibold text-slate-800">{v.variation_types?.name ?? v.custom_name}</p>
                   <p className="text-xs text-slate-500 mt-0.5">
                     {v.quantity} {v.unit}
-                    {v.rate != null ? ` × $${Number(v.rate).toFixed(2)}` : ""}
-                    {v.total_amount != null ? ` = $${Number(v.total_amount).toFixed(2)}` : ""}
+                    {canPrice && v.rate != null ? ` × $${Number(v.rate).toFixed(2)}` : ""}
+                    {canPrice && v.total_amount != null ? ` = $${Number(v.total_amount).toFixed(2)}` : ""}
                   </p>
                   {v.description && <p className="text-xs text-slate-400 mt-1">{v.description}</p>}
                   {v.photo_storage_path && (
@@ -299,20 +324,22 @@ export function JobVariations({
                     <Icon className="w-3.5 h-3.5" />
                     {s.label}
                   </span>
-                  {(v.status === "auto_approved" || v.status === "approved") && (
+                  {canPrice && (v.status === "auto_approved" || v.status === "approved") && (
                     <span
                       className={`text-xs font-medium px-2.5 py-1 rounded-full ${v.invoice_id ? "bg-slate-100 text-slate-500" : "bg-orange-100 text-orange-700"}`}
                     >
                       {v.invoice_id ? "Billed" : "Unbilled"}
                     </span>
                   )}
-                  <button onClick={() => remove(v.id)} className="text-slate-300 hover:text-red-400 transition-colors">
-                    <Trash2 className="w-4 h-4" />
-                  </button>
+                  {canPrice && (
+                    <button onClick={() => remove(v.id)} className="text-slate-300 hover:text-red-400 transition-colors">
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  )}
                 </div>
               </div>
 
-              {v.status === "pending_approval" && (
+              {canPrice && v.status === "pending_approval" && (
                 <div className="border-t pt-3 grid grid-cols-3 gap-2 items-end">
                   <div className="space-y-1">
                     <Label className="text-xs">Quantity</Label>
@@ -369,7 +396,9 @@ export function JobVariations({
                     )}
                     {(variationTypes ?? []).map((t) => (
                       <SelectItem key={t.id} value={t.id}>
-                        {t.name} — ${Number(t.rate).toFixed(2)}/{t.unit} {t.auto_approve ? "(auto-approve)" : "(needs approval)"}
+                        {t.name}
+                        {canPrice && t.rate != null ? ` — $${Number(t.rate).toFixed(2)}/${t.unit}` : ` (${t.unit})`}
+                        {t.auto_approve ? " (auto-approve)" : " (needs approval)"}
                       </SelectItem>
                     ))}
                   </SelectContent>

@@ -7,6 +7,7 @@ import { JobDetailClient } from "@/components/job/job-detail-client";
 import { TIME_ENTRY_SELECT_WITH_STAFF } from "@/lib/time-entry-columns";
 import { sumAllocatedHours } from "@/lib/hours-scoreboard";
 import { loadJobBookings } from "@/lib/bookings";
+import { loadTechVariations } from "@/lib/variations-public";
 
 export default async function JobDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -150,6 +151,12 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
 
   if (!job) notFound();
 
+  // A technician cannot read the priced job_variations table (0028) — the
+  // query above returns nothing for them — so their list comes from the
+  // rate-stripped view instead.
+  const visibleVariations =
+    isAdmin || isOffice ? variations ?? [] : (await loadTechVariations(supabase, { jobId: id })).data;
+
   const currentAssignedIds = (jobAssignments ?? []).map((a: { staff_id: string }) => a.staff_id);
 
   return (
@@ -165,7 +172,7 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
       purchaseOrders={purchaseOrders ?? []}
       vendorOrders={vendorOrders ?? []}
       timeEntries={timeEntries ?? []}
-      variations={variations ?? []}
+      variations={visibleVariations}
       expenses={expenses ?? []}
       equipmentUsage={equipmentUsage ?? []}
       isAdmin={isAdmin}
