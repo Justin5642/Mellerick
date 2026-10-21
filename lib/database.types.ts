@@ -867,6 +867,7 @@ export type Database = {
           created_at: string | null
           created_by: string | null
           customer_id: string
+          customer_po: string | null
           due_date: string | null
           id: string
           invoice_number: number
@@ -890,6 +891,7 @@ export type Database = {
           created_at?: string | null
           created_by?: string | null
           customer_id: string
+          customer_po?: string | null
           due_date?: string | null
           id?: string
           invoice_number?: number
@@ -913,6 +915,7 @@ export type Database = {
           created_at?: string | null
           created_by?: string | null
           customer_id?: string
+          customer_po?: string | null
           due_date?: string | null
           id?: string
           invoice_number?: number
@@ -1562,6 +1565,7 @@ export type Database = {
           created_at: string | null
           created_by: string | null
           customer_id: string
+          customer_po: string | null
           description: string | null
           estimated_hours: number | null
           google_event_id: string | null
@@ -1604,6 +1608,7 @@ export type Database = {
           created_at?: string | null
           created_by?: string | null
           customer_id: string
+          customer_po?: string | null
           description?: string | null
           estimated_hours?: number | null
           google_event_id?: string | null
@@ -1646,6 +1651,7 @@ export type Database = {
           created_at?: string | null
           created_by?: string | null
           customer_id?: string
+          customer_po?: string | null
           description?: string | null
           estimated_hours?: number | null
           google_event_id?: string | null

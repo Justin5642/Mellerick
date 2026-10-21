@@ -1,3 +1,5 @@
+import { customerPoLabel } from "@/lib/customer-po";
+
 // The job site printed on invoices and quotes (PDF, invoice page, Xero
 // reference). Invoices only carried the customer before (Justin, 21 Oct 2026:
 // "it's dropping the job address off") — builders pay by lot, so the site is
@@ -79,10 +81,17 @@ export function quoteJobSite(quote: {
   return { jobNumber, lines };
 }
 
-/** Xero invoice reference: "Job #546 · Lot 2, 9 Pony Promenade, Seymour VIC 3660" (Xero's limit is 255). */
-export function xeroReference(site: JobSite | null): string | undefined {
-  if (!site) return undefined;
-  const parts = [site.jobNumber ? `Job #${site.jobNumber}` : "", site.lines.join(", ")].filter(Boolean);
+/**
+ * Xero invoice reference: "PO 4500123 · Job #546 · Lot 2, 9 Pony Promenade,
+ * Seymour VIC 3660" (Xero's limit is 255). The customer's PO goes first — it is
+ * what their accounts team matches the bill on (0083).
+ */
+export function xeroReference(site: JobSite | null, customerPo?: string | null): string | undefined {
+  const parts = [
+    customerPoLabel(customerPo) ?? "",
+    site?.jobNumber ? `Job #${site.jobNumber}` : "",
+    site?.lines.join(", ") ?? "",
+  ].filter(Boolean);
   const ref = parts.join(" · ");
   return ref ? ref.slice(0, 255) : undefined;
 }

@@ -187,6 +187,7 @@ const invoices = new Table({
   updated_at: column.text,
   work_description: column.text,
   sync_office: column.integer,
+  customer_po: column.text,
 }, {
   indexes: {
     customer: ['customer_id'],
@@ -379,6 +380,7 @@ const jobs = new Table({
   sync_office: column.integer,
   schedule_daily: column.integer,
   schedule_all_day: column.integer,
+  customer_po: column.text,
 }, {
   indexes: {
     assigned_scheduled: ['assigned_to', 'scheduled_start'],

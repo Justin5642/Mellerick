@@ -73,12 +73,12 @@ export async function POST(request: NextRequest) {
       // fall back to the issue date (due on receipt) so the push succeeds;
       // setting an explicit due_date on the invoice overrides this.
       dueDate: (invoice.due_date ?? invoice.created_at).split("T")[0],
-      // Now that Xero owns the invoice number, use the reference to link the
-      // invoice back to its job (stable and useful for finding a job's invoice
-      // in Xero). The site address follows it: Xero prints the reference on
-      // the invoice it emails, and builders match bills to jobs by lot.
-      // Omitted when there is neither a job nor a site.
-      reference: xeroReference(invoiceJobSite(invoice)),
+      // The reference is what Xero prints on the invoice it emails, so it
+      // carries what the customer's accounts team pays by: their PO number
+      // first (0083), then our job number (also how to find a job's invoice
+      // in Xero, now that Xero owns the invoice number), then the site, since
+      // builders match bills to jobs by lot. Omitted when there is none of them.
+      reference: xeroReference(invoiceJobSite(invoice), invoice.customer_po),
       // Xero owns invoice numbering: we let it auto-assign its next number
       // rather than forcing ours. Forcing it (the old approach, migration
       // 0019) only worked while the two sequences stayed aligned -- but

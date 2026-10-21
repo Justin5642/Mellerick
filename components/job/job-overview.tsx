@@ -11,6 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
+import { CUSTOMER_PO_MAX, normalizeCustomerPo } from "@/lib/customer-po";
 import { SiteLocationDialog } from "@/components/site-location-dialog";
 import { Phone, Mail, MapPin, User, Save, Navigation, CalendarClock } from "lucide-react";
 import { formatDate } from "@/lib/date";
@@ -58,6 +59,7 @@ export function JobOverview({ job, readOnly = false, bookings, bookingsError, on
     priority: job.priority,
     description: job.description ?? "",
     notes: job.notes ?? "",
+    customer_po: job.customer_po ?? "",
   });
   // The schedule is NOT edited here any more. It is the job's bookings — each
   // technician's own time and cost centre (job_bookings, 0079) — shown read-only below and changed in the Schedule dialog.
@@ -116,6 +118,7 @@ export function JobOverview({ job, readOnly = false, bookings, bookingsError, on
       ...form,
       title: form.title.trim(),
       site_id: form.site_id || null,
+      customer_po: normalizeCustomerPo(form.customer_po),
     });
     if (!result.ok) {
       toast.error(result.error);
@@ -182,6 +185,17 @@ export function JobOverview({ job, readOnly = false, bookings, bookingsError, on
                     <SelectItem value="project">Project</SelectItem>
                   </SelectContent>
                 </Select>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="customer_po">Customer PO number</Label>
+                <Input
+                  id="customer_po"
+                  value={form.customer_po}
+                  onChange={(e) => set("customer_po", e.target.value)}
+                  maxLength={CUSTOMER_PO_MAX}
+                  placeholder="e.g. 4500123"
+                />
+                <p className="text-xs text-slate-400">Goes on every invoice for this job.</p>
               </div>
             </div>
           </CardContent>

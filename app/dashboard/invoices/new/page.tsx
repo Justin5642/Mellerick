@@ -6,6 +6,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { CUSTOMER_PO_MAX, normalizeCustomerPo } from "@/lib/customer-po";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -79,7 +80,10 @@ function NewInvoiceForm() {
     due_date: "",
     notes: "",
     work_description: "",
+    customer_po: "",
   });
+  // Edited by hand: a later job pick must not overwrite it.
+  const [poTouched, setPoTouched] = useState(false);
   const [lineItems, setLineItems] = useState<LineItem[]>([{ name: "", description: "", quantity: "1", unit_price: "" }]);
   const [errors, setErrors] = useState<Record<string, boolean>>({});
   const [unbilledVariations, setUnbilledVariations] = useState<UnbilledVariation[]>([]);
@@ -199,6 +203,22 @@ function NewInvoiceForm() {
     unbilledVariations.forEach((v) => addVariationToInvoice(v));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autoAddVariations, unbilledVariations]);
+
+  useEffect(() => {
+    // The job's PO number (0083) comes with it, until the office types their
+    // own — a variation can arrive on a separate PO.
+    async function prefillCustomerPo() {
+      if (poTouched) return;
+      if (!form.job_id) {
+        setForm((prev) => (prev.customer_po ? { ...prev, customer_po: "" } : prev));
+        return;
+      }
+      const { data } = await supabase.from("jobs").select("customer_po").eq("id", form.job_id).single();
+      setForm((prev) => ({ ...prev, customer_po: data?.customer_po ?? "" }));
+    }
+    prefillCustomerPo();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form.job_id]);
 
   useEffect(() => {
     // Pre-fill "Description of Works" from the linked job's on-site record so
@@ -333,6 +353,7 @@ function NewInvoiceForm() {
       ...form,
       job_id: form.job_id || null,
       due_date: form.due_date || null,
+      customer_po: normalizeCustomerPo(form.customer_po),
       subtotal, tax_amount: gst, total,
       status: "draft",
     }).select().single();
@@ -498,6 +519,17 @@ function NewInvoiceForm() {
               <div className="space-y-2">
                 <Label>Due Date</Label>
                 <Input type="date" value={form.due_date} onChange={e => setField("due_date", e.target.value)} />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="customer_po">Customer PO number</Label>
+                <Input
+                  id="customer_po"
+                  value={form.customer_po}
+                  onChange={(e) => { setPoTouched(true); setField("customer_po", e.target.value); }}
+                  maxLength={CUSTOMER_PO_MAX}
+                  placeholder="e.g. 4500123"
+                />
+                <p className="text-xs text-slate-400">From the job when it has one. Printed on the invoice and sent to Xero.</p>
               </div>
             </div>
             <div className="space-y-2">

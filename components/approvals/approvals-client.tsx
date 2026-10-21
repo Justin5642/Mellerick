@@ -111,6 +111,7 @@ export function ApprovalsClient({ role, currentUserId, jobs: initialJobs, pendin
           .insert({
             customer_id: job.customer_id,
             job_id: jobId,
+            customer_po: job.customer_po ?? null,
             title: `#${job.job_number} — ${job.title}`,
             status: "draft",
             subtotal,

@@ -74,6 +74,7 @@ export type ScheduleChange = {
   completion_notes?: string | null;
   customer_id?: string | null;
   site_id?: string | null;
+  customer_po?: string | null;
 };
 
 export type ScheduleDispatchResult =
