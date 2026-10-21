@@ -15,6 +15,7 @@ import { ArrowLeft, Plus, Trash2 } from "lucide-react";
 import Link from "next/link";
 import { FormSkeleton } from "@/components/ui/loading-skeletons";
 import { replaceLineItems, moneyTotals } from "@/lib/replace-line-items";
+import { ProgressClaimFields, emptyClaimDraft, claimColumns, claimDraftFromInvoice, type ClaimDraft } from "@/components/invoice/progress-claim-fields";
 
 interface LineItem { id?: string; name: string; description: string; quantity: string; unit_price: string; }
 
@@ -28,6 +29,8 @@ export default function EditInvoicePage() {
   const [pricingItems, setPricingItems] = useState<any[]>([]);
   const [form, setForm] = useState({ title: "", customer_id: "", customer_name: "", due_date: "", notes: "", work_description: "", customer_po: "" });
   const [lineItems, setLineItems] = useState<LineItem[]>([]);
+  const [claim, setClaim] = useState<ClaimDraft>(emptyClaimDraft);
+  const [jobId, setJobId] = useState<string | null>(null);
   const [errors, setErrors] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
@@ -46,6 +49,8 @@ export default function EditInvoicePage() {
           work_description: invoice.work_description ?? "",
           customer_po: invoice.customer_po ?? "",
         });
+        setClaim(claimDraftFromInvoice(invoice));
+        setJobId(invoice.job_id ?? null);
         setLineItems((invoice.invoice_items ?? []).map((i: any) => ({
           id: i.id,
           name: i.name,
@@ -94,6 +99,8 @@ export default function EditInvoicePage() {
     if (!form.title.trim()) newErrors.title = true;
     if (lineItems.every(i => !i.name)) newErrors.lineItems = true;
     if (Object.keys(newErrors).length > 0) { setErrors(newErrors); return; }
+    const claimCols = claimColumns(claim);
+    if (!claimCols.ok) { toast.error(claimCols.error); return; }
     setLoading(true);
 
     // Line items first, and BEFORE the totals. This used to delete every line
@@ -126,6 +133,7 @@ export default function EditInvoicePage() {
       notes: form.notes || null,
       work_description: form.work_description || null,
       customer_po: normalizeCustomerPo(form.customer_po),
+      ...claimCols.columns,
       subtotal: totals.subtotal, tax_amount: totals.tax, total: totals.total,
     }).eq("id", id);
 
@@ -193,6 +201,10 @@ export default function EditInvoicePage() {
             </div>
           </CardContent>
         </Card>
+
+        {/* Mounted after the invoice has loaded (fetching gate above), so it
+            starts from the saved figures and never prefills over them. */}
+        <ProgressClaimFields value={claim} onChange={setClaim} jobId={jobId} currentInvoiceId={id} subtotal={subtotal} />
 
         <Card>
           <CardHeader className={`flex flex-row items-center justify-between pb-3 ${errors.lineItems ? "border-b border-red-200" : ""}`}>

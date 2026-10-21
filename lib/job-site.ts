@@ -82,13 +82,14 @@ export function quoteJobSite(quote: {
 }
 
 /**
- * Xero invoice reference: "PO 4500123 · Job #546 · Lot 2, 9 Pony Promenade,
+ * Xero invoice reference: "PO 4500123 · Claim 2 · Job #546 · Lot 2, 9 Pony Promenade,
  * Seymour VIC 3660" (Xero's limit is 255). The customer's PO goes first — it is
  * what their accounts team matches the bill on (0083).
  */
-export function xeroReference(site: JobSite | null, customerPo?: string | null): string | undefined {
+export function xeroReference(site: JobSite | null, customerPo?: string | null, claimNumber?: number | null): string | undefined {
   const parts = [
     customerPoLabel(customerPo) ?? "",
+    claimNumber ? `Claim ${claimNumber}` : "",
     site?.jobNumber ? `Job #${site.jobNumber}` : "",
     site?.lines.join(", ") ?? "",
   ].filter(Boolean);

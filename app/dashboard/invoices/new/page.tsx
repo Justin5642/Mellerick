@@ -16,6 +16,7 @@ import Link from "next/link";
 import { CustomerPicker } from "@/components/customer-picker";
 import { moneyTotals } from "@/lib/replace-line-items";
 import { variationLineDescription } from "@/lib/variation-qty";
+import { ProgressClaimFields, emptyClaimDraft, claimColumns, claimDraftFromInvoice, type ClaimDraft } from "@/components/invoice/progress-claim-fields";
 
 interface LineItem { name: string; description: string; quantity: string; unit_price: string; variationId?: string; }
 interface JobOption {
@@ -86,6 +87,7 @@ function NewInvoiceForm() {
   });
   // Edited by hand: a later job pick must not overwrite it.
   const [poTouched, setPoTouched] = useState(false);
+  const [claim, setClaim] = useState<ClaimDraft>(emptyClaimDraft);
   const [lineItems, setLineItems] = useState<LineItem[]>([{ name: "", description: "", quantity: "1", unit_price: "" }]);
   const [errors, setErrors] = useState<Record<string, boolean>>({});
   const [unbilledVariations, setUnbilledVariations] = useState<UnbilledVariation[]>([]);
@@ -350,8 +352,11 @@ function NewInvoiceForm() {
     if (!form.customer_id) newErrors.customer_id = true;
     if (lineItems.every(i => !i.name)) newErrors.lineItems = true;
     if (Object.keys(newErrors).length > 0) { setErrors(newErrors); return; }
+    const claimCols = claimColumns(claim);
+    if (!claimCols.ok) { toast.error(claimCols.error); return; }
     setLoading(true);
     const { data: invoice, error } = await supabase.from("invoices").insert({
+      ...claimCols.columns,
       ...form,
       job_id: form.job_id || null,
       due_date: form.due_date || null,
@@ -550,6 +555,8 @@ function NewInvoiceForm() {
             </div>
           </CardContent>
         </Card>
+
+        <ProgressClaimFields value={claim} onChange={setClaim} jobId={form.job_id || null} subtotal={subtotal} />
 
         {unbilledVariations.filter(v => !addedVariationIds.includes(v.id)).length > 0 && (
           <Card className="border-orange-200 bg-orange-50/40">

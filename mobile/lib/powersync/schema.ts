@@ -188,6 +188,10 @@ const invoices = new Table({
   work_description: column.text,
   sync_office: column.integer,
   customer_po: column.text,
+  is_progress_claim: column.integer,
+  claim_number: column.integer,
+  claim_contract_value: column.real,
+  claim_previous: column.real,
 }, {
   indexes: {
     customer: ['customer_id'],

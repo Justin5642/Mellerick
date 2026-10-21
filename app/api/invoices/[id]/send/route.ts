@@ -4,6 +4,7 @@ import { callerClient } from "@/lib/api/caller-client";
 import { renderDocumentPdf } from "@/lib/pdf/render";
 import { businessInfo } from "@/lib/business-info";
 import { INVOICE_SITE_SELECT, invoiceJobSite } from "@/lib/job-site";
+import { invoiceProgress } from "@/lib/progress-claim";
 import { customerPoLabel } from "@/lib/customer-po";
 import { getResend, getFromAddress } from "@/lib/resend";
 import { formatDate } from "@/lib/date";
@@ -63,6 +64,8 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       workDescription: invoice.work_description,
       jobSite: invoiceJobSite(invoice),
       poNumber: invoice.customer_po,
+      amountPaid: Number(invoice.amount_paid ?? 0),
+      progress: invoiceProgress(invoice),
       business: businessInfo,
     });
 

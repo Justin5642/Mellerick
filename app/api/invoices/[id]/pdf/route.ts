@@ -4,6 +4,7 @@ import { callerClient } from "@/lib/api/caller-client";
 import { renderDocumentPdf } from "@/lib/pdf/render";
 import { businessInfo } from "@/lib/business-info";
 import { INVOICE_SITE_SELECT, invoiceJobSite } from "@/lib/job-site";
+import { invoiceProgress } from "@/lib/progress-claim";
 
 // A user is waiting on this request while it calls an outside service (Xero,
 // Google, the email provider, or the PDF renderer). Without a cap a hung
@@ -40,6 +41,8 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     notes: invoice.notes,
     jobSite: invoiceJobSite(invoice),
     poNumber: invoice.customer_po,
+    amountPaid: Number(invoice.amount_paid ?? 0),
+    progress: invoiceProgress(invoice),
     workDescription: invoice.work_description,
     business: businessInfo,
   });
