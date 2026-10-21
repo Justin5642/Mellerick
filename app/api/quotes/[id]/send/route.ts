@@ -3,6 +3,7 @@ import { requireOfficeOrAdmin } from "@/lib/api/guards";
 import { callerClient } from "@/lib/api/caller-client";
 import { renderDocumentPdf } from "@/lib/pdf/render";
 import { businessInfo } from "@/lib/business-info";
+import { QUOTE_SITE_SELECT, quoteJobSite } from "@/lib/job-site";
 import { getResend, getFromAddress } from "@/lib/resend";
 import { formatDate } from "@/lib/date";
 import { escapeHtml } from "@/lib/html";
@@ -25,7 +26,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
 
     const { data: quote } = await supabase
       .from("quotes")
-      .select("*, customers(name, email, phone), quote_items(*)")
+      .select(`*, customers(name, email, phone), quote_items(*), ${QUOTE_SITE_SELECT}`)
       .eq("id", id)
       .single();
 
@@ -54,6 +55,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       dateLabel: "Valid Until",
       dateValue: quote.valid_until,
       notes: quote.notes,
+      jobSite: quoteJobSite(quote),
       business: businessInfo,
     });
 
