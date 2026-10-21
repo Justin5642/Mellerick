@@ -158,8 +158,13 @@ export function JobDetailClient({ job, currentUserId, photos: initialPhotos, doc
   const pricingItems = useCatalogOnFirstUse<any>(activeTab === "items", () =>
     createClient().from("pricing_items").select("*").eq("is_active", true).order("category").order("name")
   );
+  // Technicians read the rate-stripped view (0028); the priced table returns
+  // nothing for them.
+  const canPriceVariations = isAdmin || isOffice;
   const variationTypes = useCatalogOnFirstUse<any>(activeTab === "variations", () =>
-    createClient().from("variation_types").select("*").eq("is_active", true).order("name")
+    canPriceVariations
+      ? createClient().from("variation_types").select("*").eq("is_active", true).order("name")
+      : createClient().from("variation_types_public").select("*").eq("is_active", true).order("name")
   );
   // Equipment names and $/hour are part of what the Equipment and Costing
   // tabs draw (not just a picker), so those two tabs wait for it rather than
@@ -273,7 +278,7 @@ export function JobDetailClient({ job, currentUserId, photos: initialPhotos, doc
                 Schedule Job
               </Button>
             )}
-            {unbilledVariations.length > 0 && (
+            {canPriceVariations && unbilledVariations.length > 0 && (
               <span
                 className="text-xs font-medium px-2.5 py-1 rounded-full bg-orange-100 text-orange-700"
                 title="Approved variations not yet added to an invoice"
@@ -380,7 +385,7 @@ export function JobDetailClient({ job, currentUserId, photos: initialPhotos, doc
               <JobTime jobId={job.id} currentUserId={currentUserId} timeEntries={timeEntries} pos={purchaseOrders} site={job.sites} costCenters={costCenters} isAdmin={isAdmin} staff={staff} onUpdate={setTimeEntries} scheduledCostCenterId={job.scheduled_cost_center_id} />
             </TabsContent>
             <TabsContent value="variations" className="m-0 h-full">
-              <JobVariations jobId={job.id} variations={variations} variationTypes={variationTypes} currentUserId={currentUserId} onUpdate={setVariations} highlightVariationId={highlightVariationId} />
+              <JobVariations jobId={job.id} variations={variations} variationTypes={variationTypes} canPrice={canPriceVariations} currentUserId={currentUserId} onUpdate={setVariations} highlightVariationId={highlightVariationId} />
             </TabsContent>
             <TabsContent value="expenses" className="m-0 h-full">
               <JobExpenses jobId={job.id} jobNumber={job.job_number} expenses={expenses} onUpdate={setExpenses} currentUserId={currentUserId} costCenters={costCenters} />
