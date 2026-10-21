@@ -13,12 +13,12 @@ export default async function ApprovalsPage() {
   // role — this used to run in the browser after hydration, followed by a
   // separate auth + profiles round trip just to learn whether to show the
   // Approve button. Columns are the ones the list renders plus what approve()
-  // copies onto the invoice (customer_id, job_number, title).
+  // copies onto the invoice (customer_id, customer_po, job_number, title).
   const [viewer, { data: jobs }, { data: pendingVariations }, { data: unbilledVariations }] = await Promise.all([
     getViewer(),
     supabase
       .from("jobs")
-      .select("id, job_number, title, customer_id, completion_notes, updated_at, overtime_category, overtime_reason, overtime_logged_at, customers(name), sites(suburb), overtime_logged_by_profile:profiles!jobs_overtime_logged_by_fkey(full_name)")
+      .select("id, job_number, title, customer_id, customer_po, completion_notes, updated_at, overtime_category, overtime_reason, overtime_logged_at, customers(name), sites(suburb), overtime_logged_by_profile:profiles!jobs_overtime_logged_by_fkey(full_name)")
       .eq("status", "completed")
       .eq("admin_status", "pending")
       .order("updated_at", { ascending: false }),

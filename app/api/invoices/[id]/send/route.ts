@@ -4,6 +4,7 @@ import { callerClient } from "@/lib/api/caller-client";
 import { renderDocumentPdf } from "@/lib/pdf/render";
 import { businessInfo } from "@/lib/business-info";
 import { INVOICE_SITE_SELECT, invoiceJobSite } from "@/lib/job-site";
+import { customerPoLabel } from "@/lib/customer-po";
 import { getResend, getFromAddress } from "@/lib/resend";
 import { formatDate } from "@/lib/date";
 import { formatInvoiceNumber } from "@/lib/utils";
@@ -61,9 +62,11 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       // The emailed copy left this out while the downloaded PDF had it.
       workDescription: invoice.work_description,
       jobSite: invoiceJobSite(invoice),
+      poNumber: invoice.customer_po,
       business: businessInfo,
     });
 
+    const po = customerPoLabel(invoice.customer_po);
     const resend = getResend();
     // ESCAPE FIRST, then convert newlines — the other order would escape the
     // <br/> tags this line just inserted. body.message is typed by a user and
@@ -78,11 +81,13 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     const { error: sendError } = await resend.emails.send({
       from: getFromAddress(),
       to,
-      subject: `Invoice ${formatInvoiceNumber(invoice.invoice_number)} from ${businessInfo.name}`,
+      // The PO in the subject: accounts inboxes file and approve by it (0083).
+      subject: `Invoice ${formatInvoiceNumber(invoice.invoice_number)}${po ? ` (${po})` : ""} from ${businessInfo.name}`,
       html: `
         <div style="font-family: sans-serif; color: #1e293b; line-height: 1.5;">
           <p>Hi ${escapeHtml(invoice.customers?.name ?? "there")},</p>
           <p>Please find attached your invoice <strong>${formatInvoiceNumber(invoice.invoice_number)} — ${escapeHtml(invoice.title)}</strong> for <strong>$${Number(invoice.total).toFixed(2)}</strong> (inc. GST).</p>
+          ${po ? `<p>Your purchase order: <strong>${escapeHtml(invoice.customer_po)}</strong></p>` : ""}
           ${personalNote}
           ${dueDateLine}
           <p>If you have any questions, just reply to this email.</p>

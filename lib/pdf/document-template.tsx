@@ -21,6 +21,8 @@ const styles = StyleSheet.create({
   label: { fontSize: 8, color: "#94a3b8", textTransform: "uppercase", marginBottom: 3 },
   value: { fontSize: 10, marginBottom: 2 },
   siteBlock: { maxWidth: 200 },
+  poBlock: { marginBottom: 8 },
+  poValue: { fontSize: 11, fontWeight: 700, marginBottom: 2 },
   tableHeaderRow: { flexDirection: "row", borderBottom: "1pt solid #cbd5e1", paddingBottom: 6, marginBottom: 6 },
   tableHeaderCell: { fontSize: 8, color: "#94a3b8", textTransform: "uppercase" },
   tableRow: { flexDirection: "row", paddingVertical: 6, borderBottom: "0.5pt solid #e2e8f0" },
@@ -64,6 +66,8 @@ export interface DocumentPdfProps {
   workDescription?: string | null;
   // Where the work was done (lib/job-site.ts) — printed beside "Billed To".
   jobSite?: JobSite | null;
+  // The customer's purchase order number (0083) — what their accounts team pays by.
+  poNumber?: string | null;
   business: { name: string; abn?: string; address?: string; phone?: string; email?: string };
   logo?: { data: Buffer; format: "png" | "jpg" };
 }
@@ -82,6 +86,7 @@ export function DocumentPdf({
   notes,
   workDescription,
   jobSite,
+  poNumber,
   business,
   logo,
 }: DocumentPdfProps) {
@@ -123,10 +128,20 @@ export function DocumentPdf({
               ))}
             </View>
           )}
-          {dateValue && (
+          {(poNumber || dateValue) && (
             <View>
-              <Text style={styles.label}>{dateLabel}</Text>
-              <Text style={styles.value}>{formatDate(dateValue, pdfDateOpts)}</Text>
+              {poNumber && (
+                <View style={styles.poBlock}>
+                  <Text style={styles.label}>Your PO Number</Text>
+                  <Text style={styles.poValue}>{poNumber}</Text>
+                </View>
+              )}
+              {dateValue && (
+                <>
+                  <Text style={styles.label}>{dateLabel}</Text>
+                  <Text style={styles.value}>{formatDate(dateValue, pdfDateOpts)}</Text>
+                </>
+              )}
             </View>
           )}
         </View>

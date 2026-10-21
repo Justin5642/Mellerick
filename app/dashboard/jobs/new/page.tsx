@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { CUSTOMER_PO_MAX, normalizeCustomerPo } from "@/lib/customer-po";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -43,7 +44,7 @@ export default function NewJobPage() {
   const [form, setForm] = useState({
     title: "", description: "", customer_id: params?.get("customer_id") ?? "", site_id: "", assigned_to: "",
     status: "pending", priority: "normal", job_type: "service",
-    notes: "",
+    notes: "", customer_po: "",
   });
   // Start date, end date, All day and daily times — the same inputs as the
   // Schedule Job wizard. A blank start date creates the job unscheduled.
@@ -82,6 +83,7 @@ export default function NewJobPage() {
       ...form,
       assigned_to: form.assigned_to || null,
       site_id: form.site_id || null,
+      customer_po: normalizeCustomerPo(form.customer_po),
       ...built.columns,
     };
     const { data, error } = await supabase.from("jobs").insert(payload).select("id").single();
@@ -195,6 +197,16 @@ export default function NewJobPage() {
             <div className="space-y-2">
               <Label>Schedule</Label>
               <ScheduleFields value={schedule} onChange={setSchedule} optional />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="customer_po">Customer PO number</Label>
+              <Input
+                id="customer_po"
+                value={form.customer_po}
+                onChange={(e) => set("customer_po", e.target.value)}
+                maxLength={CUSTOMER_PO_MAX}
+                placeholder="e.g. 4500123"
+              />
             </div>
             <div className="space-y-2">
               <Label htmlFor="description">Description</Label>

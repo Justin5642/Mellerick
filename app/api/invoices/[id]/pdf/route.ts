@@ -39,6 +39,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     dateValue: invoice.due_date,
     notes: invoice.notes,
     jobSite: invoiceJobSite(invoice),
+    poNumber: invoice.customer_po,
     workDescription: invoice.work_description,
     business: businessInfo,
   });

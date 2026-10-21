@@ -6,6 +6,7 @@ import { useRouter, useParams } from "next/navigation";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { CUSTOMER_PO_MAX, normalizeCustomerPo } from "@/lib/customer-po";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -25,7 +26,7 @@ export default function EditInvoicePage() {
   const [loading, setLoading] = useState(false);
   const [fetching, setFetching] = useState(true);
   const [pricingItems, setPricingItems] = useState<any[]>([]);
-  const [form, setForm] = useState({ title: "", customer_id: "", customer_name: "", due_date: "", notes: "", work_description: "" });
+  const [form, setForm] = useState({ title: "", customer_id: "", customer_name: "", due_date: "", notes: "", work_description: "", customer_po: "" });
   const [lineItems, setLineItems] = useState<LineItem[]>([]);
   const [errors, setErrors] = useState<Record<string, boolean>>({});
 
@@ -43,6 +44,7 @@ export default function EditInvoicePage() {
           due_date: invoice.due_date ? invoice.due_date.split("T")[0] : "",
           notes: invoice.notes ?? "",
           work_description: invoice.work_description ?? "",
+          customer_po: invoice.customer_po ?? "",
         });
         setLineItems((invoice.invoice_items ?? []).map((i: any) => ({
           id: i.id,
@@ -123,6 +125,7 @@ export default function EditInvoicePage() {
       due_date: form.due_date || null,
       notes: form.notes || null,
       work_description: form.work_description || null,
+      customer_po: normalizeCustomerPo(form.customer_po),
       subtotal: totals.subtotal, tax_amount: totals.tax, total: totals.total,
     }).eq("id", id);
 
@@ -162,6 +165,16 @@ export default function EditInvoicePage() {
               <div className="space-y-2">
                 <Label>Due Date</Label>
                 <Input type="date" value={form.due_date} onChange={e => setField("due_date", e.target.value)} />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="customer_po">Customer PO number</Label>
+                <Input
+                  id="customer_po"
+                  value={form.customer_po}
+                  onChange={(e) => setField("customer_po", e.target.value)}
+                  maxLength={CUSTOMER_PO_MAX}
+                  placeholder="e.g. 4500123"
+                />
               </div>
             </div>
             <div className="space-y-2">
