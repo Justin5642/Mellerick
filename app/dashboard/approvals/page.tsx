@@ -24,13 +24,13 @@ export default async function ApprovalsPage() {
       .order("updated_at", { ascending: false }),
     supabase
       .from("job_variations")
-      .select("id, custom_name, quantity, unit, description, variation_types(name), jobs(id, job_number, title, customers(name))")
+      .select("id, variation_type_id, custom_name, quantity, unit, description, variation_types(name), jobs(id, job_number, title, customers(name))")
       .eq("status", "pending_approval")
       .order("created_at", { ascending: false }),
     // Approved but not on an invoice yet — the "Variations to invoice" list.
     supabase
       .from("job_variations")
-      .select("id, custom_name, quantity, unit, total_amount, approved_at, logged_at, variation_types(name), jobs(id, job_number, title, customer_id, customers(name), invoices(id, invoice_number, status))")
+      .select("id, variation_type_id, custom_name, quantity, unit, total_amount, approved_at, logged_at, variation_types(name), jobs(id, job_number, title, customer_id, customers(name), invoices(id, invoice_number, status))")
       .in("status", ["approved", "auto_approved"])
       .is("invoice_id", null)
       .order("approved_at", { ascending: true, nullsFirst: true }),

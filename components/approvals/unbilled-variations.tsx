@@ -2,10 +2,12 @@ import Link from "next/link";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Receipt } from "lucide-react";
+import { variationQtyText } from "@/lib/variation-qty";
 
 export interface UnbilledVariation {
   id: string;
   custom_name: string | null;
+  variation_type_id: string | null;
   quantity: number | string | null;
   unit: string | null;
   total_amount: number | string | null;
@@ -100,7 +102,7 @@ export function UnbilledVariations({ variations: all }: { variations: UnbilledVa
                     <li key={v.id} className="flex items-center justify-between gap-3 text-xs text-slate-600">
                       <span className="truncate">
                         {v.variation_types?.name ?? v.custom_name ?? "Variation"}
-                        {v.quantity != null ? ` — ${v.quantity} ${v.unit ?? ""}` : ""}
+                        {variationQtyText(v) ? ` — ${variationQtyText(v)}` : ""}
                         {waited != null && <span className="text-slate-400"> · approved {waited === 0 ? "today" : `${waited} day${waited === 1 ? "" : "s"} ago`}</span>}
                       </span>
                       <span className="tabular-nums">{money(Number(v.total_amount ?? 0))}</span>

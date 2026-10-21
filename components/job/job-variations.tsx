@@ -12,6 +12,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Plus, Trash2, Zap, Clock3, CheckCircle2, XCircle, ImageIcon, Paperclip, Upload } from "lucide-react";
 import { formatDate } from "@/lib/date";
 import { loadTechVariations } from "@/lib/variations-public";
+import { isCustomVariation, variationQtyText } from "@/lib/variation-qty";
 
 interface VariationType {
   id: string;
@@ -105,7 +106,8 @@ export function JobVariations({
 
   async function addVariation(e: React.FormEvent) {
     e.preventDefault();
-    const qty = parseFloat(quantity) || 0;
+    // Custom / Other has no quantity: one lump sum the office prices.
+    const qty = typeId === "custom" ? 1 : parseFloat(quantity) || 0;
     if (typeId === "custom" && !customName.trim()) {
       toast.error("Give this variation a name");
       return;
@@ -194,7 +196,7 @@ export function JobVariations({
   async function priceAndApprove(v: Variation) {
     const p = pricing[v.id] ?? { rate: v.rate?.toString() ?? "", quantity: v.quantity.toString(), notes: "" };
     const rate = parseFloat(p.rate) || 0;
-    const qty = parseFloat(p.quantity) || v.quantity;
+    const qty = isCustomVariation(v) ? 1 : parseFloat(p.quantity) || v.quantity;
     const { data, error } = await supabase
       .from("job_variations")
       .update({
@@ -286,7 +288,7 @@ export function JobVariations({
                 <div>
                   <p className="font-semibold text-slate-800">{v.variation_types?.name ?? v.custom_name}</p>
                   <p className="text-xs text-slate-500 mt-0.5">
-                    {v.quantity} {v.unit}
+                    {variationQtyText(v)}
                     {canPrice && v.rate != null ? ` × $${Number(v.rate).toFixed(2)}` : ""}
                     {canPrice && v.total_amount != null ? ` = $${Number(v.total_amount).toFixed(2)}` : ""}
                   </p>
@@ -340,17 +342,19 @@ export function JobVariations({
               </div>
 
               {canPrice && v.status === "pending_approval" && (
-                <div className="border-t pt-3 grid grid-cols-3 gap-2 items-end">
+                <div className={`border-t pt-3 grid ${isCustomVariation(v) ? "grid-cols-2" : "grid-cols-3"} gap-2 items-end`}>
+                  {!isCustomVariation(v) && (
+                    <div className="space-y-1">
+                      <Label className="text-xs">Quantity</Label>
+                      <Input
+                        className="h-8 text-sm"
+                        defaultValue={v.quantity}
+                        onChange={(e) => setPricing((p) => ({ ...p, [v.id]: { ...(p[v.id] ?? { rate: "", quantity: "", notes: "" }), quantity: e.target.value } }))}
+                      />
+                    </div>
+                  )}
                   <div className="space-y-1">
-                    <Label className="text-xs">Quantity</Label>
-                    <Input
-                      className="h-8 text-sm"
-                      defaultValue={v.quantity}
-                      onChange={(e) => setPricing((p) => ({ ...p, [v.id]: { ...(p[v.id] ?? { rate: "", quantity: "", notes: "" }), quantity: e.target.value } }))}
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <Label className="text-xs">Rate ($)</Label>
+                    <Label className="text-xs">{isCustomVariation(v) ? "Price ($ ex GST)" : "Rate ($)"}</Label>
                     <Input
                       className="h-8 text-sm"
                       type="number"
@@ -410,10 +414,12 @@ export function JobVariations({
                   <Input value={customName} onChange={(e) => setCustomName(e.target.value)} placeholder="e.g. Extra trenching due to rock" />
                 </div>
               )}
-              <div className="space-y-1.5">
-                <Label>Quantity {selectedType ? `(${selectedType.unit})` : ""}</Label>
-                <Input type="number" step="0.01" value={quantity} onChange={(e) => setQuantity(e.target.value)} placeholder="0" />
-              </div>
+              {typeId !== "custom" && (
+                <div className="space-y-1.5">
+                  <Label>Quantity {selectedType ? `(${selectedType.unit})` : ""}</Label>
+                  <Input type="number" step="0.01" value={quantity} onChange={(e) => setQuantity(e.target.value)} placeholder="0" />
+                </div>
+              )}
               <div className="space-y-1.5">
                 <Label>Description</Label>
                 <Textarea value={description} onChange={(e) => setDescription(e.target.value)} placeholder="What happened on site..." rows={2} />

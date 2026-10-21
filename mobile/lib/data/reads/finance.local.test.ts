@@ -213,7 +213,8 @@ describe("getInvoiceJobPrefill (local)", () => {
       items: [{ name: "Pipe", description: null, quantity: 2, unitPrice: 10.25 }],
       unbilledVariations: [
         { id: "v1", name: "Extra excavation", description: "3 hr @ $100.00", unitPrice: 300 },
-        { id: "v2", name: "Custom thing", description: "1", unitPrice: 55 },
+        // Custom / Other at quantity 1 is a lump sum: no "1 unit" text.
+        { id: "v2", name: "Custom thing", description: "", unitPrice: 55 },
       ],
     });
 

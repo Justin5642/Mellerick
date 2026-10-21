@@ -15,6 +15,7 @@ import { ArrowLeft, Plus, Trash2, GitPullRequestArrow } from "lucide-react";
 import Link from "next/link";
 import { CustomerPicker } from "@/components/customer-picker";
 import { moneyTotals } from "@/lib/replace-line-items";
+import { variationLineDescription } from "@/lib/variation-qty";
 
 interface LineItem { name: string; description: string; quantity: string; unit_price: string; variationId?: string; }
 interface JobOption {
@@ -32,6 +33,7 @@ function jobLabel(j: JobOption) {
 interface UnbilledVariation {
   id: string;
   custom_name: string | null;
+  variation_type_id: string | null;
   quantity: number;
   unit: string;
   rate: number | null;
@@ -183,7 +185,7 @@ function NewInvoiceForm() {
       if (!form.job_id) { setUnbilledVariations([]); return; }
       const { data } = await supabase
         .from("job_variations")
-        .select("id, custom_name, quantity, unit, rate, total_amount, variation_types(name)")
+        .select("id, variation_type_id, custom_name, quantity, unit, rate, total_amount, variation_types(name)")
         .eq("job_id", form.job_id)
         .in("status", ["approved", "auto_approved"])
         .is("invoice_id", null);
@@ -289,7 +291,7 @@ function NewInvoiceForm() {
         ...withoutBlankFirst,
         {
           name: v.variation_types?.name ?? v.custom_name ?? "Variation",
-          description: `${v.quantity} ${v.unit}${v.rate != null ? ` @ $${Number(v.rate).toFixed(2)}` : ""}`,
+          description: variationLineDescription(v),
           quantity: "1",
           unit_price: String(v.total_amount ?? (Number(v.rate ?? 0) * Number(v.quantity))),
           variationId: v.id,
