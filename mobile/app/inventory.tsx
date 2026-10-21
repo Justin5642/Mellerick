@@ -198,7 +198,7 @@ export default function InventoryScreen() {
         <View style={styles.overlay}>
           <View style={styles.sheet}>
             <Text style={styles.sheetTitle}>{draft?.id ? "Edit item" : "New inventory item"}</Text>
-            <ScrollView keyboardShouldPersistTaps="handled">
+            <ScrollView automaticallyAdjustKeyboardInsets keyboardDismissMode="interactive" keyboardShouldPersistTaps="handled">
               <Field label="Name" value={draft?.name ?? ""} onChange={set("name")} />
               <View style={styles.twoCol}>
                 <View style={{ flex: 1 }}><Field label="SKU" value={draft?.sku ?? ""} onChange={set("sku")} /></View>

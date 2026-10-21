@@ -266,7 +266,7 @@ export default function NewBackflowDeviceScreen() {
 
   return (
     <SafeAreaView style={styles.container} edges={["bottom", "left", "right"]}>
-      <ScrollView style={styles.content} contentContainerStyle={{ paddingBottom: 60 }}>
+      <ScrollView automaticallyAdjustKeyboardInsets keyboardDismissMode="interactive" keyboardShouldPersistTaps="handled" style={styles.content} contentContainerStyle={{ paddingBottom: 60 }}>
         <View style={styles.card}>
           <Text style={styles.cardTitle}>Property &amp; Authority</Text>
           <ModalPicker

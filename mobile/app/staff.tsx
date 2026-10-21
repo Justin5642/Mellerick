@@ -204,7 +204,7 @@ Pull down to retry.`}</Text>
         <View style={styles.overlay}>
           <View style={styles.sheet}>
             <Text style={styles.sheetTitle}>{draft?.full_name}</Text>
-            <ScrollView keyboardShouldPersistTaps="handled">
+            <ScrollView automaticallyAdjustKeyboardInsets keyboardDismissMode="interactive" keyboardShouldPersistTaps="handled">
               <Text style={styles.fieldLabel}>Role</Text>
               <View style={styles.segment}>
                 {ROLES.map((r) => (

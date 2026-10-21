@@ -124,7 +124,7 @@ export default function NewJobScreen() {
   }
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+    <ScrollView automaticallyAdjustKeyboardInsets keyboardDismissMode="interactive" style={styles.container} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
       <Stack.Screen options={{ title: "New Job" }} />
 
       <Text style={styles.label}>Title</Text>
@@ -230,7 +230,7 @@ function PickerModal({ visible, title, onClose, children }: { visible: boolean; 
       <View style={styles.overlay}>
         <View style={styles.sheet}>
           <Text style={styles.sheetTitle}>{title}</Text>
-          <ScrollView style={{ maxHeight: 360 }}>{children}</ScrollView>
+          <ScrollView automaticallyAdjustKeyboardInsets keyboardDismissMode="interactive" keyboardShouldPersistTaps="handled" style={{ maxHeight: 360 }}>{children}</ScrollView>
           <TouchableOpacity style={styles.cancelBtn} onPress={onClose}><Text style={styles.cancelText}>Cancel</Text></TouchableOpacity>
         </View>
       </View>

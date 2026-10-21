@@ -405,7 +405,7 @@ export function ScheduleJobModal({
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={() => !saving && onClose()}>
       <View style={styles.overlay}>
-        <ScrollView style={styles.sheetScroll} contentContainerStyle={styles.sheet} keyboardShouldPersistTaps="handled">
+        <ScrollView automaticallyAdjustKeyboardInsets keyboardDismissMode="interactive" style={styles.sheetScroll} contentContainerStyle={styles.sheet} keyboardShouldPersistTaps="handled">
           <Text style={styles.title}>
             {mode.kind === "add" ? "Add booking" : mode.kind === "edit" ? "Edit booking" : "Schedule job"}
           </Text>

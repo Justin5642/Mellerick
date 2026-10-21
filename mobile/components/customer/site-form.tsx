@@ -104,7 +104,7 @@ export function SiteFormSheet({
       <View style={styles.overlay}>
         <View style={styles.sheet}>
           <Text style={styles.title}>{existing ? "Edit site" : "New site"}</Text>
-          <ScrollView keyboardShouldPersistTaps="handled">
+          <ScrollView automaticallyAdjustKeyboardInsets keyboardDismissMode="interactive" keyboardShouldPersistTaps="handled">
             <Field label="Site name" value={draft.name} onChange={set("name")} />
             <Field label="Address line 1" value={draft.address_line1} onChange={set("address_line1")} />
             <Field label="Address line 2" value={draft.address_line2} onChange={set("address_line2")} />

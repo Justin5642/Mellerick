@@ -278,7 +278,7 @@ export default function FleetScreen() {
         <View style={styles.overlay}>
           <View style={styles.sheet}>
             <Text style={styles.sheetTitle}>{draft?.id ? "Edit equipment" : "New equipment"}</Text>
-            <ScrollView keyboardShouldPersistTaps="handled">
+            <ScrollView automaticallyAdjustKeyboardInsets keyboardDismissMode="interactive" keyboardShouldPersistTaps="handled">
               <Field label="Name" value={draft?.name ?? ""} onChange={set("name")} />
               <Text style={styles.fieldLabel}>Category</Text>
               <View style={styles.segment}>
@@ -320,7 +320,7 @@ export default function FleetScreen() {
         <View style={styles.overlay}>
           <View style={styles.sheet}>
             <Text style={styles.sheetTitle}>Assign {assignFor?.name}</Text>
-            <ScrollView style={{ maxHeight: 360 }}>
+            <ScrollView automaticallyAdjustKeyboardInsets keyboardDismissMode="interactive" keyboardShouldPersistTaps="handled" style={{ maxHeight: 360 }}>
               <TouchableOpacity style={styles.assignRow} onPress={() => doAssign(null)} disabled={saving}>
                 <Ionicons name="close-circle-outline" size={18} color={colors.slate500} />
                 <Text style={styles.assignName}>Unassign</Text>

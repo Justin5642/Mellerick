@@ -112,7 +112,7 @@ export default function EditQuoteScreen() {
   }
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+    <ScrollView automaticallyAdjustKeyboardInsets keyboardDismissMode="interactive" style={styles.container} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
       <Stack.Screen options={{ title: `Edit ${formatQuoteNumber(quote.quote_number)}` }} />
 
       <Text style={styles.label}>Customer</Text>
