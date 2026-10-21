@@ -24,6 +24,7 @@ import { invoiceStatusColors } from "@/lib/badge-colors";
 import { DeleteInvoiceDialog } from "./delete-invoice-dialog";
 import { InvoicePayments, type InvoicePayment } from "./invoice-payments";
 import type { JobSite } from "@/lib/job-site";
+import { invoiceProgress } from "@/lib/progress-claim";
 
 interface Props {
   invoice: any;
@@ -34,6 +35,7 @@ interface Props {
 }
 
 export function InvoiceDetail({ invoice, jobSite, xeroConnected, payments }: Props) {
+  const progress = invoiceProgress(invoice);
   const [pushing, setPushing] = useState(false);
   const [pushed, setPushed] = useState(!!invoice.xero_invoice_id);
   const [sending, setSending] = useState(false);
@@ -216,6 +218,38 @@ export function InvoiceDetail({ invoice, jobSite, xeroConnected, payments }: Pro
           </CardContent>
         </Card>
       </div>
+
+      {progress && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-sm flex justify-between">
+              <span>Progress claim no. {progress.claimNumber}</span>
+              <span>{progress.pctToDate}% claimed to date</span>
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <div className="h-2 w-full rounded bg-slate-100 overflow-hidden flex">
+              <div className="bg-slate-400" style={{ width: `${Math.min(100, Math.max(0, progress.pctPrevious))}%` }} />
+              <div className="bg-slate-800" style={{ width: `${Math.min(100 - Math.min(100, Math.max(0, progress.pctPrevious)), Math.max(0, progress.pctThis))}%` }} />
+            </div>
+            <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 text-sm">
+              {[
+                { label: "Contract value", value: progress.contractValue, pct: "ex GST" },
+                { label: "Previously claimed", value: progress.previous, pct: `${progress.pctPrevious}%` },
+                { label: "This claim", value: progress.thisClaim, pct: `${progress.pctThis}%` },
+                { label: "Claimed to date", value: progress.toDate, pct: `${progress.pctToDate}%` },
+                { label: "Balance to claim", value: progress.balance, pct: "" },
+              ].map((c) => (
+                <div key={c.label}>
+                  <p className="text-xs text-slate-500">{c.label}</p>
+                  <p className={`font-semibold ${c.value < 0 ? "text-red-600" : ""}`}>${c.value.toFixed(2)}</p>
+                  {c.pct && <p className="text-xs text-slate-400">{c.pct}</p>}
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       <InvoicePayments
         invoiceId={invoice.id}

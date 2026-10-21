@@ -78,7 +78,7 @@ export async function POST(request: NextRequest) {
       // first (0083), then our job number (also how to find a job's invoice
       // in Xero, now that Xero owns the invoice number), then the site, since
       // builders match bills to jobs by lot. Omitted when there is none of them.
-      reference: xeroReference(invoiceJobSite(invoice), invoice.customer_po),
+      reference: xeroReference(invoiceJobSite(invoice), invoice.customer_po, invoice.is_progress_claim ? invoice.claim_number : null),
       // Xero owns invoice numbering: we let it auto-assign its next number
       // rather than forcing ours. Forcing it (the old approach, migration
       // 0019) only worked while the two sequences stayed aligned -- but

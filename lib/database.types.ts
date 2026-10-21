@@ -864,6 +864,10 @@ export type Database = {
       invoices: {
         Row: {
           amount_paid: number | null
+          claim_contract_value: number | null
+          claim_number: number | null
+          claim_previous: number | null
+          is_progress_claim: boolean
           created_at: string | null
           created_by: string | null
           customer_id: string
@@ -888,6 +892,10 @@ export type Database = {
         }
         Insert: {
           amount_paid?: number | null
+          claim_contract_value?: number | null
+          claim_number?: number | null
+          claim_previous?: number | null
+          is_progress_claim?: boolean
           created_at?: string | null
           created_by?: string | null
           customer_id: string
@@ -912,6 +920,10 @@ export type Database = {
         }
         Update: {
           amount_paid?: number | null
+          claim_contract_value?: number | null
+          claim_number?: number | null
+          claim_previous?: number | null
+          is_progress_claim?: boolean
           created_at?: string | null
           created_by?: string | null
           customer_id?: string
