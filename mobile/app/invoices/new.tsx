@@ -142,7 +142,7 @@ export default function NewInvoiceScreen() {
   }
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+    <ScrollView automaticallyAdjustKeyboardInsets keyboardDismissMode="interactive" style={styles.container} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
       <Stack.Screen options={{ title: jobId ? "Invoice from Job" : "New Invoice" }} />
 
       {prefilling && <Text style={styles.prefill}>Loading job details…</Text>}

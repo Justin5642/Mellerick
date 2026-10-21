@@ -175,7 +175,7 @@ export default function EquipmentDetailScreen() {
   const expenseTotal = expenses.reduce((s, e) => s + Number(e.amount ?? 0), 0);
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.content} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.blue600} />}>
+    <ScrollView automaticallyAdjustKeyboardInsets keyboardDismissMode="interactive" keyboardShouldPersistTaps="handled" style={styles.container} contentContainerStyle={styles.content} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.blue600} />}>
       <Stack.Screen options={{ title: equipment.name }} />
 
       <Text style={styles.name}>{equipment.name}</Text>
@@ -286,7 +286,7 @@ export default function EquipmentDetailScreen() {
 
       <Modal visible={!!draft} transparent animationType="slide" onRequestClose={() => !saving && setDraft(null)}>
         <View style={styles.overlay}>
-          <ScrollView style={styles.sheetScroll} contentContainerStyle={styles.sheet} keyboardShouldPersistTaps="handled">
+          <ScrollView automaticallyAdjustKeyboardInsets keyboardDismissMode="interactive" style={styles.sheetScroll} contentContainerStyle={styles.sheet} keyboardShouldPersistTaps="handled">
             <Text style={styles.sheetTitle}>Log expense</Text>
             <Text style={styles.fieldLabel}>Category</Text>
             <View style={styles.catRow}>

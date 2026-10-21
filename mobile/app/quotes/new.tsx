@@ -75,7 +75,7 @@ export default function NewQuoteScreen() {
   }
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+    <ScrollView automaticallyAdjustKeyboardInsets keyboardDismissMode="interactive" style={styles.container} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
       <Stack.Screen options={{ title: "New Quote" }} />
 
       <Text style={styles.label}>Customer</Text>

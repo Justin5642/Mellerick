@@ -335,7 +335,10 @@ export default function JobDetailScreen() {
         </ScrollView>
       </View>
 
-      <ScrollView style={styles.content} contentContainerStyle={{ paddingBottom: 40 }}>
+      {/* automaticallyAdjustKeyboardInsets: iOS scrolls the field being typed in
+          above the keyboard — it used to sit behind it (Justin, 21 Oct 2026,
+          logging a variation). Every form ScrollView in the app has it. */}
+      <ScrollView automaticallyAdjustKeyboardInsets keyboardDismissMode="interactive" keyboardShouldPersistTaps="handled" style={styles.content} contentContainerStyle={{ paddingBottom: 40 }}>
         {viewOnly && (
           <View style={styles.viewOnlyBanner}>
             <Text style={styles.viewOnlyText}>View only — you're not assigned to this job.</Text>
@@ -375,7 +378,7 @@ export default function JobDetailScreen() {
 
       <Modal visible={editing} transparent animationType="slide" onRequestClose={() => !savingEdit && setEditing(false)}>
         <View style={styles.overlay}>
-          <ScrollView style={styles.sheetScroll} contentContainerStyle={styles.sheet} keyboardShouldPersistTaps="handled">
+          <ScrollView automaticallyAdjustKeyboardInsets keyboardDismissMode="interactive" style={styles.sheetScroll} contentContainerStyle={styles.sheet} keyboardShouldPersistTaps="handled">
             <Text style={styles.sheetTitle}>Update job</Text>
 
             <Text style={styles.sheetLabel}>Title</Text>

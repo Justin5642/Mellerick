@@ -112,7 +112,7 @@ export default function EditInvoiceScreen() {
   }
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+    <ScrollView automaticallyAdjustKeyboardInsets keyboardDismissMode="interactive" style={styles.container} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
       <Stack.Screen options={{ title: `Edit ${formatInvoiceNumber(invoice.invoice_number)}` }} />
 
       <Text style={styles.label}>Customer</Text>

@@ -103,7 +103,7 @@ export function CustomerFormSheet({
       <View style={styles.overlay}>
         <View style={styles.sheet}>
           <Text style={styles.title}>{existing ? "Edit customer" : "New customer"}</Text>
-          <ScrollView keyboardShouldPersistTaps="handled">
+          <ScrollView automaticallyAdjustKeyboardInsets keyboardDismissMode="interactive" keyboardShouldPersistTaps="handled">
             <Field label="Name" value={draft.name} onChange={set("name")} />
             <Field label="Company" value={draft.company} onChange={set("company")} />
             <Field label="Email" value={draft.email} onChange={set("email")} keyboardType="email-address" />

@@ -153,7 +153,7 @@ export default function ApprovalsScreen() {
           {jobs.length} job{jobs.length !== 1 ? "s" : ""} awaiting review
         </Text>
       </View>
-      <ScrollView
+      <ScrollView automaticallyAdjustKeyboardInsets keyboardDismissMode="interactive"
         contentContainerStyle={styles.content}
         keyboardShouldPersistTaps="handled"
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.blue600} />}

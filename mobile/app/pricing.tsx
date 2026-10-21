@@ -241,7 +241,7 @@ export default function PricingScreen() {
         <View style={styles.overlay}>
           <View style={styles.sheet}>
             <Text style={styles.sheetTitle}>{draft?.id ? "Edit item" : "New pricing item"}</Text>
-            <ScrollView keyboardShouldPersistTaps="handled">
+            <ScrollView automaticallyAdjustKeyboardInsets keyboardDismissMode="interactive" keyboardShouldPersistTaps="handled">
               <Field label="Name" value={draft?.name ?? ""} onChange={(v) => setDraft((d) => d && { ...d, name: v })} />
               <Text style={styles.fieldLabel}>Category</Text>
               <View style={styles.catWrap}>

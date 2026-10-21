@@ -215,7 +215,7 @@ export default function JobBillingScreen() {
   if (!data) return <View style={styles.center}><Stack.Screen options={{ title: "Billing" }} /><Text style={styles.muted}>Job not found.</Text></View>;
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.content} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.blue600} />}>
+    <ScrollView automaticallyAdjustKeyboardInsets keyboardDismissMode="interactive" keyboardShouldPersistTaps="handled" style={styles.container} contentContainerStyle={styles.content} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.blue600} />}>
       <Stack.Screen options={{ title: data.jobNumber ? `#${data.jobNumber} Billing` : "Billing" }} />
 
       {isAdmin && (
@@ -360,7 +360,7 @@ export default function JobBillingScreen() {
       {/* Add expense */}
       <Modal visible={!!expense} transparent animationType="slide" onRequestClose={() => !savingExpense && setExpense(null)}>
         <View style={styles.overlay}>
-          <ScrollView style={styles.sheetScroll} contentContainerStyle={styles.sheet} keyboardShouldPersistTaps="handled">
+          <ScrollView automaticallyAdjustKeyboardInsets keyboardDismissMode="interactive" style={styles.sheetScroll} contentContainerStyle={styles.sheet} keyboardShouldPersistTaps="handled">
             <Text style={styles.sheetTitle}>Add expense</Text>
             <Field label="Supplier" value={expense?.supplier_name ?? ""} onChange={(v) => setExpense((d) => d && { ...d, supplier_name: v })} />
 
@@ -439,7 +439,7 @@ export default function JobBillingScreen() {
       {/* Log equipment usage */}
       <Modal visible={!!equipDraft} transparent animationType="slide" onRequestClose={() => !savingEquip && setEquipDraft(null)}>
         <View style={styles.overlay}>
-          <ScrollView style={styles.sheetScroll} contentContainerStyle={styles.sheet} keyboardShouldPersistTaps="handled">
+          <ScrollView automaticallyAdjustKeyboardInsets keyboardDismissMode="interactive" style={styles.sheetScroll} contentContainerStyle={styles.sheet} keyboardShouldPersistTaps="handled">
             <Text style={styles.sheetTitle}>Log equipment usage</Text>
             {!equipment || equipment.options.length === 0 ? (
               <Text style={styles.muted}>No active equipment set up yet — add vehicles/machinery under Fleet first.</Text>
