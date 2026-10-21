@@ -4,6 +4,7 @@ import { requireAdmin } from "@/lib/api/guards";
 import { callerClient } from "@/lib/api/caller-client";
 import { Invoice, LineItem, Contact, Invoices, LineAmountTypes } from "xero-node";
 import { reportError } from "@/lib/monitoring";
+import { INVOICE_SITE_SELECT, invoiceJobSite, xeroReference } from "@/lib/job-site";
 
 // A user is waiting on this request while it calls an outside service (Xero,
 // Google, the email provider, or the PDF renderer). Without a cap a hung
@@ -25,7 +26,7 @@ export async function POST(request: NextRequest) {
 
     const { data: invoice } = await supabase
       .from("invoices")
-      .select("*, customers(name, email, phone), jobs(job_number), invoice_items(*)")
+      .select(`*, customers(name, email, phone), invoice_items(*), ${INVOICE_SITE_SELECT}`)
       .eq("id", invoiceId)
       .single();
 
@@ -74,8 +75,10 @@ export async function POST(request: NextRequest) {
       dueDate: (invoice.due_date ?? invoice.created_at).split("T")[0],
       // Now that Xero owns the invoice number, use the reference to link the
       // invoice back to its job (stable and useful for finding a job's invoice
-      // in Xero). Omitted for invoices with no linked job.
-      reference: invoice.jobs?.job_number ? `Job #${invoice.jobs.job_number}` : undefined,
+      // in Xero). The site address follows it: Xero prints the reference on
+      // the invoice it emails, and builders match bills to jobs by lot.
+      // Omitted when there is neither a job nor a site.
+      reference: xeroReference(invoiceJobSite(invoice)),
       // Xero owns invoice numbering: we let it auto-assign its next number
       // rather than forcing ours. Forcing it (the old approach, migration
       // 0019) only worked while the two sequences stayed aligned -- but

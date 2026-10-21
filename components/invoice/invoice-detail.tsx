@@ -23,15 +23,17 @@ import { formatInvoiceNumber } from "@/lib/utils";
 import { invoiceStatusColors } from "@/lib/badge-colors";
 import { DeleteInvoiceDialog } from "./delete-invoice-dialog";
 import { InvoicePayments, type InvoicePayment } from "./invoice-payments";
+import type { JobSite } from "@/lib/job-site";
 
 interface Props {
   invoice: any;
+  jobSite: JobSite | null;
   xeroConnected: boolean;
   /** null when the invoice_payments table is not in this database yet. */
   payments: InvoicePayment[] | null;
 }
 
-export function InvoiceDetail({ invoice, xeroConnected, payments }: Props) {
+export function InvoiceDetail({ invoice, jobSite, xeroConnected, payments }: Props) {
   const [pushing, setPushing] = useState(false);
   const [pushed, setPushed] = useState(!!invoice.xero_invoice_id);
   const [sending, setSending] = useState(false);
@@ -191,6 +193,17 @@ export function InvoiceDetail({ invoice, xeroConnected, payments }: Props) {
             <p className="font-medium">{invoice.customers?.name}</p>
             {invoice.customers?.email && <p className="text-slate-500">{invoice.customers.email}</p>}
             {invoice.customers?.phone && <p className="text-slate-500">{invoice.customers.phone}</p>}
+            {jobSite && (
+              <div className="pt-2 mt-2 border-t">
+                <p className="text-xs text-slate-400 uppercase">
+                  Job site
+                  {jobSite.jobNumber && invoice.job_id ? (
+                    <> · <Link href={`/dashboard/jobs/${invoice.job_id}`} className="hover:underline">Job #{jobSite.jobNumber}</Link></>
+                  ) : null}
+                </p>
+                {jobSite.lines.map((line, i) => <p key={i}>{line}</p>)}
+              </div>
+            )}
           </CardContent>
         </Card>
         <Card>

@@ -3,6 +3,7 @@ import { requireOfficeOrAdmin } from "@/lib/api/guards";
 import { callerClient } from "@/lib/api/caller-client";
 import { renderDocumentPdf } from "@/lib/pdf/render";
 import { businessInfo } from "@/lib/business-info";
+import { QUOTE_SITE_SELECT, quoteJobSite } from "@/lib/job-site";
 
 // A user is waiting on this request while it calls an outside service (Xero,
 // Google, the email provider, or the PDF renderer). Without a cap a hung
@@ -19,7 +20,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 
   const { data: quote } = await supabase
     .from("quotes")
-    .select("*, customers(name, email, phone), quote_items(*)")
+    .select(`*, customers(name, email, phone), quote_items(*), ${QUOTE_SITE_SELECT}`)
     .eq("id", id)
     .single();
 
@@ -37,6 +38,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     dateLabel: "Valid Until",
     dateValue: quote.valid_until,
     notes: quote.notes,
+    jobSite: quoteJobSite(quote),
     business: businessInfo,
   });
 

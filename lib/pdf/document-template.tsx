@@ -1,6 +1,7 @@
 import { Document, Page, Text, View, StyleSheet, Image } from "@react-pdf/renderer";
 import { formatDate } from "@/lib/date";
 import { formatInvoiceNumber } from "@/lib/utils";
+import type { JobSite } from "@/lib/job-site";
 
 // Formal documents read better with an unambiguous, full date -- "30 Jun
 // 2026" instead of the app's usual short "30 Jun" (fine for in-app lists
@@ -19,6 +20,7 @@ const styles = StyleSheet.create({
   section: { flexDirection: "row", justifyContent: "space-between", marginBottom: 20 },
   label: { fontSize: 8, color: "#94a3b8", textTransform: "uppercase", marginBottom: 3 },
   value: { fontSize: 10, marginBottom: 2 },
+  siteBlock: { maxWidth: 200 },
   tableHeaderRow: { flexDirection: "row", borderBottom: "1pt solid #cbd5e1", paddingBottom: 6, marginBottom: 6 },
   tableHeaderCell: { fontSize: 8, color: "#94a3b8", textTransform: "uppercase" },
   tableRow: { flexDirection: "row", paddingVertical: 6, borderBottom: "0.5pt solid #e2e8f0" },
@@ -60,6 +62,8 @@ export interface DocumentPdfProps {
   // Customer-facing summary of the work performed (invoices only). Rendered
   // as a "Work Carried Out" block above the line items.
   workDescription?: string | null;
+  // Where the work was done (lib/job-site.ts) — printed beside "Billed To".
+  jobSite?: JobSite | null;
   business: { name: string; abn?: string; address?: string; phone?: string; email?: string };
   logo?: { data: Buffer; format: "png" | "jpg" };
 }
@@ -77,6 +81,7 @@ export function DocumentPdf({
   dateValue,
   notes,
   workDescription,
+  jobSite,
   business,
   logo,
 }: DocumentPdfProps) {
@@ -110,6 +115,14 @@ export function DocumentPdf({
             {customer.email && <Text style={styles.value}>{customer.email}</Text>}
             {customer.phone && <Text style={styles.value}>{customer.phone}</Text>}
           </View>
+          {jobSite && (
+            <View style={styles.siteBlock}>
+              <Text style={styles.label}>Job Site{jobSite.jobNumber ? ` · Job #${jobSite.jobNumber}` : ""}</Text>
+              {jobSite.lines.map((line, i) => (
+                <Text key={i} style={styles.value}>{line}</Text>
+              ))}
+            </View>
+          )}
           {dateValue && (
             <View>
               <Text style={styles.label}>{dateLabel}</Text>
