@@ -30,6 +30,15 @@ import { unwrap, unwrapRows } from "./unwrap";
 //   • listReadyToInvoice is complete by construction: every row it selects
 //     belongs to a job the window always keeps.
 
+
+// "20 m³ @ $28.00" for a standard type; nothing for a Custom / Other variation
+// logged without a quantity (saved as 1) — it is a lump sum (Justin, 21 Oct
+// 2026). Same rule as the web's lib/variation-qty.ts.
+function variationLineDescription(custom: boolean, quantity: number, unit: string | null, rate: number | null): string {
+  if (custom && quantity === 1) return "";
+  return `${quantity} ${unit ?? ""}${rate != null ? ` @ $${rate.toFixed(2)}` : ""}`.trim();
+}
+
 export interface InvoiceListRow {
   id: string;
   invoice_number: number | string;
@@ -513,7 +522,7 @@ export async function getInvoiceJobPrefill(jobId: string): Promise<InvoiceJobPre
         unbilledVariations: varRows.map((v) => ({
           id: v.id,
           name: v.variation_type_name ?? v.custom_name ?? "Variation",
-          description: `${num(v.quantity)} ${v.unit ?? ""}${v.rate != null ? ` @ $${num(v.rate).toFixed(2)}` : ""}`.trim(),
+          description: variationLineDescription(!v.variation_type_name, num(v.quantity), v.unit, numOrNull(v.rate)),
           unitPrice: numOrNull(v.total_amount) ?? num(v.rate) * num(v.quantity),
         })),
       };
@@ -539,7 +548,7 @@ export async function getInvoiceJobPrefill(jobId: string): Promise<InvoiceJobPre
       const unbilledVariations = (unwrapRows(varsRes as never, "getInvoiceJobPrefill(variations)") as unknown as VarRow[]).map((v) => ({
         id: v.id,
         name: v.variation_types?.name ?? v.custom_name ?? "Variation",
-        description: `${v.quantity} ${v.unit ?? ""}${v.rate != null ? ` @ $${Number(v.rate).toFixed(2)}` : ""}`.trim(),
+        description: variationLineDescription(!v.variation_types, Number(v.quantity), v.unit, v.rate != null ? Number(v.rate) : null),
         unitPrice: Number(v.total_amount ?? Number(v.rate ?? 0) * Number(v.quantity)),
       }));
 

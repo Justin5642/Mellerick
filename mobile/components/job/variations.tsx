@@ -157,7 +157,8 @@ export function JobVariationsTab({ jobId, currentUserId }: { jobId: string; curr
   }
 
   async function submit() {
-    const qty = parseFloat(quantity) || 0;
+    // Custom / Other has no quantity: one lump sum the office prices.
+    const qty = typeId === null ? 1 : parseFloat(quantity) || 0;
     if (!typeId && !customName.trim()) {
       Alert.alert("Missing info", "Pick a variation type or name a custom one.");
       return;
@@ -224,8 +225,9 @@ export function JobVariationsTab({ jobId, currentUserId }: { jobId: string; curr
     // (the office usually only prices the rate); but a DELIBERATE 0 is honored —
     // `|| v.quantity` would swallow it (0 is falsy), so distinguish empty from 0.
     const qtyStr = d.quantity.trim();
-    const qty = qtyStr !== "" && !Number.isNaN(parseFloat(qtyStr)) ? parseFloat(qtyStr) : v.quantity;
-    if (Number.isNaN(rate) || rate < 0) { Alert.alert("Rate required", "Enter a rate to price this variation."); return; }
+    const custom = !v.variation_type_id;
+    const qty = custom ? 1 : qtyStr !== "" && !Number.isNaN(parseFloat(qtyStr)) ? parseFloat(qtyStr) : v.quantity;
+    if (Number.isNaN(rate) || rate < 0) { Alert.alert(custom ? "Price required" : "Rate required", `Enter a ${custom ? "price" : "rate"} to price this variation.`); return; }
     setApprovingId(v.id);
     try {
       await varWrites.priceAndApprove({ id: v.id, rate, quantity: qty, approvedBy: currentUserId, notes: d.notes.trim() || null });
@@ -299,8 +301,12 @@ export function JobVariationsTab({ jobId, currentUserId }: { jobId: string; curr
             </>
           )}
 
-          <Text style={styles.formLabel}>Quantity {selectedType ? `(${selectedType.unit})` : ""}</Text>
-          <TextInput style={styles.input} value={quantity} onChangeText={setQuantity} keyboardType="decimal-pad" placeholder="0" />
+          {typeId !== null && (
+            <>
+              <Text style={styles.formLabel}>Quantity {selectedType ? `(${selectedType.unit})` : ""}</Text>
+              <TextInput style={styles.input} value={quantity} onChangeText={setQuantity} keyboardType="decimal-pad" placeholder="0" />
+            </>
+          )}
 
           <Text style={styles.formLabel}>Description</Text>
           <TextInput
@@ -347,7 +353,9 @@ export function JobVariationsTab({ jobId, currentUserId }: { jobId: string; curr
             <View style={styles.card}>
               <View style={styles.cardRow}>
                 <Text style={styles.cardTitle}>
-                  {item.custom_name ?? item.variation_types?.name ?? "Variation"} · {item.quantity} {item.unit}
+                  {item.custom_name ?? item.variation_types?.name ?? "Variation"}
+                  {/* Custom / Other is logged without a quantity (saved as 1). */}
+                  {!item.variation_type_id && Number(item.quantity) === 1 ? "" : ` · ${item.quantity} ${item.unit}`}
                 </Text>
                 <View style={[styles.statusBadge, { backgroundColor: s.bg }]}>
                   <Text style={[styles.statusBadgeText, { color: s.text }]}>{s.label}</Text>
@@ -385,13 +393,15 @@ export function JobVariationsTab({ jobId, currentUserId }: { jobId: string; curr
                 <View style={styles.approvePanel}>
                   <View style={styles.priceRow}>
                     <View style={{ flex: 1 }}>
-                      <Text style={styles.priceLabel}>Rate ($/{item.unit})</Text>
+                      <Text style={styles.priceLabel}>{item.variation_type_id ? `Rate ($/${item.unit})` : "Price ($ ex GST)"}</Text>
                       <TextInput style={styles.priceInput} value={d.rate} onChangeText={(v) => setDraft(item.id, { rate: v })} keyboardType="decimal-pad" placeholder="0.00" placeholderTextColor={colors.slate400} />
                     </View>
-                    <View style={{ flex: 1 }}>
-                      <Text style={styles.priceLabel}>Quantity</Text>
-                      <TextInput style={styles.priceInput} value={d.quantity} onChangeText={(v) => setDraft(item.id, { quantity: v })} keyboardType="decimal-pad" placeholder={String(item.quantity)} placeholderTextColor={colors.slate400} />
-                    </View>
+                    {item.variation_type_id ? (
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.priceLabel}>Quantity</Text>
+                        <TextInput style={styles.priceInput} value={d.quantity} onChangeText={(v) => setDraft(item.id, { quantity: v })} keyboardType="decimal-pad" placeholder={String(item.quantity)} placeholderTextColor={colors.slate400} />
+                      </View>
+                    ) : null}
                   </View>
                   <Text style={styles.priceLabel}>Notes (optional)</Text>
                   <TextInput style={styles.priceInput} value={d.notes} onChangeText={(v) => setDraft(item.id, { notes: v })} placeholder="Admin note" placeholderTextColor={colors.slate400} />

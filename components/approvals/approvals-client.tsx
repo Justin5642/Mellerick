@@ -13,6 +13,7 @@ import Link from "next/link";
 import { UnbilledVariations, type UnbilledVariation } from "./unbilled-variations";
 import { formatDate } from "@/lib/date";
 import { moneyTotals } from "@/lib/replace-line-items";
+import { variationLineDescription, variationQtyText } from "@/lib/variation-qty";
 
 const OVERTIME_LABELS: Record<string, string> = {
   unexpected_issue: "Unexpected issue",
@@ -80,7 +81,7 @@ export function ApprovalsClient({ role, currentUserId, jobs: initialJobs, pendin
       // 2026: "how do we track it through to the invoicing stage?").
       const { data: unbilled } = await supabase
         .from("job_variations")
-        .select("id, custom_name, quantity, unit, rate, total_amount, variation_types(name)")
+        .select("id, variation_type_id, custom_name, quantity, unit, rate, total_amount, variation_types(name)")
         .eq("job_id", jobId)
         .in("status", ["approved", "auto_approved"])
         .is("invoice_id", null);
@@ -90,7 +91,7 @@ export function ApprovalsClient({ role, currentUserId, jobs: initialJobs, pendin
         variationId: v.id as string,
         pricing_item_id: null,
         name: v.variation_types?.name ?? v.custom_name ?? "Variation",
-        description: `${v.quantity} ${v.unit ?? ""}${v.rate != null ? ` @ $${Number(v.rate).toFixed(2)}` : ""}`.trim(),
+        description: variationLineDescription(v),
         quantity: 1,
         unit_price: Number(v.total_amount ?? Number(v.rate ?? 0) * Number(v.quantity ?? 0)),
       }));
@@ -281,7 +282,7 @@ export function ApprovalsClient({ role, currentUserId, jobs: initialJobs, pendin
               <CardContent className="py-3 flex items-center justify-between gap-3">
                 <div className="min-w-0">
                   <p className="text-sm font-medium text-slate-800">
-                    {v.variation_types?.name ?? v.custom_name} — {v.quantity} {v.unit}
+                    {v.variation_types?.name ?? v.custom_name}{variationQtyText(v) ? ` — ${variationQtyText(v)}` : ""}
                   </p>
                   <p className="text-xs text-slate-500 mt-0.5">
                     #{v.jobs?.job_number} — {v.jobs?.title} · {v.jobs?.customers?.name}
