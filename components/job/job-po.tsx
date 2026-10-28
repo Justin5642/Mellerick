@@ -48,6 +48,7 @@ interface VendorOrder {
   id: string;
   cost_center_id: string;
   job_id: string;
+  po_number: string;
   vendor_name: string;
   order_number: string | null;
   description: string | null;
@@ -56,6 +57,12 @@ interface VendorOrder {
   status: "ordered" | "received" | "cancelled";
   order_date: string | null;
   notes: string | null;
+  supplier_email?: string | null;
+  emailed_at?: string | null;
+  required_by?: string | null;
+  delivery_address?: string | null;
+  vendor_order_items?: { description: string; quantity: number; sort_order: number }[];
+  profiles?: { full_name: string } | null;
 }
 
 interface ExpenseForAgg {
@@ -266,7 +273,7 @@ export function JobPO({ jobId, pos: initialPos, totalHoursLogged, onUpdate, over
       amount: parseFloat(voForm.amount) || 0,
       order_date: voForm.order_date || null,
       notes: voForm.notes || null,
-    }).select().single();
+    }).select("*, vendor_order_items(description, quantity, sort_order), profiles(full_name)").single();
 
     if (error || !data) { toast.error("Failed to save vendor order"); setVoSaving(false); return; }
 
@@ -283,6 +290,14 @@ export function JobPO({ jobId, pos: initialPos, totalHoursLogged, onUpdate, over
     const { error } = await supabase.from("vendor_orders").update({ status }).eq("id", id);
     if (error) { toast.error("Failed to update status"); return; }
     const updated = vendorOrders.map(v => v.id === id ? { ...v, status } : v);
+    setVendorOrders(updated);
+    onVendorOrdersUpdate(updated);
+  }
+
+  async function updateVendorOrder(id: string, patch: { amount: number }) {
+    const { error } = await supabase.from("vendor_orders").update(patch).eq("id", id);
+    if (error) { toast.error("Failed to update order"); return; }
+    const updated = vendorOrders.map(v => v.id === id ? { ...v, ...patch } : v);
     setVendorOrders(updated);
     onVendorOrdersUpdate(updated);
   }
@@ -321,6 +336,61 @@ export function JobPO({ jobId, pos: initialPos, totalHoursLogged, onUpdate, over
   for (const t of timeEntries) {
     if (!t.cost_center_id || t.entry_type === "travel") continue;
     hoursByCostCenter[t.cost_center_id] = (hoursByCostCenter[t.cost_center_id] ?? 0) + (Number(t.hours) || 0);
+  }
+
+  // One supplier order. Tech-raised ones arrive with a PO number, lines and
+  // no price — the amount is typed here from the supplier invoice.
+  function renderVendorOrder(vo: VendorOrder) {
+    const items = [...(vo.vendor_order_items ?? [])].sort((a, b) => a.sort_order - b.sort_order);
+    return (
+      <div key={vo.id} className="rounded border border-slate-100 bg-slate-50/60 px-2 py-1.5 text-xs space-y-1">
+        <div className="flex items-center justify-between gap-2">
+          <div className="min-w-0">
+            <span className="font-mono font-semibold text-slate-800">{vo.po_number}</span>
+            <span className="font-medium text-slate-700"> · {vo.vendor_name}</span>
+            {vo.order_number && <span className="text-slate-400 font-mono"> · {vo.order_number}</span>}
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <span className="text-slate-400">$</span>
+            <input
+              key={`${vo.id}-${vo.amount}`}
+              type="number" step="0.01" min="0"
+              defaultValue={Number(vo.amount) ? Number(vo.amount).toFixed(2) : ""}
+              placeholder="ex GST"
+              title="Amount ex GST, from the supplier invoice"
+              onBlur={e => {
+                const amount = parseFloat(e.target.value) || 0;
+                if (amount !== Number(vo.amount)) updateVendorOrder(vo.id, { amount });
+              }}
+              className="w-20 rounded border border-slate-200 bg-white px-1 py-0.5 text-right text-slate-700"
+            />
+            <select
+              value={vo.status}
+              onChange={e => updateVendorOrderStatus(vo.id, e.target.value as VendorOrder["status"])}
+              className={`rounded px-1.5 py-0.5 text-[11px] font-medium border-0 ${VENDOR_ORDER_STATUS_COLORS[vo.status]}`}
+            >
+              {(Object.keys(VENDOR_ORDER_STATUS_LABELS) as VendorOrder["status"][]).map(s => (
+                <option key={s} value={s}>{VENDOR_ORDER_STATUS_LABELS[s]}</option>
+              ))}
+            </select>
+            <button onClick={() => deleteVendorOrder(vo.id)} className="text-slate-300 hover:text-red-400 transition-colors">
+              <Trash2 className="w-3 h-3" />
+            </button>
+          </div>
+        </div>
+        {items.length > 0 && (
+          <p className="text-slate-600">{items.map(i => `${Number(i.quantity)} × ${i.description}`).join(", ")}</p>
+        )}
+        <p className="text-slate-400">
+          {[
+            vo.profiles?.full_name ? `Raised by ${vo.profiles.full_name}` : null,
+            vo.order_date,
+            vo.required_by ? `needed ${vo.required_by}` : null,
+            vo.emailed_at ? `emailed to ${vo.supplier_email}` : vo.supplier_email ? `email to ${vo.supplier_email} FAILED` : null,
+          ].filter(Boolean).join(" · ")}
+        </p>
+      </div>
+    );
   }
 
   return (
@@ -443,29 +513,7 @@ export function JobPO({ jobId, pos: initialPos, totalHoursLogged, onUpdate, over
 
                     {/* Vendor Orders */}
                     <div className="pt-1 space-y-1.5">
-                      {ccVendorOrders.map(vo => (
-                        <div key={vo.id} className="flex items-center justify-between gap-2 rounded border border-slate-100 bg-slate-50/60 px-2 py-1.5 text-xs">
-                          <div className="min-w-0">
-                            <span className="font-medium text-slate-700">{vo.vendor_name}</span>
-                            {vo.order_number && <span className="text-slate-400 font-mono"> · {vo.order_number}</span>}
-                          </div>
-                          <div className="flex items-center gap-2 shrink-0">
-                            <span className="text-slate-600">${Number(vo.amount).toFixed(2)}</span>
-                            <select
-                              value={vo.status}
-                              onChange={e => updateVendorOrderStatus(vo.id, e.target.value as VendorOrder["status"])}
-                              className={`rounded px-1.5 py-0.5 text-[11px] font-medium border-0 ${VENDOR_ORDER_STATUS_COLORS[vo.status]}`}
-                            >
-                              {(Object.keys(VENDOR_ORDER_STATUS_LABELS) as VendorOrder["status"][]).map(s => (
-                                <option key={s} value={s}>{VENDOR_ORDER_STATUS_LABELS[s]}</option>
-                              ))}
-                            </select>
-                            <button onClick={() => deleteVendorOrder(vo.id)} className="text-slate-300 hover:text-red-400 transition-colors">
-                              <Trash2 className="w-3 h-3" />
-                            </button>
-                          </div>
-                        </div>
-                      ))}
+                      {ccVendorOrders.map(vo => renderVendorOrder(vo))}
 
                       {voFormOpenFor === cc.id ? (
                         <div className="rounded border border-slate-200 p-2 space-y-2">
