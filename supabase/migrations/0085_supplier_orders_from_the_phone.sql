@@ -1,8 +1,8 @@
 -- ============================================================================
 -- Supplier purchase orders raised from the phone.
 --
--- STATUS: DRAFT — NOT APPLIED. Gate test:
--- supabase/tests/0085_supplier_orders_test.sql
+-- STATUS: ✅ APPLIED IN PRODUCTION (2026-10-28, via SQL editor). Gate test
+-- supabase/tests/0085_supplier_orders_test.sql passed.
 --
 -- WHY (Justin, 28 Oct 2026): "it needs to be possible for them to raise a
 -- purchase order against that cost centre to a supplier to get materials

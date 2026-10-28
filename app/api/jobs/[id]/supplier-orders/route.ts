@@ -8,8 +8,7 @@ import { siteOneLine } from "@/lib/job-site";
 import { parseSupplierOrder, supplierOrderEmail } from "@/lib/supplier-orders";
 import { reportError } from "@/lib/monitoring";
 
-// Supplier POs raised from the phone (migration 0085 — DRAFT, not applied
-// yet; until it is, every call here fails). Justin, 28 Oct 2026:
+// Supplier POs raised from the phone (migration 0085). Justin, 28 Oct 2026:
 // any technician, any job, any supplier, straight to the supplier.
 //
 // vendor_orders and vendor_order_items are office/admin-only by RLS, and they

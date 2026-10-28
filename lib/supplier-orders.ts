@@ -1,8 +1,8 @@
 import { escapeHtml } from "@/lib/html";
 
-// Supplier purchase orders raised from the phone (migration 0085 — DRAFT, not
-// applied yet). The rules and the email live here, apart from the route, so
-// they can be tested without a database.
+// Supplier purchase orders raised from the phone (migration 0085). The rules
+// and the email live here, apart from the route, so they can be tested
+// without a database.
 //
 // No price anywhere in this file: technicians raise these, and technicians
 // never see a dollar figure (HANDOVER §2). The office adds the cost when the

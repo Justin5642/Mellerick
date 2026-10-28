@@ -195,7 +195,7 @@ still also appears in Notes & Activity, badged "Scheduling note". `tech_job_note
 in `sync-streams.yaml` had to be updated to explicitly select the new column —
 it's a technician-visible stream, so columns are listed, never `.*`.
 
-**Supplier POs from the phone (migration `0085` — DRAFT, not applied yet).**
+**Supplier POs from the phone (migration `0085` applied 2026-10-28).**
 Justin, 28 Oct 2026: any technician, on any job, can raise a purchase order to
 any supplier against a cost centre, and it is emailed straight to the supplier
 (office copied, no approval step). Mobile: **Orders** tab on the job (shown
@@ -218,9 +218,9 @@ after `requireUser`; rules and email HTML in `lib/supplier-orders.ts`.
   into, else `jobs.scheduled_cost_center_id`, else the only one. A job with no
   cost centres shows "ask the office to add one" instead of the button. The
   office types the amount (ex GST) on the order from the supplier invoice.
-- **Apply 0085 (and run `supabase/tests/0085_supplier_orders_test.sql`) BEFORE
-  merging** — the web job page's vendor-order query embeds
-  `vendor_order_items`, which errors until the table exists.
+- 0085 was applied (gate test passed) before this merged — the web job
+  page's vendor-order query embeds `vendor_order_items`, which errors on a
+  database without it.
 
 ---
 
@@ -1019,7 +1019,7 @@ a shippable release.
 | **Turn off public sign-up** | Justin | Dashboard → Authentication → Sign In / Providers → untick **"Allow new users to sign up"**. `supabase/config.toml` now has `[auth] enable_signup = false`, but that file only configures the local stack — the hosted project still lets anyone with the anon key call `/auth/v1/signup`. Invites keep working (GoTrue's admin invite does not check this switch). Leave the **Email provider** itself enabled. |
 | **`APP_URL`** (optional) | Justin | Origin for emailed reset links. Unset = `https://mellerick-app.vercel.app`, which is right for production. Set it only for a different domain, or `http://localhost:3000` in `.env.local` to test resets locally. |
 | **Deploy the job bookings sync streams** | Justin | `0079` and `0080` are applied (19 Oct 2026). Last step: paste `mobile/powersync/sync-streams.yaml` into the PowerSync dashboard → Validate → Deploy (`docs/powersync-deploy.md`). Build 16 works before it (reads bookings from the server instead of the device), so it is not urgent, but offline bookings need it. |
-| **Apply 0085, then merge supplier POs** | Justin | Paste `supabase/migrations/0085_supplier_orders_from_the_phone.sql` into the SQL editor, then `supabase/tests/0085_supplier_orders_test.sql`; add the ledger row and flip its STATUS header. Supplier emails go from `EMAIL_FROM` — it must be on a domain verified in Resend, or suppliers never receive them. |
+| **Check `EMAIL_FROM` for supplier POs** | Justin | Supplier PO emails go from `EMAIL_FROM` — it must be on a domain verified in Resend, or suppliers never receive them. (0085 itself applied 2026-10-28.) |
 | **Maestro flow 02** | Avi | Needs `ADMIN_EMAIL` / `ADMIN_PASSWORD` in the environment. The login subflow deliberately skips when a session already exists, so a password never passes through a script — which is why flows 01/03/04 could be run and 02 could not. |
 
 ### QA fixture — do not delete

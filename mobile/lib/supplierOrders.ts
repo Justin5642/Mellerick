@@ -2,9 +2,9 @@ import { supabase } from "./supabase";
 import { fetchWithTimeout } from "./fetchWithTimeout";
 
 // Supplier purchase orders, raised from a job (web: /api/jobs/[id]/supplier-orders,
-// migration 0085 — DRAFT, not applied yet). Online only, on purpose: the
-// order is emailed to the supplier the moment it is raised, and the tech
-// needs the PO number back before they leave the counter. Not through the outbox — a PO that sat
+// migration 0085). Online only, on purpose: the order is emailed to the
+// supplier the moment it is raised, and the tech needs the PO number back
+// before they leave the counter. Not through the outbox — a PO that sat
 // queued for hours without signal would reach the supplier too late to be
 // useful, and silently.
 //
