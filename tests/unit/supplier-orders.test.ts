@@ -53,12 +53,13 @@ import { parseSupplierOrder, supplierOrderEmail } from "@/lib/supplier-orders";
 
 const JOB = "11111111-1111-4111-8111-111111111111";
 const ORDER = "22222222-2222-4222-8222-222222222222";
+const CC = "33333333-3333-4333-8333-333333333333";
 const params = { params: Promise.resolve({ id: JOB }) };
 const DENIED = { ok: false as const, response: new Response("{}", { status: 401 }) };
 const tech = { ok: true as const, userId: "tech-1", role: null };
 const body = {
   id: ORDER,
-  costCenterId: null,
+  costCenterId: CC,
   supplierName: "Reece Epping",
   supplierEmail: "orders@reece.example",
   items: [{ description: "20mm copper elbow", quantity: 4 }],
@@ -70,7 +71,10 @@ beforeEach(() => {
   vi.clearAllMocks();
   selects.length = 0;
   inserts.length = 0;
-  tableData = { jobs: { one: { id: JOB, job_number: 4321, scheduled_cost_center_id: null, sites: null } } };
+  tableData = {
+    jobs: { one: { id: JOB, job_number: 4321, scheduled_cost_center_id: null, sites: null } },
+    po_cost_centers: { one: { id: CC } },
+  };
   sendEmail.mockResolvedValue({ error: null });
 });
 
@@ -91,6 +95,8 @@ describe("parseSupplierOrder", () => {
     [{ ...body, supplierEmail: "nope" }, /email/],
     [{ ...body, items: [] }, /at least one item/],
     [{ ...body, items: [{ description: "Tee", quantity: 0 }] }, /"Tee"/],
+    [{ ...body, costCenterId: null }, /cost centre/],
+    [{ ...body, costCenterId: "" }, /cost centre/],
     [{ ...body, costCenterId: "x" }, /cost centre/],
     [{ ...body, requiredBy: "next week" }, /date/],
   ])("refuses %#", (input, message) => {
@@ -148,9 +154,25 @@ describe("/api/jobs/[id]/supplier-orders", () => {
     const res = await post(body);
     expect(await res.json()).toMatchObject({ poNumber: "PO-1001", emailed: true });
     const order = inserts.find((i) => i.table === "vendor_orders")!.rows as Record<string, unknown>;
-    expect(order).toMatchObject({ id: ORDER, job_id: JOB, entered_by: "tech-1", cost_center_id: null });
+    expect(order).toMatchObject({ id: ORDER, job_id: JOB, entered_by: "tech-1", cost_center_id: CC });
     expect(order).not.toHaveProperty("amount");
     expect(sendEmail).toHaveBeenCalledWith(expect.objectContaining({ to: "orders@reece.example", cc: expect.any(String) }));
+  });
+
+  it("refuses a cost centre from another job, raising nothing and emailing no one", async () => {
+    requireUser.mockResolvedValue(tech);
+    tableData.po_cost_centers = {};
+    const res = await post(body);
+    expect(res.status).toBe(400);
+    expect(inserts).toHaveLength(0);
+    expect(sendEmail).not.toHaveBeenCalled();
+  });
+
+  it("refuses a PO with no cost centre before touching the database", async () => {
+    requireUser.mockResolvedValue(tech);
+    const res = await post({ ...body, costCenterId: null });
+    expect(res.status).toBe(400);
+    expect(adminConstructed).not.toHaveBeenCalled();
   });
 
   it("a retried request returns the PO already raised and does not email again", async () => {

@@ -2512,7 +2512,7 @@ export type Database = {
       vendor_orders: {
         Row: {
           amount: number
-          cost_center_id: string | null
+          cost_center_id: string
           created_at: string | null
           delivery_address: string | null
           description: string | null
@@ -2532,7 +2532,7 @@ export type Database = {
         }
         Insert: {
           amount?: number
-          cost_center_id?: string | null
+          cost_center_id: string
           created_at?: string | null
           delivery_address?: string | null
           description?: string | null
@@ -2552,7 +2552,7 @@ export type Database = {
         }
         Update: {
           amount?: number
-          cost_center_id?: string | null
+          cost_center_id?: string
           created_at?: string | null
           delivery_address?: string | null
           description?: string | null

@@ -38,7 +38,7 @@ export interface SupplierOrdersState {
 
 export interface NewSupplierOrder {
   id: string;
-  costCenterId: string | null;
+  costCenterId: string | null; // required — null only while the form is being filled
   supplierName: string;
   supplierEmail: string | null;
   deliveryAddress: string | null;
@@ -89,7 +89,11 @@ export function raiseSupplierOrder(jobId: string, order: NewSupplierOrder): Prom
 const EMAIL = /^[^\s@<>,;]+@[^\s@<>,;]+\.[^\s@<>,;]+$/;
 
 /** The form's own check before sending — the same rules the server applies. Null = fine. */
-export function supplierOrderProblem(o: Pick<NewSupplierOrder, "supplierName" | "supplierEmail" | "items">): string | null {
+export function supplierOrderProblem(
+  o: Pick<NewSupplierOrder, "costCenterId" | "supplierName" | "supplierEmail" | "items">
+): string | null {
+  // No PO without a cost centre (Justin, 28 Oct 2026).
+  if (!o.costCenterId) return "Pick the cost centre this PO is for.";
   if (!o.supplierName.trim()) return "Enter the supplier's name.";
   if (o.supplierEmail && !EMAIL.test(o.supplierEmail.trim())) return "That supplier email address doesn't look right.";
   const filled = o.items.filter((i) => i.description.trim());

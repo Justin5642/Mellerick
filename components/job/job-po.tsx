@@ -46,9 +46,7 @@ const OVERTIME_LABELS: Record<string, string> = {
 
 interface VendorOrder {
   id: string;
-  // Null = raised on the job from the phone, cost centre not chosen (0085,
-  // draft — not applied yet).
-  cost_center_id: string | null;
+  cost_center_id: string;
   job_id: string;
   po_number: string;
   vendor_name: string;
@@ -296,7 +294,7 @@ export function JobPO({ jobId, pos: initialPos, totalHoursLogged, onUpdate, over
     onVendorOrdersUpdate(updated);
   }
 
-  async function updateVendorOrder(id: string, patch: { amount?: number; cost_center_id?: string | null }) {
+  async function updateVendorOrder(id: string, patch: { amount: number }) {
     const { error } = await supabase.from("vendor_orders").update(patch).eq("id", id);
     if (error) { toast.error("Failed to update order"); return; }
     const updated = vendorOrders.map(v => v.id === id ? { ...v, ...patch } : v);
@@ -314,15 +312,12 @@ export function JobPO({ jobId, pos: initialPos, totalHoursLogged, onUpdate, over
   }
 
   const vendorOrdersByCostCenter: Record<string, VendorOrder[]> = {};
-  const unallocatedVendorOrders: VendorOrder[] = [];
   for (const vo of vendorOrders) {
-    if (vo.cost_center_id) (vendorOrdersByCostCenter[vo.cost_center_id] ??= []).push(vo);
-    else unallocatedVendorOrders.push(vo);
+    (vendorOrdersByCostCenter[vo.cost_center_id] ??= []).push(vo);
   }
-  const allCostCenters = pos.flatMap(po => (po.po_cost_centers ?? []).map(cc => ({ id: cc.id, label: `PO #${po.po_number} · ${cc.name}` })));
   const committedByCostCenter: Record<string, number> = {};
   for (const vo of vendorOrders) {
-    if (vo.status === "cancelled" || !vo.cost_center_id) continue;
+    if (vo.status === "cancelled") continue;
     committedByCostCenter[vo.cost_center_id] = (committedByCostCenter[vo.cost_center_id] ?? 0) + (Number(vo.amount) || 0);
   }
 
@@ -343,9 +338,9 @@ export function JobPO({ jobId, pos: initialPos, totalHoursLogged, onUpdate, over
     hoursByCostCenter[t.cost_center_id] = (hoursByCostCenter[t.cost_center_id] ?? 0) + (Number(t.hours) || 0);
   }
 
-  // One supplier order. Tech-raised ones (0085) arrive with a PO number,
-  // lines and no price — the amount is typed here from the supplier invoice.
-  function renderVendorOrder(vo: VendorOrder, allocate = false) {
+  // One supplier order. Tech-raised ones arrive with a PO number, lines and
+  // no price — the amount is typed here from the supplier invoice.
+  function renderVendorOrder(vo: VendorOrder) {
     const items = [...(vo.vendor_order_items ?? [])].sort((a, b) => a.sort_order - b.sort_order);
     return (
       <div key={vo.id} className="rounded border border-slate-100 bg-slate-50/60 px-2 py-1.5 text-xs space-y-1">
@@ -394,37 +389,12 @@ export function JobPO({ jobId, pos: initialPos, totalHoursLogged, onUpdate, over
             vo.emailed_at ? `emailed to ${vo.supplier_email}` : vo.supplier_email ? `email to ${vo.supplier_email} FAILED` : null,
           ].filter(Boolean).join(" · ")}
         </p>
-        {allocate && (
-          allCostCenters.length > 0 ? (
-            <select
-              value=""
-              onChange={e => e.target.value && updateVendorOrder(vo.id, { cost_center_id: e.target.value })}
-              className="rounded border border-amber-200 bg-white px-1.5 py-0.5 text-[11px] text-slate-700"
-            >
-              <option value="">Allocate to cost centre…</option>
-              {allCostCenters.map(cc => <option key={cc.id} value={cc.id}>{cc.label}</option>)}
-            </select>
-          ) : (
-            <p className="text-amber-700">Add a PO with cost centres below, then allocate this order.</p>
-          )
-        )}
       </div>
     );
   }
 
   return (
     <div className="p-6 space-y-6">
-      {unallocatedVendorOrders.length > 0 && (
-        <Card className="border-amber-200 bg-amber-50/40">
-          <CardContent className="pt-4 pb-4 space-y-2">
-            <p className="text-xs font-semibold text-amber-700 uppercase tracking-wide">
-              Supplier orders not allocated to a cost centre ({unallocatedVendorOrders.length})
-            </p>
-            {unallocatedVendorOrders.map(vo => renderVendorOrder(vo, true))}
-          </CardContent>
-        </Card>
-      )}
-
       {/* Scoreboard */}
       {totalAllocatedHours > 0 && (
         <Card className="border-blue-100 bg-blue-50/40">

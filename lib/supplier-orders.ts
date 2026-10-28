@@ -15,7 +15,7 @@ export interface SupplierOrderItemInput {
 
 export interface SupplierOrderInput {
   id: string;
-  costCenterId: string | null;
+  costCenterId: string;
   supplierName: string;
   supplierEmail: string | null;
   deliveryAddress: string | null;
@@ -50,10 +50,11 @@ export function parseSupplierOrder(body: unknown): { ok: true; order: SupplierOr
   const supplierEmail = text(b.supplierEmail, 200);
   if (supplierEmail && !EMAIL.test(supplierEmail)) return { ok: false, error: "That supplier email address doesn't look right." };
 
-  const costCenterId = b.costCenterId == null || b.costCenterId === "" ? null : b.costCenterId;
-  if (costCenterId !== null && (typeof costCenterId !== "string" || !UUID.test(costCenterId))) {
-    return { ok: false, error: "Pick the cost centre again." };
-  }
+  // No PO without a cost centre (Justin, 28 Oct 2026) — it is how the
+  // materials marry up to the right stage of the job.
+  const costCenterId = b.costCenterId;
+  if (costCenterId == null || costCenterId === "") return { ok: false, error: "Pick the cost centre this PO is for." };
+  if (typeof costCenterId !== "string" || !UUID.test(costCenterId)) return { ok: false, error: "Pick the cost centre again." };
 
   const requiredBy = text(b.requiredBy, 10);
   if (requiredBy && !DATE.test(requiredBy)) return { ok: false, error: "Required-by date is invalid." };

@@ -5,7 +5,7 @@ import { supplierOrderProblem } from "./supplierOrders";
 // The form refuses what the server would refuse, so the tech hears about it
 // before tapping Send rather than after a round trip with no signal.
 describe("supplierOrderProblem", () => {
-  const ok = { supplierName: "Reece Epping", supplierEmail: "orders@reece.com.au", items: [{ description: "20mm elbow", quantity: 4 }] };
+  const ok = { costCenterId: "cc-1", supplierName: "Reece Epping", supplierEmail: "orders@reece.com.au", items: [{ description: "20mm elbow", quantity: 4 }] };
 
   it("accepts a complete order", () => {
     expect(supplierOrderProblem(ok)).toBeNull();
@@ -13,6 +13,10 @@ describe("supplierOrderProblem", () => {
 
   it("accepts an order with no email (counter or phone order)", () => {
     expect(supplierOrderProblem({ ...ok, supplierEmail: null })).toBeNull();
+  });
+
+  it("needs a cost centre", () => {
+    expect(supplierOrderProblem({ ...ok, costCenterId: null })).toMatch(/cost centre/);
   });
 
   it("needs a supplier", () => {

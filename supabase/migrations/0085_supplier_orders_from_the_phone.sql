@@ -20,9 +20,10 @@
 --   emailed_at        set once the email has gone (never re-sent blindly).
 --   vendor_order_items  what was ordered: description + quantity, NO PRICE.
 --
--- cost_center_id becomes nullable: "at least we can marry it up with the
--- job". A job with no cost centres yet, or a tech unsure which stage, still
--- gets a PO on the job; the office allocates it on the PO tab.
+-- cost_center_id stays NOT NULL (0061). Justin, 28 Oct 2026: "select the
+-- cost center then raise the po so no po can be raised without a cost
+-- center". A job with no cost centres yet cannot have a PO until the office
+-- adds one.
 --
 -- RLS is unchanged: both tables stay office/admin only. Technicians raise and
 -- list orders ONLY through /api/jobs/[id]/supplier-orders, which never reads
@@ -36,8 +37,6 @@ alter table vendor_orders
     default ('PO-' || nextval('vendor_order_po_seq')::text);
 alter table vendor_orders drop constraint if exists vendor_orders_po_number_key;
 alter table vendor_orders add constraint vendor_orders_po_number_key unique (po_number);
-
-alter table vendor_orders alter column cost_center_id drop not null;
 
 alter table vendor_orders add column if not exists supplier_email text;
 alter table vendor_orders add column if not exists delivery_address text;
@@ -61,8 +60,6 @@ create policy "Office/admin can manage vendor_order_items" on vendor_order_items
 
 comment on column vendor_orders.po_number is
   'Our purchase order number (0085), e.g. PO-1001. Database-assigned and unique; the supplier quotes it on the docket and invoice.';
-comment on column vendor_orders.cost_center_id is
-  'The cost centre this order is spend against. Null (0085) = raised on the job, cost centre not chosen yet — the office allocates it.';
 comment on column vendor_orders.supplier_email is
   'Address the PO was emailed to (0085). Null = no email (phoned in, or bought at the counter).';
 comment on column vendor_orders.emailed_at is

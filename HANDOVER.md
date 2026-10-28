@@ -212,11 +212,12 @@ after `requireUser`; rules and email HTML in `lib/supplier-orders.ts`.
 - `po_number` (`PO-1001`…) is assigned by a sequence. The phone generates the
   row id, so a retry after a dropped connection returns the same PO and does
   not email twice.
-- Cost centre defaults to the one the tech is clocked into, else
-  `jobs.scheduled_cost_center_id`; "office to allocate" leaves it null, and the
-  web PO tab shows those in an amber "not allocated" card with an allocate
-  dropdown. The office types the amount (ex GST) on the order from the
-  supplier invoice.
+- **No PO without a cost centre** (Justin, 28 Oct 2026): the form makes them
+  pick it first; the route and `vendor_orders.cost_center_id NOT NULL` both
+  refuse one without it. It defaults to the cost centre the tech is clocked
+  into, else `jobs.scheduled_cost_center_id`, else the only one. A job with no
+  cost centres shows "ask the office to add one" instead of the button. The
+  office types the amount (ex GST) on the order from the supplier invoice.
 - **Apply 0085 (and run `supabase/tests/0085_supplier_orders_test.sql`) BEFORE
   merging** — the web job page's vendor-order query embeds
   `vendor_order_items`, which errors until the table exists.

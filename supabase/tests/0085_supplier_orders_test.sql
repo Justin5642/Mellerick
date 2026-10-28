@@ -11,6 +11,7 @@ do $$
 declare
   res text[] := '{}';   -- 'scenario|expected|actual'
   j uuid;
+  cc uuid;
   vo1 uuid := gen_random_uuid();
   vo2 uuid := gen_random_uuid();
   po1 text;
@@ -22,17 +23,25 @@ declare
   n_fail int := 0;
 begin
   begin
-    select id into j from jobs limit 1;
-    if j is null then
-      raise exception 'fixture missing: need a job';
+    select cc_.id, po.job_id into cc, j
+      from po_cost_centers cc_ join purchase_orders po on po.id = cc_.po_id limit 1;
+    if cc is null then
+      raise exception 'fixture missing: need a job with a PO cost centre';
     end if;
 
-    -- 1. A PO with no cost centre saves against the job.
-    insert into vendor_orders (id, job_id, vendor_name) values (vo1, j, 'Test Supplier A');
-    insert into vendor_orders (id, job_id, vendor_name) values (vo2, j, 'Test Supplier B');
+    -- 1. No PO without a cost centre (Justin, 28 Oct 2026).
+    begin
+      insert into vendor_orders (job_id, vendor_name) values (j, 'No Cost Centre Supplier');
+      outcome := 'ALLOWED';
+    exception when not_null_violation then
+      outcome := 'BLOCKED';
+    end;
+    res := res || format('PO without cost centre|BLOCKED|%s', outcome);
+
+    insert into vendor_orders (id, job_id, cost_center_id, vendor_name) values (vo1, j, cc, 'Test Supplier A');
+    insert into vendor_orders (id, job_id, cost_center_id, vendor_name) values (vo2, j, cc, 'Test Supplier B');
     select po_number into po1 from vendor_orders where id = vo1;
     select po_number into po2 from vendor_orders where id = vo2;
-    res := res || format('cost centre optional|t|%s', (select cost_center_id is null from vendor_orders where id = vo1));
 
     -- 2. The database numbers each PO, and never twice.
     res := res || format('PO number assigned|t|%s', po1 like 'PO-%');

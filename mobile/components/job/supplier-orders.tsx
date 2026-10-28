@@ -14,8 +14,9 @@ import {
 } from "../../lib/supplierOrders";
 
 // Supplier POs on a job (Justin, 28 Oct 2026): any tech, any job, any
-// supplier — raised against the cost centre so the materials marry up to the
-// job. No prices anywhere on this screen; the office prices it from the
+// supplier — and always against a cost centre, picked first, so the materials
+// marry up to the right stage of the job. A job with no cost centres can't
+// have a PO until the office adds one. No prices anywhere on this screen; the office prices it from the
 // supplier's invoice.
 
 interface Props {
@@ -75,7 +76,7 @@ export function JobSupplierOrdersTab({ jobId, costCentres }: Props) {
 
   function openForm() {
     // The cost centre they're clocked into, else the one the job is scheduled
-    // to, else the only one there is. Otherwise left for the office.
+    // to, else the only one there is. Otherwise they must pick one.
     const preferred = state?.defaultCostCenterId;
     if (preferred && costCentres.some((cc) => cc.id === preferred)) setCostCentreId(preferred);
     else setCostCentreId(costCentres.length === 1 ? costCentres[0].id : null);
@@ -162,7 +163,14 @@ export function JobSupplierOrdersTab({ jobId, costCentres }: Props) {
         </TouchableOpacity>
       )}
 
-      {state && !formOpen && (
+      {state && !formOpen && costCentres.length === 0 && (
+        <View style={styles.noticeBox}>
+          <Text style={styles.noticeTitle}>No cost centres on this job yet</Text>
+          <Text style={styles.noticeDetail}>A PO has to go against a cost centre. Ask the office to add one, then raise the PO here.</Text>
+        </View>
+      )}
+
+      {state && !formOpen && costCentres.length > 0 && (
         <TouchableOpacity style={styles.addButton} onPress={openForm} accessibilityLabel="Raise purchase order">
           <Text style={styles.addButtonText}>+ Raise Purchase Order</Text>
         </TouchableOpacity>
@@ -170,7 +178,7 @@ export function JobSupplierOrdersTab({ jobId, costCentres }: Props) {
 
       {formOpen && (
         <View style={styles.form}>
-          <Text style={[styles.formLabel, { marginTop: 0 }]}>Cost centre</Text>
+          <Text style={[styles.formLabel, { marginTop: 0 }]}>1. Cost centre *</Text>
           <View style={styles.chipRow}>
             {costCentres.map((cc) => (
               <TouchableOpacity
@@ -181,15 +189,13 @@ export function JobSupplierOrdersTab({ jobId, costCentres }: Props) {
                 <Text style={[styles.chipText, costCentreId === cc.id && styles.chipTextActive]}>{cc.name}</Text>
               </TouchableOpacity>
             ))}
-            <TouchableOpacity style={[styles.chip, costCentreId === null && styles.chipActive]} onPress={() => setCostCentreId(null)}>
-              <Text style={[styles.chipText, costCentreId === null && styles.chipTextActive]}>Not sure — office to allocate</Text>
-            </TouchableOpacity>
           </View>
+          {!costCentreId && <Text style={[styles.hint, { color: colors.orange700 }]}>Pick the cost centre this PO is for.</Text>}
           {state?.clockedIn && costCentreId && costCentreId === state.defaultCostCenterId && (
             <Text style={styles.hint}>The cost centre you're clocked into.</Text>
           )}
 
-          <Text style={styles.formLabel}>Supplier</Text>
+          <Text style={styles.formLabel}>2. Supplier *</Text>
           <TextInput
             style={styles.input}
             value={supplierName}
@@ -227,7 +233,7 @@ export function JobSupplierOrdersTab({ jobId, costCentres }: Props) {
           />
           <Text style={styles.hint}>Leave blank if you're at the counter or ordering by phone — you'll still get a PO number to quote.</Text>
 
-          <Text style={styles.formLabel}>Items</Text>
+          <Text style={styles.formLabel}>3. Items *</Text>
           {items.map((row) => (
             <View key={row.key} style={styles.itemRow}>
               <TextInput
@@ -301,7 +307,11 @@ export function JobSupplierOrdersTab({ jobId, costCentres }: Props) {
             <TouchableOpacity style={styles.cancelButton} onPress={resetForm} disabled={sending}>
               <Text style={styles.cancelButtonText}>Cancel</Text>
             </TouchableOpacity>
-            <TouchableOpacity style={[styles.submitButton, sending && { opacity: 0.6 }]} onPress={send} disabled={sending}>
+            <TouchableOpacity
+              style={[styles.submitButton, (sending || !costCentreId) && { opacity: 0.5 }]}
+              onPress={send}
+              disabled={sending || !costCentreId}
+            >
               {sending ? (
                 <ActivityIndicator color="#fff" />
               ) : (
@@ -328,7 +338,7 @@ export function JobSupplierOrdersTab({ jobId, costCentres }: Props) {
               </View>
             </View>
             <Text style={styles.supplier}>{o.supplierName}</Text>
-            <Text style={styles.meta}>{cc ?? "Cost centre not allocated yet"}</Text>
+            {cc && <Text style={styles.meta}>{cc}</Text>}
             {o.items.map((i, n) => (
               <Text key={n} style={styles.item}>
                 {Number.isInteger(i.quantity) ? i.quantity : i.quantity.toFixed(2)} × {i.description}
@@ -355,6 +365,9 @@ const styles = StyleSheet.create({
   errorBox: { backgroundColor: colors.red100, borderRadius: 8, padding: 12 },
   errorTitle: { fontSize: 13, fontWeight: "600", color: colors.red600 },
   errorDetail: { fontSize: 11, color: colors.red600, marginTop: 4 },
+  noticeBox: { backgroundColor: colors.orange100, borderRadius: 10, padding: 12 },
+  noticeTitle: { fontSize: 14, fontWeight: "600", color: colors.orange700 },
+  noticeDetail: { fontSize: 12, color: colors.orange700, marginTop: 4 },
   addButton: { backgroundColor: colors.blue600, borderRadius: 10, paddingVertical: 12, alignItems: "center" },
   addButtonText: { color: "#fff", fontWeight: "600", fontSize: 14 },
   form: { backgroundColor: colors.card, borderRadius: 12, borderWidth: 1, borderColor: colors.border, padding: 14 },

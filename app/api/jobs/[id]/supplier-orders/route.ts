@@ -166,15 +166,13 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
 
     if (!(await consumeRateLimit(guard.userId, SUPPLIER_ORDER_LIMIT))) return rateLimitedResponse();
 
-    if (order.costCenterId) {
-      const { data: cc } = await admin
-        .from("po_cost_centers")
-        .select("id, purchase_orders!inner(job_id)")
-        .eq("id", order.costCenterId)
-        .eq("purchase_orders.job_id", jobId)
-        .maybeSingle();
-      if (!cc) return NextResponse.json({ error: "That cost centre isn't on this job. Pick it again." }, { status: 400 });
-    }
+    const { data: cc } = await admin
+      .from("po_cost_centers")
+      .select("id, purchase_orders!inner(job_id)")
+      .eq("id", order.costCenterId)
+      .eq("purchase_orders.job_id", jobId)
+      .maybeSingle();
+    if (!cc) return NextResponse.json({ error: "That cost centre isn't on this job. Pick it again." }, { status: 400 });
 
     const today = new Date().toLocaleDateString("en-CA", { timeZone: "Australia/Melbourne" });
     const { data: created, error: insertError } = await admin
