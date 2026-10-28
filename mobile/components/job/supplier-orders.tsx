@@ -192,7 +192,7 @@ export function JobSupplierOrdersTab({ jobId, costCentres }: Props) {
           </View>
           {!costCentreId && <Text style={[styles.hint, { color: colors.orange700 }]}>Pick the cost centre this PO is for.</Text>}
           {state?.clockedIn && costCentreId && costCentreId === state.defaultCostCenterId && (
-            <Text style={styles.hint}>The cost centre you're clocked into.</Text>
+            <Text style={styles.hint}>{"The cost centre you're clocked into."}</Text>
           )}
 
           <Text style={styles.formLabel}>2. Supplier *</Text>
@@ -231,7 +231,9 @@ export function JobSupplierOrdersTab({ jobId, costCentres }: Props) {
             autoCapitalize="none"
             autoCorrect={false}
           />
-          <Text style={styles.hint}>Leave blank if you're at the counter or ordering by phone — you'll still get a PO number to quote.</Text>
+          <Text style={styles.hint}>
+            {"Leave blank if you're at the counter or ordering by phone — you'll still get a PO number to quote."}
+          </Text>
 
           <Text style={styles.formLabel}>3. Items *</Text>
           {items.map((row) => (
