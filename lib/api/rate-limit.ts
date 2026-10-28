@@ -22,6 +22,9 @@ export type RateLimit = { bucket: string; max: number; windowSeconds: number };
 // big site does a handful an hour; a polish per note, a few dozen a day.
 export const SCAN_DATA_PLATE_LIMIT: RateLimit = { bucket: "scan-data-plate", max: 20, windowSeconds: 600 };
 export const POLISH_NOTE_LIMIT: RateLimit = { bucket: "polish-note", max: 60, windowSeconds: 600 };
+// Each supplier PO sends an email from our domain. A busy day is a handful;
+// this stops a looping client or a stolen session from spamming suppliers.
+export const SUPPLIER_ORDER_LIMIT: RateLimit = { bucket: "supplier-order", max: 20, windowSeconds: 600 };
 
 let reportedUnavailable = false;
 

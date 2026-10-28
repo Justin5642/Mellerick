@@ -16,6 +16,7 @@ import { JobTimeTab } from "../../components/job/time";
 import { JobSignatureTab } from "../../components/job/signature";
 import { JobDocumentsTab } from "../../components/job/documents";
 import { JobVariationsTab } from "../../components/job/variations";
+import { JobSupplierOrdersTab } from "../../components/job/supplier-orders";
 import { ScheduleJobModal } from "../../components/job/schedule-job-modal";
 import { getJobStageLabel } from "../../lib/job-stages";
 import { formatScheduleSummary } from "../../lib/scheduleDisplay";
@@ -28,6 +29,7 @@ const TABS = [
   { key: "overview", label: "Overview" },
   { key: "time", label: "Time" },
   { key: "variations", label: "Variations" },
+  { key: "orders", label: "Orders" },
   { key: "photos", label: "Photos" },
   { key: "documents", label: "Documents" },
   { key: "notes", label: "Notes" },
@@ -37,8 +39,10 @@ const TABS = [
 type TabKey = (typeof TABS)[number]["key"];
 
 // Tabs that still make sense read-only. Time, Variations and Signature are
-// all actions, so they are hidden rather than shown disabled.
-const VIEW_ONLY_TABS = new Set<TabKey>(["overview", "photos", "documents", "notes"]);
+// all actions, so they are hidden rather than shown disabled. Orders stays:
+// any tech may raise a supplier PO on any job (Justin, 28 Oct 2026) — it goes
+// through the web API, not a job write the database would refuse.
+const VIEW_ONLY_TABS = new Set<TabKey>(["overview", "orders", "photos", "documents", "notes"]);
 
 const JOB_STATUSES = ["pending", "scheduled", "in_progress", "on_hold", "completed", "cancelled"] as const;
 const JOB_PRIORITIES = ["low", "normal", "high", "urgent"] as const;
@@ -354,6 +358,7 @@ export default function JobDetailScreen() {
           />
         )}
         {activeTab === "variations" && userId && <JobVariationsTab jobId={job.id} currentUserId={userId} />}
+        {activeTab === "orders" && <JobSupplierOrdersTab jobId={job.id} costCentres={costCenters} />}
         {activeTab === "photos" && userId && (
           <JobPhotosTab
             jobId={job.id}

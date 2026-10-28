@@ -2477,12 +2477,46 @@ export type Database = {
         }
         Relationships: []
       }
+      vendor_order_items: {
+        Row: {
+          description: string
+          id: string
+          quantity: number
+          sort_order: number
+          vendor_order_id: string
+        }
+        Insert: {
+          description: string
+          id?: string
+          quantity?: number
+          sort_order?: number
+          vendor_order_id: string
+        }
+        Update: {
+          description?: string
+          id?: string
+          quantity?: number
+          sort_order?: number
+          vendor_order_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "vendor_order_items_vendor_order_id_fkey"
+            columns: ["vendor_order_id"]
+            isOneToOne: false
+            referencedRelation: "vendor_orders"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       vendor_orders: {
         Row: {
           amount: number
-          cost_center_id: string
+          cost_center_id: string | null
           created_at: string | null
+          delivery_address: string | null
           description: string | null
+          emailed_at: string | null
           entered_by: string | null
           gst_amount: number
           id: string
@@ -2490,14 +2524,19 @@ export type Database = {
           notes: string | null
           order_date: string | null
           order_number: string | null
+          po_number: string
+          required_by: string | null
           status: string
+          supplier_email: string | null
           vendor_name: string
         }
         Insert: {
           amount?: number
-          cost_center_id: string
+          cost_center_id?: string | null
           created_at?: string | null
+          delivery_address?: string | null
           description?: string | null
+          emailed_at?: string | null
           entered_by?: string | null
           gst_amount?: number
           id?: string
@@ -2505,14 +2544,19 @@ export type Database = {
           notes?: string | null
           order_date?: string | null
           order_number?: string | null
+          po_number?: string
+          required_by?: string | null
           status?: string
+          supplier_email?: string | null
           vendor_name: string
         }
         Update: {
           amount?: number
-          cost_center_id?: string
+          cost_center_id?: string | null
           created_at?: string | null
+          delivery_address?: string | null
           description?: string | null
+          emailed_at?: string | null
           entered_by?: string | null
           gst_amount?: number
           id?: string
@@ -2520,7 +2564,10 @@ export type Database = {
           notes?: string | null
           order_date?: string | null
           order_number?: string | null
+          po_number?: string
+          required_by?: string | null
           status?: string
+          supplier_email?: string | null
           vendor_name?: string
         }
         Relationships: [
