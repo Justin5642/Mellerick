@@ -369,6 +369,9 @@ export function JobDetailClient({ job, currentUserId, photos: initialPhotos, doc
             <TabsContent value="po" className="m-0 h-full">
               <JobPO
                 jobId={job.id}
+                jobNumber={job.job_number}
+                customerName={job.customers?.name ?? null}
+                site={job.sites}
                 pos={purchaseOrders}
                 totalHoursLogged={totalHoursLogged}
                 onUpdate={setPurchaseOrders}

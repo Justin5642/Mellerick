@@ -222,6 +222,14 @@ after `requireUser`; rules and email HTML in `lib/supplier-orders.ts`.
   page's vendor-order query embeds `vendor_order_items`, which errors on a
   database without it.
 
+**New cost-centre POs fill themselves in (web PO tab).** Justin, 29 Oct 2026:
+"Add Purchase Order" opens with the number `<job number>-1`, `-2`, … (next
+after the highest of that shape on the job, so a deleted one is never reused —
+`lib/job-po-number.ts`), the client's name in the Client field
+(`purchase_orders.client_reference`, otherwise unused — see 0083), and the job
+site's address, already pinned when the site has coordinates. All editable.
+Simpro-imported `SIMPRO-…` numbers are left alone.
+
 ---
 
 ## 2. The one rule that must never break

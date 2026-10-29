@@ -8,6 +8,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Plus, Trash2, Navigation, MapPin, Loader2, ShoppingCart, X } from "lucide-react";
+import { nextJobPoNumber } from "@/lib/job-po-number";
+import { siteOneLine, type JobSiteParts } from "@/lib/job-site";
 
 interface CostCenter {
   id: string;
@@ -78,6 +80,9 @@ interface TimeEntryForAgg {
 
 interface Props {
   jobId: string;
+  jobNumber: number;
+  customerName: string | null;
+  site: (JobSiteParts & { site_lat?: number | null; site_lng?: number | null }) | null;
   pos: PurchaseOrder[];
   totalHoursLogged: number;
   onUpdate: (pos: PurchaseOrder[]) => void;
@@ -107,7 +112,7 @@ function progressColor(pct: number) {
   return "bg-green-500";
 }
 
-export function JobPO({ jobId, pos: initialPos, totalHoursLogged, onUpdate, overtimeReason, overtimeCategory, expenses, timeEntries, vendorOrders: initialVendorOrders, onVendorOrdersUpdate }: Props) {
+export function JobPO({ jobId, jobNumber, customerName, site, pos: initialPos, totalHoursLogged, onUpdate, overtimeReason, overtimeCategory, expenses, timeEntries, vendorOrders: initialVendorOrders, onVendorOrdersUpdate }: Props) {
   const supabase = createClient();
   const [pos, setPos] = useState<PurchaseOrder[]>(initialPos);
   const [vendorOrders, setVendorOrders] = useState<VendorOrder[]>(initialVendorOrders);
@@ -165,6 +170,25 @@ export function JobPO({ jobId, pos: initialPos, totalHoursLogged, onUpdate, over
 
   function fieldErr(field: string) {
     return errors[field] ? "border-red-500 focus-visible:ring-red-500" : "";
+  }
+
+  // A new PO starts filled in from the job: the next number (4321-1, -2, ...),
+  // the client, and the site, already pinned when the site has coordinates.
+  // All three stay editable.
+  function openNewPO() {
+    const address = siteOneLine(site);
+    setNewPO({
+      po_number: nextJobPoNumber(jobNumber, pos.map(p => p.po_number)),
+      client_reference: customerName ?? "",
+      site_address: address,
+    });
+    setGeocoded(
+      address && site?.site_lat != null && site?.site_lng != null
+        ? { lat: Number(site.site_lat), lng: Number(site.site_lng), display: address }
+        : null
+    );
+    setErrors({});
+    setShowForm(true);
   }
 
   async function geocodeAddress() {
@@ -585,13 +609,13 @@ export function JobPO({ jobId, pos: initialPos, totalHoursLogged, onUpdate, over
                 <Input
                   value={newPO.po_number}
                   onChange={e => { setNewPO(p => ({ ...p, po_number: e.target.value })); setErrors({}); }}
-                  placeholder="e.g. PO-12345"
+                  placeholder={`e.g. ${jobNumber}-1`}
                   className={fieldErr("po_number")}
                 />
                 {errors.po_number && <p className="text-xs text-red-500">PO number is required</p>}
               </div>
               <div className="space-y-1.5">
-                <Label>Client Reference</Label>
+                <Label>Client</Label>
                 <Input
                   value={newPO.client_reference}
                   onChange={e => setNewPO(p => ({ ...p, client_reference: e.target.value }))}
@@ -731,7 +755,7 @@ export function JobPO({ jobId, pos: initialPos, totalHoursLogged, onUpdate, over
           </CardContent>
         </Card>
       ) : (
-        <Button variant="outline" className="gap-2" onClick={() => setShowForm(true)}>
+        <Button variant="outline" className="gap-2" onClick={openNewPO}>
           <Plus className="w-4 h-4" />Add Purchase Order
         </Button>
       )}
