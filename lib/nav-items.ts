@@ -27,6 +27,7 @@ export const NAV_ITEMS: NavItem[] = [
   { href: "/dashboard/customers", label: "Customers" },
   { href: "/dashboard/quotes", label: "Quotes" },
   { href: "/dashboard/invoices", label: "Invoices" },
+  { href: "/dashboard/supplier-pos", label: "Supplier POs" },
   { href: "/dashboard/pricing", label: "Pricing" },
   { href: "/dashboard/inventory", label: "Inventory" },
   { href: "/dashboard/fleet", label: "Fleet" },

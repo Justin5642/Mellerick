@@ -25,6 +25,7 @@ import {
   Menu,
   X,
   Droplets,
+  ShoppingCart,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -42,6 +43,7 @@ const ICONS: Record<string, typeof LayoutDashboard> = {
   "/dashboard/customers": Users,
   "/dashboard/quotes": FileText,
   "/dashboard/invoices": Receipt,
+  "/dashboard/supplier-pos": ShoppingCart,
   "/dashboard/pricing": DollarSign,
   "/dashboard/inventory": Package,
   "/dashboard/fleet": Truck,
