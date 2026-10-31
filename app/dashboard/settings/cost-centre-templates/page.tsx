@@ -11,26 +11,48 @@ import { ArrowLeft, Plus, Trash2 } from "lucide-react";
 import Link from "next/link";
 import { ListPageSkeleton } from "@/components/ui/loading-skeletons";
 
+// The company's cost centres (migration 0087, DRAFT, not applied yet: Below Ground Drainage,
+// Transport, Above Ground Plumbing, Civil, plus any added here) and the stages
+// under each. Stages are the cost_center_templates rows a job's Purchase Order
+// loads; their group_name is kept equal to the cost centre's name so older
+// readers (the phone's settings screen) still group them the same way.
+
+interface CostCentre {
+  id: string;
+  name: string;
+  sort_order: number;
+  is_active: boolean;
+}
+
 interface TemplateItem {
   id: string;
   group_name: string;
+  cost_centre_id: string | null;
   name: string;
   code: string | null;
   sort_order: number;
   is_active: boolean;
 }
 
-export default function CostCentreTemplatesPage() {
+export default function CostCentresPage() {
   const supabase = createClient();
+  const [centres, setCentres] = useState<CostCentre[]>([]);
   const [items, setItems] = useState<TemplateItem[]>([]);
   const [loading, setLoading] = useState(true);
-  const [showForm, setShowForm] = useState(false);
+  const [loadFailed, setLoadFailed] = useState(false);
+  const [stageFormFor, setStageFormFor] = useState<string | null>(null);
+  const [stageForm, setStageForm] = useState({ name: "", code: "" });
+  const [newCentre, setNewCentre] = useState("");
   const [saving, setSaving] = useState(false);
-  const [form, setForm] = useState({ group_name: "", name: "", code: "" });
 
   async function load() {
-    const { data } = await supabase.from("cost_center_templates").select("*").order("group_name").order("sort_order");
-    setItems((data as any) ?? []);
+    const [c, t] = await Promise.all([
+      supabase.from("cost_centres").select("id, name, sort_order, is_active").order("sort_order").order("name"),
+      supabase.from("cost_center_templates").select("id, group_name, cost_centre_id, name, code, sort_order, is_active").order("sort_order"),
+    ]);
+    setLoadFailed(!!(c.error || t.error));
+    setCentres((c.data as CostCentre[]) ?? []);
+    setItems((t.data as TemplateItem[]) ?? []);
     setLoading(false);
   }
 
@@ -39,30 +61,58 @@ export default function CostCentreTemplatesPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const groups = Array.from(new Set(items.map((i) => i.group_name)));
-
-  async function addItem(e: React.FormEvent) {
+  async function addCentre(e: React.FormEvent) {
     e.preventDefault();
-    if (!form.group_name.trim() || !form.name.trim()) {
-      toast.error("Group and stage name are required");
+    const name = newCentre.trim();
+    if (!name) return;
+    setSaving(true);
+    const nextSort = centres.length > 0 ? Math.max(...centres.map((c) => c.sort_order)) + 1 : 1;
+    const { error } = await supabase.from("cost_centres").insert({ name, sort_order: nextSort });
+    setSaving(false);
+    if (error) {
+      toast.error(error.code === "23505" ? `There's already a cost centre called ${name}.` : "Couldn't add the cost centre.");
+      return;
+    }
+    setNewCentre("");
+    toast.success("Cost centre added");
+    load();
+  }
+
+  async function toggleCentre(centre: CostCentre) {
+    const { error, count } = await supabase
+      .from("cost_centres")
+      .update({ is_active: !centre.is_active }, { count: "exact" })
+      .eq("id", centre.id);
+    if (error || count === 0) {
+      toast.error("Couldn't change this cost centre.");
+      return;
+    }
+    setCentres((prev) => prev.map((c) => (c.id === centre.id ? { ...c, is_active: !c.is_active } : c)));
+  }
+
+  async function addStage(e: React.FormEvent, centre: CostCentre) {
+    e.preventDefault();
+    if (!stageForm.name.trim()) {
+      toast.error("Stage name is required");
       return;
     }
     setSaving(true);
-    const groupItems = items.filter((i) => i.group_name === form.group_name.trim());
-    const nextSort = groupItems.length > 0 ? Math.max(...groupItems.map((i) => i.sort_order)) + 1 : 0;
+    const centreItems = items.filter((i) => i.cost_centre_id === centre.id);
+    const nextSort = centreItems.length > 0 ? Math.max(...centreItems.map((i) => i.sort_order)) + 1 : 0;
     const { error } = await supabase.from("cost_center_templates").insert({
-      group_name: form.group_name.trim(),
-      name: form.name.trim(),
-      code: form.code.trim() || null,
+      group_name: centre.name,
+      cost_centre_id: centre.id,
+      name: stageForm.name.trim(),
+      code: stageForm.code.trim() || null,
       sort_order: nextSort,
     });
     setSaving(false);
     if (error) {
-      toast.error(error.message);
+      toast.error("Couldn't add the stage.");
       return;
     }
     toast.success("Stage added");
-    setForm((f) => ({ group_name: f.group_name, name: "", code: "" })); // keep group selected to add multiple stages quickly
+    setStageForm({ name: "", code: "" }); // stay open to add several quickly
     load();
   }
 
@@ -70,25 +120,25 @@ export default function CostCentreTemplatesPage() {
   // DELETE matching zero rows, so a refusal is indistinguishable from a
   // success. Updating local state on that response shows the change until the
   // next load and then quietly loses it.
-  async function toggleActive(item: TemplateItem) {
+  async function toggleStage(item: TemplateItem) {
     const { error, count } = await supabase
       .from("cost_center_templates")
       .update({ is_active: !item.is_active }, { count: "exact" })
       .eq("id", item.id);
     if (error || count === 0) {
-      toast.error(error?.message ?? "Could not change this stage.");
+      toast.error("Couldn't change this stage.");
       return;
     }
     setItems((prev) => prev.map((x) => (x.id === item.id ? { ...x, is_active: !x.is_active } : x)));
   }
 
-  async function remove(id: string) {
+  async function removeStage(id: string) {
     const { error, count } = await supabase
       .from("cost_center_templates")
       .delete({ count: "exact" })
       .eq("id", id);
     if (error || count === 0) {
-      toast.error(error?.message ?? "Could not remove this stage.");
+      toast.error("Couldn't remove this stage.");
       return;
     }
     setItems((prev) => prev.filter((x) => x.id !== id));
@@ -96,6 +146,28 @@ export default function CostCentreTemplatesPage() {
   }
 
   if (loading) return <ListPageSkeleton />;
+
+  const unfiled = items.filter((i) => !i.cost_centre_id);
+
+  function stageRow(item: TemplateItem) {
+    return (
+      <div
+        key={item.id}
+        className={`flex items-center gap-4 rounded-lg border border-slate-100 px-3 py-2 ${!item.is_active ? "opacity-50" : ""}`}
+      >
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-medium text-slate-800">{item.name}</p>
+          {item.code && <p className="text-xs text-slate-400 font-mono">{item.code}</p>}
+        </div>
+        <button onClick={() => toggleStage(item)} className="text-xs text-slate-400 hover:text-slate-600 underline">
+          {item.is_active ? "Deactivate" : "Activate"}
+        </button>
+        <button onClick={() => removeStage(item.id)} className="text-slate-300 hover:text-red-400 transition-colors">
+          <Trash2 className="w-4 h-4" />
+        </button>
+      </div>
+    );
+  }
 
   return (
     <div className="p-6 max-w-2xl space-y-6">
@@ -106,97 +178,80 @@ export default function CostCentreTemplatesPage() {
           </Button>
         </Link>
         <div>
-          <h1 className="text-2xl font-bold text-slate-900">Cost Centre Templates</h1>
+          <h1 className="text-2xl font-bold text-slate-900">Cost Centres</h1>
           <p className="text-slate-500 text-sm mt-0.5">
-            Standard job stages grouped the same way as Simpro (Below Ground Drainage / Above Ground Plumbing /
-            Truck Cartage). When adding a Purchase Order, load one group to match a single Simpro-style PO, or
-            select several groups at once to merge them into one PO.
+            The company&apos;s cost centres and the stages under each. Every purchase order and cost on a job is tagged
+            to one of these, so costs can be added up per cost centre across all jobs.
           </p>
         </div>
       </div>
 
+      {loadFailed && (
+        <p className="text-sm text-red-600">Couldn&apos;t load the cost centres. Refresh the page to try again.</p>
+      )}
+
       <div className="space-y-4">
-        {groups.map((group) => {
-          const groupItems = items.filter((i) => i.group_name === group);
+        {centres.map((centre) => {
+          const centreItems = items.filter((i) => i.cost_centre_id === centre.id);
           return (
-            <Card key={group}>
+            <Card key={centre.id} className={!centre.is_active ? "opacity-60" : ""}>
               <CardHeader className="pb-3">
-                <CardTitle className="text-base">{group}</CardTitle>
+                <div className="flex items-center justify-between">
+                  <CardTitle className="text-base">{centre.name}</CardTitle>
+                  <button onClick={() => toggleCentre(centre)} className="text-xs text-slate-400 hover:text-slate-600 underline">
+                    {centre.is_active ? "Deactivate" : "Activate"}
+                  </button>
+                </div>
               </CardHeader>
               <CardContent className="space-y-2">
-                {groupItems.map((item) => (
-                  <div
-                    key={item.id}
-                    className={`flex items-center gap-4 rounded-lg border border-slate-100 px-3 py-2 ${!item.is_active ? "opacity-50" : ""}`}
-                  >
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium text-slate-800">{item.name}</p>
-                      {item.code && <p className="text-xs text-slate-400 font-mono">{item.code}</p>}
+                {centreItems.map(stageRow)}
+                {centreItems.length === 0 && <p className="text-xs text-slate-400">No stages yet.</p>}
+                {stageFormFor === centre.id ? (
+                  <form onSubmit={(e) => addStage(e, centre)} className="grid grid-cols-12 gap-2 pt-2 items-end">
+                    <div className="col-span-6 space-y-1">
+                      <Label className="text-xs">Stage name *</Label>
+                      <Input value={stageForm.name} onChange={(e) => setStageForm((f) => ({ ...f, name: e.target.value }))} placeholder="e.g. Sewer" className="h-8" autoFocus />
                     </div>
-                    <button onClick={() => toggleActive(item)} className="text-xs text-slate-400 hover:text-slate-600 underline">
-                      {item.is_active ? "Deactivate" : "Activate"}
-                    </button>
-                    <button onClick={() => remove(item.id)} className="text-slate-300 hover:text-red-400 transition-colors">
-                      <Trash2 className="w-4 h-4" />
-                    </button>
-                  </div>
-                ))}
+                    <div className="col-span-3 space-y-1">
+                      <Label className="text-xs">Code</Label>
+                      <Input value={stageForm.code} onChange={(e) => setStageForm((f) => ({ ...f, code: e.target.value }))} placeholder="Optional" className="h-8" />
+                    </div>
+                    <div className="col-span-3 flex gap-1 justify-end">
+                      <Button type="button" variant="ghost" size="sm" className="h-8" onClick={() => setStageFormFor(null)}>Done</Button>
+                      <Button type="submit" size="sm" className="h-8" disabled={saving}>Add</Button>
+                    </div>
+                  </form>
+                ) : (
+                  <Button variant="ghost" size="sm" className="gap-1 h-7 text-xs" onClick={() => { setStageFormFor(centre.id); setStageForm({ name: "", code: "" }); }}>
+                    <Plus className="w-3 h-3" /> Add stage
+                  </Button>
+                )}
               </CardContent>
             </Card>
           );
         })}
 
-        {groups.length === 0 && (
+        {unfiled.length > 0 && (
           <Card>
-            <CardContent className="py-10 text-center text-slate-400 text-sm">
-              No cost centre templates yet — add a stage below to get started.
-            </CardContent>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base text-slate-500">Not in a cost centre</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-2">{unfiled.map(stageRow)}</CardContent>
           </Card>
         )}
       </div>
 
-      {showForm ? (
-        <Card>
-          <CardHeader><CardTitle className="text-base">New Stage</CardTitle></CardHeader>
-          <CardContent>
-            <form onSubmit={addItem} className="space-y-4">
-              <div className="space-y-1.5">
-                <Label>Group *</Label>
-                <Input
-                  value={form.group_name}
-                  onChange={(e) => setForm((f) => ({ ...f, group_name: e.target.value }))}
-                  placeholder="e.g. Below Ground Drainage"
-                  list="cost-centre-groups"
-                />
-                <datalist id="cost-centre-groups">
-                  {groups.map((g) => (
-                    <option key={g} value={g} />
-                  ))}
-                </datalist>
-                <p className="text-xs text-slate-400">Type an existing group name to add to it, or a new one to create a new group.</p>
-              </div>
-              <div className="grid grid-cols-3 gap-3">
-                <div className="col-span-2 space-y-1.5">
-                  <Label>Stage Name *</Label>
-                  <Input value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} placeholder="e.g. Sewer" />
-                </div>
-                <div className="space-y-1.5">
-                  <Label>Code</Label>
-                  <Input value={form.code} onChange={(e) => setForm((f) => ({ ...f, code: e.target.value }))} placeholder="Optional" />
-                </div>
-              </div>
-              <div className="flex justify-end gap-2">
-                <Button type="button" variant="outline" onClick={() => setShowForm(false)}>Cancel</Button>
-                <Button type="submit" disabled={saving}>{saving ? "Saving..." : "Add Stage"}</Button>
-              </div>
-            </form>
-          </CardContent>
-        </Card>
-      ) : (
-        <Button variant="outline" className="gap-2" onClick={() => setShowForm(true)}>
-          <Plus className="w-4 h-4" /> Add Stage
-        </Button>
-      )}
+      <Card>
+        <CardHeader><CardTitle className="text-base">New Cost Centre</CardTitle></CardHeader>
+        <CardContent>
+          <form onSubmit={addCentre} className="flex gap-2">
+            <Input value={newCentre} onChange={(e) => setNewCentre(e.target.value)} placeholder="e.g. Hydraulics" />
+            <Button type="submit" disabled={saving || !newCentre.trim()} className="gap-1">
+              <Plus className="w-4 h-4" /> Add
+            </Button>
+          </form>
+        </CardContent>
+      </Card>
     </div>
   );
 }

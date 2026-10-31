@@ -248,6 +248,32 @@ Simpro-imported `SIMPRO-…` numbers are left alone.
 - **Margin flag 20%** (`min_margin_pct`, set by 0086; fallbacks in the job page
   and `mobile/lib/data/reads/jobCosting.ts` also 20).
 
+**Company cost centres and the supplier list (Stage 1; migration `0087`, DRAFT, not applied yet).**
+- `cost_centres`: the company list (Below Ground Drainage, Transport, Above
+  Ground Plumbing, Civil, plus any added). Settings → **Cost Centres**
+  (`app/dashboard/settings/cost-centre-templates`) shows each with its stages
+  (`cost_center_templates.cost_centre_id`; `group_name` is kept equal to the
+  cost centre's name for older readers). "Truck Cartage" became Transport.
+- `po_cost_centers.cost_centre_id` tags a job's budget lines. 0087 matched the
+  existing lines by keyword; unmatched ones stay null for the office. Lines
+  loaded from a stage template on the PO tab are tagged by themselves. The
+  phone's offline schema has the column (`mobile/lib/powersync/schema.ts`,
+  added by hand: the generator needs a linked CLI).
+- `suppliers`: copied from Xero contacts marked as suppliers
+  (`lib/xero-suppliers.ts`; Settings → **Suppliers** "Copy from Xero", and
+  nightly via `/api/xero/poll-suppliers` at 16:40 UTC). Xero owns name, account
+  number, phone and active; the ordering email is the office's once set, and
+  each supplier can have a usual cost centre (the quarry → Transport).
+  Office/admin only by RLS.
+- **Phone:** the Orders tab picks the supplier from the list (search by any
+  word), with "Other supplier" for one-offs. Picking a supplier with a usual
+  cost centre selects the job's matching line, unless the tech already chose
+  one. `vendor_orders.supplier_id` records the pick; the route stores the name
+  on file, not what the phone sent. The route returns `suppliers` and
+  `costCentreLines`; older phone builds read only `name`/`email`.
+- **Web PO tab:** the vendor-order form suggests suppliers from the list and
+  links a matching name by id.
+
 ---
 
 ## 2. The one rule that must never break

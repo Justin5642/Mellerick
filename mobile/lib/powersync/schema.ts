@@ -403,6 +403,7 @@ const po_cost_centers = new Table({
   sort_order: column.integer,
   created_at: column.text,
   simpro_cost_center_id: column.integer,
+  cost_centre_id: column.text,
 }, {
   indexes: {
     po: ['po_id'],

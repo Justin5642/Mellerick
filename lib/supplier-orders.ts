@@ -16,6 +16,8 @@ export interface SupplierOrderItemInput {
 export interface SupplierOrderInput {
   id: string;
   costCenterId: string;
+  /** Picked from the supplier list (0087, DRAFT, not applied yet); null = typed in ("Other"). */
+  supplierId: string | null;
   supplierName: string;
   supplierEmail: string | null;
   deliveryAddress: string | null;
@@ -43,6 +45,11 @@ export function parseSupplierOrder(body: unknown): { ok: true; order: SupplierOr
   // Generated on the phone, so a retried request after a dropped connection
   // is recognised instead of raising (and emailing) the same order twice.
   if (typeof b.id !== "string" || !UUID.test(b.id)) return { ok: false, error: "Order id is missing — update the app." };
+
+  const supplierId = b.supplierId == null || b.supplierId === "" ? null : b.supplierId;
+  if (supplierId !== null && (typeof supplierId !== "string" || !UUID.test(supplierId))) {
+    return { ok: false, error: "Pick the supplier again." };
+  }
 
   const supplierName = text(b.supplierName, 120);
   if (!supplierName) return { ok: false, error: "Enter the supplier's name." };
@@ -79,6 +86,7 @@ export function parseSupplierOrder(body: unknown): { ok: true; order: SupplierOr
     order: {
       id: b.id,
       costCenterId,
+      supplierId,
       supplierName,
       supplierEmail,
       deliveryAddress: text(b.deliveryAddress, 300),

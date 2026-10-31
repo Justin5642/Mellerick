@@ -304,6 +304,7 @@ export type Database = {
       cost_center_templates: {
         Row: {
           code: string | null
+          cost_centre_id: string | null
           created_at: string | null
           group_name: string
           id: string
@@ -313,6 +314,7 @@ export type Database = {
         }
         Insert: {
           code?: string | null
+          cost_centre_id?: string | null
           created_at?: string | null
           group_name: string
           id?: string
@@ -322,8 +324,36 @@ export type Database = {
         }
         Update: {
           code?: string | null
+          cost_centre_id?: string | null
           created_at?: string | null
           group_name?: string
+          id?: string
+          is_active?: boolean
+          name?: string
+          sort_order?: number
+        }
+        Relationships: []
+      }
+      cost_centres: {
+        Row: {
+          code: string | null
+          created_at: string | null
+          id: string
+          is_active: boolean
+          name: string
+          sort_order: number
+        }
+        Insert: {
+          code?: string | null
+          created_at?: string | null
+          id?: string
+          is_active?: boolean
+          name: string
+          sort_order?: number
+        }
+        Update: {
+          code?: string | null
+          created_at?: string | null
           id?: string
           is_active?: boolean
           name?: string
@@ -1791,6 +1821,7 @@ export type Database = {
           allocated_amount: number | null
           allocated_hours: number | null
           code: string | null
+          cost_centre_id: string | null
           created_at: string | null
           id: string
           name: string
@@ -1802,6 +1833,7 @@ export type Database = {
           allocated_amount?: number | null
           allocated_hours?: number | null
           code?: string | null
+          cost_centre_id?: string | null
           created_at?: string | null
           id?: string
           name: string
@@ -1813,6 +1845,7 @@ export type Database = {
           allocated_amount?: number | null
           allocated_hours?: number | null
           code?: string | null
+          cost_centre_id?: string | null
           created_at?: string | null
           id?: string
           name?: string
@@ -2296,6 +2329,53 @@ export type Database = {
           },
         ]
       }
+      suppliers: {
+        Row: {
+          account_number: string | null
+          created_at: string | null
+          default_cost_centre_id: string | null
+          email: string | null
+          id: string
+          is_active: boolean
+          name: string
+          phone: string | null
+          updated_at: string | null
+          xero_contact_id: string | null
+        }
+        Insert: {
+          account_number?: string | null
+          created_at?: string | null
+          default_cost_centre_id?: string | null
+          email?: string | null
+          id?: string
+          is_active?: boolean
+          name: string
+          phone?: string | null
+          updated_at?: string | null
+          xero_contact_id?: string | null
+        }
+        Update: {
+          account_number?: string | null
+          created_at?: string | null
+          default_cost_centre_id?: string | null
+          email?: string | null
+          id?: string
+          is_active?: boolean
+          name?: string
+          phone?: string | null
+          updated_at?: string | null
+          xero_contact_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "suppliers_default_cost_centre_id_fkey"
+            columns: ["default_cost_centre_id"]
+            isOneToOne: false
+            referencedRelation: "cost_centres"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       sync_horizon: {
         Row: {
           backflow_cutoff: string
@@ -2531,6 +2611,7 @@ export type Database = {
           required_by: string | null
           status: string
           supplier_email: string | null
+          supplier_id: string | null
           vendor_name: string
         }
         Insert: {
@@ -2551,6 +2632,7 @@ export type Database = {
           required_by?: string | null
           status?: string
           supplier_email?: string | null
+          supplier_id?: string | null
           vendor_name: string
         }
         Update: {
@@ -2571,6 +2653,7 @@ export type Database = {
           required_by?: string | null
           status?: string
           supplier_email?: string | null
+          supplier_id?: string | null
           vendor_name?: string
         }
         Relationships: [

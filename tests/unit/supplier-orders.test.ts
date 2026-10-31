@@ -54,6 +54,7 @@ import { parseSupplierOrder, supplierOrderEmail } from "@/lib/supplier-orders";
 const JOB = "11111111-1111-4111-8111-111111111111";
 const ORDER = "22222222-2222-4222-8222-222222222222";
 const CC = "33333333-3333-4333-8333-333333333333";
+const SUPPLIER = "44444444-4444-4444-8444-444444444444";
 const params = { params: Promise.resolve({ id: JOB }) };
 const DENIED = { ok: false as const, response: new Response("{}", { status: 401 }) };
 const tech = { ok: true as const, userId: "tech-1", role: null };
@@ -99,6 +100,7 @@ describe("parseSupplierOrder", () => {
     [{ ...body, costCenterId: "" }, /cost centre/],
     [{ ...body, costCenterId: "x" }, /cost centre/],
     [{ ...body, requiredBy: "next week" }, /date/],
+    [{ ...body, supplierId: "not-a-uuid" }, /supplier again/],
   ])("refuses %#", (input, message) => {
     const r = parseSupplierOrder(input);
     expect(r.ok).toBe(false);
@@ -157,6 +159,34 @@ describe("/api/jobs/[id]/supplier-orders", () => {
     expect(order).toMatchObject({ id: ORDER, job_id: JOB, entered_by: "tech-1", cost_center_id: CC });
     expect(order).not.toHaveProperty("amount");
     expect(sendEmail).toHaveBeenCalledWith(expect.objectContaining({ to: "orders@reece.example", cc: expect.any(String) }));
+  });
+
+  it("lists suppliers from the supplier table, without account numbers or phones", async () => {
+    requireUser.mockResolvedValue(tech);
+    tableData.suppliers = {
+      list: [{ id: SUPPLIER, name: "Boral Quarries", email: null, default_cost_centre_id: "transport", account_number: "ACCT-9", phone: "0399999999" }],
+    };
+    tableData.po_cost_centers = { one: { id: CC }, list: [{ id: CC, cost_centre_id: "transport" }] };
+    const res = await GET(new NextRequest("http://localhost/x"), params);
+    const json = await res.json();
+    expect(json.suppliers).toEqual([{ id: SUPPLIER, name: "Boral Quarries", email: null, defaultCostCentreId: "transport" }]);
+    expect(json.costCentreLines).toEqual([{ id: CC, costCentreId: "transport" }]);
+    expect(JSON.stringify(json)).not.toMatch(/ACCT-9|0399999999/);
+  });
+
+  it("a supplier picked from the list is recorded by id, under the name on file", async () => {
+    requireUser.mockResolvedValue(tech);
+    tableData.suppliers = { one: { name: "Reece Plumbing Epping" } };
+    await post({ ...body, supplierId: SUPPLIER, supplierName: "reece" });
+    const order = inserts.find((i) => i.table === "vendor_orders")!.rows as Record<string, unknown>;
+    expect(order).toMatchObject({ supplier_id: SUPPLIER, vendor_name: "Reece Plumbing Epping" });
+  });
+
+  it("refuses a supplier that is no longer on the list", async () => {
+    requireUser.mockResolvedValue(tech);
+    const res = await post({ ...body, supplierId: SUPPLIER });
+    expect(res.status).toBe(400);
+    expect(inserts).toHaveLength(0);
   });
 
   it("refuses a cost centre from another job, raising nothing and emailing no one", async () => {
