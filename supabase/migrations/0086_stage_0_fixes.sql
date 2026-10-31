@@ -1,7 +1,8 @@
 -- ============================================================================
 -- Stage 0 fixes from the 31 Oct 2026 workflow review.
 --
--- STATUS: DRAFT, not applied yet. Gate test supabase/tests/0086_stage_0_fixes_test.sql.
+-- STATUS: ✅ APPLIED IN PRODUCTION (2026-10-31, via SQL editor). Gate test
+-- supabase/tests/0086_stage_0_fixes_test.sql passed.
 --
 -- 1. "Project" job type. The web New Job form and job Overview offer
 --    'project', but the baseline check (0000) only allows service /

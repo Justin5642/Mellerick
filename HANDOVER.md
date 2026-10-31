@@ -230,7 +230,7 @@ after the highest of that shape on the job, so a deleted one is never reused —
 site's address, already pinned when the site has coordinates. All editable.
 Simpro-imported `SIMPRO-…` numbers are left alone.
 
-**Stage 0 fixes (31 Oct 2026 workflow review; migration `0086`, DRAFT, not applied yet).**
+**Stage 0 fixes (31 Oct 2026 workflow review; migration `0086` applied 2026-10-31).**
 - **No website geofence.** `components/job/job-time.tsx` no longer watches the
   browser's location. Its first reading away from site closed the viewer's open
   entry, so a tech clocked in on the phone who opened the job in the office was
