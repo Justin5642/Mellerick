@@ -14,8 +14,24 @@ import { clockInCostCentre, type BookingWindow } from "./bookings";
 // decision callable from both the foreground watcher and the background task,
 // so the two cannot drift apart.
 
-/** Mirrors the constant used by the web side (components/job/job-time.tsx). */
+/** Inside a site: within this distance of its coordinates. */
 export const GEOFENCE_RADIUS_METERS = 150;
+
+/**
+ * Left a site: beyond THIS distance, not the arrival radius (Stage 5, 31 Oct
+ * 2026). Phone fixes wander ±100 m under a house, in a trench beside a truck or
+ * on a weak signal; with one radius for both, a single wandering reading
+ * clocked a tech off and straight back on, splitting the day and inventing a
+ * travel leg. The gap between 150 and 250 is the buffer.
+ */
+export const GEOFENCE_EXIT_RADIUS_METERS = 250;
+
+/**
+ * A reading less accurate than this is ignored. Balanced accuracy is ~100 m
+ * at worst on a good day; a 500 m wifi-only or "Approximate location" fix
+ * against a 150 m fence decides nothing and was being used as-is.
+ */
+export const MAX_READING_ACCURACY_METERS = 75;
 
 export interface TrackedSite {
   jobId: string;
@@ -41,6 +57,8 @@ export function arrivalCostCentre(site: TrackedSite | undefined, atMs: number): 
 export interface Coords {
   latitude: number;
   longitude: number;
+  /** The fix's accuracy radius in metres, as expo-location reports it. Unknown = trusted. */
+  accuracy?: number | null;
 }
 
 export type GeofenceTransition = "arrival" | "departure" | "none";
@@ -93,6 +111,23 @@ export function nextGeofenceState(
     if (d < nearestDist) {
       nearestDist = d;
       nearestJobId = site.jobId;
+    }
+  }
+
+  // Too vague to decide anything: keep whatever we had.
+  if (typeof coords.accuracy === "number" && Number.isFinite(coords.accuracy) && coords.accuracy > MAX_READING_ACCURACY_METERS) {
+    return { insideJobId: currentInsideJobId, previousJobId: currentInsideJobId, transition: "none" };
+  }
+
+  // Still on the site we were on, by the wider exit radius — unless the reading
+  // is properly inside a DIFFERENT site and nearer to it (two jobs side by
+  // side on an estate), which is a move from one to the other.
+  const current = currentInsideJobId ? sites.find((s) => s.jobId === currentInsideJobId) : undefined;
+  if (current && Number.isFinite(current.lat) && Number.isFinite(current.lng)) {
+    const dCurrent = haversineDistance(coords.latitude, coords.longitude, current.lat, current.lng);
+    const movedNext = nearestJobId !== currentInsideJobId && nearestDist <= radiusMeters && nearestDist < dCurrent;
+    if (dCurrent <= GEOFENCE_EXIT_RADIUS_METERS && !movedNext) {
+      return { insideJobId: currentInsideJobId, previousJobId: currentInsideJobId, transition: "none" };
     }
   }
 

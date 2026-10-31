@@ -13,7 +13,7 @@ let mockAnswers: Record<string, unknown> = {};
 jest.mock("../../supabase", () => {
   function builder(table: string) {
     const b: Record<string, unknown> = {};
-    for (const m of ["select", "eq", "neq", "not", "or", "gte", "lt", "order", "limit"]) {
+    for (const m of ["select", "eq", "neq", "not", "or", "gte", "lt", "order", "limit", "is"]) {
       b[m] = (...args: unknown[]) => {
         mockCalls.push({ table, method: m, args });
         return b;
