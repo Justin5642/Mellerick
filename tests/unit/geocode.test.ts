@@ -17,6 +17,11 @@ describe("siteAddress", () => {
 });
 
 describe("isPreciseEnough — only building/address-level results drive a 150 m geofence", () => {
+  it("rejects a land-use zone (an estate's centroid), whatever its type", () => {
+    expect(isPreciseEnough({ class: "landuse", type: "residential" })).toBe(false);
+    expect(isPreciseEnough({ class: "landuse", type: "commercial" })).toBe(false);
+  });
+
   it("accepts a house or building", () => {
     expect(isPreciseEnough({ class: "place", type: "house", addresstype: "place" })).toBe(true);
     expect(isPreciseEnough({ class: "building", type: "yes" })).toBe(true);

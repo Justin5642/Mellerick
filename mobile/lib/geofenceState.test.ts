@@ -90,3 +90,39 @@ describe("nextGeofenceState", () => {
     expect(nextGeofenceState(justOutside, [SITE_A], null).insideJobId).toBeNull();
   });
 });
+
+// Stage 5 (31 Oct 2026): a wandering fix must not clock a tech off and back on.
+describe("nextGeofenceState — accuracy and the exit buffer", () => {
+  // 0.0018 deg latitude ≈ 200 m: outside the 150 m arrival radius, inside the 250 m exit radius.
+  const TWO_HUNDRED_M = { latitude: -37.8136 - 0.0018, longitude: 144.9631 };
+  const THREE_HUNDRED_M = { latitude: -37.8136 - 0.0027, longitude: 144.9631 };
+
+  it("stays on site for a reading in the buffer", () => {
+    expect(nextGeofenceState(TWO_HUNDRED_M, [SITE_A], "job-a").transition).toBe("none");
+  });
+
+  it("does not arrive from the buffer", () => {
+    expect(nextGeofenceState(TWO_HUNDRED_M, [SITE_A], null).transition).toBe("none");
+  });
+
+  it("leaves once clearly past the exit radius", () => {
+    expect(nextGeofenceState(THREE_HUNDRED_M, [SITE_A], "job-a").transition).toBe("departure");
+  });
+
+  it("ignores a vague reading, whichever way it points", () => {
+    expect(nextGeofenceState({ ...FAR_FROM_ALL, accuracy: 500 }, [SITE_A], "job-a").transition).toBe("none");
+    expect(nextGeofenceState({ ...AT_SITE_A, accuracy: 500 }, [SITE_A], null).transition).toBe("none");
+  });
+
+  it("uses an accurate reading normally", () => {
+    expect(nextGeofenceState({ ...AT_SITE_A, accuracy: 10 }, [SITE_A], null).transition).toBe("arrival");
+  });
+
+  it("moves to a neighbouring site when properly inside it and nearer", () => {
+    // Site C ~180 m from A; standing on C is inside A's exit buffer but C is nearer.
+    const SITE_C: TrackedSite = { jobId: "job-c", lat: -37.8136 - 0.0016, lng: 144.9631, scheduledCostCenterId: null };
+    const atC = { latitude: SITE_C.lat, longitude: SITE_C.lng };
+    const s = nextGeofenceState(atC, [SITE_A, SITE_C], "job-a");
+    expect(s).toEqual({ insideJobId: "job-c", previousJobId: "job-a", transition: "arrival" });
+  });
+});

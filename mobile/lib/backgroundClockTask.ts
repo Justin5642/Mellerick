@@ -1,3 +1,4 @@
+import { AppState } from "react-native";
 import { supabase } from "./supabase";
 import { plausibleAutoClockHours, MAX_PLAUSIBLE_TRAVEL_HOURS, MAX_PLAUSIBLE_WORK_HOURS } from "./autoClockHours";
 import {
@@ -44,7 +45,9 @@ import { reportSyncError } from "./monitoring";
 
 /** A replayed insert whose client id already exists landed the first time. */
 function isReplayOfSameRow(error: { code?: string; message: string }): boolean {
-  return error.code === "23505" && /_pkey"/.test(error.message);
+  // The primary key: our own earlier attempt landed. The one-open-entry index
+  // (migration 0090): the foreground watcher clocked in first. Either way the tech is clocked in, which is all this wanted.
+  return error.code === "23505" && /(_pkey|time_entries_one_open_work_entry)"/.test(error.message);
 }
 
 async function insertWorkClockIn(
@@ -222,6 +225,12 @@ async function handleDelivery({ data, error }: LocationTaskBody): Promise<void> 
 
   const locations: LocationReading[] = data?.locations ?? [];
   if (locations.length === 0) return;
+
+  // While the app is on screen the foreground watcher records arrivals and
+  // departures; this task got the same readings and wrote them a second time
+  // (Stage 5, 31 Oct 2026 — the duplicate open entries and doubled travel
+  // legs). It steps aside until the app is backgrounded.
+  if (AppState.currentState === "active") return;
 
   try {
     await applyBackgroundBatch(locations, supabaseClockDeps);
