@@ -13,6 +13,7 @@ import { JobOverviewTab } from "../../components/job/overview";
 import { JobNotesTab } from "../../components/job/notes";
 import { JobPhotosTab } from "../../components/job/photos";
 import { JobTimeTab } from "../../components/job/time";
+import { JobTodayCard } from "../../components/job/today-card";
 import { JobSignatureTab } from "../../components/job/signature";
 import { JobDocumentsTab } from "../../components/job/documents";
 import { JobVariationsTab } from "../../components/job/variations";
@@ -347,6 +348,17 @@ export default function JobDetailScreen() {
           <View style={styles.viewOnlyBanner}>
             <Text style={styles.viewOnlyText}>View only — you're not assigned to this job.</Text>
           </View>
+        )}
+        {/* The day's steps first (Stage 6): what's done and what's next. Not in view-only. */}
+        {activeTab === "overview" && !viewOnly && userId && (
+          <JobTodayCard
+            jobId={job.id}
+            currentUserId={userId}
+            signedOff={job.status === "completed"}
+            scheduledCostCenterId={job.scheduled_cost_center_id}
+            myBookings={bookings ? bookings.filter((b) => b.staff_id === userId) : null}
+            onGo={setTab}
+          />
         )}
         {activeTab === "overview" && <JobOverviewTab job={job} currentUserId={userId} readOnly={viewOnly} />}
         {activeTab === "time" && userId && (
