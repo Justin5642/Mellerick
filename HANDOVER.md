@@ -292,8 +292,12 @@ that cost centre's budget. Cartage comes out of the drainage PO.
   "Add cost centre to this PO" splits what's left.
 - **Quote → job** (web) creates `<job number>-1` with the quote's subtotal (ex
   GST), unsplit, and opens the PO tab. Mobile quote conversion does not yet.
-- Not yet: picking which builder PO an invoice or progress claim is for. The
-  claim's contract value still defaults to the sum of the job's PO values.
+- **Which builder PO an invoice is for** (1 Nov 2026): on New Invoice, a job
+  with more than one priced PO shows a picker; it sets the invoice's
+  `customer_po` to that PO's number, and a progress claim then defaults its
+  contract value to that PO's value and its previous claims to earlier claims
+  on the same PO number (`ProgressClaimFields builderPo`). A job with one PO
+  behaves as before. Edit Invoice is unchanged.
 
 **New tables need explicit grants (migration `0088` applied 2026-10-31).**
 After 0087 the cost centre drop-down came up empty: the new tables had RLS but

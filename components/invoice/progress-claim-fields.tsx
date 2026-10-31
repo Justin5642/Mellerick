@@ -59,6 +59,7 @@ export function ProgressClaimFields({
   jobId,
   currentInvoiceId,
   subtotal,
+  builderPo,
 }: {
   value: ClaimDraft;
   onChange: (d: ClaimDraft) => void;
@@ -67,14 +68,21 @@ export function ProgressClaimFields({
   currentInvoiceId?: string;
   /** This claim, ex GST. */
   subtotal: number;
+  /**
+   * The builder PO this claim is against (Stage 2 left this open: a job holds
+   * a PO per stage). When set, the contract value is that PO's value and the
+   * previous claims are the ones on that PO number — not the whole job's.
+   */
+  builderPo?: { poNumber: string; value: number } | null;
 }) {
   // Prefill once per tick-on (and again if the job changes while ticked), but
   // never over figures already on the invoice.
-  const prefilledFor = useRef<string | null>(value.on && value.contract ? `${jobId}` : null);
+  const prefillKey = `${jobId}:${builderPo?.poNumber ?? ""}`;
+  const prefilledFor = useRef<string | null>(value.on && value.contract ? prefillKey : null);
 
   useEffect(() => {
-    if (!value.on || !jobId || prefilledFor.current === jobId) return;
-    prefilledFor.current = jobId;
+    if (!value.on || !jobId || prefilledFor.current === prefillKey) return;
+    prefilledFor.current = prefillKey;
     let cancelled = false;
     (async () => {
       const supabase = createClient();
@@ -86,12 +94,15 @@ export function ProgressClaimFields({
         .order("claim_number", { ascending: false })
         .limit(1);
       if (currentInvoiceId) latestQ = latestQ.neq("id", currentInvoiceId);
+      if (builderPo) latestQ = latestQ.eq("customer_po", builderPo.poNumber);
       const [{ data: latest }, { data: pos }] = await Promise.all([
         latestQ,
         supabase.from("purchase_orders").select("total_value").eq("job_id", jobId),
       ]);
       if (cancelled) return;
-      const simproValue = (pos ?? []).reduce((s, p) => s + Number(p.total_value ?? 0), 0) || null;
+      const simproValue = builderPo
+        ? builderPo.value || null
+        : (pos ?? []).reduce((s, p) => s + Number(p.total_value ?? 0), 0) || null;
       const d = nextClaimDefaults(latest?.[0] ?? null, simproValue);
       onChange({
         on: true,
@@ -104,7 +115,7 @@ export function ProgressClaimFields({
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [value.on, jobId]);
+  }, [value.on, jobId, builderPo?.poNumber]);
 
   const contract = parseFloat(value.contract);
   const preview =
