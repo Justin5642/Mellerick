@@ -5,6 +5,7 @@ import { colors } from "../../lib/theme";
 import { getOpenWorkEntryOnJob } from "../../lib/data/reads/clock";
 import { useTimeClock } from "../../lib/data/hooks/useTimeClock";
 import { onClockChanged } from "../../lib/clockEvents";
+import { currentFix } from "../../lib/clockFix";
 import { clockInCostCentre, type BookingWindow } from "../../lib/bookings";
 import { loadSupplierOrders } from "../../lib/supplierOrders";
 import { todaySteps, type StepKey, type TodayStep } from "../../lib/todaySteps";
@@ -76,7 +77,12 @@ export function JobTodayCard({
     try {
       // The same default cost centre as the Time tab: the booking covering now,
       // then the nearest one today, then the job's.
-      await timeClock.clockIn({ jobId, staffId: currentUserId, costCenterId: clockInCostCentre(myBookings, Date.now(), scheduledCostCenterId) });
+      await timeClock.clockIn({
+        jobId,
+        staffId: currentUserId,
+        costCenterId: clockInCostCentre(myBookings, Date.now(), scheduledCostCenterId),
+        fix: await currentFix(3000),
+      });
       setClockedInSince(new Date().toISOString());
     } catch (e: any) {
       Alert.alert("Clock on failed", e?.message ?? "Try again from the Time tab.");

@@ -2,6 +2,7 @@ import { useState } from "react";
 import { View, Text, StyleSheet, TextInput, TouchableOpacity, Alert, Modal, FlatList } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { supabase } from "../../lib/supabase";
+import { setSiteLocationHere } from "../../lib/siteLocation";
 import { useJobEdit } from "../../lib/data/hooks/useJobEdit";
 import { colors } from "../../lib/theme";
 import { openExternalUrl, openNavigation } from "../../lib/open-external-url";
@@ -110,13 +111,48 @@ interface Job {
 
 // readOnly: view-only (not assigned — see JobNotesTab). Hides the edit card
 // and the hours scoreboard, which records an overtime reason.
-export function JobOverviewTab({ job, currentUserId, readOnly = false }: { job: Job; currentUserId: string | null; readOnly?: boolean }) {
+export function JobOverviewTab({
+  job,
+  currentUserId,
+  readOnly = false,
+  onChanged,
+}: {
+  job: Job;
+  currentUserId: string | null;
+  readOnly?: boolean;
+  /** Reload the job after something here changed it (the site pin). */
+  onChanged?: () => void;
+}) {
   const [status, setStatus] = useState(job.status);
   const [priority, setPriority] = useState(job.priority);
   const [description, setDescription] = useState(job.description ?? "");
   const [notes, setNotes] = useState(job.notes ?? "");
   const [saving, setSaving] = useState(false);
+  const [pinning, setPinning] = useState(false);
   const jobEdit = useJobEdit();
+
+  // "Set site location here": pin the site where the tech is standing, so the
+  // auto-clock fence is right (clock extras). Moving an existing pin asks first.
+  function pinSiteHere() {
+    const hasPin = job.sites?.site_lat != null && job.sites?.site_lng != null;
+    const go = async () => {
+      setPinning(true);
+      try {
+        await setSiteLocationHere(job.id);
+        Alert.alert("Site location set", "Auto clock will use where you're standing for this site.");
+        onChanged?.();
+      } catch (e: any) {
+        Alert.alert("Site location not set", e?.message ?? "Try again.");
+      } finally {
+        setPinning(false);
+      }
+    };
+    if (!hasPin) return void go();
+    Alert.alert("Move the site pin?", "Only do this if you're standing on the site and the current pin is wrong.", [
+      { text: "Cancel", style: "cancel" },
+      { text: "Move it here", onPress: () => void go() },
+    ]);
+  }
 
   async function save() {
     if (!jobEdit.ready) {
@@ -243,9 +279,15 @@ export function JobOverviewTab({ job, currentUserId, readOnly = false }: { job: 
                 geocoder fills them from the address when it can (0082). */}
             {(job.sites.site_lat == null || job.sites.site_lng == null) && (
               <Text style={styles.noLocation}>
-                No map location for this address — auto clock-in won&apos;t work here. Clock in by hand, and let the
-                office know.
+                No map location for this address, so auto clock-in won&apos;t work here. If you&apos;re on site, set it below.
               </Text>
+            )}
+            {!readOnly && (
+              <TouchableOpacity onPress={pinSiteHere} disabled={pinning} style={styles.pinButton} accessibilityLabel="Set site location here">
+                <Text style={styles.pinButtonText}>
+                  {pinning ? "Getting your location…" : job.sites.site_lat == null ? "📍 Set site location here" : "📍 Pin wrong? Set it here"}
+                </Text>
+              </TouchableOpacity>
             )}
           </View>
         </>
@@ -289,6 +331,8 @@ export function JobOverviewTab({ job, currentUserId, readOnly = false }: { job: 
 }
 
 const styles = StyleSheet.create({
+  pinButton: { marginTop: 10, paddingVertical: 12, borderRadius: 8, alignItems: "center", backgroundColor: colors.slate100 },
+  pinButtonText: { fontSize: 15, fontWeight: "700", color: colors.slate700 },
   container: { padding: 16 },
   sectionTitle: { fontSize: 13, fontWeight: "700", color: colors.slate500, textTransform: "uppercase", marginBottom: 8, marginTop: 12 },
   card: { backgroundColor: colors.card, borderRadius: 12, padding: 14, borderWidth: 1, borderColor: colors.border },

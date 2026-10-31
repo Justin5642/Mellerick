@@ -6,6 +6,7 @@ import { listMyJobSites } from "./data/reads/jobs";
 import { withMyBookings } from "./data/reads/bookings";
 import { getOpenWorkEntry } from "./data/reads/clock";
 import { onClockChanged } from "./clockEvents";
+import { fixFromCoords } from "./clockFix";
 import {
   GATE_RECHECK_MS,
   decideTracking,
@@ -62,7 +63,23 @@ import { LocationDisclosure } from "../components/LocationDisclosure";
 // rather than left as a second, non-durable path someone might revive.
 
 /** `enabled`: the gate currently has location tracking running. */
-const LocationTrackingContext = createContext<{ enabled: boolean }>({ enabled: false });
+/**
+ * What the auto-clock is doing, for the phone's status line (clock extras,
+ * 31 Oct 2026). Before this a tech could not see that auto-clock was running,
+ * that "Always" was declined, or that Approximate location made it useless.
+ */
+export interface TrackingStatus {
+  enabled: boolean;
+  /** Why it isn't running, when it isn't. */
+  reason: "declined" | "no-sites" | "off-hours" | "not-technician" | "signed-out" | "failed" | null;
+  /** Tracking runs only while the app is open ("Always" not allowed). */
+  backgroundOff: boolean;
+  /** iOS Approximate / Android coarse-only: km-level fixes, useless against a 150 m fence. */
+  approximate: boolean;
+}
+
+const IDLE_STATUS: TrackingStatus = { enabled: false, reason: null, backgroundOff: false, approximate: false };
+const LocationTrackingContext = createContext<TrackingStatus>(IDLE_STATUS);
 
 /**
  * App-wide geofence watcher for auto clock in/out + travel-time logging.
@@ -127,6 +144,7 @@ export function LocationTrackingProvider({ children }: { children: ReactNode }) 
   const layerRef = useRef(layer);
   layerRef.current = layer;
   const [tracking, setTracking] = useState(false);
+  const [status, setStatus] = useState<Omit<TrackingStatus, "enabled">>({ reason: null, backgroundOff: false, approximate: false });
   // The Play Store prominent disclosure (lib/locationDisclosure.ts). The gate
   // awaits the technician's choice before anything may request a location
   // permission; the modal resolves it.
@@ -335,6 +353,7 @@ export function LocationTrackingProvider({ children }: { children: ReactNode }) 
       if (!decision.track) {
         stopForeground();
         setTracking(false);
+        setStatus({ reason: decision.reason as TrackingStatus["reason"], backgroundOff: false, approximate: false });
         await stopBackgroundClock().catch((e) => console.warn("[geofence] could not stop background tracking:", e));
         // Off hours the wake regions are what bring tracking back for the next
         // arrival, even if the app is never opened (trackingGate.ts). For any
@@ -352,6 +371,7 @@ export function LocationTrackingProvider({ children }: { children: ReactNode }) 
         if (disposed) return;
         stopForeground();
         setTracking(false);
+        setStatus({ reason: "declined", backgroundOff: false, approximate: false });
         await stopBackgroundClock().catch((e) => console.warn("[geofence] could not stop background tracking:", e));
         await stopSiteWake().catch((e) => console.warn("[geofence] could not update wake regions:", e));
         return;
@@ -367,6 +387,7 @@ export function LocationTrackingProvider({ children }: { children: ReactNode }) 
       try {
         if (!(await startForeground(settings))) {
           setTracking(false);
+          setStatus({ reason: "failed", backgroundOff: false, approximate: false });
           return;
         }
         setTracking(true);
@@ -399,6 +420,13 @@ export function LocationTrackingProvider({ children }: { children: ReactNode }) 
         console.warn("[geofence] background clock failed to start:", e);
         return false;
       });
+      if (!disposed) {
+        const approximate = await Location.getForegroundPermissionsAsync()
+          // Android says so; iOS doesn't report it, so handlePosition infers it from km-level fixes.
+          .then((p) => p.android?.accuracy === "coarse")
+          .catch(() => false);
+        setStatus({ reason: null, backgroundOff: !started, approximate });
+      }
       if (!started && !backgroundOffLoggedRef.current) {
         backgroundOffLoggedRef.current = true;
         console.warn(
@@ -457,6 +485,10 @@ export function LocationTrackingProvider({ children }: { children: ReactNode }) 
   }, [userId]);
 
   async function handlePosition(position: Location.LocationObject, staffId: string) {
+    // iOS "Approximate Location" gives fixes kilometres wide; say so on screen.
+    if (typeof position.coords.accuracy === "number" && position.coords.accuracy > 1000) {
+      setStatus((s) => (s.approximate ? s : { ...s, approximate: true }));
+    }
     if (busyRef.current) return;
     const sites = sitesRef.current;
     if (sites.length === 0) return;
@@ -497,7 +529,7 @@ export function LocationTrackingProvider({ children }: { children: ReactNode }) 
       if (insideJobId && previousJobId) {
         const left = await applyGeofenceTransition(
           { kind: "departure", jobId: previousJobId, staffId, pendingDeparture: departureRef.current, costCenterId: null },
-          makeTransitionDeps(layer)
+          makeTransitionDeps(layer, position.coords)
         );
         if (!left.handled) {
           insideJobIdRef.current = previousCursor;
@@ -515,7 +547,7 @@ export function LocationTrackingProvider({ children }: { children: ReactNode }) 
           pendingDeparture: departureRef.current,
           costCenterId: arrivalCostCentre(targetSite, position.timestamp),
         },
-        makeTransitionDeps(layer)
+        makeTransitionDeps(layer, position.coords)
       );
 
       // THE CURSOR IS ONLY CONSUMED ON A DURABLE CONCLUSION.
@@ -579,13 +611,16 @@ export function LocationTrackingProvider({ children }: { children: ReactNode }) 
     }
   }
 
-  function makeTransitionDeps(layer: DataLayer): GeofenceTransitionDeps {
+  function makeTransitionDeps(layer: DataLayer, coords?: Location.LocationObjectCoords): GeofenceTransitionDeps {
+    // The reading that triggered the transition is where it happened (0092,
+    // DRAFT, not applied yet), so the office can see why the clock fired.
+    const fix = fixFromCoords(coords);
     return {
       findOpenEntry,
       // autoClocked: the geofence started this, not the technician. The
       // background task records the same flag, so both paths now agree.
-      clockIn: (input) => layer.timeEntries.clockIn({ ...input, autoClocked: true }),
-      clockOut: (input) => layer.timeEntries.clockOut(input),
+      clockIn: (input) => layer.timeEntries.clockIn({ ...input, autoClocked: true, fix }),
+      clockOut: (input) => layer.timeEntries.clockOut({ ...input, fix }),
       addTravelLeg: async (input) => {
         await layer.timeEntries.addManual({
           jobId: input.jobId,
@@ -605,7 +640,7 @@ export function LocationTrackingProvider({ children }: { children: ReactNode }) 
 
 
   return (
-    <LocationTrackingContext.Provider value={{ enabled: tracking }}>
+    <LocationTrackingContext.Provider value={{ enabled: tracking, ...status }}>
       {children}
       <LocationDisclosure
         visible={disclosureOpen}

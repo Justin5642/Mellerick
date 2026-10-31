@@ -2,6 +2,7 @@ import { useCallback } from "react";
 import { useDataLayer } from "../DataProvider";
 import { useFlush } from "./useFlush";
 import type { ManualEntryInput, EditEntryInput } from "../repositories/timeEntries";
+import type { ClockFix } from "../../clockFix";
 
 // Write-side hook for time tracking. Every action enqueues a durable outbox
 // operation (works offline) and then flushes — draining immediately when online,
@@ -10,8 +11,8 @@ import type { ManualEntryInput, EditEntryInput } from "../repositories/timeEntri
 // (online) or keep its optimistic local state (offline).
 export interface TimeClock {
   ready: boolean;
-  clockIn(input: { jobId: string; staffId: string; costCenterId?: string | null }): Promise<{ id: string; synced: boolean }>;
-  clockOut(input: { entryId: string; clockInIso: string }): Promise<{ synced: boolean }>;
+  clockIn(input: { jobId: string; staffId: string; costCenterId?: string | null; fix?: ClockFix | null }): Promise<{ id: string; synced: boolean }>;
+  clockOut(input: { entryId: string; clockInIso: string; fix?: ClockFix | null }): Promise<{ synced: boolean }>;
   addManual(input: ManualEntryInput): Promise<{ id: string; synced: boolean }>;
   editEntry(input: EditEntryInput): Promise<{ synced: boolean }>;
   assignCostCenter(entryId: string, costCenterId: string | null): Promise<{ synced: boolean }>;
