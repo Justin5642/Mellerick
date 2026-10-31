@@ -9,6 +9,7 @@ import type { JobCostCentre } from "../../lib/data/reads/jobBilling";
 import {
   costCentreLineForSupplier,
   loadSupplierOrders,
+  markSupplierOrderDelivered,
   matchSuppliers,
   raiseSupplierOrder,
   supplierOrderProblem,
@@ -53,6 +54,7 @@ export function JobSupplierOrdersTab({ jobId, costCentres }: Props) {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [formOpen, setFormOpen] = useState(false);
   const [sending, setSending] = useState(false);
+  const [delivering, setDelivering] = useState<string | null>(null);
 
   // One id per draft, kept across retries: a retry after a dropped connection
   // gets back the PO already raised, never a second email to the supplier.
@@ -173,6 +175,20 @@ export function JobSupplierOrdersTab({ jobId, costCentres }: Props) {
       Alert.alert("PO not raised", e?.message ?? "Try again.");
     } finally {
       setSending(false);
+    }
+  }
+
+  // One tap when the materials turn up (31 Oct 2026: "Yes, tap only").
+  async function markDelivered(orderId: string) {
+    if (delivering) return;
+    setDelivering(orderId);
+    try {
+      await markSupplierOrderDelivered(jobId, orderId);
+      await load();
+    } catch (e: any) {
+      Alert.alert("Not marked delivered", e?.message ?? "Try again.");
+    } finally {
+      setDelivering(null);
     }
   }
 
@@ -419,6 +435,18 @@ export function JobSupplierOrdersTab({ jobId, costCentres }: Props) {
             <Text style={[styles.meta, { color: o.emailedAt ? colors.green600 : colors.slate500 }]}>
               {o.emailedAt ? `Emailed to ${o.supplierEmail}` : o.supplierEmail ? "Email didn't send — phone it through" : "Not emailed"}
             </Text>
+            {o.deliveredAt ? (
+              <Text style={[styles.meta, { color: colors.green600 }]}>Delivered {new Date(o.deliveredAt).toLocaleDateString("en-AU")}</Text>
+            ) : o.status === "ordered" ? (
+              <TouchableOpacity
+                style={styles.deliveredBtn}
+                onPress={() => markDelivered(o.id)}
+                disabled={delivering === o.id}
+                accessibilityLabel={`Mark ${o.poNumber} delivered`}
+              >
+                <Text style={styles.deliveredText}>{delivering === o.id ? "Saving…" : "✓ Delivered"}</Text>
+              </TouchableOpacity>
+            ) : null}
           </View>
         );
       })}
@@ -440,6 +468,8 @@ const styles = StyleSheet.create({
   form: { backgroundColor: colors.card, borderRadius: 12, borderWidth: 1, borderColor: colors.border, padding: 14 },
   formLabel: { fontSize: 13, fontWeight: "600", color: colors.slate700, marginBottom: 6, marginTop: 12 },
   hint: { fontSize: 11, color: colors.slate500, marginTop: 4 },
+  deliveredBtn: { marginTop: 8, paddingVertical: 12, borderRadius: 8, alignItems: "center", backgroundColor: colors.green100 },
+  deliveredText: { fontSize: 16, fontWeight: "700", color: colors.green600 },
   linkText: { color: colors.blue600, fontSize: 13, paddingVertical: 6 },
   supplierRow: { paddingVertical: 14, paddingHorizontal: 12, borderBottomWidth: 1, borderBottomColor: colors.border },
   supplierRowText: { fontSize: 16, fontWeight: "600", color: colors.slate700 },
