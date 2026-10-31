@@ -541,6 +541,12 @@ const time_entries = new Table({
   edited_at: column.text,
   rate_override: column.text,
   sync_office: column.integer,
+  clock_in_lat: column.real,
+  clock_in_lng: column.real,
+  clock_in_accuracy: column.real,
+  clock_out_lat: column.real,
+  clock_out_lng: column.real,
+  clock_out_accuracy: column.real,
 }, {
   indexes: {
     job_staff: ['job_id', 'staff_id'],

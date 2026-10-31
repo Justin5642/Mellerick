@@ -3,6 +3,7 @@ import { useDataLayer } from "../DataProvider";
 import { useFlush } from "./useFlush";
 import { persistOutboxAttachmentFromBase64 } from "../attachments";
 import { getOpenWorkEntryOnJob } from "../reads/clock";
+import { currentFix } from "../../clockFix";
 
 // Write-side hook for customer sign-off / job completion. Persists the signature
 // PNG (base64 from the canvas) to durable storage, enqueues the compound
@@ -42,7 +43,7 @@ export function useSignoff(): Signoff {
     try {
       const open = await getOpenWorkEntryOnJob(input.uploadedBy, input.jobId);
       if (open) {
-        await layer.timeEntries.clockOut({ entryId: open.id, clockInIso: open.clockInIso });
+        await layer.timeEntries.clockOut({ entryId: open.id, clockInIso: open.clockInIso, fix: await currentFix(3000) });
         clockedOut = true;
       }
     } catch (e) {

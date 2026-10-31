@@ -14,6 +14,7 @@ import { JobNotesTab } from "../../components/job/notes";
 import { JobPhotosTab } from "../../components/job/photos";
 import { JobTimeTab } from "../../components/job/time";
 import { JobTodayCard } from "../../components/job/today-card";
+import { AutoClockStatus } from "../../components/job/auto-clock-status";
 import { JobPlantUsage } from "../../components/job/plant-usage";
 import { JobSignatureTab } from "../../components/job/signature";
 import { JobDocumentsTab } from "../../components/job/documents";
@@ -361,7 +362,8 @@ export default function JobDetailScreen() {
             onGo={setTab}
           />
         )}
-        {activeTab === "overview" && <JobOverviewTab job={job} currentUserId={userId} readOnly={viewOnly} />}
+        {activeTab === "overview" && <JobOverviewTab job={job} currentUserId={userId} readOnly={viewOnly} onChanged={loadJob} />}
+        {activeTab === "time" && userId && <AutoClockStatus />}
         {activeTab === "time" && userId && (
           <JobTimeTab
             jobId={job.id}

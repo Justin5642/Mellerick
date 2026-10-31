@@ -386,7 +386,7 @@ export function JobDetailClient({ job, currentUserId, photos: initialPhotos, doc
             </TabsContent>
             )}
             <TabsContent value="time" className="m-0 h-full">
-              <JobTime jobId={job.id} currentUserId={currentUserId} timeEntries={timeEntries} costCenters={costCenters} isAdmin={isAdmin} staff={staff} onUpdate={setTimeEntries} scheduledCostCenterId={job.scheduled_cost_center_id} />
+              <JobTime jobId={job.id} currentUserId={currentUserId} timeEntries={timeEntries} site={job.sites} costCenters={costCenters} isAdmin={isAdmin} staff={staff} onUpdate={setTimeEntries} scheduledCostCenterId={job.scheduled_cost_center_id} />
             </TabsContent>
             <TabsContent value="variations" className="m-0 h-full">
               <JobVariations jobId={job.id} variations={variations} variationTypes={variationTypes} canPrice={canPriceVariations} currentUserId={currentUserId} onUpdate={setVariations} highlightVariationId={highlightVariationId} />

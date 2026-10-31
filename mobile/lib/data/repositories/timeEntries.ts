@@ -3,6 +3,7 @@ import type { IdGen } from "../ids";
 import type { WriteOp, WriteOperation, SideEffectOperation } from "../outbox/types";
 import { systemTime, type TimeSource } from "../time";
 import { notifyClockChanged } from "../../clockEvents";
+import { fixColumns, type ClockFix } from "../../clockFix";
 
 // Re-exported for back-compat with existing importers of these from here.
 export { systemTime, type TimeSource };
@@ -60,7 +61,7 @@ export class TimeEntriesRepository {
    * backgroundClockTask.ts:18-22 warns "would show up only as a disputed
    * payslip".
    */
-  async clockIn(input: { jobId: string; staffId: string; autoClocked?: boolean; costCenterId?: string | null }): Promise<string> {
+  async clockIn(input: { jobId: string; staffId: string; autoClocked?: boolean; costCenterId?: string | null; fix?: ClockFix | null }): Promise<string> {
     const rowId = this.ids.newId();
     const opId = await this.enqueueWrite(rowId, "insert", {
       job_id: input.jobId,
@@ -68,17 +69,20 @@ export class TimeEntriesRepository {
       clock_in: this.time.nowIso(),
       auto_clocked: input.autoClocked ?? false,
       cost_center_id: input.costCenterId ?? null,
+      // Where the phone was (0092) — only when known.
+      ...fixColumns("clock_in", input.fix),
     });
     await this.enqueueBillingSync(rowId, opId);
     return rowId;
   }
 
   /** Clock out an open entry now, computing hours from its clock-in. */
-  async clockOut(input: { entryId: string; clockInIso: string }): Promise<void> {
+  async clockOut(input: { entryId: string; clockInIso: string; fix?: ClockFix | null }): Promise<void> {
     const clockOutIso = this.time.nowIso();
     const opId = await this.enqueueWrite(input.entryId, "update", {
       clock_out: clockOutIso,
       hours: hoursBetween(input.clockInIso, clockOutIso),
+      ...fixColumns("clock_out", input.fix),
     });
     await this.enqueueBillingSync(input.entryId, opId);
   }
