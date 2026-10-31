@@ -2,7 +2,8 @@
 -- One open work entry per person per job (Stage 5 of the 31 Oct 2026
 -- workflow review: fix the automatic clock).
 --
--- STATUS: DRAFT, not applied yet. Gate test supabase/tests/0090_one_open_work_entry_per_job_test.sql.
+-- STATUS: ✅ APPLIED IN PRODUCTION (2026-10-31, via SQL editor). Gate test
+-- supabase/tests/0090_one_open_work_entry_per_job_test.sql passed.
 --
 -- WHY: the phone ran two location trackers at once while the app was open
 -- (foreground watcher + background task). Both saw the same arrival; the

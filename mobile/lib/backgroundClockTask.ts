@@ -46,8 +46,7 @@ import { reportSyncError } from "./monitoring";
 /** A replayed insert whose client id already exists landed the first time. */
 function isReplayOfSameRow(error: { code?: string; message: string }): boolean {
   // The primary key: our own earlier attempt landed. The one-open-entry index
-  // (migration 0090, DRAFT, not applied yet): the foreground watcher clocked in
-  // first. Either way the tech is clocked in, which is all this wanted.
+  // (migration 0090): the foreground watcher clocked in first. Either way the tech is clocked in, which is all this wanted.
   return error.code === "23505" && /(_pkey|time_entries_one_open_work_entry)"/.test(error.message);
 }
 

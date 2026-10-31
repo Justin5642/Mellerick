@@ -1233,7 +1233,7 @@ paused task, which would lose the departure and the next arrival. Rationale in
 evening shift (clocked in past 19:00 keeps tracking; clocking out stops it and
 the notification goes) and a morning first arrival with the app unopened.
 
-**Auto-clock fixes (Stage 5, 31 Oct 2026; migration `0090`, DRAFT, not applied yet).**
+**Auto-clock fixes (Stage 5, 31 Oct 2026; migration `0090` applied 2026-10-31).**
 Justin chose to keep automatic clocking and fix it. What changed:
 - **One engine at a time.** The background task ignores deliveries while the
   app is active (`backgroundClockTask.ts`); the foreground watcher has them.
