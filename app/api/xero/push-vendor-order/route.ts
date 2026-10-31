@@ -9,7 +9,7 @@ import { reportError } from "@/lib/monitoring";
 export const maxDuration = 30;
 
 // The supplier's invoice, entered once against its PO on the job's PO tab,
-// becomes a Xero bill (migration 0089, DRAFT, not applied yet; Justin, 31 Oct 2026: bills are typed
+// becomes a Xero bill (migration 0089; Justin, 31 Oct 2026: bills are typed
 // into Xero by hand today — type them here instead, once). Same shape as
 // /api/xero/push-expense: a manual button, an AUTHORISED ACCPAY bill coded to
 // the default expense account, and a link written back that is the only thing

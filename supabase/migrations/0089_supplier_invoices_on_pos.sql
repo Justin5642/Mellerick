@@ -2,7 +2,8 @@
 -- Supplier invoices entered against their PO, and deliveries confirmed on site
 -- (Stage 4 of the 31 Oct 2026 workflow review).
 --
--- STATUS: DRAFT, not applied yet. Gate test supabase/tests/0089_supplier_invoices_on_pos_test.sql.
+-- STATUS: ✅ APPLIED IN PRODUCTION (2026-10-31, via SQL editor). Gate test
+-- supabase/tests/0089_supplier_invoices_on_pos_test.sql passed.
 --
 -- WHY (Justin, 31 Oct 2026): "When a supplier invoice arrives quoting the PO
 -- number, it should be easy to attach it to the right job and cost line."

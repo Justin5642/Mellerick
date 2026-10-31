@@ -322,7 +322,7 @@ i.e. already under the minimum even if nothing more is spent.
 - Known overlap until Stage 4: one supplier invoice entered both as an expense
   and as a PO's amount counts twice.
 
-**Supplier invoices against POs, deliveries (Stage 4; migration `0089`, DRAFT, not applied yet).**
+**Supplier invoices against POs, deliveries (Stage 4; migration `0089` applied 2026-10-31).**
 Justin: supplier bills are typed into Xero by hand. Now the office types each
 one once, against its PO, and the app makes the Xero bill.
 - **Supplier POs** page (`app/dashboard/supplier-pos`, office): type the PO
@@ -341,7 +341,7 @@ one once, against its PO, and the app makes the Xero bill.
   `requireUser`, writes only status/delivered_at/delivered_by).
 - The Expenses form now says to enter a PO's invoice on the PO, so it isn't
   counted twice in the ledger.
-- Apply 0089 BEFORE merging: the supplier-orders route selects `delivered_at`.
+- 0089 was applied before this merged (the supplier-orders route selects `delivered_at`).
 
 ---
 

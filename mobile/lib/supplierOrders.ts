@@ -24,7 +24,7 @@ export interface SupplierOrder {
   notes: string | null;
   createdAt: string;
   emailedAt: string | null;
-  /** Set when the crew tapped Delivered (0089, DRAFT, not applied yet). Absent from older servers. */
+  /** Set when the crew tapped Delivered (0089). Absent from older servers. */
   deliveredAt?: string | null;
   raisedBy: string | null;
   items: { description: string; quantity: number }[];

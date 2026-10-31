@@ -133,7 +133,7 @@ export function JobPO({ jobId, jobNumber, customerName, site, pos: initialPos, t
   const [errors, setErrors] = useState<Record<string, boolean>>({});
   const [stages, setStages] = useState<StageOption[]>([]);
   const [addLinesFor, setAddLinesFor] = useState<string | null>(null);
-  // The supplier's invoice for one order, entered against its PO (0089, DRAFT, not applied yet).
+  // The supplier's invoice for one order, entered against its PO (0089).
   const [invoiceFor, setInvoiceFor] = useState<string | null>(null);
   const [invoiceForm, setInvoiceForm] = useState({ number: "", date: "", amount: "" });
   const [invoiceFile, setInvoiceFile] = useState<File | null>(null);

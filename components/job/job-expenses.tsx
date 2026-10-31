@@ -276,7 +276,7 @@ export function JobExpenses({ jobId, jobNumber, expenses: initialExpenses, onUpd
         <Card>
           <CardHeader>
             <CardTitle className="text-base">New Expense</CardTitle>
-            {/* Stage 4 (0089, DRAFT, not applied yet): a supplier invoice for a PO is entered on the PO itself. Entered here too, it counts twice. */}
+            {/* Stage 4 (0089): a supplier invoice for a PO is entered on the PO itself. Entered here too, it counts twice. */}
             <p className="text-xs text-amber-700 mt-1">
               Invoice for one of this job&apos;s supplier POs? Enter it on the PO (Purchase Orders tab) instead, so it isn&apos;t counted twice.
             </p>
