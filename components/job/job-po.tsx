@@ -123,6 +123,7 @@ export function JobPO({ jobId, jobNumber, customerName, site, pos: initialPos, t
   const [poValue, setPoValue] = useState("");
   const [poLines, setPoLines] = useState<BuilderPoLineInput[]>([blankLine()]);
   const [costCentreOptions, setCostCentreOptions] = useState<CostCentreOption[]>([]);
+  const [costCentresFailed, setCostCentresFailed] = useState(false);
   const [geocoded, setGeocoded] = useState<{ lat: number; lng: number; display: string } | null>(null);
   const [errors, setErrors] = useState<Record<string, boolean>>({});
   const [stages, setStages] = useState<StageOption[]>([]);
@@ -142,7 +143,11 @@ export function JobPO({ jobId, jobNumber, customerName, site, pos: initialPos, t
       .select("id, name")
       .eq("is_active", true)
       .order("sort_order")
-      .then(({ data }) => setCostCentreOptions((data as CostCentreOption[]) ?? []));
+      .then(({ data, error }) => {
+        if (error) console.error("cost centres load failed:", error);
+        setCostCentresFailed(!!error);
+        setCostCentreOptions((data as CostCentreOption[]) ?? []);
+      });
     supabase
       .from("suppliers")
       .select("id, name")
@@ -669,6 +674,8 @@ export function JobPO({ jobId, jobNumber, customerName, site, pos: initialPos, t
                     onChange={setAddLines}
                     costCentres={costCentreOptions}
                     stages={stages}
+                    loadError={costCentresFailed}
+                    onCostCentreAdded={(c) => setCostCentreOptions((prev) => [...prev, c])}
                   />
                   <div className="flex justify-end gap-2">
                     <Button type="button" variant="ghost" size="sm" className="h-7 text-xs" onClick={() => { setAddLinesFor(null); setAddLines([blankLine()]); }}>Cancel</Button>
@@ -762,7 +769,15 @@ export function JobPO({ jobId, jobNumber, customerName, site, pos: initialPos, t
                 Each cost centre&apos;s share is its budget. A drainage PO usually splits between Below Ground Drainage and
                 Transport. You can save now and split the rest later.
               </p>
-              <BuilderPoLines value={poValue} lines={poLines} onChange={setPoLines} costCentres={costCentreOptions} stages={stages} />
+              <BuilderPoLines
+                value={poValue}
+                lines={poLines}
+                onChange={setPoLines}
+                costCentres={costCentreOptions}
+                stages={stages}
+                loadError={costCentresFailed}
+                onCostCentreAdded={(c) => setCostCentreOptions((prev) => [...prev, c])}
+              />
             </div>
 
             <div className="flex justify-end gap-2 pt-2">

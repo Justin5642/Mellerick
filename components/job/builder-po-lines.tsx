@@ -1,5 +1,8 @@
 "use client";
 
+import { useState } from "react";
+import { createClient } from "@/lib/supabase/client";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Plus, Trash2 } from "lucide-react";
@@ -16,6 +19,11 @@ export interface StageOption {
 
 export const blankLine = (): BuilderPoLineInput => ({ costCentreId: "", stage: "", amount: "", hours: "" });
 
+// Picked from the cost centre list to add a new company cost centre on the
+// spot (Justin, 31 Oct 2026: "a button to add a different one if it is a
+// different type of job"). It joins the company list in Settings too.
+const NEW_CENTRE = "__new__";
+
 const money = (n: number) => `$${n.toLocaleString("en-AU", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
 export function BuilderPoLines({
@@ -24,6 +32,8 @@ export function BuilderPoLines({
   onChange,
   costCentres,
   stages,
+  loadError,
+  onCostCentreAdded,
 }: {
   /** The PO value as typed, for the running "unallocated" figure. */
   value: string;
@@ -31,9 +41,45 @@ export function BuilderPoLines({
   onChange: (lines: BuilderPoLineInput[]) => void;
   costCentres: CostCentreOption[];
   stages: StageOption[];
+  /** The cost centre list couldn't be read — say so instead of an empty list. */
+  loadError?: boolean;
+  /** A cost centre added here, for the parent to add to its list. */
+  onCostCentreAdded?: (c: CostCentreOption) => void;
 }) {
+  const [addingFor, setAddingFor] = useState<number | null>(null);
+  const [newName, setNewName] = useState("");
+  const [savingNew, setSavingNew] = useState(false);
+
   const set = (i: number, patch: Partial<BuilderPoLineInput>) =>
     onChange(lines.map((l, j) => (j === i ? { ...l, ...patch } : l)));
+
+  async function addCentre(i: number) {
+    const name = newName.trim();
+    if (!name) return;
+    const existing = costCentres.find((c) => c.name.toLowerCase() === name.toLowerCase());
+    if (existing) {
+      set(i, { costCentreId: existing.id, stage: "" });
+      setAddingFor(null);
+      setNewName("");
+      return;
+    }
+    setSavingNew(true);
+    const { data, error } = await createClient()
+      .from("cost_centres")
+      .insert({ name, sort_order: 100 })
+      .select("id, name")
+      .single();
+    setSavingNew(false);
+    if (error || !data) {
+      toast.error(error?.code === "23505" ? `There's already a cost centre called ${name} (it may be switched off in Settings).` : "Couldn't add the cost centre.");
+      return;
+    }
+    onCostCentreAdded?.(data as CostCentreOption);
+    set(i, { costCentreId: data.id, stage: "" });
+    setAddingFor(null);
+    setNewName("");
+    toast.success(`${name} added to your cost centres`);
+  }
 
   const num = (s: string) => Number(s.replace(/[$,\s]/g, "")) || 0;
   const total = num(value);
@@ -42,6 +88,9 @@ export function BuilderPoLines({
 
   return (
     <div className="space-y-2">
+      {loadError && (
+        <p className="text-xs text-red-600">Couldn&apos;t load your cost centres. Refresh the page to try again.</p>
+      )}
       <div className="grid grid-cols-12 gap-2 text-xs text-slate-400 font-medium px-1">
         <span className="col-span-4">Cost centre *</span>
         <span className="col-span-3">Stage</span>
@@ -52,16 +101,39 @@ export function BuilderPoLines({
         const stageOptions = stages.filter((s) => s.cost_centre_id === l.costCentreId);
         return (
           <div key={i} className="grid grid-cols-12 gap-2 items-center">
-            <select
-              value={l.costCentreId}
-              onChange={(e) => set(i, { costCentreId: e.target.value, stage: "" })}
-              className={`col-span-4 h-8 rounded-md border bg-white px-2 text-sm ${l.costCentreId ? "border-slate-200" : "border-orange-300"}`}
-            >
-              <option value="">Pick…</option>
-              {costCentres.map((c) => (
-                <option key={c.id} value={c.id}>{c.name}</option>
-              ))}
-            </select>
+            {addingFor === i ? (
+              <div className="col-span-4 flex gap-1">
+                <Input
+                  value={newName}
+                  onChange={(e) => setNewName(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") { e.preventDefault(); addCentre(i); }
+                    if (e.key === "Escape") { setAddingFor(null); setNewName(""); }
+                  }}
+                  placeholder="New cost centre"
+                  className="h-8 text-sm"
+                  autoFocus
+                />
+                <Button type="button" size="sm" className="h-8 px-2 text-xs" onClick={() => addCentre(i)} disabled={savingNew || !newName.trim()}>
+                  Add
+                </Button>
+              </div>
+            ) : (
+              <select
+                value={l.costCentreId}
+                onChange={(e) => {
+                  if (e.target.value === NEW_CENTRE) { setAddingFor(i); setNewName(""); return; }
+                  set(i, { costCentreId: e.target.value, stage: "" });
+                }}
+                className={`col-span-4 h-8 rounded-md border bg-white px-2 text-sm ${l.costCentreId ? "border-slate-200" : "border-orange-300"}`}
+              >
+                <option value="">Pick…</option>
+                {costCentres.map((c) => (
+                  <option key={c.id} value={c.id}>{c.name}</option>
+                ))}
+                <option value={NEW_CENTRE}>+ New cost centre…</option>
+              </select>
+            )}
             <select
               value={l.stage}
               onChange={(e) => set(i, { stage: e.target.value })}

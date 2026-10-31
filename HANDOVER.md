@@ -295,6 +295,17 @@ that cost centre's budget. Cartage comes out of the drainage PO.
 - Not yet: picking which builder PO an invoice or progress claim is for. The
   claim's contract value still defaults to the sum of the job's PO values.
 
+**New tables need explicit grants (migration `0088` applied 2026-10-31).**
+After 0087 the cost centre drop-down came up empty: the new tables had RLS but
+the `authenticated` role had no table privileges, so reads returned nothing
+without an error. 0088 grants them (RLS still decides rows) and the list
+filled at once. **Any future migration that creates a table must `grant` it
+to `authenticated` (and `service_role`) explicitly** — this project does not
+expose new tables by itself. The cost centre picker
+(`components/job/builder-po-lines.tsx`) now says when the list can't load,
+and has "+ New cost centre…" to add one on the spot (it joins the company
+list in Settings).
+
 ---
 
 ## 2. The one rule that must never break

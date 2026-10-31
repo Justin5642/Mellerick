@@ -58,15 +58,18 @@ export default function NewJobPage() {
   const [poLines, setPoLines] = useState<BuilderPoLineInput[]>([blankLine()]);
   const [costCentres, setCostCentres] = useState<CostCentreOption[]>([]);
   const [stages, setStages] = useState<StageOption[]>([]);
+  const [costCentresFailed, setCostCentresFailed] = useState(false);
 
   useEffect(() => {
     async function load() {
-      const [{ data: s }, { data: c }, { data: t }] = await Promise.all([
+      const [{ data: s }, { data: c, error: cError }, { data: t }] = await Promise.all([
         supabase.from("profiles").select("id, full_name, role").eq("is_active", true).order("full_name"),
         supabase.from("cost_centres").select("id, name").eq("is_active", true).order("sort_order"),
         supabase.from("cost_center_templates").select("name, cost_centre_id").eq("is_active", true).order("sort_order"),
       ]);
       setStaff(s ?? []);
+      if (cError) console.error("cost centres load failed:", cError);
+      setCostCentresFailed(!!cError);
       setCostCentres((c as CostCentreOption[]) ?? []);
       setStages((t as StageOption[]) ?? []);
     }
@@ -280,7 +283,15 @@ export default function NewJobPage() {
                 <p className="text-xs text-slate-400">
                   Each cost centre&apos;s share is its budget, e.g. Below Ground Drainage and Transport for a drainage PO.
                 </p>
-                <BuilderPoLines value={poValue} lines={poLines} onChange={setPoLines} costCentres={costCentres} stages={stages} />
+                <BuilderPoLines
+                  value={poValue}
+                  lines={poLines}
+                  onChange={setPoLines}
+                  costCentres={costCentres}
+                  stages={stages}
+                  loadError={costCentresFailed}
+                  onCostCentreAdded={(c) => setCostCentres((prev) => [...prev, c])}
+                />
               </div>
             )}
             <div className="space-y-2">
