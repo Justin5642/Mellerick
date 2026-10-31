@@ -274,6 +274,27 @@ Simpro-imported `SIMPRO-…` numbers are left alone.
 - **Web PO tab:** the vendor-order form suggests suppliers from the list and
   links a matching name by id.
 
+**Builder POs split by cost centre (Stage 2, 31 Oct 2026; no migration).**
+Justin: the builder issues a PO per stage (or we work to a quote total), one
+job per lot; each PO's value is split across cost centres and each share is
+that cost centre's budget. Cartage comes out of the drainage PO.
+- Same tables: `purchase_orders.po_number` is the builder's number (or
+  `<job number>-1` for quoted work), `total_value` is the value **as entered**
+  — no longer the sum of the lines — and each split line is a
+  `po_cost_centers` row with `cost_centre_id`. Lines that don't add up show as
+  "not split yet" / "over" on the PO card. Rules in `lib/builder-po.ts`; the
+  shared form is `components/job/builder-po-lines.tsx`.
+- **New Job** takes the builder's PO number (`jobs.customer_po`, as before),
+  a PO value and the split, and creates the PO with the job (not atomic: a PO
+  failure sends the office to the job's PO tab).
+- **PO tab**: new POs take a value and a split; each PO card edits its value,
+  tags any line with a cost centre (Simpro lines 0087 couldn't place), and
+  "Add cost centre to this PO" splits what's left.
+- **Quote → job** (web) creates `<job number>-1` with the quote's subtotal (ex
+  GST), unsplit, and opens the PO tab. Mobile quote conversion does not yet.
+- Not yet: picking which builder PO an invoice or progress claim is for. The
+  claim's contract value still defaults to the sum of the job's PO values.
+
 ---
 
 ## 2. The one rule that must never break

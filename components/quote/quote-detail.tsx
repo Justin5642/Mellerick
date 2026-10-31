@@ -138,9 +138,29 @@ export function QuoteDetail({ quote }: Props) {
       return;
     }
 
-    toast.success("Job created from quote");
+    // The quote total becomes the job's budget (Justin, 31 Oct 2026: "Quote
+    // total, split by cost centre"). It lands on the PO tab unsplit; the
+    // office splits it across cost centres there, which also lets the crew
+    // raise supplier orders against it.
+    const quoteValue = Number(quote.subtotal) || 0;
+    if (quoteValue > 0) {
+      const { error: poError } = await supabase.from("purchase_orders").insert({
+        job_id: job.id,
+        po_number: `${job.job_number ?? "JOB"}-1`,
+        total_value: quoteValue,
+        total_hours: 0,
+      });
+      if (poError) {
+        toast.error("Job created, but the quote total didn't carry across as its budget. Add it on the job's PO tab.");
+        setConverted(true);
+        router.push(`/dashboard/jobs/${job.id}?tab=po`);
+        return;
+      }
+    }
+
+    toast.success(quoteValue > 0 ? "Job created from quote — split the quote total across cost centres" : "Job created from quote");
     setConverted(true);
-    router.push(`/dashboard/jobs/${job.id}`);
+    router.push(quoteValue > 0 ? `/dashboard/jobs/${job.id}?tab=po` : `/dashboard/jobs/${job.id}`);
   }
 
   return (

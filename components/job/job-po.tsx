@@ -10,22 +10,16 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Plus, Trash2, Navigation, MapPin, Loader2, ShoppingCart, X } from "lucide-react";
 import { nextJobPoNumber } from "@/lib/job-po-number";
 import { siteOneLine, type JobSiteParts } from "@/lib/job-site";
+import { planBuilderPo, planBuilderPoLines, type BuilderPoLineInput, type CostCentreOption } from "@/lib/builder-po";
+import { BuilderPoLines, blankLine, type StageOption } from "@/components/job/builder-po-lines";
 
 interface CostCenter {
   id: string;
   name: string;
+  cost_centre_id?: string | null;
   code: string | null;
   allocated_amount: number;
   allocated_hours: number;
-}
-
-interface CostCenterTemplate {
-  id: string;
-  group_name: string;
-  cost_centre_id?: string | null;
-  name: string;
-  code: string | null;
-  sort_order: number;
 }
 
 interface PurchaseOrder {
@@ -124,25 +118,31 @@ export function JobPO({ jobId, jobNumber, customerName, site, pos: initialPos, t
   const [geocoding, setGeocoding] = useState(false);
   const [saving, setSaving] = useState(false);
   const [newPO, setNewPO] = useState({ po_number: "", client_reference: "", site_address: "" });
-  // cost_centre_id: the company cost centre (0087), set when a row is loaded
-  // from a stage template so the job's budget line is tagged by itself.
-  const [costCenters, setCostCenters] = useState<{ name: string; code: string; allocated_amount: string; allocated_hours: string; cost_centre_id?: string | null }[]>(
-    [{ name: "", code: "", allocated_amount: "", allocated_hours: "" }]
-  );
+  // The builder's PO value and its split across company cost centres
+  // (lib/builder-po.ts; Justin, 31 Oct 2026).
+  const [poValue, setPoValue] = useState("");
+  const [poLines, setPoLines] = useState<BuilderPoLineInput[]>([blankLine()]);
+  const [costCentreOptions, setCostCentreOptions] = useState<CostCentreOption[]>([]);
   const [geocoded, setGeocoded] = useState<{ lat: number; lng: number; display: string } | null>(null);
   const [errors, setErrors] = useState<Record<string, boolean>>({});
-  const [templates, setTemplates] = useState<CostCenterTemplate[]>([]);
-  const [selectedGroups, setSelectedGroups] = useState<Set<string>>(new Set());
+  const [stages, setStages] = useState<StageOption[]>([]);
+  const [addLinesFor, setAddLinesFor] = useState<string | null>(null);
+  const [addLines, setAddLines] = useState<BuilderPoLineInput[]>([blankLine()]);
   const [suppliers, setSuppliers] = useState<{ id: string; name: string }[]>([]);
 
   useEffect(() => {
     supabase
       .from("cost_center_templates")
-      .select("*")
+      .select("name, cost_centre_id")
       .eq("is_active", true)
-      .order("group_name")
       .order("sort_order")
-      .then(({ data }) => setTemplates((data as any) ?? []));
+      .then(({ data }) => setStages((data as StageOption[]) ?? []));
+    supabase
+      .from("cost_centres")
+      .select("id, name")
+      .eq("is_active", true)
+      .order("sort_order")
+      .then(({ data }) => setCostCentreOptions((data as CostCentreOption[]) ?? []));
     supabase
       .from("suppliers")
       .select("id, name")
@@ -151,34 +151,6 @@ export function JobPO({ jobId, jobNumber, customerName, site, pos: initialPos, t
       .then(({ data }) => setSuppliers((data as { id: string; name: string }[]) ?? []));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-  // Distinct groups in first-seen order (e.g. Below Ground Drainage, Above
-  // Ground Plumbing, Truck Cartage) -- picking just one group recreates
-  // Simpro's habit of a separate PO per group; picking several at once
-  // merges their stages into a single PO.
-  const templateGroups = Array.from(new Set(templates.map((t) => t.group_name)));
-
-  function toggleTemplateGroup(group: string) {
-    setSelectedGroups((prev) => {
-      const next = new Set(prev);
-      if (next.has(group)) next.delete(group);
-      else next.add(group);
-      return next;
-    });
-  }
-
-  function loadTemplateGroups() {
-    const rows = templates
-      .filter((t) => selectedGroups.has(t.group_name))
-      .map((t) => ({ name: t.name, code: t.code ?? "", allocated_amount: "", allocated_hours: "", cost_centre_id: t.cost_centre_id ?? null }));
-    if (rows.length === 0) return;
-    setCostCenters((prev) => {
-      const isBlankOnly = prev.length === 1 && !prev[0].name.trim() && !prev[0].code.trim() && !prev[0].allocated_amount && !prev[0].allocated_hours;
-      return isBlankOnly ? rows : [...prev, ...rows];
-    });
-    setSelectedGroups(new Set());
-    toast.success(`Loaded ${rows.length} stage${rows.length === 1 ? "" : "s"}`);
-  }
 
   function fieldErr(field: string) {
     return errors[field] ? "border-red-500 focus-visible:ring-red-500" : "";
@@ -199,6 +171,8 @@ export function JobPO({ jobId, jobNumber, customerName, site, pos: initialPos, t
         ? { lat: Number(site.site_lat), lng: Number(site.site_lng), display: address }
         : null
     );
+    setPoValue("");
+    setPoLines([blankLine()]);
     setErrors({});
     setShowForm(true);
   }
@@ -223,36 +197,26 @@ export function JobPO({ jobId, jobNumber, customerName, site, pos: initialPos, t
 
   async function savePO() {
     if (!newPO.po_number.trim()) { setErrors({ po_number: true }); return; }
+    const planned = planBuilderPo({ value: poValue, lines: poLines }, costCentreOptions);
+    if (!planned.ok) { toast.error(planned.error); return; }
     setSaving(true);
-
-    const totalValue = costCenters.reduce((sum, c) => sum + (parseFloat(c.allocated_amount) || 0), 0);
-    const totalHours = costCenters.reduce((sum, c) => sum + (parseFloat(c.allocated_hours) || 0), 0);
 
     const { data: po, error } = await supabase.from("purchase_orders").insert({
       job_id: jobId,
-      po_number: newPO.po_number,
+      po_number: newPO.po_number.trim(),
       client_reference: newPO.client_reference || null,
       site_address: newPO.site_address || null,
       site_lat: geocoded?.lat ?? null,
       site_lng: geocoded?.lng ?? null,
-      total_value: totalValue,
-      total_hours: totalHours,
+      total_value: planned.po.value,
+      total_hours: planned.po.totalHours,
     }).select().single();
 
     if (error || !po) { toast.error("Failed to save PO"); setSaving(false); return; }
 
-    const validCenters = costCenters.filter(c => c.name.trim());
-    if (validCenters.length > 0) {
+    if (planned.po.lines.length > 0) {
       const { error: centersError } = await supabase.from("po_cost_centers").insert(
-        validCenters.map((c, i) => ({
-          po_id: po.id,
-          name: c.name,
-          code: c.code || null,
-          allocated_amount: parseFloat(c.allocated_amount) || 0,
-          allocated_hours: parseFloat(c.allocated_hours) || 0,
-          cost_centre_id: c.cost_centre_id ?? null,
-          sort_order: i,
-        }))
+        planned.po.lines.map((l) => ({ ...l, po_id: po.id }))
       );
 
       // Cost centres carry the allocated dollars and hours this PO is measured
@@ -264,21 +228,73 @@ export function JobPO({ jobId, jobNumber, customerName, site, pos: initialPos, t
       }
     }
 
+    await refreshPO(po.id);
+    setShowForm(false);
+    setNewPO({ po_number: "", client_reference: "", site_address: "" });
+    setPoValue("");
+    setPoLines([blankLine()]);
+    setGeocoded(null);
+    toast.success(planned.po.unallocated > 0 ? "Purchase order saved — part of its value isn't split yet" : "Purchase order saved");
+    setSaving(false);
+  }
+
+  // Re-reads one PO with its lines and puts it in place (or on the end).
+  async function refreshPO(poId: string) {
     const { data: freshPO } = await supabase
       .from("purchase_orders")
       .select("*, po_cost_centers(*)")
-      .eq("id", po.id)
+      .eq("id", poId)
       .single();
-
-    const updated = [...pos, freshPO as PurchaseOrder];
+    if (!freshPO) return;
+    const fresh = freshPO as PurchaseOrder;
+    const updated = pos.some((p) => p.id === poId) ? pos.map((p) => (p.id === poId ? fresh : p)) : [...pos, fresh];
     setPos(updated);
     onUpdate(updated);
-    setShowForm(false);
-    setNewPO({ po_number: "", client_reference: "", site_address: "" });
-    setCostCenters([{ name: "", code: "", allocated_amount: "", allocated_hours: "" }]);
-    setGeocoded(null);
-    toast.success("Purchase order saved");
-    setSaving(false);
+  }
+
+  // Tags an existing line with a company cost centre — mostly Simpro lines the
+  // 0087 keyword match couldn't place.
+  async function setLineCostCentre(lineId: string, poId: string, costCentreId: string) {
+    const { error, count } = await supabase
+      .from("po_cost_centers")
+      .update({ cost_centre_id: costCentreId || null }, { count: "exact" })
+      .eq("id", lineId);
+    if (error || count === 0) { toast.error("Couldn't set the cost centre."); return; }
+    await refreshPO(poId);
+  }
+
+  // The PO's value as the builder wrote it. Lines are not touched.
+  async function setPOValue(po: PurchaseOrder, raw: string) {
+    const value = Math.round((Number(raw.replace(/[$,\s]/g, "")) || 0) * 100) / 100;
+    if (value === Number(po.total_value)) return;
+    const { error, count } = await supabase
+      .from("purchase_orders")
+      .update({ total_value: value }, { count: "exact" })
+      .eq("id", po.id);
+    if (error || count === 0) { toast.error("Couldn't change the PO value."); return; }
+    await refreshPO(po.id);
+  }
+
+  // Adds split lines to a PO that already exists (a quote total to split, or
+  // a stage the builder added).
+  async function saveAddedLines(po: PurchaseOrder) {
+    const planned = planBuilderPoLines(addLines, costCentreOptions);
+    if (!planned.ok) { toast.error(planned.error); return; }
+    if (planned.lines.length === 0) { setAddLinesFor(null); return; }
+    const start = po.po_cost_centers?.length ?? 0;
+    const { error } = await supabase.from("po_cost_centers").insert(
+      planned.lines.map((l, i) => ({ ...l, po_id: po.id, sort_order: start + i }))
+    );
+    if (error) { toast.error("Couldn't add the cost centres."); return; }
+    const hours = Number(po.total_hours || 0) + planned.totalHours;
+    if (planned.totalHours > 0) {
+      // The lines are saved either way; only the PO's hours total would be stale.
+      const { error: hoursError } = await supabase.from("purchase_orders").update({ total_hours: hours }).eq("id", po.id);
+      if (hoursError) toast.error("Cost centres added, but the PO's hours total didn't update.");
+    }
+    setAddLinesFor(null);
+    setAddLines([blankLine()]);
+    await refreshPO(po.id);
   }
 
   async function deletePO(poId: string) {
@@ -483,6 +499,18 @@ export function JobPO({ jobId, jobNumber, customerName, site, pos: initialPos, t
             <div className="flex items-start justify-between gap-2">
               <div>
                 <CardTitle className="text-base">PO #{po.po_number}</CardTitle>
+                <label className="flex items-center gap-1.5 text-xs text-slate-500 mt-1">
+                  Value $
+                  <input
+                    key={`${po.id}-value-${po.total_value}`}
+                    inputMode="decimal"
+                    defaultValue={Number(po.total_value || 0).toFixed(2)}
+                    onBlur={e => setPOValue(po, e.target.value)}
+                    title="The PO's value ex GST, as the builder wrote it (or the quote total)"
+                    className="w-28 rounded border border-slate-200 bg-white px-1.5 py-0.5 text-right text-slate-800"
+                  />
+                  ex GST
+                </label>
                 {po.client_reference && <p className="text-xs text-slate-500 mt-0.5">Ref: {po.client_reference}</p>}
                 {po.site_address && (
                   <p className="text-xs text-slate-400 flex items-center gap-1 mt-1">
@@ -504,9 +532,12 @@ export function JobPO({ jobId, jobNumber, customerName, site, pos: initialPos, t
               </div>
             </div>
           </CardHeader>
-          {po.po_cost_centers && po.po_cost_centers.length > 0 && (
+          {(() => {
+            const lines = po.po_cost_centers ?? [];
+            const unsplit = Math.round((Number(po.total_value || 0) - lines.reduce((s, l) => s + (Number(l.allocated_amount) || 0), 0)) * 100) / 100;
+            return (
             <CardContent className="pt-0 space-y-3">
-              {po.po_cost_centers.map(cc => {
+              {lines.map(cc => {
                 const spent = spentByCostCenter[cc.id] ?? 0;
                 const hoursLogged = hoursByCostCenter[cc.id] ?? 0;
                 const allocatedAmount = Number(cc.allocated_amount) || 0;
@@ -518,9 +549,22 @@ export function JobPO({ jobId, jobNumber, customerName, site, pos: initialPos, t
                 const ccVendorOrders = vendorOrdersByCostCenter[cc.id] ?? [];
                 return (
                   <div key={cc.id} className="rounded-lg border border-slate-100 p-3 space-y-2">
-                    <div className="flex items-center justify-between">
-                      <p className="text-sm font-semibold text-slate-800">{cc.name}</p>
-                      {cc.code && <p className="text-xs text-slate-400 font-mono">{cc.code}</p>}
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="text-sm font-semibold text-slate-800">
+                        {cc.name}
+                        {cc.code && <span className="ml-2 text-xs text-slate-400 font-mono font-normal">{cc.code}</span>}
+                      </p>
+                      <select
+                        value={cc.cost_centre_id ?? ""}
+                        onChange={e => setLineCostCentre(cc.id, po.id, e.target.value)}
+                        title="Company cost centre"
+                        className={`h-7 rounded border bg-white px-1.5 text-xs ${cc.cost_centre_id ? "border-slate-200 text-slate-600" : "border-orange-300 text-orange-700"}`}
+                      >
+                        <option value="">Set cost centre…</option>
+                        {costCentreOptions.map(c => (
+                          <option key={c.id} value={c.id}>{c.name}</option>
+                        ))}
+                      </select>
                     </div>
                     <div>
                       <div className="flex justify-between text-xs text-slate-500 mb-1">
@@ -610,12 +654,42 @@ export function JobPO({ jobId, jobNumber, customerName, site, pos: initialPos, t
                   </div>
                 );
               })}
+              {unsplit !== 0 && (
+                <p className={`text-xs font-medium ${unsplit > 0 ? "text-orange-600" : "text-red-600"}`}>
+                  {unsplit > 0
+                    ? `$${unsplit.toFixed(2)} of this PO isn't split across cost centres yet.`
+                    : `The cost centres add up to $${(-unsplit).toFixed(2)} more than the PO value.`}
+                </p>
+              )}
+              {addLinesFor === po.id ? (
+                <div className="rounded-lg border border-dashed border-slate-200 p-3 space-y-2">
+                  <BuilderPoLines
+                    value={unsplit > 0 ? unsplit.toFixed(2) : ""}
+                    lines={addLines}
+                    onChange={setAddLines}
+                    costCentres={costCentreOptions}
+                    stages={stages}
+                  />
+                  <div className="flex justify-end gap-2">
+                    <Button type="button" variant="ghost" size="sm" className="h-7 text-xs" onClick={() => { setAddLinesFor(null); setAddLines([blankLine()]); }}>Cancel</Button>
+                    <Button type="button" size="sm" className="h-7 text-xs" onClick={() => saveAddedLines(po)}>Add</Button>
+                  </div>
+                </div>
+              ) : (
+                <button
+                  onClick={() => { setAddLinesFor(po.id); setAddLines([{ ...blankLine(), amount: unsplit > 0 ? unsplit.toFixed(2) : "" }]); }}
+                  className="flex items-center gap-1 text-xs text-slate-500 hover:text-slate-700 transition-colors"
+                >
+                  <Plus className="w-3 h-3" />Add cost centre to this PO
+                </button>
+              )}
               <div className="flex justify-between text-sm pt-2 border-t font-semibold text-slate-800">
                 <span>PO Total</span>
                 <span>${Number(po.total_value).toFixed(2)} · {Number(po.total_hours).toFixed(1)}h</span>
               </div>
             </CardContent>
-          )}
+            );
+          })()}
         </Card>
       ))}
 
@@ -626,14 +700,16 @@ export function JobPO({ jobId, jobNumber, customerName, site, pos: initialPos, t
           <CardContent className="space-y-4">
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-1.5">
-                <Label>PO Number *</Label>
+                <Label>Builder&apos;s PO number *</Label>
                 <Input
                   value={newPO.po_number}
                   onChange={e => { setNewPO(p => ({ ...p, po_number: e.target.value })); setErrors({}); }}
                   placeholder={`e.g. ${jobNumber}-1`}
                   className={fieldErr("po_number")}
                 />
-                {errors.po_number && <p className="text-xs text-red-500">PO number is required</p>}
+                {errors.po_number
+                  ? <p className="text-xs text-red-500">PO number is required</p>
+                  : <p className="text-xs text-slate-400">For quoted work with no builder PO, keep the job number.</p>}
               </div>
               <div className="space-y-1.5">
                 <Label>Client</Label>
@@ -669,106 +745,28 @@ export function JobPO({ jobId, jobNumber, customerName, site, pos: initialPos, t
               )}
             </div>
 
-            {/* Cost Centre Templates */}
-            {templateGroups.length > 0 && (
-              <div className="rounded-lg border border-dashed border-slate-200 p-3 space-y-2">
-                <Label className="text-xs text-slate-500 uppercase tracking-wide">Load from Template</Label>
-                <div className="flex flex-wrap gap-3">
-                  {templateGroups.map((group) => (
-                    <label key={group} className="flex items-center gap-1.5 text-sm text-slate-600">
-                      <input
-                        type="checkbox"
-                        checked={selectedGroups.has(group)}
-                        onChange={() => toggleTemplateGroup(group)}
-                      />
-                      {group}
-                    </label>
-                  ))}
-                </div>
-                <p className="text-xs text-slate-400">
-                  Select one group for a single Simpro-style PO, or several groups to merge them into one PO.
-                </p>
-                <Button
-                  type="button" variant="outline" size="sm"
-                  onClick={loadTemplateGroups}
-                  disabled={selectedGroups.size === 0}
-                >
-                  Load Selected
-                </Button>
-              </div>
-            )}
+            <div className="space-y-1.5">
+              <Label>PO value (ex GST) *</Label>
+              <Input
+                inputMode="decimal"
+                value={poValue}
+                onChange={e => setPoValue(e.target.value)}
+                placeholder="What the builder's PO (or the quote) is for"
+                className="max-w-xs"
+              />
+            </div>
 
-            {/* Cost Centres */}
-            <div>
-              <div className="flex items-center justify-between mb-2">
-                <Label>Cost Centres</Label>
-                <Button
-                  type="button" variant="ghost" size="sm"
-                  className="gap-1 h-7 text-xs"
-                  onClick={() => setCostCenters(p => [...p, { name: "", code: "", allocated_amount: "", allocated_hours: "" }])}
-                >
-                  <Plus className="w-3 h-3" />Add Row
-                </Button>
-              </div>
-              <div className="space-y-2">
-                <div className="grid grid-cols-12 gap-2 text-xs text-slate-400 font-medium px-1">
-                  <span className="col-span-4">Name</span>
-                  <span className="col-span-3">Code</span>
-                  <span className="col-span-2 text-right">$ Amount</span>
-                  <span className="col-span-2 text-right">Hours</span>
-                </div>
-                {costCenters.map((cc, i) => (
-                  <div key={i} className="grid grid-cols-12 gap-2 items-center">
-                    <div className="col-span-4">
-                      <Input
-                        value={cc.name}
-                        onChange={e => setCostCenters(p => p.map((c, j) => j === i ? { ...c, name: e.target.value } : c))}
-                        placeholder="e.g. Labour"
-                        className="text-sm h-8"
-                      />
-                    </div>
-                    <div className="col-span-3">
-                      <Input
-                        value={cc.code}
-                        onChange={e => setCostCenters(p => p.map((c, j) => j === i ? { ...c, code: e.target.value } : c))}
-                        placeholder="LAB01"
-                        className="text-sm h-8 font-mono"
-                      />
-                    </div>
-                    <div className="col-span-2">
-                      <Input
-                        type="number" step="0.01"
-                        value={cc.allocated_amount}
-                        onChange={e => setCostCenters(p => p.map((c, j) => j === i ? { ...c, allocated_amount: e.target.value } : c))}
-                        placeholder="0.00"
-                        className="text-sm h-8 text-right"
-                      />
-                    </div>
-                    <div className="col-span-2">
-                      <Input
-                        type="number" step="0.5"
-                        value={cc.allocated_hours}
-                        onChange={e => setCostCenters(p => p.map((c, j) => j === i ? { ...c, allocated_hours: e.target.value } : c))}
-                        placeholder="0"
-                        className="text-sm h-8 text-right"
-                      />
-                    </div>
-                    <div className="col-span-1 flex justify-end">
-                      <button
-                        type="button"
-                        onClick={() => setCostCenters(p => p.filter((_, j) => j !== i))}
-                        className="text-slate-300 hover:text-red-400 transition-colors"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-                  </div>
-                ))}
-              </div>
+            <div className="space-y-1.5">
+              <Label>Split across cost centres</Label>
+              <p className="text-xs text-slate-400">
+                Each cost centre&apos;s share is its budget. A drainage PO usually splits between Below Ground Drainage and
+                Transport. You can save now and split the rest later.
+              </p>
+              <BuilderPoLines value={poValue} lines={poLines} onChange={setPoLines} costCentres={costCentreOptions} stages={stages} />
             </div>
 
             <div className="flex justify-end gap-2 pt-2">
-              <Button type="button" variant="outline" onClick={() => { setShowForm(false); setGeocoded(null); }}>Cancel</Button>
+              <Button type="button" variant="outline" onClick={() => { setShowForm(false); setGeocoded(null); setPoValue(""); setPoLines([blankLine()]); }}>Cancel</Button>
               <Button type="button" onClick={savePO} disabled={saving}>
                 {saving ? "Saving..." : "Save PO"}
               </Button>

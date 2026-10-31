@@ -18,6 +18,8 @@ import { emptyScheduleInput, scheduleColumnsFromForm } from "@/lib/schedule-form
 import { CustomerPicker } from "@/components/customer-picker";
 import { AddSiteDialog } from "@/components/site-add-dialog";
 import { ScheduleFields } from "@/components/job/schedule-fields";
+import { BuilderPoLines, blankLine, type StageOption } from "@/components/job/builder-po-lines";
+import { planBuilderPo, type BuilderPoLineInput, type CostCentreOption } from "@/lib/builder-po";
 
 // Radix/shadcn's SelectItem can't take value="", so an explicit "Unassigned"
 // option needs a sentinel value that gets translated back to "" (-> null on
@@ -49,11 +51,24 @@ export default function NewJobPage() {
   // Start date, end date, All day and daily times — the same inputs as the
   // Schedule Job wizard. A blank start date creates the job unscheduled.
   const [schedule, setSchedule] = useState<ScheduleInput>(emptyScheduleInput);
+  // The builder's PO value and its split by cost centre (Stage 2, 31 Oct
+  // 2026): entered here once, it becomes the job's budget on the PO tab and
+  // the crew can raise supplier orders against it straight away.
+  const [poValue, setPoValue] = useState("");
+  const [poLines, setPoLines] = useState<BuilderPoLineInput[]>([blankLine()]);
+  const [costCentres, setCostCentres] = useState<CostCentreOption[]>([]);
+  const [stages, setStages] = useState<StageOption[]>([]);
 
   useEffect(() => {
     async function load() {
-      const { data: s } = await supabase.from("profiles").select("id, full_name, role").eq("is_active", true).order("full_name");
+      const [{ data: s }, { data: c }, { data: t }] = await Promise.all([
+        supabase.from("profiles").select("id, full_name, role").eq("is_active", true).order("full_name"),
+        supabase.from("cost_centres").select("id, name").eq("is_active", true).order("sort_order"),
+        supabase.from("cost_center_templates").select("name, cost_centre_id").eq("is_active", true).order("sort_order"),
+      ]);
       setStaff(s ?? []);
+      setCostCentres((c as CostCentreOption[]) ?? []);
+      setStages((t as StageOption[]) ?? []);
     }
     load();
   }, []);
@@ -78,6 +93,13 @@ export default function NewJobPage() {
       toast.error(built.error);
       return;
     }
+    // No value = no PO yet (a service call, or the PO comes later).
+    const hasPo = poValue.trim() !== "";
+    const planned = hasPo ? planBuilderPo({ value: poValue, lines: poLines }, costCentres) : null;
+    if (planned && !planned.ok) {
+      toast.error(planned.error);
+      return;
+    }
     setLoading(true);
     const payload: any = {
       ...form,
@@ -86,17 +108,50 @@ export default function NewJobPage() {
       customer_po: normalizeCustomerPo(form.customer_po),
       ...built.columns,
     };
-    const { data, error } = await supabase.from("jobs").insert(payload).select("id").single();
+    const { data, error } = await supabase.from("jobs").insert(payload).select("id, job_number").single();
     if (error) {
       toast.error(error.message);
       setLoading(false);
-    } else {
-      if (data?.id) {
-        fetch(`/api/jobs/${data.id}/sync-calendar`, { method: "POST" }).catch(() => {});
-      }
-      toast.success("Job created successfully");
-      window.location.href = "/dashboard/jobs";
+      return;
     }
+    if (data?.id) {
+      fetch(`/api/jobs/${data.id}/sync-calendar`, { method: "POST" }).catch(() => {});
+    }
+    if (data?.id && planned?.ok) {
+      const poSaved = await saveBuilderPo(data.id, data.job_number, payload.customer_po, planned.po);
+      if (!poSaved) {
+        // The job is real; only its PO is missing. Send them to it.
+        toast.error("Job created, but its PO didn't save. Add it on the job's PO tab.");
+        window.location.href = `/dashboard/jobs/${data.id}?tab=po`;
+        return;
+      }
+    }
+    toast.success("Job created successfully");
+    window.location.href = "/dashboard/jobs";
+  }
+
+  // The PO row and its split lines. Not atomic with the job: a failure here
+  // leaves a job without a PO, which the caller reports.
+  async function saveBuilderPo(
+    jobId: string,
+    jobNumber: number | null,
+    customerPo: string | null,
+    po: Extract<ReturnType<typeof planBuilderPo>, { ok: true }>["po"]
+  ): Promise<boolean> {
+    const { data: row, error } = await supabase
+      .from("purchase_orders")
+      .insert({
+        job_id: jobId,
+        po_number: customerPo || `${jobNumber ?? "JOB"}-1`,
+        total_value: po.value,
+        total_hours: po.totalHours,
+      })
+      .select("id")
+      .single();
+    if (error || !row) return false;
+    if (po.lines.length === 0) return true;
+    const { error: linesError } = await supabase.from("po_cost_centers").insert(po.lines.map((l) => ({ ...l, po_id: row.id })));
+    return !linesError;
   }
 
   return (
@@ -199,7 +254,7 @@ export default function NewJobPage() {
               <ScheduleFields value={schedule} onChange={setSchedule} optional />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="customer_po">Customer PO number</Label>
+              <Label htmlFor="customer_po">Builder&apos;s PO number</Label>
               <Input
                 id="customer_po"
                 value={form.customer_po}
@@ -208,6 +263,26 @@ export default function NewJobPage() {
                 placeholder="e.g. 4500123"
               />
             </div>
+            <div className="space-y-2">
+              <Label htmlFor="po_value">PO value (ex GST)</Label>
+              <Input
+                id="po_value"
+                inputMode="decimal"
+                value={poValue}
+                onChange={(e) => setPoValue(e.target.value)}
+                placeholder="The builder's rate for this job (leave blank if none yet)"
+                className="max-w-xs"
+              />
+            </div>
+            {poValue.trim() !== "" && (
+              <div className="space-y-2">
+                <Label>Split across cost centres</Label>
+                <p className="text-xs text-slate-400">
+                  Each cost centre&apos;s share is its budget, e.g. Below Ground Drainage and Transport for a drainage PO.
+                </p>
+                <BuilderPoLines value={poValue} lines={poLines} onChange={setPoLines} costCentres={costCentres} stages={stages} />
+              </div>
+            )}
             <div className="space-y-2">
               <Label htmlFor="description">Description</Label>
               <Textarea id="description" value={form.description} onChange={(e) => set("description", e.target.value)} placeholder="Describe the work required..." rows={3} />
