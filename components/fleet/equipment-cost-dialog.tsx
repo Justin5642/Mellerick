@@ -50,7 +50,7 @@ export function EquipmentCostDialog({ equipmentId, equipmentName, open, onOpenCh
   const [usageEntries, setUsageEntries] = useState<UsageEntry[]>([]);
   const [usageForm, setUsageForm] = useState(emptyUsageForm);
   const [addingUsage, setAddingUsage] = useState(false);
-  // $ per load carted (0091, DRAFT, not applied yet) — the truck's cartage is costed per hour AND per load.
+  // $ per load carted (0091) — the truck's cartage is costed per hour AND per load.
   const [costPerLoad, setCostPerLoad] = useState(0);
 
   useEffect(() => {

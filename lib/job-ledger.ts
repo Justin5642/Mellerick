@@ -18,7 +18,7 @@ import { computeEquipmentCost, type EquipmentCostInputs } from "@/lib/equipment-
 //   materials  job_expenses + priced supplier orders, by line. A supplier
 //              order with no amount yet is counted as "to be priced", not $0.
 //   plant      equipment usage: hours × cost per hour, plus loads × cost per
-//              load (0091, DRAFT, not applied yet), by the usage's line — the truck's cartage on the
+//              load (0091), by the usage's line — the truck's cartage on the
 //              Transport line. Untagged usage lands in "Not tagged".
 //
 // Known overlap until supplier invoices are matched to POs (Stage 4): the
@@ -38,7 +38,7 @@ export interface StaffCostProfileInput {
 export interface EquipmentInput extends EquipmentCostInputs {
   id: string;
   assigned_to?: string | null;
-  /** $ per load carted (0091, DRAFT, not applied yet). */
+  /** $ per load carted (0091). */
   cost_per_load?: number | null;
 }
 

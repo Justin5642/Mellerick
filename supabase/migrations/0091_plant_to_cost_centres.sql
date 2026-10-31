@@ -2,7 +2,8 @@
 -- Truck and plant usage against a job's cost centre, with truck loads
 -- (Stage 7 of the 31 Oct 2026 workflow review).
 --
--- STATUS: DRAFT, not applied yet. Gate test supabase/tests/0091_plant_to_cost_centres_test.sql.
+-- STATUS: ✅ APPLIED IN PRODUCTION (2026-10-31, via SQL editor). Gate test
+-- supabase/tests/0091_plant_to_cost_centres_test.sql passed.
 --
 -- WHY (Justin, 31 Oct 2026): quarter-minus cartage — the truck picks up from
 -- the quarry, tips on site, then carts spoil off — belongs to the Transport

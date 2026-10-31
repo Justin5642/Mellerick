@@ -34,7 +34,7 @@ interface Props {
   usage: UsageEntry[];
   equipmentOptions: EquipmentOption[];
   onUpdate: (usage: UsageEntry[]) => void;
-  /** The job's PO lines, so usage can be costed to one — cartage to Transport (0091, DRAFT, not applied yet). */
+  /** The job's PO lines, so usage can be costed to one — cartage to Transport (0091). */
   costCentres?: { id: string; name: string }[];
 }
 
@@ -60,7 +60,7 @@ export function JobEquipment({ jobId, usage: initialUsage, equipmentOptions, onU
     return eq ? computeEquipmentCost(eq).costPerHour : 0;
   }
 
-  // Hours × cost per hour, plus loads × cost per load (0091, DRAFT, not applied yet).
+  // Hours × cost per hour, plus loads × cost per load (0091).
   function costOf(u: UsageEntry) {
     const eq = equipmentById.get(u.equipment_id);
     return Number(u.hours) * costPerHourFor(u.equipment_id) + Number(u.loads ?? 0) * Number(eq?.cost_per_load ?? 0);

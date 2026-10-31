@@ -830,7 +830,7 @@ renders as a full-screen red box over a working app**. They route errors to an
 
 ---
 
-**Truck and plant to cost centres (Stage 7, 31 Oct 2026; migration `0091`, DRAFT, not applied yet).**
+**Truck and plant to cost centres (Stage 7, 31 Oct 2026; migration `0091` applied 2026-10-31).**
 Justin: quarter-minus cartage belongs to Transport, separate from the drainage
 work; a dedicated driver logs it; truck cost counts per hour AND per load.
 - 0091: `equipment_usage_log.cost_center_id` (the job's PO line) and `loads`
