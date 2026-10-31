@@ -474,6 +474,16 @@ never ORed with a filter.
 
 ---
 
+**Today card on the phone (Stage 6, 31 Oct 2026; no migration).** Justin:
+"the app should prompt the crew through the next steps… The app leads the
+day." `components/job/today-card.tsx` sits above the Overview (not in
+view-only): Clock on → Order materials → Confirm deliveries → Record progress
+→ Complete the job, each ticked from what is already recorded
+(`lib/todaySteps.ts`, tested), the first unfinished one highlighted. Clock on
+works on the card (same default cost centre as the Time tab); the other steps
+open their tab. Orders are online-only, so offline that step says "Orders need
+signal".
+
 ## 3. How offline works
 
 Reads and writes take different paths. Understand this before touching
