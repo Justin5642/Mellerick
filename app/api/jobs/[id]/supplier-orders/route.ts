@@ -16,7 +16,7 @@ import { reportError } from "@/lib/monitoring";
 // service-role client after requireUser — and it NEVER selects amount or
 // gst_amount. ORDER_COLS is the whole list of what a technician can learn.
 const ORDER_COLS =
-  "id, po_number, vendor_name, supplier_email, status, cost_center_id, delivery_address, required_by, notes, created_at, emailed_at";
+  "id, po_number, vendor_name, supplier_email, status, cost_center_id, delivery_address, required_by, notes, created_at, emailed_at, delivered_at";
 
 // A user is waiting on this request while it calls the email provider.
 export const maxDuration = 30;
@@ -46,6 +46,7 @@ interface OrderRow {
   notes: string | null;
   created_at: string;
   emailed_at: string | null;
+  delivered_at: string | null;
   profiles: { full_name: string } | null;
   vendor_order_items: { description: string; quantity: number; sort_order: number }[] | null;
 }
@@ -70,6 +71,7 @@ async function listOrders(admin: Admin, jobId: string) {
     notes: o.notes,
     createdAt: o.created_at,
     emailedAt: o.emailed_at,
+    deliveredAt: o.delivered_at,
     raisedBy: o.profiles?.full_name ?? null,
     items: [...(o.vendor_order_items ?? [])]
       .sort((a, b) => a.sort_order - b.sort_order)

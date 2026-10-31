@@ -24,6 +24,8 @@ export interface SupplierOrder {
   notes: string | null;
   createdAt: string;
   emailedAt: string | null;
+  /** Set when the crew tapped Delivered (0089, DRAFT, not applied yet). Absent from older servers. */
+  deliveredAt?: string | null;
   raisedBy: string | null;
   items: { description: string; quantity: number }[];
 }
@@ -95,6 +97,11 @@ export function loadSupplierOrders(jobId: string): Promise<SupplierOrdersState> 
  */
 export function raiseSupplierOrder(jobId: string, order: NewSupplierOrder): Promise<RaisedSupplierOrder> {
   return call(`/api/jobs/${jobId}/supplier-orders`, { method: "POST", body: JSON.stringify(order) });
+}
+
+/** The crew confirms the materials arrived. Online, like raising the PO. */
+export function markSupplierOrderDelivered(jobId: string, orderId: string): Promise<{ deliveredAt: string }> {
+  return call(`/api/jobs/${jobId}/supplier-orders/${orderId}/delivered`, { method: "POST" });
 }
 
 const EMAIL = /^[^\s@<>,;]+@[^\s@<>,;]+\.[^\s@<>,;]+$/;

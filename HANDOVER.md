@@ -322,6 +322,27 @@ i.e. already under the minimum even if nothing more is spent.
 - Known overlap until Stage 4: one supplier invoice entered both as an expense
   and as a PO's amount counts twice.
 
+**Supplier invoices against POs, deliveries (Stage 4; migration `0089`, DRAFT, not applied yet).**
+Justin: supplier bills are typed into Xero by hand. Now the office types each
+one once, against its PO, and the app makes the Xero bill.
+- **Supplier POs** page (`app/dashboard/supplier-pos`, office): type the PO
+  number off the invoice ("1234" finds PO-1234), open the job's PO tab. Below
+  it, every live order still waiting for its invoice, oldest first.
+- **PO tab**: "+ Enter supplier invoice" on each order — invoice number, date,
+  amount ex GST (GST 10%), file. The file goes to job-documents as
+  `{job}/expense-receipt-{PO}-...`, so 0047's money-file rule hides it from
+  technicians. "Send to Xero" (`/api/xero/push-vendor-order`, office/admin)
+  makes an AUTHORISED ACCPAY bill: invoice number = supplier's, reference =
+  `PO-x / JOB-n`, contact = the supplier's Xero contact when picked from the
+  list (0087), coded to the default expense account. `xero_bill_id` (unique)
+  blocks a second bill; the amount locks once sent.
+- **Phone**: "Delivered" on each ordered PO
+  (`/api/jobs/[id]/supplier-orders/[orderId]/delivered`, service role after
+  `requireUser`, writes only status/delivered_at/delivered_by).
+- The Expenses form now says to enter a PO's invoice on the PO, so it isn't
+  counted twice in the ledger.
+- Apply 0089 BEFORE merging: the supplier-orders route selects `delivered_at`.
+
 ---
 
 ## 2. The one rule that must never break
