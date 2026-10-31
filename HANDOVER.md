@@ -1264,6 +1264,30 @@ paused task, which would lose the departure and the next arrival. Rationale in
 evening shift (clocked in past 19:00 keeps tracking; clocking out stops it and
 the notification goes) and a morning first arrival with the app unopened.
 
+**Auto-clock fixes (Stage 5, 31 Oct 2026; migration `0090` applied 2026-10-31).**
+Justin chose to keep automatic clocking and fix it. What changed:
+- **One engine at a time.** The background task ignores deliveries while the
+  app is active (`backgroundClockTask.ts`); the foreground watcher has them.
+  0090 adds `time_entries_one_open_work_entry` (unique on staff+job while open
+  and `work`), after closing existing duplicates (earliest kept open, later ones
+  closed at their own clock-in, 0 h, audited). The gateway and the background
+  task treat a clash with that index as "already clocked in".
+- **Bad readings ignored, buffer to leave.** `nextGeofenceState` skips fixes
+  with accuracy worse than 75 m; arrival stays at 150 m, but leaving needs
+  250 m (`GEOFENCE_EXIT_RADIUS_METERS`), unless the reading is properly inside
+  a nearer neighbouring site.
+- **Today's jobs only** (`todaysJobSites` in `reads/jobs.ts`): jobs whose
+  schedule touches today, plus any job the tech is still clocked into (even if
+  completed); with nothing scheduled today it falls back to all open jobs.
+- **Foreground site-to-site** closes the job left before clocking into the
+  next (the background planner already did).
+- **Web**: the website geofence was removed in Stage 0; the dashboard now has
+  "Needs a look from yesterday" — jobs booked yesterday not signed off, and
+  clocks still running from before today.
+- Geocoding no longer accepts `class=landuse` (an estate's centroid) as precise.
+- Not done yet from the plan: saving position/accuracy on each entry, an
+  on-screen tracking status, and "set site location here" on the phone.
+
 **The store-review risk is real and has not gone away.** Apple and Google both
 scrutinise "Always" location. The submission needs a clear justification string
 (written, in `app.json`) and screenshots showing the Android foreground-service

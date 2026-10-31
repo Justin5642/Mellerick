@@ -490,6 +490,23 @@ export function LocationTrackingProvider({ children }: { children: ReactNode }) 
       // separately.
       const targetSite = sites.find((s) => s.jobId === target);
 
+      // Straight from one site to the next (Stage 5, 31 Oct 2026): close the
+      // job we left before opening the new one. This path used to only clock in
+      // at the new site, leaving the old entry running; the background planner
+      // already did both.
+      if (insideJobId && previousJobId) {
+        const left = await applyGeofenceTransition(
+          { kind: "departure", jobId: previousJobId, staffId, pendingDeparture: departureRef.current, costCenterId: null },
+          makeTransitionDeps(layer)
+        );
+        if (!left.handled) {
+          insideJobIdRef.current = previousCursor;
+          return;
+        }
+        if (left.clearPendingDeparture) departureRef.current = null;
+        if (left.setPendingDeparture) departureRef.current = left.setPendingDeparture;
+      }
+
       const result = await applyGeofenceTransition(
         {
           kind: insideJobId ? "arrival" : "departure",

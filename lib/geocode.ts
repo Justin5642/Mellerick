@@ -39,7 +39,16 @@ export function isPreciseEnough(result: { class?: string; type?: string; address
   if (result.addresstype && ["house", "building", "place"].includes(result.addresstype)) return true;
   if (result.class === "building") return true;
   if (result.class === "place" && result.type === "house") return true;
-  return !!result.type && PRECISE_TYPES.has(result.type) && result.class !== "highway" && result.class !== "boundary";
+  // class=landuse with type residential/commercial/industrial is a ZONE — a
+  // whole estate's centroid, often hundreds of metres from the house — not a
+  // building (Stage 5, 31 Oct 2026). It used to pass on its type alone.
+  return (
+    !!result.type &&
+    PRECISE_TYPES.has(result.type) &&
+    result.class !== "highway" &&
+    result.class !== "boundary" &&
+    result.class !== "landuse"
+  );
 }
 
 export interface GeocodeResult {

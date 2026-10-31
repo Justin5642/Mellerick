@@ -219,6 +219,13 @@ describe("deleteRow — zero rows is success only when the row is really gone", 
 });
 
 describe("insertRow — 23505 handling", () => {
+  it("succeeds when the clock-in is already open (one open entry per job, 0090)", async () => {
+    insert.mockResolvedValue({
+      error: { code: "23505", message: 'duplicate key value violates unique constraint "time_entries_one_open_work_entry"' },
+    });
+    await expect(supabaseGateway.insertRow("time_entries", { id: "te-1" })).resolves.toBeUndefined();
+  });
+
   it("succeeds when the PRIMARY KEY collides (an outbox replay of a landed write)", async () => {
     insert.mockResolvedValue({
       error: { code: "23505", message: 'duplicate key value violates unique constraint "jobs_pkey"' },

@@ -177,7 +177,10 @@ function isReplayOfSameRow(table: string, message: string): boolean {
     console.warn(`[outbox] ${table}: unique violation with no constraint name — assuming replay, row dropped:`, message);
     return true;
   }
-  return named[1].endsWith("_pkey");
+  // One open work entry per person per job (migration 0090): the background
+  // clock got there first, so this clock-in is already true. Dropping it is right; surfacing it would show the tech an
+  // error for being clocked in.
+  return named[1].endsWith("_pkey") || named[1] === "time_entries_one_open_work_entry";
 }
 
 function guessContentType(path: string): string {

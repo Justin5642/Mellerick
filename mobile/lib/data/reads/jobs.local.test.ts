@@ -21,7 +21,7 @@ jest.mock("../../supabase", () => {
 
 import { supabase } from "../../supabase";
 import { resetSourceForTests, setLocalReads, type LocalReads, type LocalRole } from "./source";
-import { getJob, listMyJobs, listMyJobSites, listOfficeJobs, searchJobs, searchOfficeJobs } from "./jobs";
+import { getJob, listMyJobs, listMyJobSites, listOfficeJobs, searchJobs, searchOfficeJobs, todaysJobSites } from "./jobs";
 
 /** Whitespace-normalize SQL for comparison. */
 function norm(sql: string): string {
@@ -132,9 +132,38 @@ describe("listMyJobSites (local)", () => {
     expect(norm(sql)).toContain(
       "WHERE (j.assigned_to = ?1 OR j.id IN (SELECT ja.job_id FROM job_assignments ja WHERE ja.staff_id = ?1))"
     );
-    expect(norm(sql)).toContain("AND j.status NOT IN ('completed', 'cancelled')");
+    // Open jobs, plus any job I'm still clocked into (Stage 5).
+    expect(norm(sql)).toContain("AND (j.status NOT IN ('completed', 'cancelled') OR j.id IN (SELECT te.job_id FROM time_entries te");
     expect(params).toEqual(["tech-2"]);
     expect(supabase.from as jest.Mock).not.toHaveBeenCalled();
+  });
+});
+
+// Stage 5 (31 Oct 2026): only today's jobs compete for the clock-in, so the
+// wrong job on the same estate can't take it.
+describe("todaysJobSites", () => {
+  const now = new Date(2026, 9, 31, 9, 0); // 31 Oct, 9am local
+  const row = (id: string, start: string | null, end: string | null = null, clocked = false) =>
+    ({ id, scheduled_cost_center_id: null, scheduled_start: start, scheduled_end: end, site_lat: 1, site_lng: 1, clocked_in: clocked });
+
+  it("keeps today's jobs (including a multi-day one running through today) and drops the rest", () => {
+    const rows = [
+      row("today", new Date(2026, 9, 31, 7).toISOString(), new Date(2026, 9, 31, 15).toISOString()),
+      row("spanning", new Date(2026, 9, 29, 7).toISOString(), new Date(2026, 10, 2, 15).toISOString()),
+      row("last-week", new Date(2026, 9, 24, 7).toISOString(), new Date(2026, 9, 24, 15).toISOString()),
+      row("unscheduled", null),
+    ];
+    expect(todaysJobSites(rows, now).map((r) => r.id)).toEqual(["today", "spanning"]);
+  });
+
+  it("always keeps a job I'm clocked into", () => {
+    const rows = [row("today", new Date(2026, 9, 31, 7).toISOString()), row("old", null, null, true)];
+    expect(todaysJobSites(rows, now).map((r) => r.id)).toEqual(["today", "old"]);
+  });
+
+  it("falls back to every job on a day with nothing scheduled", () => {
+    const rows = [row("a", null), row("b", new Date(2026, 9, 20, 7).toISOString())];
+    expect(todaysJobSites(rows, now).map((r) => r.id)).toEqual(["a", "b"]);
   });
 });
 

@@ -55,6 +55,11 @@ export default async function DashboardPage() {
   // block that ran past midnight.
   const todayKey = dateKeyInBusinessTZ(new Date());
   const { dayStartIso: todayStart, dayEndIso: tomorrowStart } = businessDayRange(todayKey);
+  // Yesterday, for the morning list (Stage 5, 31 Oct 2026): jobs booked
+  // yesterday that nobody signed off, and clocks still running from before
+  // today — the departures the phone missed (dead battery, app swiped away).
+  const yesterdayKey = dateKeyInBusinessTZ(new Date(new Date(todayStart).getTime() - 12 * 60 * 60 * 1000));
+  const { dayStartIso: yesterdayStart } = businessDayRange(yesterdayKey);
 
   const [
     { count: totalJobs },
@@ -65,6 +70,8 @@ export default async function DashboardPage() {
     { data: scheduledJobs },
     { data: backflowDevices },
     { data: unbilledVariations },
+    { data: yesterdaysJobs },
+    { data: runningClocks },
   ] = await Promise.all([
     supabase.from("jobs").select("*", { count: "exact", head: true }),
     supabase.from("jobs").select("*", { count: "exact", head: true }).in("status", ["pending", "scheduled", "in_progress"]),
@@ -103,7 +110,24 @@ export default async function DashboardPage() {
     // Approved variations not on an invoice yet (Approvals → Variations to invoice).
     // (The permanent QA fixture job's probe variation is excluded below.)
     supabase.from("job_variations").select("total_amount, jobs(title)").in("status", ["approved", "auto_approved"]).is("invoice_id", null),
+    supabase.from("jobs")
+      .select("id, job_number, title, status, scheduled_start, scheduled_end, schedule_daily, customers(name), profiles!jobs_assigned_to_fkey(full_name)")
+      .lt("scheduled_start", todayStart)
+      .or(scheduleOverlapOrFilter(yesterdayStart))
+      .not("status", "in", '("completed","cancelled")')
+      .order("scheduled_start"),
+    supabase.from("time_entries")
+      .select("id, clock_in, job_id, jobs(job_number, title), profiles!time_entries_staff_id_fkey(full_name)")
+      .is("clock_out", null)
+      .eq("entry_type", "work")
+      .lt("clock_in", todayStart)
+      .order("clock_in"),
   ]);
+
+  // Booked yesterday, not signed off, and not simply carrying on today.
+  const unfinishedYesterday = (yesterdaysJobs ?? []).filter(
+    (job: any) => scheduleDayOn(job, yesterdayKey) !== null && scheduleDayOn(job, todayKey) === null
+  );
 
   // Each job's block TODAY — a multi-day job's times are today's, and the
   // list is ordered by them rather than by the day the job first started.
@@ -152,6 +176,35 @@ export default async function DashboardPage() {
         />
         <StatCard title="Backflow Tests Due" value={backflowDueCount} icon={Droplets} color="bg-cyan-600" href="/dashboard/backflow" />
       </div>
+
+      {/* Morning list: yesterday's loose ends (Stage 5) */}
+      {(unfinishedYesterday.length > 0 || (runningClocks ?? []).length > 0) && (
+        <Card className="border-amber-200">
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base font-semibold">Needs a look from yesterday</CardTitle>
+          </CardHeader>
+          <CardContent className="p-0 divide-y">
+            {unfinishedYesterday.map((job: any) => (
+              <Link prefetch={false} key={job.id} href={`/dashboard/jobs/${job.id}`} className="flex items-center justify-between gap-4 px-6 py-3 hover:bg-slate-50">
+                <span className="text-sm">
+                  <span className="font-medium text-slate-800">#{job.job_number} — {job.title}</span>
+                  <span className="text-slate-400"> · {job.profiles?.full_name ?? "Unassigned"}</span>
+                </span>
+                <span className="text-xs text-amber-700">Booked yesterday, not signed off</span>
+              </Link>
+            ))}
+            {(runningClocks ?? []).map((t: any) => (
+              <Link prefetch={false} key={t.id} href={`/dashboard/jobs/${t.job_id}?tab=time`} className="flex items-center justify-between gap-4 px-6 py-3 hover:bg-slate-50">
+                <span className="text-sm">
+                  <span className="font-medium text-slate-800">{t.profiles?.full_name ?? "Someone"}</span>
+                  <span className="text-slate-400"> · #{t.jobs?.job_number} — {t.jobs?.title}</span>
+                </span>
+                <span className="text-xs text-red-600">Still clocked on since {formatDate(t.clock_in, { weekday: "short", day: "numeric", month: "short" })} {formatTime(t.clock_in)}</span>
+              </Link>
+            ))}
+          </CardContent>
+        </Card>
+      )}
 
       {/* Today's Jobs */}
       <Card>
