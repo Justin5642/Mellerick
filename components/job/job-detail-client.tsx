@@ -396,7 +396,7 @@ export function JobDetailClient({ job, currentUserId, photos: initialPhotos, doc
             </TabsContent>
             <TabsContent value="equipment" className="m-0 h-full">
               {equipmentOptions ? (
-                <JobEquipment jobId={job.id} usage={equipmentUsage} equipmentOptions={equipmentOptions} onUpdate={setEquipmentUsage} />
+                <JobEquipment jobId={job.id} usage={equipmentUsage} equipmentOptions={equipmentOptions} onUpdate={setEquipmentUsage} costCentres={costCenters} />
               ) : (
                 <TabLoading />
               )}

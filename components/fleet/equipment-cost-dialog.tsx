@@ -50,6 +50,8 @@ export function EquipmentCostDialog({ equipmentId, equipmentName, open, onOpenCh
   const [usageEntries, setUsageEntries] = useState<UsageEntry[]>([]);
   const [usageForm, setUsageForm] = useState(emptyUsageForm);
   const [addingUsage, setAddingUsage] = useState(false);
+  // $ per load carted (0091, DRAFT, not applied yet) — the truck's cartage is costed per hour AND per load.
+  const [costPerLoad, setCostPerLoad] = useState(0);
 
   useEffect(() => {
     if (!open) return;
@@ -75,9 +77,11 @@ export function EquipmentCostDialog({ equipmentId, equipmentName, open, onOpenCh
           target_hours_per_year: Number(equipment.target_hours_per_year),
         });
         setPurchaseDate(equipment.purchase_date ?? "");
+        setCostPerLoad(Number(equipment.cost_per_load ?? 0));
       } else {
         setCostForm(emptyCostForm);
         setPurchaseDate("");
+        setCostPerLoad(0);
       }
       setUsageEntries((usage as any) ?? []);
       setLoading(false);
@@ -98,6 +102,7 @@ export function EquipmentCostDialog({ equipmentId, equipmentName, open, onOpenCh
       .from("equipment")
       .update({
         ...costForm,
+        cost_per_load: costPerLoad,
         purchase_date: purchaseDate || null,
         updated_at: new Date().toISOString(),
         updated_by: user?.id ?? null,
@@ -202,7 +207,11 @@ export function EquipmentCostDialog({ equipmentId, equipmentName, open, onOpenCh
                   <Label>Fuel ($/hour)</Label>
                   <Input type="number" step="0.5" value={costForm.fuel_cost_per_hour} onChange={(e) => setField("fuel_cost_per_hour", e.target.value)} />
                 </div>
-                <div className="space-y-1.5 col-span-2">
+                <div className="space-y-1.5">
+                  <Label>Per load carted ($)</Label>
+                  <Input type="number" step="1" value={costPerLoad} onChange={(e) => setCostPerLoad(e.target.value === "" ? 0 : parseFloat(e.target.value))} />
+                </div>
+                <div className="space-y-1.5">
                   <Label>Other Annual Costs ($)</Label>
                   <Input type="number" step="1" value={costForm.other_annual_costs} onChange={(e) => setField("other_annual_costs", e.target.value)} />
                 </div>

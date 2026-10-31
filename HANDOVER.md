@@ -830,6 +830,23 @@ renders as a full-screen red box over a working app**. They route errors to an
 
 ---
 
+**Truck and plant to cost centres (Stage 7, 31 Oct 2026; migration `0091`, DRAFT, not applied yet).**
+Justin: quarter-minus cartage belongs to Transport, separate from the drainage
+work; a dedicated driver logs it; truck cost counts per hour AND per load.
+- 0091: `equipment_usage_log.cost_center_id` (the job's PO line) and `loads`
+  (hours may be 0 for loads only; one of them must be > 0), and
+  `equipment.cost_per_load` (Fleet → cost profile, "Per load carted").
+- Ledger (`lib/job-ledger.ts plantCosts`): hours × cost/hour (skipped for
+  equipment assigned to a person — already in their rate) plus loads × cost
+  per load (always), on the usage's line.
+- Web Equipment tab: loads and a cost centre on each entry.
+- Phone: "Truck & plant" under the Time tab (`components/job/plant-usage.tsx`,
+  route `/api/jobs/[id]/plant-usage`): pick the truck, the cost centre (a
+  vehicle defaults to the job's Transport line), hours and loads with big
+  steppers. Equipment names come through the service role with no costs; the
+  insert uses the caller's session so 0074's "jobs you can manage" rule holds.
+  The office mirror's schema has the new columns (`schema.ts`, added by hand).
+
 ## 4. Database
 
 Migrations in `supabase/migrations/`, applied in filename order.
