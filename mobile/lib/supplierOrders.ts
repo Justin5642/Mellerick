@@ -33,7 +33,7 @@ export interface SupplierOrdersState {
   defaultCostCenterId: string | null;
   clockedIn: boolean;
   deliveryAddress: string | null;
-  /** Our supplier accounts (0087, DRAFT, not applied yet), copied from Xero. */
+  /** Our supplier accounts (0087), copied from Xero. */
   suppliers: Supplier[];
   /** Which company cost centre each of the job's budget lines belongs to. Absent from servers before 0087. */
   costCentreLines?: { id: string; costCentreId: string | null }[];

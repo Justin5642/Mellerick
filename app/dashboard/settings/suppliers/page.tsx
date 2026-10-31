@@ -11,7 +11,7 @@ import { ArrowLeft, Plus, RefreshCw, Loader2 } from "lucide-react";
 import Link from "next/link";
 import { ListPageSkeleton } from "@/components/ui/loading-skeletons";
 
-// Supplier accounts (migration 0087, DRAFT, not applied yet) — the list the crew picks from when they
+// Supplier accounts (migration 0087) — the list the crew picks from when they
 // raise a PO. Copied from Xero (nightly, or the button here); Xero owns the
 // name, account number and phone of those. The ordering email and default
 // cost centre are set here. Suppliers not in Xero can be added by hand.

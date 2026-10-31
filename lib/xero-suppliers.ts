@@ -4,7 +4,7 @@ import { getRefreshedXero } from "@/lib/xero";
 
 // The supplier list is copied from Xero (Justin, 31 Oct 2026: "Yes, copy from
 // Xero"), so nobody types our supplier accounts in twice. Xero contacts marked
-// as suppliers become `suppliers` rows (migration 0087, DRAFT, not applied yet), matched on the Xero
+// as suppliers become `suppliers` rows (migration 0087), matched on the Xero
 // ContactID on every run.
 //
 // Xero owns the name, account number, phone and whether it is active. The

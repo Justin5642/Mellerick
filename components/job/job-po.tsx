@@ -124,7 +124,7 @@ export function JobPO({ jobId, jobNumber, customerName, site, pos: initialPos, t
   const [geocoding, setGeocoding] = useState(false);
   const [saving, setSaving] = useState(false);
   const [newPO, setNewPO] = useState({ po_number: "", client_reference: "", site_address: "" });
-  // cost_centre_id: the company cost centre (0087, DRAFT, not applied yet), set when a row is loaded
+  // cost_centre_id: the company cost centre (0087), set when a row is loaded
   // from a stage template so the job's budget line is tagged by itself.
   const [costCenters, setCostCenters] = useState<{ name: string; code: string; allocated_amount: string; allocated_hours: string; cost_centre_id?: string | null }[]>(
     [{ name: "", code: "", allocated_amount: "", allocated_hours: "" }]

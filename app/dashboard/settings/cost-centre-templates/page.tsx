@@ -11,7 +11,7 @@ import { ArrowLeft, Plus, Trash2 } from "lucide-react";
 import Link from "next/link";
 import { ListPageSkeleton } from "@/components/ui/loading-skeletons";
 
-// The company's cost centres (migration 0087, DRAFT, not applied yet: Below Ground Drainage,
+// The company's cost centres (migration 0087: Below Ground Drainage,
 // Transport, Above Ground Plumbing, Civil, plus any added here) and the stages
 // under each. Stages are the cost_center_templates rows a job's Purchase Order
 // loads; their group_name is kept equal to the cost centre's name so older

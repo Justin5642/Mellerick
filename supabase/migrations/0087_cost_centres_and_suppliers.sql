@@ -2,7 +2,8 @@
 -- Company cost centres and the supplier list (Stage 1 of the 31 Oct 2026
 -- workflow review).
 --
--- STATUS: DRAFT, not applied yet. Gate test supabase/tests/0087_cost_centres_and_suppliers_test.sql.
+-- STATUS: ✅ APPLIED IN PRODUCTION (2026-10-31, via SQL editor). Gate test
+-- supabase/tests/0087_cost_centres_and_suppliers_test.sql passed.
 --
 -- WHY (Justin, 31 Oct 2026): every PO and cost line is tagged to a job and a
 -- cost centre, the cost centres are a company list that can grow, and the crew

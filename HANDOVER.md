@@ -248,7 +248,7 @@ Simpro-imported `SIMPRO-…` numbers are left alone.
 - **Margin flag 20%** (`min_margin_pct`, set by 0086; fallbacks in the job page
   and `mobile/lib/data/reads/jobCosting.ts` also 20).
 
-**Company cost centres and the supplier list (Stage 1; migration `0087`, DRAFT, not applied yet).**
+**Company cost centres and the supplier list (Stage 1; migration `0087` applied 2026-10-31).**
 - `cost_centres`: the company list (Below Ground Drainage, Transport, Above
   Ground Plumbing, Civil, plus any added). Settings → **Cost Centres**
   (`app/dashboard/settings/cost-centre-templates`) shows each with its stages

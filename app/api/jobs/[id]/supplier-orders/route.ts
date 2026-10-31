@@ -79,7 +79,7 @@ async function listOrders(admin: Admin, jobId: string) {
 
 // What the Raise PO form starts with: the orders already on the job, the cost
 // centre the tech is clocked into (else the one the job is scheduled to), the
-// site address, the supplier list (0087, DRAFT, not applied yet), and which company cost centre each
+// site address, the supplier list (0087), and which company cost centre each
 // of the job's budget lines belongs to — so picking the quarry can put the PO
 // on the job's Transport line by itself.
 export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {

@@ -16,7 +16,7 @@ export interface SupplierOrderItemInput {
 export interface SupplierOrderInput {
   id: string;
   costCenterId: string;
-  /** Picked from the supplier list (0087, DRAFT, not applied yet); null = typed in ("Other"). */
+  /** Picked from the supplier list (0087); null = typed in ("Other"). */
   supplierId: string | null;
   supplierName: string;
   supplierEmail: string | null;
