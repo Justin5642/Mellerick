@@ -17,6 +17,10 @@
     {
       "path": "/api/sites/geocode-missing",
       "schedule": "15 * * * *"
+    },
+    {
+      "path": "/api/xero/poll-suppliers",
+      "schedule": "40 16 * * *"
     }
   ]
 }

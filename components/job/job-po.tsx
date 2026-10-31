@@ -22,6 +22,7 @@ interface CostCenter {
 interface CostCenterTemplate {
   id: string;
   group_name: string;
+  cost_centre_id?: string | null;
   name: string;
   code: string | null;
   sort_order: number;
@@ -123,11 +124,16 @@ export function JobPO({ jobId, jobNumber, customerName, site, pos: initialPos, t
   const [geocoding, setGeocoding] = useState(false);
   const [saving, setSaving] = useState(false);
   const [newPO, setNewPO] = useState({ po_number: "", client_reference: "", site_address: "" });
-  const [costCenters, setCostCenters] = useState([{ name: "", code: "", allocated_amount: "", allocated_hours: "" }]);
+  // cost_centre_id: the company cost centre (0087), set when a row is loaded
+  // from a stage template so the job's budget line is tagged by itself.
+  const [costCenters, setCostCenters] = useState<{ name: string; code: string; allocated_amount: string; allocated_hours: string; cost_centre_id?: string | null }[]>(
+    [{ name: "", code: "", allocated_amount: "", allocated_hours: "" }]
+  );
   const [geocoded, setGeocoded] = useState<{ lat: number; lng: number; display: string } | null>(null);
   const [errors, setErrors] = useState<Record<string, boolean>>({});
   const [templates, setTemplates] = useState<CostCenterTemplate[]>([]);
   const [selectedGroups, setSelectedGroups] = useState<Set<string>>(new Set());
+  const [suppliers, setSuppliers] = useState<{ id: string; name: string }[]>([]);
 
   useEffect(() => {
     supabase
@@ -137,6 +143,12 @@ export function JobPO({ jobId, jobNumber, customerName, site, pos: initialPos, t
       .order("group_name")
       .order("sort_order")
       .then(({ data }) => setTemplates((data as any) ?? []));
+    supabase
+      .from("suppliers")
+      .select("id, name")
+      .eq("is_active", true)
+      .order("name")
+      .then(({ data }) => setSuppliers((data as { id: string; name: string }[]) ?? []));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -158,7 +170,7 @@ export function JobPO({ jobId, jobNumber, customerName, site, pos: initialPos, t
   function loadTemplateGroups() {
     const rows = templates
       .filter((t) => selectedGroups.has(t.group_name))
-      .map((t) => ({ name: t.name, code: t.code ?? "", allocated_amount: "", allocated_hours: "" }));
+      .map((t) => ({ name: t.name, code: t.code ?? "", allocated_amount: "", allocated_hours: "", cost_centre_id: t.cost_centre_id ?? null }));
     if (rows.length === 0) return;
     setCostCenters((prev) => {
       const isBlankOnly = prev.length === 1 && !prev[0].name.trim() && !prev[0].code.trim() && !prev[0].allocated_amount && !prev[0].allocated_hours;
@@ -238,6 +250,7 @@ export function JobPO({ jobId, jobNumber, customerName, site, pos: initialPos, t
           code: c.code || null,
           allocated_amount: parseFloat(c.allocated_amount) || 0,
           allocated_hours: parseFloat(c.allocated_hours) || 0,
+          cost_centre_id: c.cost_centre_id ?? null,
           sort_order: i,
         }))
       );
@@ -289,10 +302,14 @@ export function JobPO({ jobId, jobNumber, customerName, site, pos: initialPos, t
   async function saveVendorOrder(costCenterId: string) {
     if (!voForm.vendor_name.trim()) { toast.error("Vendor name is required"); return; }
     setVoSaving(true);
+    // A name picked from the supplier list links the order to that supplier
+    // (0087); anything else is a one-off, kept by name only.
+    const picked = suppliers.find((s) => s.name.toLowerCase() === voForm.vendor_name.trim().toLowerCase());
     const { data, error } = await supabase.from("vendor_orders").insert({
       cost_center_id: costCenterId,
       job_id: jobId,
-      vendor_name: voForm.vendor_name,
+      vendor_name: picked?.name ?? voForm.vendor_name.trim(),
+      supplier_id: picked?.id ?? null,
       order_number: voForm.order_number || null,
       amount: parseFloat(voForm.amount) || 0,
       order_date: voForm.order_date || null,
@@ -541,12 +558,16 @@ export function JobPO({ jobId, jobNumber, customerName, site, pos: initialPos, t
 
                       {voFormOpenFor === cc.id ? (
                         <div className="rounded border border-slate-200 p-2 space-y-2">
+                          <datalist id="po-supplier-list">
+                            {suppliers.map((s) => <option key={s.id} value={s.name} />)}
+                          </datalist>
                           <div className="grid grid-cols-2 gap-2">
                             <Input
                               value={voForm.vendor_name}
                               onChange={e => setVoForm(p => ({ ...p, vendor_name: e.target.value }))}
-                              placeholder="Vendor name *"
+                              placeholder="Supplier *"
                               className="text-xs h-7"
+                              list="po-supplier-list"
                             />
                             <Input
                               value={voForm.order_number}

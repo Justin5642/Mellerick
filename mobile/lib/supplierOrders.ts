@@ -33,12 +33,23 @@ export interface SupplierOrdersState {
   defaultCostCenterId: string | null;
   clockedIn: boolean;
   deliveryAddress: string | null;
-  suppliers: { name: string; email: string }[];
+  /** Our supplier accounts (0087), copied from Xero. */
+  suppliers: Supplier[];
+  /** Which company cost centre each of the job's budget lines belongs to. Absent from servers before 0087. */
+  costCentreLines?: { id: string; costCentreId: string | null }[];
+}
+
+export interface Supplier {
+  id?: string; // absent from servers before 0087
+  name: string;
+  email: string | null;
+  defaultCostCentreId?: string | null;
 }
 
 export interface NewSupplierOrder {
   id: string;
   costCenterId: string | null; // required — null only while the form is being filled
+  supplierId: string | null; // picked from the list; null = typed in ("Other")
   supplierName: string;
   supplierEmail: string | null;
   deliveryAddress: string | null;
@@ -101,4 +112,30 @@ export function supplierOrderProblem(
   const bad = filled.find((i) => !Number.isFinite(i.quantity) || i.quantity <= 0);
   if (bad) return `Check the quantity for "${bad.description.trim()}".`;
   return null;
+}
+
+/**
+ * Up to `limit` suppliers whose name (or any word in it) starts with what was
+ * typed — "epp" finds "Reece Epping". Empty search = the first few.
+ */
+export function matchSuppliers(all: Supplier[], query: string, limit = 8): Supplier[] {
+  const q = query.trim().toLowerCase();
+  if (!q) return all.slice(0, limit);
+  const starts = all.filter((s) => s.name.toLowerCase().startsWith(q));
+  const words = all.filter((s) => !starts.includes(s) && s.name.toLowerCase().split(/[\s\-&/()]+/).some((w) => w.startsWith(q)));
+  const anywhere = all.filter((s) => !starts.includes(s) && !words.includes(s) && s.name.toLowerCase().includes(q));
+  return [...starts, ...words, ...anywhere].slice(0, limit);
+}
+
+/**
+ * The job's budget line for a supplier's usual cost centre (the quarry →
+ * Transport), when the job has exactly one such line. Null = leave it to the tech.
+ */
+export function costCentreLineForSupplier(
+  supplier: Pick<Supplier, "defaultCostCentreId">,
+  lines: { id: string; costCentreId: string | null }[] | undefined
+): string | null {
+  if (!supplier.defaultCostCentreId || !lines) return null;
+  const matches = lines.filter((l) => l.costCentreId === supplier.defaultCostCentreId);
+  return matches.length === 1 ? matches[0].id : null;
 }

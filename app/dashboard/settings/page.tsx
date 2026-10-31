@@ -1,7 +1,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { CheckCircle2, XCircle, ExternalLink, CalendarDays, Wrench, Layers } from "lucide-react";
+import { CheckCircle2, XCircle, ExternalLink, CalendarDays, Wrench, Layers, Truck } from "lucide-react";
 import Link from "next/link";
 import { GoogleCalendarSyncButton } from "@/components/settings/google-calendar-sync-button";
 import { XeroExpenseAccountCode } from "@/components/settings/xero-expense-account-code";
@@ -201,12 +201,11 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
             <div>
               <CardTitle className="text-base flex items-center gap-2">
                 <Layers className="w-4 h-4 text-blue-600" />
-                Cost Centre Templates
+                Cost Centres
               </CardTitle>
               <CardDescription className="mt-1">
-                Standard job stages (Below Ground Drainage / Above Ground Plumbing / Truck Cartage) that can be
-                loaded straight onto a Purchase Order — one group at a time to match Simpro, or several merged
-                into a single PO
+                The company&apos;s cost centres (Below Ground Drainage, Transport, Above Ground Plumbing, Civil) and the
+                stages under each, which load straight onto a job&apos;s Purchase Order
               </CardDescription>
             </div>
           </div>
@@ -214,7 +213,28 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
         <CardContent>
           <Link href="/dashboard/settings/cost-centre-templates">
             <Button variant="outline" className="gap-2">
-              <ExternalLink className="w-4 h-4" /> Manage Cost Centre Templates
+              <ExternalLink className="w-4 h-4" /> Manage Cost Centres
+            </Button>
+          </Link>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <div>
+            <CardTitle className="text-base flex items-center gap-2">
+              <Truck className="w-4 h-4 text-blue-600" />
+              Suppliers
+            </CardTitle>
+            <CardDescription className="mt-1">
+              The supplier accounts the crew pick from when they raise a purchase order, copied from Xero every night
+            </CardDescription>
+          </div>
+        </CardHeader>
+        <CardContent>
+          <Link href="/dashboard/settings/suppliers">
+            <Button variant="outline" className="gap-2">
+              <ExternalLink className="w-4 h-4" /> Manage Suppliers
             </Button>
           </Link>
         </CardContent>

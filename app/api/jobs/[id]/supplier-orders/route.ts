@@ -79,7 +79,9 @@ async function listOrders(admin: Admin, jobId: string) {
 
 // What the Raise PO form starts with: the orders already on the job, the cost
 // centre the tech is clocked into (else the one the job is scheduled to), the
-// site address, and suppliers we have emailed before.
+// site address, the supplier list (0087), and which company cost centre each
+// of the job's budget lines belongs to — so picking the quarry can put the PO
+// on the job's Transport line by itself.
 export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const guard = await requireUser(request);
   if (!guard.ok) return guard.response;
@@ -90,7 +92,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     const job = await loadJob(admin, id);
     if (!job) return NextResponse.json({ error: "Job not found" }, { status: 404 });
 
-    const [orders, { data: openEntry }, { data: past }] = await Promise.all([
+    const [orders, { data: openEntry }, { data: supplierRows, error: suppliersError }, { data: lines, error: linesError }] = await Promise.all([
       listOrders(admin, id),
       admin
         .from("time_entries")
@@ -103,28 +105,33 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
         .limit(1)
         .maybeSingle(),
       admin
-        .from("vendor_orders")
-        .select("vendor_name, supplier_email")
-        .not("supplier_email", "is", null)
-        .order("created_at", { ascending: false })
-        .limit(300),
+        .from("suppliers")
+        .select("id, name, email, default_cost_centre_id")
+        .eq("is_active", true)
+        .order("name"),
+      admin
+        .from("po_cost_centers")
+        .select("id, cost_centre_id, purchase_orders!inner(job_id)")
+        .eq("purchase_orders.job_id", id),
     ]);
+    if (suppliersError) throw suppliersError;
+    if (linesError) throw linesError;
 
-    const suppliers: { name: string; email: string }[] = [];
-    const seen = new Set<string>();
-    for (const s of past ?? []) {
-      const key = String(s.vendor_name).trim().toLowerCase();
-      if (seen.has(key)) continue;
-      seen.add(key);
-      suppliers.push({ name: s.vendor_name, email: s.supplier_email as string });
-    }
+    // Field by field: a supplier's account number and phone stay office-side.
+    const suppliers = (supplierRows ?? []).map((s) => ({
+      id: s.id as string,
+      name: s.name as string,
+      email: (s.email as string | null) ?? null,
+      defaultCostCentreId: (s.default_cost_centre_id as string | null) ?? null,
+    }));
 
     return NextResponse.json({
       orders,
       defaultCostCenterId: openEntry?.cost_center_id ?? job.scheduled_cost_center_id ?? null,
       clockedIn: !!openEntry,
       deliveryAddress: siteOneLine(job.sites) || null,
-      suppliers: suppliers.slice(0, 40),
+      suppliers,
+      costCentreLines: (lines ?? []).map((l) => ({ id: l.id as string, costCentreId: (l.cost_centre_id as string | null) ?? null })),
     });
   } catch (err) {
     console.error("supplier orders list error:", err);
@@ -173,6 +180,21 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       .maybeSingle();
     if (!cc) return NextResponse.json({ error: "That cost centre isn't on this job. Pick it again." }, { status: 400 });
 
+    // A supplier picked from the list: its name is the one on file, whatever
+    // the phone sent. The email stays as sent — the tech may have cleared it
+    // to order at the counter.
+    let supplierName = order.supplierName;
+    if (order.supplierId) {
+      const { data: supplier } = await admin
+        .from("suppliers")
+        .select("name")
+        .eq("id", order.supplierId)
+        .eq("is_active", true)
+        .maybeSingle();
+      if (!supplier) return NextResponse.json({ error: "That supplier isn't on the list any more. Pick it again." }, { status: 400 });
+      supplierName = supplier.name as string;
+    }
+
     const today = new Date().toLocaleDateString("en-CA", { timeZone: "Australia/Melbourne" });
     const { data: created, error: insertError } = await admin
       .from("vendor_orders")
@@ -180,7 +202,8 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
         id: order.id,
         job_id: jobId,
         cost_center_id: order.costCenterId,
-        vendor_name: order.supplierName,
+        supplier_id: order.supplierId,
+        vendor_name: supplierName,
         supplier_email: order.supplierEmail,
         delivery_address: order.deliveryAddress,
         required_by: order.requiredBy,
@@ -216,7 +239,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       const email = supplierOrderEmail({
         poNumber,
         jobNumber: job.job_number,
-        supplierName: order.supplierName,
+        supplierName,
         raisedBy: me ? { name: me.full_name, phone: me.phone } : null,
         deliveryAddress: order.deliveryAddress,
         requiredBy: order.requiredBy,

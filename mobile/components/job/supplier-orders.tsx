@@ -7,17 +7,22 @@ import { localDateKey } from "../../lib/date";
 import { cryptoIdGen } from "../../lib/data/ids";
 import type { JobCostCentre } from "../../lib/data/reads/jobBilling";
 import {
+  costCentreLineForSupplier,
   loadSupplierOrders,
+  matchSuppliers,
   raiseSupplierOrder,
   supplierOrderProblem,
+  type Supplier,
   type SupplierOrdersState,
 } from "../../lib/supplierOrders";
 
 // Supplier POs on a job (Justin, 28 Oct 2026): any tech, any job, any
 // supplier — and always against a cost centre, picked first, so the materials
-// marry up to the right stage of the job. A job with no cost centres can't
-// have a PO until the office adds one. No prices anywhere on this screen; the office prices it from the
-// supplier's invoice.
+// marry up to the right stage of the job. The supplier is picked from our
+// accounts (copied from Xero, 31 Oct 2026), with "Other" for a one-off. A
+// job with no cost centres can't have a PO until the office adds one. No
+// prices anywhere on this screen; the office prices it from the supplier's
+// invoice.
 
 interface Props {
   jobId: string;
@@ -53,6 +58,12 @@ export function JobSupplierOrdersTab({ jobId, costCentres }: Props) {
   // gets back the PO already raised, never a second email to the supplier.
   const [draftId, setDraftId] = useState(() => cryptoIdGen.newId());
   const [costCentreId, setCostCentreId] = useState<string | null>(null);
+  // Set once the tech taps a cost centre: a supplier's usual cost centre
+  // never overrides a choice they made.
+  const [costCentreTouched, setCostCentreTouched] = useState(false);
+  const [supplierId, setSupplierId] = useState<string | null>(null);
+  const [otherSupplier, setOtherSupplier] = useState(false);
+  const [supplierSearch, setSupplierSearch] = useState("");
   const [supplierName, setSupplierName] = useState("");
   const [supplierEmail, setSupplierEmail] = useState("");
   const [items, setItems] = useState<ItemRow[]>([newRow()]);
@@ -87,6 +98,10 @@ export function JobSupplierOrdersTab({ jobId, costCentres }: Props) {
   function resetForm() {
     setFormOpen(false);
     setDraftId(cryptoIdGen.newId());
+    setCostCentreTouched(false);
+    setSupplierId(null);
+    setOtherSupplier(false);
+    setSupplierSearch("");
     setSupplierName("");
     setSupplierEmail("");
     setItems([newRow()]);
@@ -94,12 +109,28 @@ export function JobSupplierOrdersTab({ jobId, costCentres }: Props) {
     setNotes("");
   }
 
-  const supplierMatches = useMemo(() => {
-    const q = supplierName.trim().toLowerCase();
-    const all = state?.suppliers ?? [];
-    if (!q) return all.slice(0, 6);
-    return all.filter((s) => s.name.toLowerCase().includes(q) && s.name.toLowerCase() !== q).slice(0, 6);
-  }, [supplierName, state?.suppliers]);
+  const supplierMatches = useMemo(
+    () => matchSuppliers(state?.suppliers ?? [], supplierSearch),
+    [supplierSearch, state?.suppliers]
+  );
+
+  function pickSupplier(s: Supplier) {
+    setSupplierId(s.id ?? null);
+    setSupplierName(s.name);
+    setSupplierEmail(s.email ?? "");
+    setOtherSupplier(false);
+    if (!costCentreTouched) {
+      const line = costCentreLineForSupplier(s, state?.costCentreLines);
+      if (line && costCentres.some((cc) => cc.id === line)) setCostCentreId(line);
+    }
+  }
+
+  function clearSupplier() {
+    setSupplierId(null);
+    setSupplierName("");
+    setSupplierEmail("");
+    setSupplierSearch("");
+  }
 
   function updateItem(key: string, patch: Partial<ItemRow>) {
     setItems((rows) => rows.map((r) => (r.key === key ? { ...r, ...patch } : r)));
@@ -115,6 +146,7 @@ export function JobSupplierOrdersTab({ jobId, costCentres }: Props) {
     const order = {
       id: draftId,
       costCenterId: costCentreId,
+      supplierId,
       supplierName: supplierName.trim(),
       supplierEmail: supplierEmail.trim() || null,
       deliveryAddress: deliveryAddress.trim() || null,
@@ -184,7 +216,10 @@ export function JobSupplierOrdersTab({ jobId, costCentres }: Props) {
               <TouchableOpacity
                 key={cc.id}
                 style={[styles.chip, costCentreId === cc.id && styles.chipActive]}
-                onPress={() => setCostCentreId(cc.id)}
+                onPress={() => {
+                  setCostCentreId(cc.id);
+                  setCostCentreTouched(true);
+                }}
               >
                 <Text style={[styles.chipText, costCentreId === cc.id && styles.chipTextActive]}>{cc.name}</Text>
               </TouchableOpacity>
@@ -196,28 +231,58 @@ export function JobSupplierOrdersTab({ jobId, costCentres }: Props) {
           )}
 
           <Text style={styles.formLabel}>2. Supplier *</Text>
-          <TextInput
-            style={styles.input}
-            value={supplierName}
-            onChangeText={setSupplierName}
-            placeholder="e.g. Reece Epping"
-            placeholderTextColor={colors.slate400}
-          />
-          {supplierMatches.length > 0 && (
-            <View style={[styles.chipRow, { marginTop: 6 }]}>
+          {supplierName && !otherSupplier ? (
+            <View style={styles.pickedSupplier}>
+              <Ionicons name="checkmark-circle" size={22} color={colors.green600} />
+              <Text style={styles.pickedSupplierName}>{supplierName}</Text>
+              <TouchableOpacity onPress={clearSupplier} accessibilityLabel="Change supplier" style={styles.changeBtn}>
+                <Text style={styles.changeText}>Change</Text>
+              </TouchableOpacity>
+            </View>
+          ) : otherSupplier ? (
+            <>
+              <TextInput
+                style={styles.input}
+                value={supplierName}
+                onChangeText={setSupplierName}
+                placeholder="Supplier name"
+                placeholderTextColor={colors.slate400}
+                autoFocus
+              />
+              <TouchableOpacity onPress={() => { setOtherSupplier(false); clearSupplier(); }}>
+                <Text style={[styles.hint, styles.linkText]}>Back to the supplier list</Text>
+              </TouchableOpacity>
+            </>
+          ) : (
+            <>
+              <TextInput
+                style={styles.input}
+                value={supplierSearch}
+                onChangeText={setSupplierSearch}
+                placeholder="Search our suppliers"
+                placeholderTextColor={colors.slate400}
+                autoCorrect={false}
+              />
               {supplierMatches.map((s) => (
-                <TouchableOpacity
-                  key={s.name}
-                  style={styles.chip}
-                  onPress={() => {
-                    setSupplierName(s.name);
-                    setSupplierEmail(s.email);
-                  }}
-                >
-                  <Text style={styles.chipText}>{s.name}</Text>
+                <TouchableOpacity key={s.id ?? s.name} style={styles.supplierRow} onPress={() => pickSupplier(s)}>
+                  <Text style={styles.supplierRowText}>{s.name}</Text>
                 </TouchableOpacity>
               ))}
-            </View>
+              {supplierSearch.trim() !== "" && supplierMatches.length === 0 && (
+                <Text style={styles.hint}>{"No supplier by that name on our list."}</Text>
+              )}
+              <TouchableOpacity
+                style={styles.supplierRow}
+                onPress={() => {
+                  setOtherSupplier(true);
+                  setSupplierId(null);
+                  setSupplierName(supplierSearch.trim());
+                  setSupplierEmail("");
+                }}
+              >
+                <Text style={[styles.supplierRowText, { color: colors.blue600 }]}>Other supplier (not on the list)</Text>
+              </TouchableOpacity>
+            </>
           )}
 
           <Text style={styles.formLabel}>Supplier email</Text>
@@ -375,6 +440,13 @@ const styles = StyleSheet.create({
   form: { backgroundColor: colors.card, borderRadius: 12, borderWidth: 1, borderColor: colors.border, padding: 14 },
   formLabel: { fontSize: 13, fontWeight: "600", color: colors.slate700, marginBottom: 6, marginTop: 12 },
   hint: { fontSize: 11, color: colors.slate500, marginTop: 4 },
+  linkText: { color: colors.blue600, fontSize: 13, paddingVertical: 6 },
+  supplierRow: { paddingVertical: 14, paddingHorizontal: 12, borderBottomWidth: 1, borderBottomColor: colors.border },
+  supplierRowText: { fontSize: 16, fontWeight: "600", color: colors.slate700 },
+  pickedSupplier: { flexDirection: "row", alignItems: "center", gap: 8, padding: 12, borderRadius: 8, backgroundColor: colors.green100 },
+  pickedSupplierName: { flex: 1, fontSize: 16, fontWeight: "700", color: colors.slate700 },
+  changeBtn: { paddingVertical: 6, paddingHorizontal: 10 },
+  changeText: { fontSize: 14, fontWeight: "600", color: colors.blue600 },
   chipRow: { flexDirection: "row", flexWrap: "wrap", gap: 6 },
   chip: { paddingHorizontal: 10, paddingVertical: 6, borderRadius: 999, backgroundColor: colors.bg, borderWidth: 1, borderColor: colors.border },
   chipActive: { backgroundColor: colors.blue600, borderColor: colors.blue600 },
