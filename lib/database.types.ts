@@ -257,6 +257,7 @@ export type Database = {
       billing_rate_config: {
         Row: {
           apprentice_margin_pct: number
+          auto_labour_lines: boolean
           call_out_fee: number
           double_time_multiplier: number
           id: boolean
@@ -268,6 +269,7 @@ export type Database = {
         }
         Insert: {
           apprentice_margin_pct?: number
+          auto_labour_lines?: boolean
           call_out_fee?: number
           double_time_multiplier?: number
           id?: boolean
@@ -279,6 +281,7 @@ export type Database = {
         }
         Update: {
           apprentice_margin_pct?: number
+          auto_labour_lines?: boolean
           call_out_fee?: number
           double_time_multiplier?: number
           id?: boolean

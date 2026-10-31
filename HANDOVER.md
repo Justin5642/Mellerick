@@ -230,6 +230,24 @@ after the highest of that shape on the job, so a deleted one is never reused —
 site's address, already pinned when the site has coordinates. All editable.
 Simpro-imported `SIMPRO-…` numbers are left alone.
 
+**Stage 0 fixes (31 Oct 2026 workflow review; migration `0086` applied 2026-10-31).**
+- **No website geofence.** `components/job/job-time.tsx` no longer watches the
+  browser's location. Its first reading away from site closed the viewer's open
+  entry, so a tech clocked in on the phone who opened the job in the office was
+  clocked out. Automatic clocking is the phone app's alone; the web is manual.
+- **No automatic hourly labour lines.** `billing_rate_config.auto_labour_lines`
+  (0086, default false) makes `syncJobBilling` a no-op: no new "Labour" / "Call
+  Out Fee" job_items, and existing ones are left as they are. Builder work is
+  fixed price; the office adds labour by hand for day work. A database without
+  the column keeps the old behaviour, so merging before applying is harmless.
+- **"Project" job type saves.** 0086 replaces the jobs `job_type` check
+  (found by definition, not name) with one that includes `project`.
+- **Sign-off clocks the signer off.** Phone (`useSignoff` →
+  `getOpenWorkEntryOnJob`, through the outbox) and web (`job-signature.tsx`)
+  close the signer's own open work entry on that job. Other crew are untouched.
+- **Margin flag 20%** (`min_margin_pct`, set by 0086; fallbacks in the job page
+  and `mobile/lib/data/reads/jobCosting.ts` also 20).
+
 ---
 
 ## 2. The one rule that must never break
