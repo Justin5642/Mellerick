@@ -23,7 +23,7 @@ interface Props {
   timeEntries: { staff_id: string; hours: number | null; cost_center_id: string | null; entry_type?: string | null }[];
   expenses: { amount: number | null; cost_center_id: string | null }[];
   vendorOrders: { amount: number | null; cost_center_id: string | null; status: string }[];
-  equipmentUsage: { equipment_id: string; hours: number }[];
+  equipmentUsage: { equipment_id: string; hours: number; loads?: number | null; cost_center_id?: string | null }[];
   equipmentOptions: EquipmentInput[];
   staffCostProfiles: StaffCostProfileInput[];
   minMarginPct: number;
@@ -165,7 +165,7 @@ export function JobLedger({ purchaseOrders, timeEntries, expenses, vendorOrders,
           {ledger.unpricedOrders > 0 && (
             <p>Supplier POs not priced yet aren&apos;t in the cost until their invoice amount is entered.</p>
           )}
-          <p>Ex GST. Plant isn&apos;t tagged to a cost centre yet, so it shows under &quot;Not tagged&quot;.</p>
+          <p>Ex GST. Truck and plant usage logged without a cost centre shows under &quot;Not tagged&quot;.</p>
         </div>
       </CardContent>
     </Card>

@@ -16,6 +16,7 @@ interface EquipmentOption extends EquipmentCostInputs {
   id: string;
   name: string;
   category: string;
+  cost_per_load?: number | null;
 }
 
 interface UsageEntry {
@@ -24,6 +25,8 @@ interface UsageEntry {
   usage_date: string;
   hours: number;
   notes: string | null;
+  loads?: number | null;
+  cost_center_id?: string | null;
 }
 
 interface Props {
@@ -31,9 +34,11 @@ interface Props {
   usage: UsageEntry[];
   equipmentOptions: EquipmentOption[];
   onUpdate: (usage: UsageEntry[]) => void;
+  /** The job's PO lines, so usage can be costed to one — cartage to Transport (0091). */
+  costCentres?: { id: string; name: string }[];
 }
 
-export function JobEquipment({ jobId, usage: initialUsage, equipmentOptions, onUpdate }: Props) {
+export function JobEquipment({ jobId, usage: initialUsage, equipmentOptions, onUpdate, costCentres = [] }: Props) {
   const supabase = createClient();
   const [usage, setUsage] = useState<UsageEntry[]>(initialUsage);
   const [showForm, setShowForm] = useState(false);
@@ -42,6 +47,8 @@ export function JobEquipment({ jobId, usage: initialUsage, equipmentOptions, onU
     equipment_id: equipmentOptions[0]?.id ?? "",
     usage_date: "",
     hours: "",
+    loads: "",
+    cost_center_id: "",
     notes: "",
   });
   const [errors, setErrors] = useState<Record<string, boolean>>({});
@@ -53,10 +60,17 @@ export function JobEquipment({ jobId, usage: initialUsage, equipmentOptions, onU
     return eq ? computeEquipmentCost(eq).costPerHour : 0;
   }
 
+  // Hours × cost per hour, plus loads × cost per load (0091).
+  function costOf(u: UsageEntry) {
+    const eq = equipmentById.get(u.equipment_id);
+    return Number(u.hours) * costPerHourFor(u.equipment_id) + Number(u.loads ?? 0) * Number(eq?.cost_per_load ?? 0);
+  }
+
   async function saveUsage() {
     if (!form.equipment_id) { setErrors({ equipment_id: true }); return; }
     if (!form.usage_date) { setErrors({ usage_date: true }); return; }
-    if (!form.hours || Number(form.hours) <= 0) { setErrors({ hours: true }); return; }
+    // Hours, loads, or both — a truck run can be loads only.
+    if (!(Number(form.hours) > 0) && !(Number(form.loads) > 0)) { setErrors({ hours: true }); return; }
     setSaving(true);
 
     const {
@@ -69,7 +83,9 @@ export function JobEquipment({ jobId, usage: initialUsage, equipmentOptions, onU
         job_id: jobId,
         equipment_id: form.equipment_id,
         usage_date: form.usage_date,
-        hours: Number(form.hours),
+        hours: Number(form.hours) || 0,
+        loads: Math.max(0, Math.round(Number(form.loads) || 0)),
+        cost_center_id: form.cost_center_id || null,
         notes: form.notes || null,
         logged_by: user?.id ?? null,
       })
@@ -82,7 +98,7 @@ export function JobEquipment({ jobId, usage: initialUsage, equipmentOptions, onU
     setUsage(updated);
     onUpdate(updated);
     setShowForm(false);
-    setForm({ equipment_id: equipmentOptions[0]?.id ?? "", usage_date: "", hours: "", notes: "" });
+    setForm({ equipment_id: equipmentOptions[0]?.id ?? "", usage_date: "", hours: "", loads: "", cost_center_id: "", notes: "" });
     toast.success("Equipment usage logged");
     setSaving(false);
   }
@@ -107,7 +123,7 @@ export function JobEquipment({ jobId, usage: initialUsage, equipmentOptions, onU
     toast.success("Usage entry removed");
   }
 
-  const totalCost = usage.reduce((sum, u) => sum + Number(u.hours) * costPerHourFor(u.equipment_id), 0);
+  const totalCost = usage.reduce((sum, u) => sum + costOf(u), 0);
   const totalHours = usage.reduce((sum, u) => sum + Number(u.hours), 0);
 
   return (
@@ -130,7 +146,7 @@ export function JobEquipment({ jobId, usage: initialUsage, equipmentOptions, onU
 
       {usage.map((entry) => {
         const eq = equipmentById.get(entry.equipment_id);
-        const cost = Number(entry.hours) * costPerHourFor(entry.equipment_id);
+        const cost = costOf(entry);
         return (
           <Card key={entry.id}>
             <CardHeader className="pb-3">
@@ -142,6 +158,8 @@ export function JobEquipment({ jobId, usage: initialUsage, equipmentOptions, onU
                   </CardTitle>
                   <p className="text-xs text-slate-500 mt-0.5">
                     {eq ? EQUIPMENT_CATEGORY_LABELS[eq.category] ?? eq.category : ""} · {formatDate(entry.usage_date)}
+                    {entry.cost_center_id && ` · ${costCentres.find((c) => c.id === entry.cost_center_id)?.name ?? "cost centre"}`}
+                    {Number(entry.loads) > 0 && ` · ${entry.loads} load${entry.loads === 1 ? "" : "s"}`}
                   </p>
                   {entry.notes && <p className="text-sm text-slate-600 mt-1">{entry.notes}</p>}
                 </div>
@@ -194,7 +212,7 @@ export function JobEquipment({ jobId, usage: initialUsage, equipmentOptions, onU
                     />
                   </div>
                   <div className="space-y-1.5">
-                    <Label>Hours *</Label>
+                    <Label>Hours</Label>
                     <Input
                       type="number" step="0.5"
                       value={form.hours}
@@ -202,6 +220,25 @@ export function JobEquipment({ jobId, usage: initialUsage, equipmentOptions, onU
                       placeholder="e.g. 4"
                       className={errors.hours ? "border-red-500 focus-visible:ring-red-500" : ""}
                     />
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-1.5">
+                    <Label>Loads</Label>
+                    <Input type="number" step="1" min="0" value={form.loads} onChange={(e) => { setForm((f) => ({ ...f, loads: e.target.value })); setErrors({}); }} placeholder="0" />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label>Cost centre</Label>
+                    <select
+                      value={form.cost_center_id}
+                      onChange={(e) => setForm((f) => ({ ...f, cost_center_id: e.target.value }))}
+                      className="h-9 w-full rounded-md border border-slate-200 bg-white px-2 text-sm"
+                    >
+                      <option value="">Not tagged</option>
+                      {costCentres.map((c) => (
+                        <option key={c.id} value={c.id}>{c.name}</option>
+                      ))}
+                    </select>
                   </div>
                 </div>
                 <div className="space-y-1.5">

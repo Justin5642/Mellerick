@@ -93,6 +93,7 @@ const equipment = new Table({
   updated_at: column.text,
   updated_by: column.text,
   assigned_to: column.text,
+  cost_per_load: column.real,
 });
 
 const equipment_expenses = new Table({
@@ -124,6 +125,8 @@ const equipment_usage_log = new Table({
   logged_by: column.text,
   created_at: column.text,
   sync_office: column.integer,
+  cost_center_id: column.text,
+  loads: column.integer,
 }, {
   indexes: {
     job: ['job_id'],

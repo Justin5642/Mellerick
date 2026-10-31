@@ -68,7 +68,7 @@ describe("computeJobLedger", () => {
           { staff_id: "tech", hours: 1, cost_center_id: null, entry_type: "travel" },
           { staff_id: "tech", hours: 2, cost_center_id: null, entry_type: "work" },
         ],
-        plant: [250],
+        plant: [{ cost: 250, cost_center_id: null }],
       })
     );
     expect(l.rows.slice(-2).map((r) => [r.key, r.cost])).toEqual([
@@ -101,15 +101,31 @@ describe("belowMinimumMargin", () => {
 });
 
 describe("plantCosts", () => {
+  const eq = {
+    purchase_cost: 0, estimated_life_years: 1, insurance_annual: 0, maintenance_annual: 0,
+    registration_annual: 0, other_annual_costs: 0, fuel_cost_per_hour: 50, target_hours_per_year: 1000,
+  };
+
   it("skips equipment assigned to a person (already in their labour rate)", () => {
-    const eq = {
-      purchase_cost: 0, estimated_life_years: 1, insurance_annual: 0, maintenance_annual: 0,
-      registration_annual: 0, other_annual_costs: 0, fuel_cost_per_hour: 50, target_hours_per_year: 1000,
-    };
     const costs = plantCosts(
       [{ equipment_id: "digger", hours: 4 }, { equipment_id: "ute", hours: 4 }],
       [{ id: "digger", ...eq }, { id: "ute", assigned_to: "tech", ...eq }]
     );
-    expect(costs).toEqual([200]);
+    expect(costs).toEqual([{ cost: 200, cost_center_id: null }]);
+  });
+
+  it("adds loads at the cost per load — even on an assigned truck — on the usage's line", () => {
+    const costs = plantCosts(
+      [{ equipment_id: "truck", hours: 2, loads: 3, cost_center_id: "l-cart" }],
+      [{ id: "truck", assigned_to: "driver", cost_per_load: 85, ...eq }]
+    );
+    expect(costs).toEqual([{ cost: 255, cost_center_id: "l-cart" }]);
+  });
+});
+
+describe("computeJobLedger — plant on its cost centre", () => {
+  it("puts tagged truck cost on the Transport row", () => {
+    const l = computeJobLedger(base({ plant: [{ cost: 300, cost_center_id: "l-cart" }] }));
+    expect(l.rows.find((r) => r.key === "transport")).toMatchObject({ plant: 300, cost: 300 });
   });
 });

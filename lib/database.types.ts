@@ -459,6 +459,7 @@ export type Database = {
         Row: {
           assigned_to: string | null
           category: string
+          cost_per_load: number
           created_at: string | null
           estimated_life_years: number
           fuel_cost_per_hour: number
@@ -480,6 +481,7 @@ export type Database = {
         Insert: {
           assigned_to?: string | null
           category?: string
+          cost_per_load?: number
           created_at?: string | null
           estimated_life_years?: number
           fuel_cost_per_hour?: number
@@ -501,6 +503,7 @@ export type Database = {
         Update: {
           assigned_to?: string | null
           category?: string
+          cost_per_load?: number
           created_at?: string | null
           estimated_life_years?: number
           fuel_cost_per_hour?: number
@@ -646,33 +649,39 @@ export type Database = {
       }
       equipment_usage_log: {
         Row: {
+          cost_center_id: string | null
           created_at: string | null
           equipment_id: string
           hours: number
           id: string
           job_id: string | null
+          loads: number
           logged_by: string | null
           notes: string | null
           sync_office: boolean
           usage_date: string
         }
         Insert: {
+          cost_center_id?: string | null
           created_at?: string | null
           equipment_id: string
           hours: number
           id?: string
           job_id?: string | null
+          loads?: number
           logged_by?: string | null
           notes?: string | null
           sync_office?: boolean
           usage_date?: string
         }
         Update: {
+          cost_center_id?: string | null
           created_at?: string | null
           equipment_id?: string
           hours?: number
           id?: string
           job_id?: string | null
+          loads?: number
           logged_by?: string | null
           notes?: string | null
           sync_office?: boolean

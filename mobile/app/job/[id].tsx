@@ -14,6 +14,7 @@ import { JobNotesTab } from "../../components/job/notes";
 import { JobPhotosTab } from "../../components/job/photos";
 import { JobTimeTab } from "../../components/job/time";
 import { JobTodayCard } from "../../components/job/today-card";
+import { JobPlantUsage } from "../../components/job/plant-usage";
 import { JobSignatureTab } from "../../components/job/signature";
 import { JobDocumentsTab } from "../../components/job/documents";
 import { JobVariationsTab } from "../../components/job/variations";
@@ -369,6 +370,8 @@ export default function JobDetailScreen() {
             myBookings={bookings ? bookings.filter((b) => b.staff_id === userId) : null}
           />
         )}
+        {/* Truck & plant (Stage 7): the driver logs cartage against the job's cost centre. */}
+        {activeTab === "time" && userId && <JobPlantUsage jobId={job.id} />}
         {activeTab === "variations" && userId && <JobVariationsTab jobId={job.id} currentUserId={userId} />}
         {activeTab === "orders" && <JobSupplierOrdersTab jobId={job.id} costCentres={costCenters} />}
         {activeTab === "photos" && userId && (

@@ -17,8 +17,9 @@ import { computeEquipmentCost, type EquipmentCostInputs } from "@/lib/equipment-
 //   travel     travel hours × loaded rate — its own row, it has no line
 //   materials  job_expenses + priced supplier orders, by line. A supplier
 //              order with no amount yet is counted as "to be priced", not $0.
-//   plant      equipment usage × cost per hour. Usage has no cost centre yet,
-//              so it lands in "Not tagged".
+//   plant      equipment usage: hours × cost per hour, plus loads × cost per
+//              load (0091), by the usage's line — the truck's cartage on the
+//              Transport line. Untagged usage lands in "Not tagged".
 //
 // Known overlap until supplier invoices are matched to POs (Stage 4): the
 // same invoice entered both as an expense and as an order's amount counts
@@ -37,6 +38,8 @@ export interface StaffCostProfileInput {
 export interface EquipmentInput extends EquipmentCostInputs {
   id: string;
   assigned_to?: string | null;
+  /** $ per load carted (0091). */
+  cost_per_load?: number | null;
 }
 
 /** Each person's loaded $/hour, with any vehicle assigned to them folded in. */
@@ -54,15 +57,26 @@ export function loadedRatesByStaff(profiles: StaffCostProfileInput[], equipment:
   );
 }
 
-/** Plant cost per usage entry. Equipment assigned to a person is already in their labour rate, so it is skipped. */
-export function plantCosts(usage: { equipment_id: string; hours: number }[], equipment: EquipmentInput[]): number[] {
+/**
+ * Plant cost per usage entry, with the line it belongs to. Hours on equipment
+ * assigned to a person are already in their labour rate, so only that
+ * equipment's loads are costed; everything else is hours × cost per hour plus
+ * loads × cost per load.
+ */
+export function plantCosts(
+  usage: { equipment_id: string; hours: number; loads?: number | null; cost_center_id?: string | null }[],
+  equipment: EquipmentInput[]
+): { cost: number; cost_center_id: string | null }[] {
   const byId = new Map(equipment.map((e) => [e.id, e]));
   return usage
-    .filter((u) => !byId.get(u.equipment_id)?.assigned_to)
     .map((u) => {
       const eq = byId.get(u.equipment_id);
-      return eq ? Number(u.hours) * computeEquipmentCost(eq).costPerHour : 0;
-    });
+      if (!eq) return { cost: 0, cost_center_id: u.cost_center_id ?? null };
+      const hoursCost = eq.assigned_to ? 0 : Number(u.hours) * computeEquipmentCost(eq).costPerHour;
+      const loadsCost = Number(u.loads ?? 0) * Number(eq.cost_per_load ?? 0);
+      return { cost: hoursCost + loadsCost, cost_center_id: u.cost_center_id ?? null };
+    })
+    .filter((p) => p.cost > 0);
 }
 
 export interface LedgerInputs {
@@ -75,7 +89,7 @@ export interface LedgerInputs {
   ratesByStaff: Map<string, number>;
   expenses: { amount: number | null; cost_center_id: string | null }[];
   supplierOrders: { amount: number | null; cost_center_id: string | null; status: string }[];
-  plant: number[];
+  plant: { cost: number; cost_center_id: string | null }[];
 }
 
 export interface LedgerRow {
@@ -154,8 +168,7 @@ export function computeJobLedger(i: LedgerInputs): JobLedger {
     else r.unpricedOrders += 1;
   }
 
-  const plantTotal = i.plant.reduce((s, p) => s + p, 0);
-  if (plantTotal > 0) row("untagged", "Not tagged to a cost centre").plant += plantTotal;
+  for (const p of i.plant) forLine(p.cost_center_id).plant += p.cost;
 
   // Company cost centres first in list order, then travel, then untagged.
   const order = (k: string) => {

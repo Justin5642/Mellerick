@@ -20,7 +20,7 @@ import { ArrowLeft, AlertTriangle } from "lucide-react";
 
 const EQUIPMENT_COST_COLUMNS =
   "id, assigned_to, purchase_cost, estimated_life_years, insurance_annual, maintenance_annual, " +
-  "registration_annual, other_annual_costs, fuel_cost_per_hour, target_hours_per_year";
+  "registration_annual, other_annual_costs, fuel_cost_per_hour, target_hours_per_year, cost_per_load";
 const STAFF_COST_COLUMNS =
   "staff_id, hourly_rate, super_rate, workers_comp_rate, leave_loading_rate, annual_fixed_oncosts, target_hours_per_week";
 
@@ -78,7 +78,7 @@ export default async function JobMarginsPage() {
     type TimeRow = { job_id: string; staff_id: string; hours: number | null; cost_center_id: string | null; entry_type: string | null };
     type ExpenseRow = { job_id: string; amount: number | null; cost_center_id: string | null };
     type OrderRow = { job_id: string; amount: number | null; cost_center_id: string | null; status: string };
-    type UsageRow = { job_id: string; equipment_id: string; hours: number };
+    type UsageRow = { job_id: string; equipment_id: string; hours: number; loads: number | null; cost_center_id: string | null };
     const [time, expenses, orders, usage, equipmentRes, profilesRes, centresRes, configRes] = await Promise.all([
       forJobs<TimeRow>(ids, (chunk) =>
         fetchAllRows<TimeRow>((count) => supabase.from("time_entries").select("id, job_id, staff_id, hours, cost_center_id, entry_type", count).in("job_id", chunk).order("id") as never)
@@ -90,7 +90,7 @@ export default async function JobMarginsPage() {
         fetchAllRows<OrderRow>((count) => supabase.from("vendor_orders").select("id, job_id, amount, cost_center_id, status", count).in("job_id", chunk).order("id") as never)
       ),
       forJobs<UsageRow>(ids, (chunk) =>
-        fetchAllRows<UsageRow>((count) => supabase.from("equipment_usage_log").select("id, job_id, equipment_id, hours", count).in("job_id", chunk).order("id") as never)
+        fetchAllRows<UsageRow>((count) => supabase.from("equipment_usage_log").select("id, job_id, equipment_id, hours, loads, cost_center_id", count).in("job_id", chunk).order("id") as never)
       ),
       supabase.from("equipment").select(EQUIPMENT_COST_COLUMNS),
       supabase.from("staff_cost_profiles").select(STAFF_COST_COLUMNS),
