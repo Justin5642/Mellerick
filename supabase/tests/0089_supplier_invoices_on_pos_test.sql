@@ -10,8 +10,10 @@
 do $$
 declare
   res text[] := '{}';   -- 'scenario|expected|actual'
-  a uuid;
-  b uuid;
+  a uuid := gen_random_uuid();
+  b uuid := gen_random_uuid();
+  j uuid;
+  cc uuid;
   outcome text;
   line text;
   parts text[];
@@ -19,11 +21,14 @@ declare
   n_fail int := 0;
 begin
   begin
-    select id into a from vendor_orders order by created_at limit 1;
-    select id into b from vendor_orders where id <> a order by created_at limit 1;
-    if a is null or b is null then
-      raise exception 'fixture missing: need two vendor orders';
+    -- Two orders of its own (undone at the end), on any job with a cost centre.
+    select cc_.id, po.job_id into cc, j
+      from po_cost_centers cc_ join purchase_orders po on po.id = cc_.po_id limit 1;
+    if cc is null then
+      raise exception 'fixture missing: need a job with a PO cost centre';
     end if;
+    insert into vendor_orders (id, job_id, cost_center_id, vendor_name) values (a, j, cc, 'Test Supplier 0089 A');
+    insert into vendor_orders (id, job_id, cost_center_id, vendor_name) values (b, j, cc, 'Test Supplier 0089 B');
 
     -- 1. An invoice saves on an order.
     update vendor_orders set invoice_number = 'INV-TEST-0089', invoice_date = current_date, amount = 123.45 where id = a;
