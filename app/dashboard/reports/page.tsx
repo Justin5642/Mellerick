@@ -314,6 +314,7 @@ export default async function ReportsPage() {
       totalQuotes={quotesData.length}
       staffEfficiency={isAdmin ? staffEfficiency : null}
       equipmentUtilization={equipmentUtilization}
+      showJobMargins={isAdmin}
     />
   );
 }

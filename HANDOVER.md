@@ -306,6 +306,22 @@ expose new tables by itself. The cost centre picker
 and has "+ New cost centre…" to add one on the spot (it joins the company
 list in Settings).
 
+**Job ledger and Job Margins (Stage 3, 31 Oct 2026; no migration).**
+`lib/job-ledger.ts` (pure, tested in `tests/unit/job-ledger.test.ts`) gives
+one job's budget per company cost centre (its PO lines, by `cost_centre_id`)
+against cost so far: labour (hours × loaded rate, by the entry's line), travel
+(own row), materials (`job_expenses` + priced `vendor_orders`; an order with
+no amount counts as "to be priced", not $0), plant (usage × cost/hour, under
+"Not tagged" — usage has no cost centre yet). Margin = builder's price (sum of
+`purchase_orders.total_value`) − cost; flagged when below `min_margin_pct`,
+i.e. already under the minimum even if nothing more is spent.
+- Admin only: the **Costing** tab's new "Job Ledger" card
+  (`components/job/job-ledger.tsx`) and **Reports → Job margins**
+  (`app/dashboard/reports/job-margins`), every open job with a price, worst
+  margin first. "Open" = not cancelled and not completed-and-approved.
+- Known overlap until Stage 4: one supplier invoice entered both as an expense
+  and as a PO's amount counts twice.
+
 ---
 
 ## 2. The one rule that must never break

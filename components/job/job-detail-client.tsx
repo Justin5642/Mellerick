@@ -29,6 +29,7 @@ const JobPhotos = dynamic(() => import("./job-photos").then((m) => m.JobPhotos),
 const JobLineItems = dynamic(() => import("./job-line-items").then((m) => m.JobLineItems), { loading: TabLoading });
 const JobNotes = dynamic(() => import("./job-notes").then((m) => m.JobNotes), { loading: TabLoading });
 const JobSignature = dynamic(() => import("./job-signature").then((m) => m.JobSignature), { loading: TabLoading });
+const JobLedger = dynamic(() => import("./job-ledger").then((m) => m.JobLedger), { loading: TabLoading });
 const JobPO = dynamic(() => import("./job-po").then((m) => m.JobPO), { loading: TabLoading });
 const JobTime = dynamic(() => import("./job-time").then((m) => m.JobTime), { loading: TabLoading });
 const JobVariations = dynamic(() => import("./job-variations").then((m) => m.JobVariations), { loading: TabLoading });
@@ -403,6 +404,19 @@ export function JobDetailClient({ job, currentUserId, photos: initialPhotos, doc
             {isAdmin && (
               <TabsContent value="costing" className="m-0 h-full">
                 {equipmentOptions ? (
+                  <>
+                  <div className="p-6 pb-0 max-w-3xl">
+                    <JobLedger
+                      purchaseOrders={purchaseOrders}
+                      timeEntries={timeEntries}
+                      expenses={expenses}
+                      vendorOrders={vendorOrders}
+                      equipmentUsage={equipmentUsage}
+                      equipmentOptions={equipmentOptions}
+                      staffCostProfiles={staffCostProfiles}
+                      minMarginPct={minMarginPct}
+                    />
+                  </div>
                   <JobProfitability
                     timeEntries={timeEntries}
                     staffCostProfiles={staffCostProfiles}
@@ -414,6 +428,7 @@ export function JobDetailClient({ job, currentUserId, photos: initialPhotos, doc
                     variations={variations}
                     minMarginPct={minMarginPct}
                   />
+                  </>
                 ) : (
                   <TabLoading />
                 )}
