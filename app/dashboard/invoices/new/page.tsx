@@ -224,6 +224,21 @@ function NewInvoiceForm() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [form.job_id]);
 
+  // The job's builder POs (Stage 2: one per stage). Picking one puts its number
+  // on the invoice and, for a progress claim, claims against that PO's value.
+  const [jobPos, setJobPos] = useState<{ id: string; po_number: string; total_value: number }[]>([]);
+  useEffect(() => {
+    if (!form.job_id) { setJobPos([]); return; }
+    supabase
+      .from("purchase_orders")
+      .select("id, po_number, total_value")
+      .eq("job_id", form.job_id)
+      .order("created_at")
+      .then(({ data }) => setJobPos(((data ?? []) as { id: string; po_number: string; total_value: number }[]).filter((p) => Number(p.total_value) > 0)));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form.job_id]);
+  const pickedPo = jobPos.find((p) => p.po_number === form.customer_po.trim()) ?? null;
+
   useEffect(() => {
     // Pre-fill "Description of Works" from the linked job's on-site record so
     // the office starts from what the technician actually wrote rather than a
@@ -536,6 +551,24 @@ function NewInvoiceForm() {
                   maxLength={CUSTOMER_PO_MAX}
                   placeholder="e.g. 4500123"
                 />
+                {jobPos.length > 1 && (
+                  <select
+                    value={pickedPo?.id ?? ""}
+                    onChange={(e) => {
+                      const po = jobPos.find((p) => p.id === e.target.value);
+                      if (!po) return;
+                      setPoTouched(true);
+                      setField("customer_po", po.po_number);
+                    }}
+                    className="h-9 w-full rounded-md border border-slate-200 bg-white px-2 text-sm"
+                    aria-label="Which builder PO this invoice is for"
+                  >
+                    <option value="" disabled>Which of this job&apos;s POs is this for?</option>
+                    {jobPos.map((p) => (
+                      <option key={p.id} value={p.id}>{p.po_number} — ${Number(p.total_value).toLocaleString("en-AU")}</option>
+                    ))}
+                  </select>
+                )}
                 <p className="text-xs text-slate-400">From the job when it has one. Printed on the invoice and sent to Xero.</p>
               </div>
             </div>
@@ -556,7 +589,13 @@ function NewInvoiceForm() {
           </CardContent>
         </Card>
 
-        <ProgressClaimFields value={claim} onChange={setClaim} jobId={form.job_id || null} subtotal={subtotal} />
+        <ProgressClaimFields
+          value={claim}
+          onChange={setClaim}
+          jobId={form.job_id || null}
+          subtotal={subtotal}
+          builderPo={jobPos.length > 1 && pickedPo ? { poNumber: pickedPo.po_number, value: Number(pickedPo.total_value) } : null}
+        />
 
         {unbilledVariations.filter(v => !addedVariationIds.includes(v.id)).length > 0 && (
           <Card className="border-orange-200 bg-orange-50/40">
