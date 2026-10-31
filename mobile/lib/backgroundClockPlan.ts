@@ -1,4 +1,5 @@
 import { arrivalCostCentre, nextGeofenceState, type Coords, type TrackedSite } from "./geofenceState";
+import { fixFromCoords, type ClockFix } from "./clockFix";
 
 // Turn a BATCH of background location readings into clock actions.
 //
@@ -34,6 +35,8 @@ export interface ClockAction {
   fromAt: string | null;
   /** On an arrival, the arriving job's scheduled stage — null on a departure. */
   costCenterId: string | null;
+  /** Where the reading was (0092, DRAFT, not applied yet). Absent on actions queued by older builds. */
+  fix?: ClockFix | null;
 }
 
 /** A departure waiting for the arrival that closes it into a travel leg. */
@@ -94,10 +97,11 @@ export function planBackgroundClockActions(
     // events in it; stamping actions with "now" would compress a two-hour visit
     // into an instant and destroy the hours it represents.
     const at = new Date(reading.timestamp).toISOString();
+    const fix = fixFromCoords(reading.coords);
 
     if (state.transition === "departure") {
       const jobId = state.previousJobId as string;
-      actions.push({ type: "depart", jobId, at, fromJobId: null, fromAt: null, costCenterId: null });
+      actions.push({ type: "depart", jobId, at, fromJobId: null, fromAt: null, costCenterId: null, fix });
       // The technician is now driving. Remember from where and when, so the
       // arrival — which may be several readings or several INVOCATIONS later —
       // can attribute the leg.
@@ -108,11 +112,12 @@ export function planBackgroundClockActions(
       // must close the old entry before opening the new one, or the technician
       // ends up clocked in at two jobs simultaneously.
       if (state.previousJobId) {
-        actions.push({ type: "depart", jobId: state.previousJobId, at, fromJobId: null, fromAt: null, costCenterId: null });
+        actions.push({ type: "depart", jobId: state.previousJobId, at, fromJobId: null, fromAt: null, costCenterId: null, fix });
         pendingDeparture = { jobId: state.previousJobId, at };
       }
       actions.push({
         type: "arrive",
+        fix,
         jobId: state.insideJobId as string,
         at,
         fromJobId: pendingDeparture?.jobId ?? null,

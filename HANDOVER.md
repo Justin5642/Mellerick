@@ -1302,8 +1302,24 @@ Justin chose to keep automatic clocking and fix it. What changed:
   "Needs a look from yesterday" — jobs booked yesterday not signed off, and
   clocks still running from before today.
 - Geocoding no longer accepts `class=landuse` (an estate's centroid) as precise.
-- Not done yet from the plan: saving position/accuracy on each entry, an
-  on-screen tracking status, and "set site location here" on the phone.
+- **Clock extras (migration `0092`, DRAFT, not applied yet):**
+  - Every phone clock-on/off records `clock_in_/clock_out_` lat, lng and
+    accuracy (`mobile/lib/clockFix.ts`): manual taps take a recent fix or wait
+    ≤3 s, never block and never prompt; the auto-clock (foreground and
+    background, including queued background actions) uses the reading that
+    fired it. 0092 grants the new columns explicitly — time_entries has
+    column-level select grants (0045).
+  - Web Time tab shows "In: on site / 320 m from site" per entry, amber with
+    ⚠ when outside 150 m even allowing for the fix's accuracy
+    (`lib/clock-location.ts`). A flag, never a block.
+  - Phone Time tab status line (`components/job/auto-clock-status.tsx`,
+    `lib/autoClockMessage.ts`): on / only while the app is open ("Always" off)
+    / Approximate location (Android reports it; iOS inferred from fixes over
+    1 km) / off and why, with a Settings button where a setting is the fix.
+  - Phone Overview "📍 Set site location here" (`/api/jobs/[id]/site-location`,
+    service role after checking the caller is on the job or office): needs a
+    fix within ±50 m, asks before moving an existing pin, records
+    `sites.location_set_by/_at`.
 
 **The store-review risk is real and has not gone away.** Apple and Google both
 scrutinise "Always" location. The submission needs a clear justification string

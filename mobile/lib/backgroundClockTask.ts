@@ -19,6 +19,7 @@ import type { LocationReading } from "./backgroundClockPlan";
 import { appendClockActions, replayClockActions, type QueuedClockAction } from "./backgroundClockQueue";
 import { isTransientFailure, syncError } from "./data/outbox/errors";
 import { cryptoIdGen } from "./data/ids";
+import { fixColumns, type ClockFix } from "./clockFix";
 import { reportSyncError } from "./monitoring";
 
 // Registration of the background location task.
@@ -55,7 +56,8 @@ async function insertWorkClockIn(
   at: string,
   staffId: string,
   costCenterId: string | null,
-  entryId?: string
+  entryId?: string,
+  fix?: ClockFix | null
 ): Promise<void> {
   // Idempotence: if an entry is already open for this job, do nothing. The task
   // can legitimately re-derive a transition after the process is killed mid-way,
@@ -82,6 +84,7 @@ async function insertWorkClockIn(
     auto_clocked: true,
     entry_type: "work",
     cost_center_id: costCenterId,
+    ...fixColumns("clock_in", fix),
   });
   if (insertError && !isReplayOfSameRow(insertError)) {
     throw syncError(`backgroundClock clockIn: ${insertError.message}`, insertStatus);
@@ -132,7 +135,7 @@ async function insertTravelLeg(
   }
 }
 
-async function closeWorkEntry(jobId: string, at: string, staffId: string): Promise<void> {
+async function closeWorkEntry(jobId: string, at: string, staffId: string, fix?: ClockFix | null): Promise<void> {
   const { data: openEntry, error, status } = await supabase
     .from("time_entries")
     .select("id, clock_in")
@@ -154,21 +157,21 @@ async function closeWorkEntry(jobId: string, at: string, staffId: string): Promi
   const hours = plausibleAutoClockHours(openEntry.clock_in, at, MAX_PLAUSIBLE_WORK_HOURS);
   const { error: updateError, status: updateStatus } = await supabase
     .from("time_entries")
-    .update({ clock_out: at, ...(hours === null ? {} : { hours }) })
+    .update({ clock_out: at, ...(hours === null ? {} : { hours }), ...fixColumns("clock_out", fix) })
     .eq("id", openEntry.id);
   if (updateError) throw syncError(`backgroundClock clockOut: ${updateError.message}`, updateStatus);
 }
 
 export const supabaseClockDeps: BackgroundClockDeps = {
   ...storageDeps,
-  onArrive: async (jobId, at, fromJobId, fromAt, staffId, costCenterId, ids) => {
-    await insertWorkClockIn(jobId, at, staffId, costCenterId, ids?.entryId);
+  onArrive: async (jobId, at, fromJobId, fromAt, staffId, costCenterId, ids, fix) => {
+    await insertWorkClockIn(jobId, at, staffId, costCenterId, ids?.entryId, fix);
     // Both are required: fromJobId says where the drive started, fromAt says
     // when. Without the second the leg was always zero-length and discarded.
     if (fromJobId && fromAt) await insertTravelLeg(jobId, fromJobId, fromAt, at, staffId, ids?.travelId);
   },
-  onDepart: async (jobId, at, staffId) => {
-    await closeWorkEntry(jobId, at, staffId);
+  onDepart: async (jobId, at, staffId, fix) => {
+    await closeWorkEntry(jobId, at, staffId, fix);
   },
   enqueueActions: (actions, staffId) => appendClockActions(clockQueueStore, actions, staffId, cryptoIdGen.newId),
   replayPending: async () => {
@@ -178,11 +181,17 @@ export const supabaseClockDeps: BackgroundClockDeps = {
 
 function applyQueued(action: QueuedClockAction): Promise<void> {
   return action.type === "depart"
-    ? supabaseClockDeps.onDepart(action.jobId, action.at, action.staffId)
-    : supabaseClockDeps.onArrive(action.jobId, action.at, action.fromJobId, action.fromAt, action.staffId, action.costCenterId, {
-        entryId: action.entryId,
-        travelId: action.travelId,
-      });
+    ? supabaseClockDeps.onDepart(action.jobId, action.at, action.staffId, action.fix)
+    : supabaseClockDeps.onArrive(
+        action.jobId,
+        action.at,
+        action.fromJobId,
+        action.fromAt,
+        action.staffId,
+        action.costCenterId,
+        { entryId: action.entryId, travelId: action.travelId },
+        action.fix
+      );
 }
 
 /**

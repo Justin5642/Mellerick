@@ -2171,6 +2171,8 @@ export type Database = {
           geocode_attempted_at: string | null
           id: string
           is_active: boolean
+          location_set_at: string | null
+          location_set_by: string | null
           name: string
           notes: string | null
           postcode: string
@@ -2190,6 +2192,8 @@ export type Database = {
           geocode_attempted_at?: string | null
           id?: string
           is_active?: boolean
+          location_set_at?: string | null
+          location_set_by?: string | null
           name: string
           notes?: string | null
           postcode: string
@@ -2209,6 +2213,8 @@ export type Database = {
           geocode_attempted_at?: string | null
           id?: string
           is_active?: boolean
+          location_set_at?: string | null
+          location_set_by?: string | null
           name?: string
           notes?: string | null
           postcode?: string
@@ -2413,7 +2419,13 @@ export type Database = {
         Row: {
           auto_clocked: boolean | null
           clock_in: string
+          clock_in_accuracy: number | null
+          clock_in_lat: number | null
+          clock_in_lng: number | null
           clock_out: string | null
+          clock_out_accuracy: number | null
+          clock_out_lat: number | null
+          clock_out_lng: number | null
           cost_center_id: string | null
           created_at: string | null
           edited_at: string | null
@@ -2431,7 +2443,13 @@ export type Database = {
         Insert: {
           auto_clocked?: boolean | null
           clock_in?: string
+          clock_in_accuracy?: number | null
+          clock_in_lat?: number | null
+          clock_in_lng?: number | null
           clock_out?: string | null
+          clock_out_accuracy?: number | null
+          clock_out_lat?: number | null
+          clock_out_lng?: number | null
           cost_center_id?: string | null
           created_at?: string | null
           edited_at?: string | null
@@ -2449,7 +2467,13 @@ export type Database = {
         Update: {
           auto_clocked?: boolean | null
           clock_in?: string
+          clock_in_accuracy?: number | null
+          clock_in_lat?: number | null
+          clock_in_lng?: number | null
           clock_out?: string | null
+          clock_out_accuracy?: number | null
+          clock_out_lat?: number | null
+          clock_out_lng?: number | null
           cost_center_id?: string | null
           created_at?: string | null
           edited_at?: string | null

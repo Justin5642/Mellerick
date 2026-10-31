@@ -5,6 +5,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { supabase } from "../../lib/supabase";
 import { colors } from "../../lib/theme";
 import { useTimeClock } from "../../lib/data/hooks/useTimeClock";
+import { currentFix } from "../../lib/clockFix";
 import { getJobCostCentres, type JobCostCentre } from "../../lib/data/reads/jobBilling";
 import { ScreenError } from "../../design/components/ScreenError";
 import { unwrapRows } from "../../lib/data/reads/unwrap";
@@ -373,7 +374,9 @@ export function JobTimeTab({
     const now = new Date();
     const clockInIso = now.toISOString();
     const costCenterId = clockInCostCentre(myBookings, now.getTime(), scheduledCostCenterId);
-    const { id } = await timeClock.clockIn({ jobId, staffId: currentUserId, costCenterId });
+    // Where the phone is (0092, DRAFT, not applied yet): a few seconds at most, never blocks.
+    const fix = await currentFix(3000);
+    const { id } = await timeClock.clockIn({ jobId, staffId: currentUserId, costCenterId, fix });
     // Optimistic: show immediately (this is also the offline display path). The
     // server row reconciles in via useSyncSettled once the write lands.
     setEntries((prev) => [optimisticEntry(id, currentUserId, clockInIso, costCenterId), ...prev]);
@@ -384,7 +387,7 @@ export function JobTimeTab({
     const open = myOpenEntry;
     if (!open || loading || !timeClock.ready) return;
     setLoading(true);
-    await timeClock.clockOut({ entryId: open.id, clockInIso: open.clock_in });
+    await timeClock.clockOut({ entryId: open.id, clockInIso: open.clock_in, fix: await currentFix(3000) });
     const clockOutIso = new Date().toISOString();
     const hours = hoursBetween(open.clock_in, clockOutIso);
     setEntries((prev) => prev.map((e) => (e.id === open.id ? { ...e, clock_out: clockOutIso, hours } : e)));

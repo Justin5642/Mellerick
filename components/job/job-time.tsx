@@ -11,6 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Clock, LogIn, LogOut, Smartphone, Car, Pencil, Plus } from "lucide-react";
 import { TimeEntryEditDialog } from "@/components/job/time-entry-edit-dialog";
 import { BUSINESS_TIME_ZONE } from "@/lib/date";
+import { clockPlace } from "@/lib/clock-location";
 
 interface TimeEntry {
   id: string;
@@ -24,6 +25,12 @@ interface TimeEntry {
   edited_at?: string | null;
   rate_override?: "normal" | "time_and_half" | "double_time" | null;
   profiles: { full_name: string };
+  clock_in_lat?: number | null;
+  clock_in_lng?: number | null;
+  clock_in_accuracy?: number | null;
+  clock_out_lat?: number | null;
+  clock_out_lng?: number | null;
+  clock_out_accuracy?: number | null;
 }
 
 interface CostCenterOption {
@@ -42,6 +49,8 @@ interface Props {
   jobId: string;
   currentUserId: string;
   timeEntries: TimeEntry[];
+  /** The job site's pin, to show how far from it each clock-on/off was (0092, DRAFT, not applied yet). */
+  site?: { site_lat: number | null; site_lng: number | null } | null;
   costCenters: CostCenterOption[];
   isAdmin?: boolean;
   // Active staff for the admin "log on behalf of" picker in the edit dialog.
@@ -69,7 +78,7 @@ function syncBilling(entryId: string) {
   fetch(`/api/time-entries/${entryId}/sync-billing`, { method: "POST" }).catch(() => {});
 }
 
-export function JobTime({ jobId, currentUserId, timeEntries: initial, costCenters, isAdmin, staff, onUpdate, scheduledCostCenterId }: Props) {
+export function JobTime({ jobId, currentUserId, timeEntries: initial, site, costCenters, isAdmin, staff, onUpdate, scheduledCostCenterId }: Props) {
   const supabase = createClient();
   const [entries, setEntries] = useState<TimeEntry[]>(initial);
   const [loading, setLoading] = useState(false);
@@ -242,6 +251,18 @@ export function JobTime({ jobId, currentUserId, timeEntries: initial, costCenter
                       {canEdit && <Pencil className="w-3 h-3 text-slate-400" />}
                     </div>
                   </button>
+                  {!isTravel && (() => {
+                    const pin = site ? { lat: site.site_lat, lng: site.site_lng } : null;
+                    const on = clockPlace({ lat: entry.clock_in_lat, lng: entry.clock_in_lng, accuracy: entry.clock_in_accuracy }, pin);
+                    const off = clockPlace({ lat: entry.clock_out_lat, lng: entry.clock_out_lng, accuracy: entry.clock_out_accuracy }, pin);
+                    if (!on && !off) return null;
+                    return (
+                      <p className="text-xs text-slate-500 flex flex-wrap gap-x-3">
+                        {on && <span className={on.outside ? "text-amber-700 font-medium" : ""}>{on.outside ? "⚠ " : ""}In: {on.label}</span>}
+                        {off && <span className={off.outside ? "text-amber-700 font-medium" : ""}>{off.outside ? "⚠ " : ""}Out: {off.label}</span>}
+                      </p>
+                    );
+                  })()}
                   {!isTravel && costCenters.length > 0 && (
                     <Select
                       value={entry.cost_center_id ?? "none"}

@@ -32,7 +32,13 @@ describe("planBackgroundClockActions", () => {
   it("plans an arrival when the batch enters a site", () => {
     const { actions, insideJobId } = planBackgroundClockActions([at(SITE_A, T0)], [SITE_A], null);
     expect(insideJobId).toBe("job-a");
-    expect(actions).toEqual([{ type: "arrive", jobId: "job-a", at: new Date(T0).toISOString(), fromJobId: null, fromAt: null, costCenterId: null }]);
+    expect(actions).toEqual([
+      {
+        type: "arrive", jobId: "job-a", at: new Date(T0).toISOString(), fromJobId: null, fromAt: null, costCenterId: null,
+        // Where the reading was, for the office (0092, DRAFT, not applied yet).
+        fix: { lat: SITE_A.lat, lng: SITE_A.lng, accuracy: null },
+      },
+    ]);
   });
 
   // THE CASE THAT JUSTIFIES PROCESSING THE WHOLE BATCH.
@@ -54,8 +60,8 @@ describe("planBackgroundClockActions", () => {
     // time between them is unattributable and gets dropped.
     const { actions } = planBackgroundClockActions([at(SITE_B, T0)], [SITE_A, SITE_B], "job-a");
     expect(actions).toEqual([
-      { type: "depart", jobId: "job-a", at: new Date(T0).toISOString(), fromJobId: null, fromAt: null, costCenterId: null },
-      { type: "arrive", jobId: "job-b", at: new Date(T0).toISOString(), fromJobId: "job-a", fromAt: new Date(T0).toISOString(), costCenterId: null },
+      { type: "depart", jobId: "job-a", at: new Date(T0).toISOString(), fromJobId: null, fromAt: null, costCenterId: null, fix: { lat: SITE_B.lat, lng: SITE_B.lng, accuracy: null } },
+      { type: "arrive", jobId: "job-b", at: new Date(T0).toISOString(), fromJobId: "job-a", fromAt: new Date(T0).toISOString(), costCenterId: null, fix: { lat: SITE_B.lat, lng: SITE_B.lng, accuracy: null } },
     ]);
   });
 

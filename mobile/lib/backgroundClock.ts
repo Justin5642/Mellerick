@@ -1,6 +1,7 @@
 import * as Location from "expo-location";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { planBackgroundClockActions, type ClockAction, type LocationReading, type PendingDeparture } from "./backgroundClockPlan";
+import type { ClockFix } from "./clockFix";
 import { CLOCK_QUEUE_KEY, parseClockQueue, type ClockQueueStore } from "./backgroundClockQueue";
 import type { TrackedSite } from "./geofenceState";
 import {
@@ -70,9 +71,11 @@ export interface BackgroundClockDeps {
     /** The arriving job's scheduled stage. */
     costCenterId: string | null,
     /** Client ids for the rows this creates, so a replay cannot duplicate them. */
-    ids?: { entryId: string; travelId: string }
+    ids?: { entryId: string; travelId: string },
+    /** Where the reading was (0092, DRAFT, not applied yet). */
+    fix?: ClockFix | null
   ): Promise<void>;
-  onDepart(jobId: string, at: string, staffId: string): Promise<void>;
+  onDepart(jobId: string, at: string, staffId: string, fix?: ClockFix | null): Promise<void>;
   /**
    * Durably queue planned actions with their original timestamps (see
    * lib/backgroundClockQueue.ts). Must not resolve until they are on disk.
