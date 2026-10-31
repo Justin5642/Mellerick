@@ -8,7 +8,7 @@ import { reportError } from "@/lib/monitoring";
 // is right — for sites with no pin (lot and new-estate addresses the geocoder
 // can't place) or a wrong one. Sites are written by the office normally, so
 // this goes through the service role after checking the caller is on the job,
-// and records who moved the pin and when (migration 0092, DRAFT, not applied yet).
+// and records who moved the pin and when (migration 0092).
 
 /** A pin worse than this would make the fence worse, not better. */
 const MAX_PIN_ACCURACY_METRES = 50;

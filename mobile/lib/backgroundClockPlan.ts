@@ -35,7 +35,7 @@ export interface ClockAction {
   fromAt: string | null;
   /** On an arrival, the arriving job's scheduled stage — null on a departure. */
   costCenterId: string | null;
-  /** Where the reading was (0092, DRAFT, not applied yet). Absent on actions queued by older builds. */
+  /** Where the reading was (0092). Absent on actions queued by older builds. */
   fix?: ClockFix | null;
 }
 

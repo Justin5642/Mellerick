@@ -2,7 +2,8 @@
 -- Where each clock-on and clock-off happened, and who moved a site's pin
 -- (the clock extras left over from Stage 5, 31 Oct 2026 workflow review).
 --
--- STATUS: DRAFT, not applied yet. Gate test supabase/tests/0092_clock_location_and_site_pins_test.sql.
+-- STATUS: ✅ APPLIED IN PRODUCTION (2026-11-01, via SQL editor). Gate test
+-- supabase/tests/0092_clock_location_and_site_pins_test.sql passed.
 --
 -- WHY: the office could not tell why an automatic clock fired, or whether a
 -- manual clock-on happened on site. Each phone clock-on/off now records the

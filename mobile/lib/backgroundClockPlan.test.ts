@@ -35,7 +35,7 @@ describe("planBackgroundClockActions", () => {
     expect(actions).toEqual([
       {
         type: "arrive", jobId: "job-a", at: new Date(T0).toISOString(), fromJobId: null, fromAt: null, costCenterId: null,
-        // Where the reading was, for the office (0092, DRAFT, not applied yet).
+        // Where the reading was, for the office (0092).
         fix: { lat: SITE_A.lat, lng: SITE_A.lng, accuracy: null },
       },
     ]);

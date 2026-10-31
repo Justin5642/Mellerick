@@ -49,7 +49,7 @@ interface Props {
   jobId: string;
   currentUserId: string;
   timeEntries: TimeEntry[];
-  /** The job site's pin, to show how far from it each clock-on/off was (0092, DRAFT, not applied yet). */
+  /** The job site's pin, to show how far from it each clock-on/off was (0092). */
   site?: { site_lat: number | null; site_lng: number | null } | null;
   costCenters: CostCenterOption[];
   isAdmin?: boolean;

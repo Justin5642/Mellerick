@@ -72,7 +72,7 @@ export interface BackgroundClockDeps {
     costCenterId: string | null,
     /** Client ids for the rows this creates, so a replay cannot duplicate them. */
     ids?: { entryId: string; travelId: string },
-    /** Where the reading was (0092, DRAFT, not applied yet). */
+    /** Where the reading was (0092). */
     fix?: ClockFix | null
   ): Promise<void>;
   onDepart(jobId: string, at: string, staffId: string, fix?: ClockFix | null): Promise<void>;

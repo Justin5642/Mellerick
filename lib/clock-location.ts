@@ -1,6 +1,6 @@
-// How far from the site a clock-on or clock-off was (migration 0092, DRAFT,
-// not applied yet). The phone records where it was; this is how the web Time
-// tab reads it for the office. Nothing is blocked by it — it is a flag.
+// How far from the site a clock-on or clock-off was (migration 0092). The
+// phone records where it was; this is how the web Time tab reads it for the
+// office. Nothing is blocked by it — it is a flag.
 
 /** The site fence, as the phone's auto-clock uses it (mobile/lib/geofenceState.ts). */
 export const SITE_FENCE_METRES = 150;

@@ -1,7 +1,7 @@
 jest.mock("expo-location", () => ({}));
 import { fixColumns, fixFromCoords } from "./clockFix";
 
-// Clock-on/off position (0092, DRAFT, not applied yet): recorded when known, never invented.
+// Clock-on/off position (0092): recorded when known, never invented.
 describe("clock fix", () => {
   it("turns a reading into columns", () => {
     const fix = fixFromCoords({ latitude: -37.8, longitude: 144.9, accuracy: 12.6 });

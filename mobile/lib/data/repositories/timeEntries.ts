@@ -69,7 +69,7 @@ export class TimeEntriesRepository {
       clock_in: this.time.nowIso(),
       auto_clocked: input.autoClocked ?? false,
       cost_center_id: input.costCenterId ?? null,
-      // Where the phone was (0092, DRAFT, not applied yet) — only when known.
+      // Where the phone was (0092) — only when known.
       ...fixColumns("clock_in", input.fix),
     });
     await this.enqueueBillingSync(rowId, opId);

@@ -374,7 +374,7 @@ export function JobTimeTab({
     const now = new Date();
     const clockInIso = now.toISOString();
     const costCenterId = clockInCostCentre(myBookings, now.getTime(), scheduledCostCenterId);
-    // Where the phone is (0092, DRAFT, not applied yet): a few seconds at most, never blocks.
+    // Where the phone is (0092): a few seconds at most, never blocks.
     const fix = await currentFix(3000);
     const { id } = await timeClock.clockIn({ jobId, staffId: currentUserId, costCenterId, fix });
     // Optimistic: show immediately (this is also the offline display path). The

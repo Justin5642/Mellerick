@@ -1302,7 +1302,7 @@ Justin chose to keep automatic clocking and fix it. What changed:
   "Needs a look from yesterday" — jobs booked yesterday not signed off, and
   clocks still running from before today.
 - Geocoding no longer accepts `class=landuse` (an estate's centroid) as precise.
-- **Clock extras (migration `0092`, DRAFT, not applied yet):**
+- **Clock extras (migration `0092` applied 2026-11-01):**
   - Every phone clock-on/off records `clock_in_/clock_out_` lat, lng and
     accuracy (`mobile/lib/clockFix.ts`): manual taps take a recent fix or wait
     ≤3 s, never block and never prompt; the auto-clock (foreground and

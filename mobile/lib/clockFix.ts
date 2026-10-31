@@ -1,9 +1,8 @@
 import * as Location from "expo-location";
 
 // Where the phone was when a clock-on or clock-off was written (migration
-// 0092, DRAFT, not applied yet). Recorded, never enforced: the office sees how
-// far from the site it was, and anything outside the fence is flagged on the
-// web Time tab. A clock write never waits long for it and never fails for
+// 0092). Recorded, never enforced: the office sees how far from the site it
+// was, and anything outside the fence is flagged on the web Time tab. A clock write never waits long for it and never fails for
 // want of it.
 
 export interface ClockFix {
