@@ -2597,12 +2597,17 @@ export type Database = {
           amount: number
           cost_center_id: string
           created_at: string | null
+          delivered_at: string | null
+          delivered_by: string | null
           delivery_address: string | null
           description: string | null
           emailed_at: string | null
           entered_by: string | null
           gst_amount: number
           id: string
+          invoice_date: string | null
+          invoice_number: string | null
+          invoice_storage_path: string | null
           job_id: string
           notes: string | null
           order_date: string | null
@@ -2613,17 +2618,24 @@ export type Database = {
           supplier_email: string | null
           supplier_id: string | null
           vendor_name: string
+          xero_bill_id: string | null
+          xero_synced_at: string | null
         }
         Insert: {
           amount?: number
           cost_center_id: string
           created_at?: string | null
+          delivered_at?: string | null
+          delivered_by?: string | null
           delivery_address?: string | null
           description?: string | null
           emailed_at?: string | null
           entered_by?: string | null
           gst_amount?: number
           id?: string
+          invoice_date?: string | null
+          invoice_number?: string | null
+          invoice_storage_path?: string | null
           job_id: string
           notes?: string | null
           order_date?: string | null
@@ -2634,17 +2646,24 @@ export type Database = {
           supplier_email?: string | null
           supplier_id?: string | null
           vendor_name: string
+          xero_bill_id?: string | null
+          xero_synced_at?: string | null
         }
         Update: {
           amount?: number
           cost_center_id?: string
           created_at?: string | null
+          delivered_at?: string | null
+          delivered_by?: string | null
           delivery_address?: string | null
           description?: string | null
           emailed_at?: string | null
           entered_by?: string | null
           gst_amount?: number
           id?: string
+          invoice_date?: string | null
+          invoice_number?: string | null
+          invoice_storage_path?: string | null
           job_id?: string
           notes?: string | null
           order_date?: string | null
@@ -2655,6 +2674,8 @@ export type Database = {
           supplier_email?: string | null
           supplier_id?: string | null
           vendor_name?: string
+          xero_bill_id?: string | null
+          xero_synced_at?: string | null
         }
         Relationships: [
           {

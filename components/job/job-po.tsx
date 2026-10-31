@@ -60,6 +60,11 @@ interface VendorOrder {
   delivery_address?: string | null;
   vendor_order_items?: { description: string; quantity: number; sort_order: number }[];
   profiles?: { full_name: string } | null;
+  invoice_number?: string | null;
+  invoice_date?: string | null;
+  invoice_storage_path?: string | null;
+  xero_bill_id?: string | null;
+  delivered_at?: string | null;
 }
 
 interface ExpenseForAgg {
@@ -128,6 +133,11 @@ export function JobPO({ jobId, jobNumber, customerName, site, pos: initialPos, t
   const [errors, setErrors] = useState<Record<string, boolean>>({});
   const [stages, setStages] = useState<StageOption[]>([]);
   const [addLinesFor, setAddLinesFor] = useState<string | null>(null);
+  // The supplier's invoice for one order, entered against its PO (0089).
+  const [invoiceFor, setInvoiceFor] = useState<string | null>(null);
+  const [invoiceForm, setInvoiceForm] = useState({ number: "", date: "", amount: "" });
+  const [invoiceFile, setInvoiceFile] = useState<File | null>(null);
+  const [invoiceBusy, setInvoiceBusy] = useState(false);
   const [addLines, setAddLines] = useState<BuilderPoLineInput[]>([blankLine()]);
   const [suppliers, setSuppliers] = useState<{ id: string; name: string }[]>([]);
 
@@ -364,6 +374,77 @@ export function JobPO({ jobId, jobNumber, customerName, site, pos: initialPos, t
     onVendorOrdersUpdate(updated);
   }
 
+  function openInvoice(vo: VendorOrder) {
+    setInvoiceFor(vo.id);
+    setInvoiceForm({
+      number: vo.invoice_number ?? "",
+      date: vo.invoice_date ?? new Date().toLocaleDateString("en-CA", { timeZone: "Australia/Melbourne" }),
+      amount: Number(vo.amount) ? Number(vo.amount).toFixed(2) : "",
+    });
+    setInvoiceFile(null);
+  }
+
+  // Saves the supplier's invoice on its PO: number, date, amount ex GST (GST
+  // at 10%), and the file. That is what puts the cost on the job's ledger and
+  // what the Xero bill is made from.
+  async function saveInvoice(vo: VendorOrder) {
+    const amount = Math.round((Number(invoiceForm.amount.replace(/[$,\s]/g, "")) || 0) * 100) / 100;
+    if (!invoiceForm.number.trim()) { toast.error("Enter the supplier's invoice number"); return; }
+    if (amount <= 0) { toast.error("Enter the invoice amount ex GST"); return; }
+    setInvoiceBusy(true);
+    let path = vo.invoice_storage_path ?? null;
+    if (invoiceFile) {
+      // "expense-receipt-" keeps the file out of technicians' reach (0047's money-file rule).
+      path = `${jobId}/expense-receipt-${vo.po_number}-${Date.now()}_${invoiceFile.name.replace(/[^a-zA-Z0-9._-]/g, "_")}`;
+      const { error: uploadError } = await supabase.storage.from("job-documents").upload(path, invoiceFile);
+      if (uploadError) { toast.error("Couldn't upload the invoice file"); setInvoiceBusy(false); return; }
+    }
+    const patch = {
+      invoice_number: invoiceForm.number.trim(),
+      invoice_date: invoiceForm.date || null,
+      amount,
+      gst_amount: Math.round(amount * 10) / 100,
+      invoice_storage_path: path,
+      status: vo.status === "cancelled" ? vo.status : ("received" as const),
+    };
+    const { error, count } = await supabase.from("vendor_orders").update(patch, { count: "exact" }).eq("id", vo.id);
+    setInvoiceBusy(false);
+    if (error || count === 0) { toast.error("Couldn't save the invoice"); return; }
+    const updated = vendorOrders.map(v => v.id === vo.id ? { ...v, ...patch } : v);
+    setVendorOrders(updated);
+    onVendorOrdersUpdate(updated);
+    setInvoiceFor(null);
+    toast.success(`Invoice saved on ${vo.po_number}`);
+  }
+
+  async function sendInvoiceToXero(vo: VendorOrder) {
+    setInvoiceBusy(true);
+    try {
+      const res = await fetch("/api/xero/push-vendor-order", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ orderId: vo.id }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) { toast.error(body.error ?? "Couldn't send the bill to Xero"); return; }
+      const updated = vendorOrders.map(v => v.id === vo.id ? { ...v, xero_bill_id: body.xeroBillId } : v);
+      setVendorOrders(updated);
+      onVendorOrdersUpdate(updated);
+      toast.success(`${vo.po_number} is now a bill in Xero`);
+    } catch {
+      toast.error("Couldn't reach the server. Check your connection.");
+    } finally {
+      setInvoiceBusy(false);
+    }
+  }
+
+  async function openInvoiceFile(vo: VendorOrder) {
+    if (!vo.invoice_storage_path) return;
+    const { data } = await supabase.storage.from("job-documents").createSignedUrl(vo.invoice_storage_path, 60);
+    if (data?.signedUrl) window.open(data.signedUrl, "_blank");
+    else toast.error("Couldn't open the invoice file");
+  }
+
   async function deleteVendorOrder(id: string) {
     const { error, count } = await supabase.from("vendor_orders").delete({ count: "exact" }).eq("id", id);
     if (error || count === 0) { toast.error(error?.message ?? "Could not remove this vendor order."); return; }
@@ -419,7 +500,8 @@ export function JobPO({ jobId, jobNumber, customerName, site, pos: initialPos, t
               type="number" step="0.01" min="0"
               defaultValue={Number(vo.amount) ? Number(vo.amount).toFixed(2) : ""}
               placeholder="ex GST"
-              title="Amount ex GST, from the supplier invoice"
+              title={vo.xero_bill_id ? "Already sent to Xero as a bill — change it in Xero" : "Amount ex GST, from the supplier invoice"}
+              disabled={!!vo.xero_bill_id}
               onBlur={e => {
                 const amount = parseFloat(e.target.value) || 0;
                 if (amount !== Number(vo.amount)) updateVendorOrder(vo.id, { amount });
@@ -443,9 +525,46 @@ export function JobPO({ jobId, jobNumber, customerName, site, pos: initialPos, t
         {items.length > 0 && (
           <p className="text-slate-600">{items.map(i => `${Number(i.quantity)} × ${i.description}`).join(", ")}</p>
         )}
+        {invoiceFor === vo.id ? (
+          <div className="rounded border border-slate-200 bg-white p-2 space-y-2">
+            <div className="grid grid-cols-3 gap-2">
+              <Input value={invoiceForm.number} onChange={e => setInvoiceForm(f => ({ ...f, number: e.target.value }))} placeholder="Supplier invoice #" className="h-7 text-xs" autoFocus />
+              <Input type="date" value={invoiceForm.date} onChange={e => setInvoiceForm(f => ({ ...f, date: e.target.value }))} className="h-7 text-xs" />
+              <Input inputMode="decimal" value={invoiceForm.amount} onChange={e => setInvoiceForm(f => ({ ...f, amount: e.target.value }))} placeholder="$ ex GST" className="h-7 text-xs text-right" />
+            </div>
+            <div className="flex items-center justify-between gap-2">
+              <input type="file" accept="application/pdf,image/*" onChange={e => setInvoiceFile(e.target.files?.[0] ?? null)} className="text-[11px] text-slate-500" />
+              <div className="flex gap-1">
+                <Button type="button" variant="ghost" size="sm" className="h-7 text-xs" onClick={() => setInvoiceFor(null)}>Cancel</Button>
+                <Button type="button" size="sm" className="h-7 text-xs" onClick={() => saveInvoice(vo)} disabled={invoiceBusy}>{invoiceBusy ? "Saving..." : "Save invoice"}</Button>
+              </div>
+            </div>
+          </div>
+        ) : vo.invoice_number ? (
+          <div className="flex items-center gap-2 text-slate-600">
+            <span>
+              Invoice <span className="font-mono">{vo.invoice_number}</span>
+              {vo.invoice_date ? ` · ${vo.invoice_date}` : ""} · ${Number(vo.amount).toFixed(2)} ex GST
+            </span>
+            {vo.invoice_storage_path && (
+              <button onClick={() => openInvoiceFile(vo)} className="text-blue-600 hover:underline">View</button>
+            )}
+            {vo.xero_bill_id ? (
+              <span className="text-green-700 font-medium">In Xero ✓</span>
+            ) : (
+              <>
+                <button onClick={() => openInvoice(vo)} className="text-slate-400 hover:text-slate-600 underline">Edit</button>
+                <button onClick={() => sendInvoiceToXero(vo)} disabled={invoiceBusy} className="text-blue-600 hover:underline font-medium">Send to Xero</button>
+              </>
+            )}
+          </div>
+        ) : vo.status !== "cancelled" ? (
+          <button onClick={() => openInvoice(vo)} className="text-blue-600 hover:underline">+ Enter supplier invoice</button>
+        ) : null}
         <p className="text-slate-400">
           {[
             vo.profiles?.full_name ? `Raised by ${vo.profiles.full_name}` : null,
+            vo.delivered_at ? `delivered ${new Date(vo.delivered_at).toLocaleDateString("en-AU")}` : null,
             vo.order_date,
             vo.required_by ? `needed ${vo.required_by}` : null,
             vo.emailed_at ? `emailed to ${vo.supplier_email}` : vo.supplier_email ? `email to ${vo.supplier_email} FAILED` : null,
