@@ -1,15 +1,14 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { toast } from "sonner";
 import { plausibleClockedHours } from "@/lib/time-entry-hours";
 import { TIME_ENTRY_SELECT_WITH_STAFF } from "@/lib/time-entry-columns";
 import { canEditTimeEntry } from "@/lib/time-entry-access";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Clock, LogIn, LogOut, MapPin, Radio, WifiOff, Car, Pencil, Plus } from "lucide-react";
+import { Clock, LogIn, LogOut, Smartphone, Car, Pencil, Plus } from "lucide-react";
 import { TimeEntryEditDialog } from "@/components/job/time-entry-edit-dialog";
 import { BUSINESS_TIME_ZONE } from "@/lib/date";
 
@@ -25,18 +24,6 @@ interface TimeEntry {
   edited_at?: string | null;
   rate_override?: "normal" | "time_and_half" | "double_time" | null;
   profiles: { full_name: string };
-}
-
-interface PO {
-  site_lat: number | null;
-  site_lng: number | null;
-  site_address: string | null;
-}
-
-interface JobSite {
-  site_lat: number | null;
-  site_lng: number | null;
-  address_line1?: string | null;
 }
 
 interface CostCenterOption {
@@ -55,26 +42,14 @@ interface Props {
   jobId: string;
   currentUserId: string;
   timeEntries: TimeEntry[];
-  pos: PO[];
-  site?: JobSite | null;
   costCenters: CostCenterOption[];
   isAdmin?: boolean;
   // Active staff for the admin "log on behalf of" picker in the edit dialog.
   staff?: StaffOption[];
   onUpdate: (entries: TimeEntry[]) => void;
-  // The stage picked when this job was scheduled — new clock-ins (manual or
-  // geofence-auto) default to it instead of landing unassigned.
+  // The stage picked when this job was scheduled — new clock-ins default to it
+  // instead of landing unassigned.
   scheduledCostCenterId?: string | null;
-}
-
-const GEOFENCE_RADIUS = 150;
-
-function haversineDistance(lat1: number, lng1: number, lat2: number, lng2: number) {
-  const R = 6371000;
-  const toRad = (n: number) => n * Math.PI / 180;
-  const dLat = toRad(lat2 - lat1), dLng = toRad(lng2 - lng1);
-  const a = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
-  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
 function formatTime(iso: string) {
@@ -94,18 +69,14 @@ function syncBilling(entryId: string) {
   fetch(`/api/time-entries/${entryId}/sync-billing`, { method: "POST" }).catch(() => {});
 }
 
-export function JobTime({ jobId, currentUserId, timeEntries: initial, pos, site, costCenters, isAdmin, staff, onUpdate, scheduledCostCenterId }: Props) {
+export function JobTime({ jobId, currentUserId, timeEntries: initial, costCenters, isAdmin, staff, onUpdate, scheduledCostCenterId }: Props) {
   const supabase = createClient();
   const [entries, setEntries] = useState<TimeEntry[]>(initial);
   const [loading, setLoading] = useState(false);
   const [assigningId, setAssigningId] = useState<string | null>(null);
-  const [distance, setDistance] = useState<number | null>(null);
-  const [withinFence, setWithinFence] = useState(false);
-  const lastInsideRef = useRef<boolean | null>(null);
   const [editDialog, setEditDialog] = useState<{ mode: "edit" | "add"; entry?: TimeEntry } | null>(null);
 
-  // Single source of truth for entries lives in local state (needed for the
-  // geofencing watcher's functional updates below); mirror every change up
+  // Single source of truth for entries lives in local state; mirror every change up
   // to the parent so the PO tab's per-stage actuals stay in sync without a
   // full page reload.
   useEffect(() => {
@@ -134,103 +105,17 @@ export function JobTime({ jobId, currentUserId, timeEntries: initial, pos, site,
     setEntries((prev) => prev.map((e) => (e.id === entryId ? (data as unknown as TimeEntry) : e)));
   }
 
-  // Prefer the job's own site coordinates -- a PO isn't required (many
-  // service jobs never get one) but the geofence should still work as soon
-  // as someone is assigned. Fall back to a PO's coordinates for jobs whose
-  // site predates migration 0009 and only has coords on the PO.
-  const poWithLocation = (site?.site_lat && site?.site_lng)
-    ? { site_lat: site.site_lat, site_lng: site.site_lng, site_address: site.address_line1 ?? null }
-    : pos.find(p => p.site_lat && p.site_lng);
   const myOpenEntry = entries.find(e => e.staff_id === currentUserId && e.entry_type !== "travel" && !e.clock_out);
   const workEntries = entries.filter(e => e.entry_type !== "travel");
   const travelEntries = entries.filter(e => e.entry_type === "travel");
   const totalHours = workEntries.reduce((sum, e) => sum + (e.hours ? Number(e.hours) : 0), 0);
   const totalTravelHours = travelEntries.reduce((sum, e) => sum + (e.hours ? Number(e.hours) : 0), 0);
 
-  useEffect(() => {
-    if (!poWithLocation?.site_lat || !poWithLocation?.site_lng) return;
-    if (!("geolocation" in navigator)) return;
-
-    const watchId = navigator.geolocation.watchPosition(
-      async (position) => {
-        const dist = haversineDistance(
-          position.coords.latitude, position.coords.longitude,
-          poWithLocation.site_lat!, poWithLocation.site_lng!
-        );
-        setDistance(Math.round(dist));
-        const inside = dist <= GEOFENCE_RADIUS;
-        setWithinFence(inside);
-
-        if (inside === lastInsideRef.current) return;
-        lastInsideRef.current = inside;
-
-        if (inside) {
-          const { data: open } = await supabase
-            .from("time_entries")
-            .select("id")
-            .eq("job_id", jobId)
-            .eq("staff_id", currentUserId)
-            .is("clock_out", null)
-            .maybeSingle();
-
-          if (!open) {
-            const { data, error } = await supabase
-              .from("time_entries")
-              .insert({ job_id: jobId, staff_id: currentUserId, clock_in: new Date().toISOString(), auto_clocked: true, cost_center_id: scheduledCostCenterId ?? null })
-              .select(TIME_ENTRY_SELECT_WITH_STAFF)
-              .single();
-            // NEVER swallow this. Discarding the error here is how a technician
-            // gets told nothing while their arrival goes unrecorded — the exact
-            // shape of the 0045 outage. An auto clock-in that fails must say so,
-            // because the manual button is the only fallback.
-            if (error || !data) {
-              toast.error("Auto clock-in failed — please clock in manually");
-              return;
-            }
-            setEntries(e => [data as unknown as TimeEntry, ...e]);
-            toast.success("On site — clocked in automatically");
-            syncBilling(data.id);
-          }
-        } else {
-          const { data: open } = await supabase
-            .from("time_entries")
-            .select("id, clock_in")
-            .eq("job_id", jobId)
-            .eq("staff_id", currentUserId)
-            .is("clock_out", null)
-            .maybeSingle();
-
-          if (open) {
-            const clockOut = new Date().toISOString();
-            // null when the duration cannot be believed — cross-device clock
-            // skew (clocked in on a fast phone, out here) would otherwise write
-            // NEGATIVE hours and subtract from the technician's pay.
-            const hours = plausibleClockedHours(open.clock_in, clockOut);
-            const { data, error } = await supabase
-              .from("time_entries")
-              .update({ clock_out: clockOut, hours })
-              .eq("id", open.id)
-              .select(TIME_ENTRY_SELECT_WITH_STAFF)
-              .single();
-            // A swallowed failure here leaves the entry OPEN and running. The
-            // office then sees an entry spanning days and has to reconstruct the
-            // real hours by hand.
-            if (error || !data) {
-              toast.error("Auto clock-out failed — please clock out manually");
-              return;
-            }
-            setEntries(e => e.map(en => en.id === open.id ? data as unknown as TimeEntry : en));
-            toast.success("Left site — clocked out automatically");
-            syncBilling(data.id);
-          }
-        }
-      },
-      null,
-      { enableHighAccuracy: true, maximumAge: 10000 }
-    );
-
-    return () => navigator.geolocation.clearWatch(watchId);
-  }, [jobId, currentUserId, poWithLocation?.site_lat, poWithLocation?.site_lng, scheduledCostCenterId]);
+  // No automatic clocking here. The website used to run its own geofence
+  // while this tab was open, and its first reading away from site closed the
+  // viewer's open entry — a tech clocked in on the phone who opened the job
+  // in the office was clocked out (Justin approved removing it, 31 Oct 2026).
+  // Automatic clock-in/out belongs to the phone app alone.
 
   async function clockIn() {
     if (myOpenEntry || loading) return;
@@ -277,36 +162,9 @@ export function JobTime({ jobId, currentUserId, timeEntries: initial, pos, site,
 
   return (
     <div className="p-6 space-y-5">
-      {/* Geo-fence indicator */}
-      {poWithLocation ? (
-        <Card className={withinFence ? "border-green-200 bg-green-50/60" : "border-slate-200"}>
-          <CardContent className="py-3 px-4">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                {withinFence ? (
-                  <Radio className="w-4 h-4 text-green-600 animate-pulse" />
-                ) : (
-                  <WifiOff className="w-4 h-4 text-slate-400" />
-                )}
-                <span className="text-sm font-medium text-slate-700">
-                  {withinFence ? "On site — geo-fence active" : distance !== null ? "Not on site" : "Locating..."}
-                </span>
-              </div>
-              {distance !== null && (
-                <span className="text-xs text-slate-500 flex items-center gap-1">
-                  <MapPin className="w-3 h-3" />
-                  {distance < 1000 ? `${distance}m away` : `${(distance / 1000).toFixed(1)}km away`}
-                </span>
-              )}
-            </div>
-            {withinFence && <p className="text-xs text-green-600 mt-1">Clock-in/out is handled automatically</p>}
-          </CardContent>
-        </Card>
-      ) : (
-        <p className="text-xs text-slate-400 flex items-center gap-1.5">
-          <MapPin className="w-3 h-3" />Add a site address to this job to enable automatic geo-fence clock-in/out
-        </p>
-      )}
+      <p className="text-xs text-slate-400 flex items-center gap-1.5">
+        <Smartphone className="w-3 h-3" />Automatic clock-in/out happens in the phone app. Here it&apos;s manual.
+      </p>
 
       {/* Manual clock in/out */}
       <div className="flex items-center gap-3">

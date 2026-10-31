@@ -68,7 +68,7 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
     let isOffice = false;
     let staffCostProfiles: any[] = [];
     let jobInvoices: any[] = [];
-    let minMarginPct = 30;
+    let minMarginPct = 20;
     const user = viewer?.user;
     if (user) {
       // Role comes from the per-request cached viewer (lib/auth/viewer.ts), not

@@ -4,6 +4,7 @@ import { useRef, useState, useEffect } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { pushJobToCalendar } from "@/lib/schedule-dispatch";
 import { toast } from "sonner";
+import { plausibleClockedHours } from "@/lib/time-entry-hours";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -95,6 +96,28 @@ export function JobSignature({ jobId, currentUserId, existingSignature, voiceRep
     setSaved(false);
   }
 
+  // null when there was nothing to close or it closed; otherwise the error.
+  async function clockOutOfJob(): Promise<unknown> {
+    const { data: open, error } = await supabase
+      .from("time_entries")
+      .select("id, clock_in")
+      .eq("job_id", jobId)
+      .eq("staff_id", currentUserId)
+      .eq("entry_type", "work")
+      .is("clock_out", null)
+      .order("clock_in", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (error) return error;
+    if (!open) return null;
+    const clockOut = new Date().toISOString();
+    const { error: updateError } = await supabase
+      .from("time_entries")
+      .update({ clock_out: clockOut, hours: plausibleClockedHours(open.clock_in, clockOut) })
+      .eq("id", open.id);
+    return updateError ?? null;
+  }
+
   async function handleSave() {
     if (!hasSignature) { toast.error("Please provide a signature first"); return; }
     const canvas = canvasRef.current;
@@ -149,6 +172,12 @@ export function JobSignature({ jobId, currentUserId, existingSignature, voiceRep
     // The job is complete either way, so this is not an error — but the
     // technician's calendar still showing it as booked is worth one sentence
     // rather than the silence `.catch(() => {})` used to give it.
+    // The job is finished, so the signer's clock stops with it (31 Oct 2026).
+    // Only their own open work entry on this job; the rest of the crew clock
+    // off themselves. A failure here leaves the sign-off intact and says so.
+    const clockOutError = await clockOutOfJob();
+    if (clockOutError) toast.error("Job complete, but you're still clocked in — clock out on the Time tab.");
+
     const calendarSynced = await pushJobToCalendar(jobId);
     if (calendarSynced) toast.success("Job complete — flagged for office review");
     else toast.warning("Job complete — flagged for office review, but Google Calendar was not updated");

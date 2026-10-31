@@ -22,6 +22,7 @@ export function JobSignatureTab({
   const [signerName, setSignerName] = useState("");
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [clockedOut, setClockedOut] = useState(false);
   const signoff = useSignoff();
 
   async function handleOK(signature: string) {
@@ -32,13 +33,14 @@ export function JobSignatureTab({
       // calendar resync). Durable: a sign-off with no signal completes now and
       // syncs on reconnect.
       const base64 = signature.replace(/^data:image\/png;base64,/, "");
-      await signoff.signOff({
+      const result = await signoff.signOff({
         jobId,
         uploadedBy: currentUserId,
         signerName,
         signatureBase64: base64,
         signedOffDate: new Date().toLocaleDateString("en-AU"),
       });
+      setClockedOut(result.clockedOut);
       setSaved(true);
       onCompleted?.();
     } catch (e) {
@@ -62,6 +64,7 @@ export function JobSignatureTab({
         <View style={styles.doneCard}>
           <Text style={styles.doneTitle}>✅ Job Signed Off</Text>
           {existingSignature && <Text style={styles.doneSubtitle}>{existingSignature}</Text>}
+          {clockedOut && <Text style={styles.doneSubtitle}>{"You've been clocked off this job."}</Text>}
         </View>
         <VoiceReportRecorder jobId={jobId} currentUserId={currentUserId} existingTranscript={existingVoiceTranscript} />
       </View>

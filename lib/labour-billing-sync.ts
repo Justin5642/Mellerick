@@ -119,6 +119,16 @@ export async function syncJobBilling(admin: SupabaseClient, jobId: string) {
   const rateConfigRow = rateConfigRes.data;
   const existingAutoItems = existingItemsRes.data;
 
+  // Switched off company-wide (migration 0086, DRAFT, not applied yet; Justin, 31 Oct 2026: never
+  // automatic). Builder work is a fixed price, and an hourly "Labour" line per
+  // clock-in plus a call-out fee put the hours on top of the agreed price.
+  // Lines already written are left exactly as they are — the office decides
+  // what to bill — and nothing new is added or repriced. Only an explicit
+  // false turns it off: a database without 0086 keeps the old behaviour.
+  if (rateConfigRow?.auto_labour_lines === false) {
+    return { billableEntries: 0, labourItems: 0, disabled: true };
+  }
+
   const rateConfig: LabourRateConfig = rateConfigRow
     ? {
         qualifiedBaseRate: Number(rateConfigRow.qualified_base_rate),

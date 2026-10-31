@@ -34,7 +34,7 @@ export async function getJobProfitability(jobId: string): Promise<JobProfitabili
   const job = unwrap(jobRes as never, "getJobProfitability(job)") as unknown as { job_number: number | null; title: string } | null;
   if (!job) return null;
   const cfg = unwrap(cfgRes as never, "getJobProfitability(billingRateConfig)") as unknown as { min_margin_pct: number | null } | null;
-  const minMarginPct = cfg?.min_margin_pct != null ? Number(cfg.min_margin_pct) : 30;
+  const minMarginPct = cfg?.min_margin_pct != null ? Number(cfg.min_margin_pct) : 20;
 
   const result = computeJobProfitability({
     timeEntries: unwrapRows(timeRes as never, "getJobProfitability(timeEntries)") as unknown as { staff_id: string; hours: number | null }[],
