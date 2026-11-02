@@ -1,4 +1,4 @@
-import { SignatureRepository } from "./signature";
+import { SignatureRepository, technicianSignOffNote } from "./signature";
 import type { Outbox } from "../outbox/outbox";
 import type { IdGen } from "../ids";
 import type { Operation, WriteOperation, SideEffectOperation } from "../outbox/types";
@@ -70,5 +70,26 @@ describe("SignatureRepository", () => {
     const [photo, jobUpdate] = writes(ops);
     expect(photo.payload.caption).toBe("Customer signature");
     expect(jobUpdate.payload.completion_notes).toBe("Signed off by: Customer on 22/07/2026");
+  });
+
+  it("completeAsTechnician completes the job with no signature to wait for, then resyncs the calendar", async () => {
+    const { outbox, ops } = captureOutbox();
+    const repo = new SignatureRepository(outbox, seqIds(), fixedTime());
+    await repo.completeAsTechnician({ jobId: "j1", technicianName: "Brodie Unwin", signedOffDate: "03/11/2026" });
+    const [jobUpdate] = writes(ops);
+    expect(writes(ops)).toHaveLength(1);
+    expect(jobUpdate.table).toBe("jobs");
+    expect(jobUpdate.dependsOn).toBeUndefined();
+    expect(jobUpdate.payload).toMatchObject({
+      status: "completed",
+      ready_to_invoice: true,
+      completion_notes: "Signed off by technician Brodie Unwin on 03/11/2026 (customer not on site)",
+    });
+    const cal = ops.find((o) => o.kind === "side_effect")!;
+    expect(cal.dependsOn).toBe(jobUpdate.id);
+  });
+
+  it("names 'the technician' when the name isn't known", () => {
+    expect(technicianSignOffNote(null, "03/11/2026")).toBe("Signed off by the technician on 03/11/2026 (customer not on site)");
   });
 });

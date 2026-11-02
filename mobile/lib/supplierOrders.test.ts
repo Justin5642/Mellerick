@@ -27,9 +27,13 @@ describe("supplierOrderProblem", () => {
     expect(supplierOrderProblem({ ...ok, supplierEmail: "reece at gmail" })).toMatch(/email/);
   });
 
-  it("ignores blank rows but needs at least one item", () => {
+  it("ignores blank rows but needs at least one item to email", () => {
     expect(supplierOrderProblem({ ...ok, items: [{ description: " ", quantity: 1 }] })).toMatch(/at least one item/);
     expect(supplierOrderProblem({ ...ok, items: [...ok.items, { description: "", quantity: NaN }] })).toBeNull();
+  });
+
+  it("lets a phone or counter order go with no items", () => {
+    expect(supplierOrderProblem({ ...ok, supplierEmail: null, items: [] })).toBeNull();
   });
 
   it("names the item with a bad quantity", () => {

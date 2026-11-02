@@ -385,7 +385,7 @@ export default function JobDetailScreen() {
         {/* Truck & plant (Stage 7): the driver logs cartage against the job's cost centre. */}
         {activeTab === "time" && userId && <JobPlantUsage jobId={job.id} />}
         {activeTab === "variations" && userId && <JobVariationsTab jobId={job.id} currentUserId={userId} />}
-        {activeTab === "orders" && <JobSupplierOrdersTab jobId={job.id} costCentres={costCenters} />}
+        {activeTab === "orders" && <JobSupplierOrdersTab jobId={job.id} currentUserId={userId ?? null} costCentres={costCenters} />}
         {activeTab === "photos" && userId && (
           <JobPhotosTab
             jobId={job.id}

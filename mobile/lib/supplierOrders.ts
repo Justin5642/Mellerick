@@ -26,6 +26,8 @@ export interface SupplierOrder {
   emailedAt: string | null;
   /** Set when the crew tapped Delivered (0089). Absent from older servers. */
   deliveredAt?: string | null;
+  /** Docket photos taken against this PO (0093). Absent from older servers. */
+  docketPhotos?: number;
   raisedBy: string | null;
   items: { description: string; quantity: number }[];
 }
@@ -117,7 +119,8 @@ export function supplierOrderProblem(
   if (!o.supplierName.trim()) return "Enter the supplier's name.";
   if (o.supplierEmail && !EMAIL.test(o.supplierEmail.trim())) return "That supplier email address doesn't look right.";
   const filled = o.items.filter((i) => i.description.trim());
-  if (filled.length === 0) return "Add at least one item.";
+  // A phone or counter order needs no items — the docket photo shows what came.
+  if (filled.length === 0 && o.supplierEmail) return "Add at least one item to email the supplier.";
   const bad = filled.find((i) => !Number.isFinite(i.quantity) || i.quantity <= 0);
   if (bad) return `Check the quantity for "${bad.description.trim()}".`;
   return null;
