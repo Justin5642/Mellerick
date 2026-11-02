@@ -134,7 +134,7 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
     supabase.from("job_stage_notes").select("*, profiles(full_name)").eq("job_id", id).order("created_at", { ascending: false }),
     supabase.from("job_items").select("*").eq("job_id", id).order("created_at"),
     supabase.from("purchase_orders").select("*, po_cost_centers(*)").eq("job_id", id).order("created_at"),
-    supabase.from("vendor_orders").select("*, vendor_order_items(description, quantity, sort_order), profiles(full_name)").eq("job_id", id).order("created_at", { ascending: false }),
+    supabase.from("vendor_orders").select("*, vendor_order_items(description, quantity, sort_order), profiles!vendor_orders_entered_by_fkey(full_name)").eq("job_id", id).order("created_at", { ascending: false }),
     // time_entries has two FKs to profiles (staff_id, edited_by), so an
     // unhinted "profiles(...)" embed is ambiguous and PostgREST rejects the
     // whole query (PGRST201) — naming the exact FK fixes it (see

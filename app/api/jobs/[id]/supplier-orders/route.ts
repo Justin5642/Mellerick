@@ -15,6 +15,11 @@ import { reportError } from "@/lib/monitoring";
 // carry money. This route is how a technician reaches them, so it uses the
 // service-role client after requireUser — and it NEVER selects amount or
 // gst_amount. ORDER_COLS is the whole list of what a technician can learn.
+//
+// The staff embed names its FK: vendor_orders has two links to profiles
+// (entered_by, and delivered_by since 0089), and an unhinted profiles(...)
+// makes PostgREST refuse the whole query (PGRST201) — which is how the phone's
+// Orders tab showed "Couldn't load purchase orders" after 0089 (2 Nov 2026).
 const ORDER_COLS =
   "id, po_number, vendor_name, supplier_email, status, cost_center_id, delivery_address, required_by, notes, created_at, emailed_at, delivered_at";
 
@@ -54,7 +59,7 @@ interface OrderRow {
 async function listOrders(admin: Admin, jobId: string) {
   const { data, error } = await admin
     .from("vendor_orders")
-    .select(`${ORDER_COLS}, profiles(full_name), vendor_order_items(description, quantity, sort_order)`)
+    .select(`${ORDER_COLS}, profiles!vendor_orders_entered_by_fkey(full_name), vendor_order_items(description, quantity, sort_order)`)
     .eq("job_id", jobId)
     .order("created_at", { ascending: false });
   if (error) throw error;
