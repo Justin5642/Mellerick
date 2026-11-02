@@ -345,7 +345,7 @@ export function JobPO({ jobId, jobNumber, customerName, site, pos: initialPos, t
       amount: parseFloat(voForm.amount) || 0,
       order_date: voForm.order_date || null,
       notes: voForm.notes || null,
-    }).select("*, vendor_order_items(description, quantity, sort_order), profiles(full_name)").single();
+    }).select("*, vendor_order_items(description, quantity, sort_order), profiles!vendor_orders_entered_by_fkey(full_name)").single();
 
     if (error || !data) { toast.error("Failed to save vendor order"); setVoSaving(false); return; }
 

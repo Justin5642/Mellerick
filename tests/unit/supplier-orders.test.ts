@@ -136,6 +136,14 @@ describe("/api/jobs/[id]/supplier-orders", () => {
     expect(sendEmail).not.toHaveBeenCalled();
   });
 
+  it("names which staff link it means (vendor_orders has two since 0089)", async () => {
+    requireUser.mockResolvedValue(tech);
+    await GET(new NextRequest("http://localhost/x"), params);
+    const cols = selects.filter((x) => x.table === "vendor_orders").map((x) => x.cols).join(" ");
+    expect(cols).toContain("profiles!vendor_orders_entered_by_fkey(full_name)");
+    expect(cols).not.toMatch(/(^|[ ,])profiles\(/);
+  });
+
   it("never selects or returns a dollar figure", async () => {
     requireUser.mockResolvedValue(tech);
     // Even if the database handed one back, it must not reach the phone.
