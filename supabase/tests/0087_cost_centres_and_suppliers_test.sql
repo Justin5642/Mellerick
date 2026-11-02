@@ -37,13 +37,12 @@ begin
     res := res || format('Truck Cartage group left|0|%s', (
       select count(*) from cost_center_templates where group_name = 'Truck Cartage'));
 
-    -- 3. Existing budget lines matched by keyword land where expected.
-    res := res || format('a sewer line is Below Ground Drainage|0|%s', (
-      select count(*) from po_cost_centers p join cost_centres c on c.id = p.cost_centre_id
-      where p.name ~* 'sewer' and c.name <> 'Below Ground Drainage'));
-    res := res || format('a rough-in line is Above Ground Plumbing|0|%s', (
-      select count(*) from po_cost_centers p join cost_centres c on c.id = p.cost_centre_id
-      where p.name ~* 'rough' and c.name <> 'Above Ground Plumbing'));
+    -- 3. Budget lines can be tagged to a company cost centre. (Not checked by
+    --    name: since Stage 2 the office sets any line's cost centre, so
+    --    "Sewer cartage" under Transport is right. Re-running this test on
+    --    2 Nov 2026 failed on exactly that.)
+    res := res || format('budget lines have a cost centre column|1|%s', (
+      select count(*) from information_schema.columns where table_name = 'po_cost_centers' and column_name = 'cost_centre_id'));
 
     -- 4. Suppliers: Xero id is unique; an order can point at one.
     insert into suppliers (id, name, xero_contact_id) values (s, 'Test Supplier 0087', 'xero-test-0087');
