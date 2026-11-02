@@ -24,6 +24,15 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
 
   const admin = createAdminClient();
 
+  // Automatic labour lines are off (0086), so there is nothing to sync —
+  // answer done before looking for the entry. The phone queues this after
+  // every clock write, including a clock-on the one-open-entry rule (0090)
+  // refused as a duplicate: that row never exists, a 404 reads as "not there
+  // yet", and the phone retried it forever ("Syncing" that never cleared,
+  // 2 Nov 2026).
+  const { data: config } = await admin.from("billing_rate_config").select("auto_labour_lines").eq("id", true).maybeSingle();
+  if (config?.auto_labour_lines === false) return NextResponse.json({ ok: true, disabled: true });
+
   const { allowed, jobId } = await canManageTimeEntryBilling(admin, guard.userId, timeEntryId);
   if (!jobId) return NextResponse.json({ error: "Time entry not found" }, { status: 404 });
   if (!allowed) return NextResponse.json({ error: "Insufficient permissions" }, { status: 403 });
