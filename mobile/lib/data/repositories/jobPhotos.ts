@@ -16,6 +16,9 @@ export interface AddPhotoInput {
   localUri: string;
   /** File extension for the Storage object key; photos are always jpg. */
   ext?: string;
+  /** A delivery docket: the supplier PO it belongs to (0093). */
+  vendorOrderId?: string;
+  caption?: string;
 }
 
 // Offline-first write path for job photos. An add enqueues a single durable
@@ -50,6 +53,10 @@ export class JobPhotosRepository {
         job_id: input.jobId,
         uploaded_by: input.uploadedBy,
         photo_type: input.photoType,
+        // Only on a docket, so an ordinary photo's write never names a
+        // column a server without 0093 doesn't have.
+        ...(input.vendorOrderId ? { vendor_order_id: input.vendorOrderId } : {}),
+        ...(input.caption ? { caption: input.caption } : {}),
       },
       status: "pending",
       attempts: 0,

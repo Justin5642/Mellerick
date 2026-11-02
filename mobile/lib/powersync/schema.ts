@@ -298,6 +298,7 @@ const job_photos = new Table({
   created_at: column.text,
   simpro_file_id: column.text,
   sync_office: column.integer,
+  vendor_order_id: column.text,
 }, {
   indexes: {
     job: ['job_id'],

@@ -1,8 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { View, Text, StyleSheet, TextInput, TouchableOpacity, ActivityIndicator, Alert, Platform } from "react-native";
 import DateTimePicker, { type DateTimePickerEvent } from "@react-native-community/datetimepicker";
+import * as ImagePicker from "expo-image-picker";
 import { Ionicons } from "@expo/vector-icons";
 import { colors } from "../../lib/theme";
+import { prepareImageForUpload } from "../../lib/imageUpload";
+import { usePhotoLibrary } from "../../lib/data/hooks/usePhotoLibrary";
 import { localDateKey } from "../../lib/date";
 import { cryptoIdGen } from "../../lib/data/ids";
 import type { JobCostCentre } from "../../lib/data/reads/jobBilling";
@@ -24,11 +27,20 @@ import {
 // job with no cost centres can't have a PO until the office adds one. No
 // prices anywhere on this screen; the office prices it from the supplier's
 // invoice.
+//
+// Most orders are phoned through or bought at the counter (Justin, 2 Nov
+// 2026), so that is the default: cost centre and supplier, and the tech gets
+// a PO number to quote — no items needed. When the goods arrive they tap
+// Delivered and photograph the docket, which lands with the job photos,
+// linked to the PO, for the office to match against the invoice.
 
 interface Props {
   jobId: string;
+  currentUserId: string | null;
   costCentres: JobCostCentre[];
 }
+
+type OrderMode = "phone" | "email";
 
 interface ItemRow {
   key: string;
@@ -49,7 +61,8 @@ function displayDate(key: string): string {
   return `${d}/${m}/${y}`;
 }
 
-export function JobSupplierOrdersTab({ jobId, costCentres: localCostCentres }: Props) {
+export function JobSupplierOrdersTab({ jobId, currentUserId, costCentres: localCostCentres }: Props) {
+  const photoLibrary = usePhotoLibrary();
   const [state, setState] = useState<SupplierOrdersState | null>(null);
   // The server's list, read fresh on every load, wins over the phone's copy:
   // that copy is read once when the job opens, so a cost centre the office
@@ -59,6 +72,11 @@ export function JobSupplierOrdersTab({ jobId, costCentres: localCostCentres }: P
   const [formOpen, setFormOpen] = useState(false);
   const [sending, setSending] = useState(false);
   const [delivering, setDelivering] = useState<string | null>(null);
+  const [savingDocket, setSavingDocket] = useState<string | null>(null);
+  // Dockets photographed here since the last load: the upload may still be
+  // queued (no signal on site), so the server's count can't show them yet.
+  const [docketsTaken, setDocketsTaken] = useState<Set<string>>(() => new Set());
+  const [mode, setMode] = useState<OrderMode>("phone");
 
   // One id per draft, kept across retries: a retry after a dropped connection
   // gets back the PO already raised, never a second email to the supplier.
@@ -103,6 +121,7 @@ export function JobSupplierOrdersTab({ jobId, costCentres: localCostCentres }: P
 
   function resetForm() {
     setFormOpen(false);
+    setMode("phone");
     setDraftId(cryptoIdGen.newId());
     setCostCentreTouched(false);
     setSupplierId(null);
@@ -154,7 +173,7 @@ export function JobSupplierOrdersTab({ jobId, costCentres: localCostCentres }: P
       costCenterId: costCentreId,
       supplierId,
       supplierName: supplierName.trim(),
-      supplierEmail: supplierEmail.trim() || null,
+      supplierEmail: mode === "email" ? supplierEmail.trim() || null : null,
       deliveryAddress: deliveryAddress.trim() || null,
       requiredBy,
       notes: notes.trim() || null,
@@ -167,12 +186,20 @@ export function JobSupplierOrdersTab({ jobId, costCentres: localCostCentres }: P
       Alert.alert("Check the order", problem);
       return;
     }
+    if (mode === "email" && !order.supplierEmail) {
+      Alert.alert("Check the order", "Enter the supplier's email, or choose Phone / counter.");
+      return;
+    }
     setSending(true);
     try {
       const res = await raiseSupplierOrder(jobId, order);
       if (res.warning) Alert.alert(`${res.poNumber} raised — email not sent`, res.warning);
       else if (res.emailed) Alert.alert(`${res.poNumber} sent`, `Emailed to ${res.emailedTo}. The office has a copy.`);
-      else Alert.alert(`${res.poNumber} raised`, `Quote ${res.poNumber} to the supplier so the invoice comes back to this job.`);
+      else
+        Alert.alert(
+          `Your PO number is ${res.poNumber}`,
+          `Quote ${res.poNumber} to the supplier so the invoice comes back to this job. When the goods arrive, tap Delivered and take a photo of the docket.`
+        );
       resetForm();
       await load();
     } catch (e: any) {
@@ -182,8 +209,10 @@ export function JobSupplierOrdersTab({ jobId, costCentres: localCostCentres }: P
     }
   }
 
-  // One tap when the materials turn up (31 Oct 2026: "Yes, tap only").
-  async function markDelivered(orderId: string) {
+  // One tap when the materials turn up (31 Oct 2026: "Yes, tap only"), then
+  // the offer of a docket photo (2 Nov 2026) — skippable, and still there on
+  // the card afterwards.
+  async function markDelivered(orderId: string, poNumber: string) {
     if (delivering) return;
     setDelivering(orderId);
     try {
@@ -191,8 +220,43 @@ export function JobSupplierOrdersTab({ jobId, costCentres: localCostCentres }: P
       await load();
     } catch (e: any) {
       Alert.alert("Not marked delivered", e?.message ?? "Try again.");
+      return;
     } finally {
       setDelivering(null);
+    }
+    Alert.alert(`${poNumber} delivered`, "Take a photo of the delivery docket?", [
+      { text: "Later", style: "cancel" },
+      { text: "Take photo", onPress: () => void takeDocket(orderId, poNumber) },
+    ]);
+  }
+
+  // Through the offline outbox like any job photo: it saves on the phone at
+  // once and uploads when there's signal. No timestamp stamp burned in — the
+  // docket has to stay readable.
+  async function takeDocket(orderId: string, poNumber: string) {
+    if (savingDocket || !currentUserId || !photoLibrary.ready) return;
+    const perm = await ImagePicker.requestCameraPermissionsAsync();
+    if (!perm.granted) {
+      Alert.alert("Camera needed", "Allow camera access to photograph the docket.");
+      return;
+    }
+    const shot = await ImagePicker.launchCameraAsync({ quality: 1 });
+    if (shot.canceled || !shot.assets?.length) return;
+    setSavingDocket(orderId);
+    try {
+      await photoLibrary.addPhoto({
+        jobId,
+        uploadedBy: currentUserId,
+        photoType: "general",
+        sourceUri: await prepareImageForUpload(shot.assets[0].uri),
+        vendorOrderId: orderId,
+        caption: `Docket ${poNumber}`,
+      });
+      setDocketsTaken((prev) => new Set(prev).add(orderId));
+    } catch (e: any) {
+      Alert.alert("Docket photo not saved", e?.message ?? "Try again.");
+    } finally {
+      setSavingDocket(null);
     }
   }
 
@@ -233,7 +297,31 @@ export function JobSupplierOrdersTab({ jobId, costCentres: localCostCentres }: P
 
       {formOpen && (
         <View style={styles.form}>
-          <Text style={[styles.formLabel, { marginTop: 0 }]}>1. Cost centre *</Text>
+          <Text style={[styles.formLabel, { marginTop: 0 }]}>How are you ordering?</Text>
+          <View style={styles.modeRow}>
+            {(
+              [
+                ["phone", "Phone / counter"],
+                ["email", "Email the supplier"],
+              ] as const
+            ).map(([m, label]) => (
+              <TouchableOpacity
+                key={m}
+                style={[styles.modeBtn, mode === m && styles.modeBtnActive]}
+                onPress={() => setMode(m)}
+                accessibilityLabel={label}
+              >
+                <Text style={[styles.modeText, mode === m && styles.chipTextActive]}>{label}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+          <Text style={styles.hint}>
+            {mode === "phone"
+              ? "You'll get a PO number to quote. No items needed — photograph the docket when it arrives."
+              : "The PO and the items are emailed to the supplier, with the office copied."}
+          </Text>
+
+          <Text style={styles.formLabel}>1. Cost centre *</Text>
           <View style={styles.chipRow}>
             {costCentres.map((cc) => (
               <TouchableOpacity
@@ -308,22 +396,23 @@ export function JobSupplierOrdersTab({ jobId, costCentres: localCostCentres }: P
             </>
           )}
 
-          <Text style={styles.formLabel}>Supplier email</Text>
-          <TextInput
-            style={styles.input}
-            value={supplierEmail}
-            onChangeText={setSupplierEmail}
-            placeholder="orders@supplier.com.au"
-            placeholderTextColor={colors.slate400}
-            keyboardType="email-address"
-            autoCapitalize="none"
-            autoCorrect={false}
-          />
-          <Text style={styles.hint}>
-            {"Leave blank if you're at the counter or ordering by phone — you'll still get a PO number to quote."}
-          </Text>
+          {mode === "email" && (
+            <>
+              <Text style={styles.formLabel}>Supplier email *</Text>
+              <TextInput
+                style={styles.input}
+                value={supplierEmail}
+                onChangeText={setSupplierEmail}
+                placeholder="orders@supplier.com.au"
+                placeholderTextColor={colors.slate400}
+                keyboardType="email-address"
+                autoCapitalize="none"
+                autoCorrect={false}
+              />
+            </>
+          )}
 
-          <Text style={styles.formLabel}>3. Items *</Text>
+          <Text style={styles.formLabel}>{mode === "email" ? "3. Items *" : "3. Items (optional)"}</Text>
           {items.map((row) => (
             <View key={row.key} style={styles.itemRow}>
               <TextInput
@@ -383,12 +472,12 @@ export function JobSupplierOrdersTab({ jobId, costCentres: localCostCentres }: P
             <DateTimePicker value={requiredBy ? new Date(`${requiredBy}T12:00:00`) : new Date()} mode="date" minimumDate={new Date()} onChange={onDateChange} />
           )}
 
-          <Text style={styles.formLabel}>Notes for the supplier (optional)</Text>
+          <Text style={styles.formLabel}>{mode === "email" ? "Notes for the supplier (optional)" : "What's it for? (optional)"}</Text>
           <TextInput
             style={[styles.input, styles.textArea]}
             value={notes}
             onChangeText={setNotes}
-            placeholder="e.g. Call on arrival, gate code 1234"
+            placeholder={mode === "email" ? "e.g. Call on arrival, gate code 1234" : "e.g. 100mm pipe and fittings for the sewer"}
             placeholderTextColor={colors.slate400}
             multiline
           />
@@ -405,7 +494,7 @@ export function JobSupplierOrdersTab({ jobId, costCentres: localCostCentres }: P
               {sending ? (
                 <ActivityIndicator color="#fff" />
               ) : (
-                <Text style={styles.submitButtonText}>{supplierEmail.trim() ? "Send PO" : "Raise PO"}</Text>
+                <Text style={styles.submitButtonText}>{mode === "email" ? "Send PO" : "Get PO number"}</Text>
               )}
             </TouchableOpacity>
           </View>
@@ -440,14 +529,29 @@ export function JobSupplierOrdersTab({ jobId, costCentres: localCostCentres }: P
                 .join(" · ")}
             </Text>
             <Text style={[styles.meta, { color: o.emailedAt ? colors.green600 : colors.slate500 }]}>
-              {o.emailedAt ? `Emailed to ${o.supplierEmail}` : o.supplierEmail ? "Email didn't send — phone it through" : "Not emailed"}
+              {o.emailedAt ? `Emailed to ${o.supplierEmail}` : o.supplierEmail ? "Email didn't send — phone it through" : "Phone / counter order"}
             </Text>
             {o.deliveredAt ? (
-              <Text style={[styles.meta, { color: colors.green600 }]}>Delivered {new Date(o.deliveredAt).toLocaleDateString("en-AU")}</Text>
+              <>
+                <Text style={[styles.meta, { color: colors.green600 }]}>Delivered {new Date(o.deliveredAt).toLocaleDateString("en-AU")}</Text>
+                {(o.docketPhotos ?? 0) > 0 || docketsTaken.has(o.id) ? (
+                  <Text style={[styles.meta, { color: colors.green600 }]}>✓ Docket photo saved</Text>
+                ) : (
+                  <TouchableOpacity
+                    style={styles.docketBtn}
+                    onPress={() => takeDocket(o.id, o.poNumber)}
+                    disabled={savingDocket === o.id}
+                    accessibilityLabel={`Photograph the docket for ${o.poNumber}`}
+                  >
+                    <Ionicons name="camera-outline" size={20} color={colors.blue600} />
+                    <Text style={styles.docketText}>{savingDocket === o.id ? "Saving…" : "Photo of docket"}</Text>
+                  </TouchableOpacity>
+                )}
+              </>
             ) : o.status === "ordered" ? (
               <TouchableOpacity
                 style={styles.deliveredBtn}
-                onPress={() => markDelivered(o.id)}
+                onPress={() => markDelivered(o.id, o.poNumber)}
                 disabled={delivering === o.id}
                 accessibilityLabel={`Mark ${o.poNumber} delivered`}
               >
@@ -477,6 +581,12 @@ const styles = StyleSheet.create({
   hint: { fontSize: 11, color: colors.slate500, marginTop: 4 },
   deliveredBtn: { marginTop: 8, paddingVertical: 12, borderRadius: 8, alignItems: "center", backgroundColor: colors.green100 },
   deliveredText: { fontSize: 16, fontWeight: "700", color: colors.green600 },
+  docketBtn: { marginTop: 8, paddingVertical: 12, borderRadius: 8, alignItems: "center", justifyContent: "center", flexDirection: "row", gap: 6, backgroundColor: "#eff6ff" },
+  docketText: { fontSize: 16, fontWeight: "700", color: colors.blue600 },
+  modeRow: { flexDirection: "row", gap: 8 },
+  modeBtn: { flex: 1, paddingVertical: 12, borderRadius: 10, alignItems: "center", backgroundColor: colors.bg, borderWidth: 1, borderColor: colors.border },
+  modeBtnActive: { backgroundColor: colors.blue600, borderColor: colors.blue600 },
+  modeText: { fontSize: 14, fontWeight: "700", color: colors.slate700 },
   checkAgain: { marginTop: 10, alignSelf: "flex-start", paddingVertical: 10, paddingHorizontal: 16, borderRadius: 8, backgroundColor: "#fff" },
   checkAgainText: { fontSize: 15, fontWeight: "700", color: colors.blue600 },
   linkText: { color: colors.blue600, fontSize: 13, paddingVertical: 6 },
