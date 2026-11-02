@@ -182,6 +182,21 @@ describe("/api/jobs/[id]/supplier-orders", () => {
     expect(JSON.stringify(json)).not.toMatch(/ACCT-9|0399999999/);
   });
 
+  it("returns the job's cost centres fresh, so one added on the web shows straight away", async () => {
+    requireUser.mockResolvedValue(tech);
+    tableData.po_cost_centers = {
+      one: { id: CC },
+      list: [
+        { id: "line-2", name: "Transport", sort_order: 1, cost_centre_id: "t", cost_centres: { name: "Transport" }, purchase_orders: { po_number: "4500123" }, allocated_amount: 999 },
+        { id: CC, name: "Sewer", sort_order: 0, cost_centre_id: "b", cost_centres: { name: "Below Ground Drainage" }, purchase_orders: { po_number: "4500123" } },
+      ],
+    };
+    const json = await (await GET(new NextRequest("http://localhost/x"), params)).json();
+    expect(json.costCentres.map((c: { id: string }) => c.id)).toEqual([CC, "line-2"]);
+    expect(json.costCentres[0]).toMatchObject({ name: "Sewer", po_number: "4500123", costCentre: "Below Ground Drainage" });
+    expect(JSON.stringify(json.costCentres)).not.toMatch(/999|allocated/);
+  });
+
   it("a supplier picked from the list is recorded by id, under the name on file", async () => {
     requireUser.mockResolvedValue(tech);
     tableData.suppliers = { one: { name: "Reece Plumbing Epping" } };

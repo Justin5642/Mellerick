@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, Modal, Alert, TextInput } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
@@ -127,6 +127,16 @@ export default function JobDetailScreen() {
   // Both awaits can throw — the session lookup and the row read. Uncaught, the
   // throw skipped setLoading(false) and the technician sat on a spinner that
   // never resolved, on the one screen they spend the whole day in.
+  // Re-read the job's cost centres whenever a tab that uses them opens: they
+  // were read once with the job, so one the office added since never showed
+  // (2 Nov 2026). A local read, so it costs nothing to repeat.
+  useEffect(() => {
+    if (tab !== "time" && tab !== "orders") return;
+    getJobCostCentres(id)
+      .then(setCostCenters)
+      .catch(() => {});
+  }, [tab, id]);
+
   const loadJob = useCallback(async () => {
     try {
       setError(null);
