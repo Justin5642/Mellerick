@@ -17,6 +17,8 @@ export interface PhotoLibrary {
     photoType: PhotoType;
     sourceUri: string;
     ext?: string;
+    vendorOrderId?: string;
+    caption?: string;
   }): Promise<{ id: string; storagePath: string; localUri: string; synced: boolean }>;
   deletePhoto(input: { id: string; storagePath: string }): Promise<{ synced: boolean }>;
 }
@@ -34,6 +36,8 @@ export function usePhotoLibrary(): PhotoLibrary {
       photoType: input.photoType,
       localUri,
       ext: input.ext,
+      vendorOrderId: input.vendorOrderId,
+      caption: input.caption,
     });
     return { id, storagePath, localUri, synced: await flush() };
   }, [layer, flush]);

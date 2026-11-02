@@ -90,6 +90,12 @@ describe("parseSupplierOrder", () => {
     expect(r.ok && r.order.supplierEmail).toBeNull();
   });
 
+  it("allows a phone order with no items, but not an emailed one", () => {
+    const r = parseSupplierOrder({ ...body, supplierEmail: null, items: [] });
+    expect(r.ok && r.order.items).toEqual([]);
+    expect(parseSupplierOrder({ ...body, supplierEmail: null, items: undefined }).ok).toBe(true);
+  });
+
   it.each([
     [{ ...body, id: "not-a-uuid" }, /update the app/],
     [{ ...body, supplierName: " " }, /supplier's name/],
@@ -167,6 +173,24 @@ describe("/api/jobs/[id]/supplier-orders", () => {
     expect(order).toMatchObject({ id: ORDER, job_id: JOB, entered_by: "tech-1", cost_center_id: CC });
     expect(order).not.toHaveProperty("amount");
     expect(sendEmail).toHaveBeenCalledWith(expect.objectContaining({ to: "orders@reece.example", cc: expect.any(String) }));
+  });
+
+  it("raises a phone order with no items: a PO number, no item rows, no email", async () => {
+    requireUser.mockResolvedValue(tech);
+    const res = await post({ ...body, supplierEmail: null, items: [], notes: "Pipe for the sewer" });
+    expect(await res.json()).toMatchObject({ poNumber: "PO-1001", emailed: false });
+    const order = inserts.find((i) => i.table === "vendor_orders")!.rows as Record<string, unknown>;
+    expect(order).toMatchObject({ description: "Pipe for the sewer" });
+    expect(inserts.some((i) => i.table === "vendor_order_items")).toBe(false);
+    expect(sendEmail).not.toHaveBeenCalled();
+  });
+
+  it("counts the docket photos taken against each order", async () => {
+    requireUser.mockResolvedValue(tech);
+    tableData.vendor_orders = { list: [{ id: ORDER, po_number: "PO-1001", vendor_name: "Reece", status: "received", vendor_order_items: [] }] };
+    tableData.job_photos = { list: [{ vendor_order_id: ORDER }, { vendor_order_id: ORDER }] };
+    const json = await (await GET(new NextRequest("http://localhost/x"), params)).json();
+    expect(json.orders[0]).toMatchObject({ poNumber: "PO-1001", docketPhotos: 2 });
   });
 
   it("lists suppliers from the supplier table, without account numbers or phones", async () => {

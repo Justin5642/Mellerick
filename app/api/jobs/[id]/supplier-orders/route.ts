@@ -63,6 +63,17 @@ async function listOrders(admin: Admin, jobId: string) {
     .eq("job_id", jobId)
     .order("created_at", { ascending: false });
   if (error) throw error;
+  // Docket photos taken against each order (0093 — DRAFT, not applied yet).
+  // Read on their own and never fatal: until 0093 is applied the column
+  // doesn't exist, and the orders must still load.
+  const dockets = new Map<string, number>();
+  const { data: photos, error: photosError } = await admin
+    .from("job_photos")
+    .select("vendor_order_id")
+    .eq("job_id", jobId)
+    .not("vendor_order_id", "is", null);
+  if (photosError) console.error("supplier orders: docket photos not read:", photosError.message);
+  for (const p of (photos ?? []) as { vendor_order_id: string }[]) dockets.set(p.vendor_order_id, (dockets.get(p.vendor_order_id) ?? 0) + 1);
   // Field by field, never a spread: whatever else a row carries stays here.
   return ((data ?? []) as unknown as OrderRow[]).map((o) => ({
     id: o.id,
@@ -77,6 +88,7 @@ async function listOrders(admin: Admin, jobId: string) {
     createdAt: o.created_at,
     emailedAt: o.emailed_at,
     deliveredAt: o.delivered_at,
+    docketPhotos: dockets.get(o.id) ?? 0,
     raisedBy: o.profiles?.full_name ?? null,
     items: [...(o.vendor_order_items ?? [])]
       .sort((a, b) => a.sort_order - b.sort_order)
@@ -229,7 +241,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
         delivery_address: order.deliveryAddress,
         required_by: order.requiredBy,
         notes: order.notes,
-        description: order.items.map((i) => i.description).join(", ").slice(0, 300),
+        description: (order.items.length ? order.items.map((i) => i.description).join(", ") : order.notes ?? "Phone order").slice(0, 300),
         order_date: today,
         status: "ordered",
         entered_by: guard.userId,
@@ -238,9 +250,11 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       .single();
     if (insertError || !created) throw insertError ?? new Error("vendor order insert returned no row");
 
-    const { error: itemsError } = await admin.from("vendor_order_items").insert(
-      order.items.map((i, n) => ({ vendor_order_id: order.id, description: i.description, quantity: i.quantity, sort_order: n }))
-    );
+    const { error: itemsError } = order.items.length
+      ? await admin.from("vendor_order_items").insert(
+          order.items.map((i, n) => ({ vendor_order_id: order.id, description: i.description, quantity: i.quantity, sort_order: n }))
+        )
+      : { error: null };
     if (itemsError) {
       // An order with no lines is useless to the supplier and the office.
       // Remove it so the tech's retry starts clean.

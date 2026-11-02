@@ -140,6 +140,27 @@ export function JobPO({ jobId, jobNumber, customerName, site, pos: initialPos, t
   const [invoiceBusy, setInvoiceBusy] = useState(false);
   const [addLines, setAddLines] = useState<BuilderPoLineInput[]>([blankLine()]);
   const [suppliers, setSuppliers] = useState<{ id: string; name: string }[]>([]);
+  // Docket photos the crew took against each order (0093 — DRAFT, not applied
+  // yet; until it is, this read fails quietly and no docket links show).
+  const [dockets, setDockets] = useState<Record<string, string[]>>({});
+
+  useEffect(() => {
+    supabase
+      .from("job_photos")
+      .select("vendor_order_id, storage_path")
+      .eq("job_id", jobId)
+      .not("vendor_order_id", "is", null)
+      .order("created_at")
+      .then(({ data, error }) => {
+        if (error) return;
+        const byOrder: Record<string, string[]> = {};
+        for (const p of (data ?? []) as { vendor_order_id: string; storage_path: string }[]) {
+          (byOrder[p.vendor_order_id] ??= []).push(p.storage_path);
+        }
+        setDockets(byOrder);
+      });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [jobId]);
 
   useEffect(() => {
     supabase
@@ -445,6 +466,12 @@ export function JobPO({ jobId, jobNumber, customerName, site, pos: initialPos, t
     else toast.error("Couldn't open the invoice file");
   }
 
+  async function openDocket(path: string) {
+    const { data } = await supabase.storage.from("job-photos").createSignedUrl(path, 60);
+    if (data?.signedUrl) window.open(data.signedUrl, "_blank");
+    else toast.error("Couldn't open the docket photo");
+  }
+
   async function deleteVendorOrder(id: string) {
     const { error, count } = await supabase.from("vendor_orders").delete({ count: "exact" }).eq("id", id);
     if (error || count === 0) { toast.error(error?.message ?? "Could not remove this vendor order."); return; }
@@ -561,6 +588,15 @@ export function JobPO({ jobId, jobNumber, customerName, site, pos: initialPos, t
         ) : vo.status !== "cancelled" ? (
           <button onClick={() => openInvoice(vo)} className="text-blue-600 hover:underline">+ Enter supplier invoice</button>
         ) : null}
+        {(dockets[vo.id] ?? []).length > 0 && (
+          <div className="flex items-center gap-2">
+            {(dockets[vo.id] ?? []).map((path, n) => (
+              <button key={path} onClick={() => openDocket(path)} className="text-blue-600 hover:underline">
+                {n === 0 ? "View docket photo" : `Docket photo ${n + 1}`}
+              </button>
+            ))}
+          </div>
+        )}
         <p className="text-slate-400">
           {[
             vo.profiles?.full_name ? `Raised by ${vo.profiles.full_name}` : null,

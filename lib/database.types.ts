@@ -1408,6 +1408,7 @@ export type Database = {
           storage_path: string
           sync_office: boolean
           uploaded_by: string | null
+          vendor_order_id: string | null
         }
         Insert: {
           caption?: string | null
@@ -1419,6 +1420,7 @@ export type Database = {
           storage_path: string
           sync_office?: boolean
           uploaded_by?: string | null
+          vendor_order_id?: string | null
         }
         Update: {
           caption?: string | null
@@ -1430,8 +1432,16 @@ export type Database = {
           storage_path?: string
           sync_office?: boolean
           uploaded_by?: string | null
+          vendor_order_id?: string | null
         }
         Relationships: [
+          {
+            foreignKeyName: "job_photos_vendor_order_id_fkey"
+            columns: ["vendor_order_id"]
+            isOneToOne: false
+            referencedRelation: "vendor_orders"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "job_photos_job_id_fkey"
             columns: ["job_id"]

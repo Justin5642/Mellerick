@@ -51,6 +51,14 @@ export default async function SupplierPosPage({ searchParams }: { searchParams: 
   const loadFailed = !!(found.error || waiting.error);
   if (loadFailed) console.error("supplier POs load failed:", found.error ?? waiting.error);
 
+  // Which orders have a docket photo from site (0093 — DRAFT, not applied yet;
+  // until it is, this read fails quietly and nothing is marked).
+  const ids = [...((found.data ?? []) as unknown as OrderRow[]), ...((waiting.data ?? []) as unknown as OrderRow[])].map((o) => o.id);
+  const { data: docketRows } = ids.length
+    ? await supabase.from("job_photos").select("vendor_order_id").in("vendor_order_id", ids)
+    : { data: [] };
+  const withDocket = new Set(((docketRows ?? []) as { vendor_order_id: string }[]).map((r) => r.vendor_order_id));
+
   const table = (rows: OrderRow[], empty: string) =>
     rows.length === 0 ? (
       <p className="text-sm text-slate-400 text-center py-8">{empty}</p>
@@ -79,6 +87,9 @@ export default async function SupplierPosPage({ searchParams }: { searchParams: 
               <td className="px-4 py-2.5 text-slate-500">
                 {o.order_date ?? o.created_at.slice(0, 10)}
                 {o.delivered_at && <span className="block text-xs text-green-700">delivered</span>}
+                {withDocket.has(o.id) && o.jobs && (
+                  <Link href={`/dashboard/jobs/${o.jobs.id}?tab=po`} className="block text-xs text-blue-600 hover:underline">docket photo</Link>
+                )}
                 {o.status === "cancelled" && <span className="block text-xs text-slate-400">cancelled</span>}
               </td>
               <td className="px-4 py-2.5 text-slate-600">
