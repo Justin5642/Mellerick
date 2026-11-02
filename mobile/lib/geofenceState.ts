@@ -16,9 +16,8 @@ import { clockInCostCentre, type BookingWindow } from "./bookings";
 
 /**
  * Inside a site: within this distance of its coordinates — unless the office
- * gave the site its own size (sites.geofence_radius_m, 0094 — DRAFT, not
- * applied yet; Justin, 2 Nov 2026: "some of the bigger jobs, 150 meters would
- * not be big enough").
+ * gave the site its own size (sites.geofence_radius_m, 0094; Justin, 2 Nov
+ * 2026: "some of the bigger jobs, 150 meters would not be big enough").
  */
 export const GEOFENCE_RADIUS_METERS = 150;
 

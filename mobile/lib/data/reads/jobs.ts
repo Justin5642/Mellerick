@@ -493,7 +493,7 @@ export interface MyJobSite {
   lat: number;
   lng: number;
   scheduledCostCenterId: string | null;
-  /** The site's own fence (0094 — DRAFT, not applied yet); absent = the standard 150 m. */
+  /** The site's own fence (0094); absent = the standard 150 m. */
   radiusM?: number;
 }
 

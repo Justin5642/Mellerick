@@ -7,7 +7,7 @@ export const SITE_FENCE_METRES = 150;
 
 /**
  * The fence sizes the office can pick for a big site (sites.geofence_radius_m,
- * 0094 — DRAFT, not applied yet). Null = the standard 150 m. The phone clocks
+ * 0094). Null = the standard 150 m. The phone clocks
  * off 100 m past whichever it is.
  */
 export const SITE_FENCE_CHOICES = [250, 400, 600, 1000] as const;

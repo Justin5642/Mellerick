@@ -1,7 +1,8 @@
 -- ============================================================================
 -- A clock-on fence size per site.
 --
--- STATUS: DRAFT, not applied yet.
+-- STATUS: ✅ APPLIED IN PRODUCTION (2026-11-02, via SQL editor). Gate test
+-- supabase/tests/0094_site_fence_size_test.sql passed.
 --
 -- WHY (Justin, 2 Nov 2026): "some of the bigger jobs, 150 meters would not be
 -- big enough to cover the site." The auto-clock fence was 150 m for every

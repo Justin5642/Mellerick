@@ -127,7 +127,7 @@ describe("nextGeofenceState — accuracy and the exit buffer", () => {
   });
 });
 
-// A site's own fence size (0094 — DRAFT, not applied yet; Justin, 2 Nov 2026).
+// A site's own fence size (0094; Justin, 2 Nov 2026).
 describe("nextGeofenceState with a bigger site", () => {
   const BIG: TrackedSite = { ...SITE_A, jobId: "job-big", radiusM: 400 };
   const at = (metresNorth: number) => ({ latitude: -37.8136 + metresNorth / 111_000, longitude: 144.9631, accuracy: 10 });
