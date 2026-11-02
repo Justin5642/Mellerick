@@ -26,7 +26,7 @@ export interface SupplierOrder {
   emailedAt: string | null;
   /** Set when the crew tapped Delivered (0089). Absent from older servers. */
   deliveredAt?: string | null;
-  /** Docket photos taken against this PO (0093 — DRAFT, not applied yet). Absent from older servers. */
+  /** Docket photos taken against this PO (0093). Absent from older servers. */
   docketPhotos?: number;
   raisedBy: string | null;
   items: { description: string; quantity: number }[];

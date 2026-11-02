@@ -1,7 +1,8 @@
 -- ============================================================================
 -- Delivery docket photos, linked to the supplier PO they belong to.
 --
--- STATUS: DRAFT, not applied yet.
+-- STATUS: ✅ APPLIED IN PRODUCTION (2026-11-02, via SQL editor). Gate test
+-- supabase/tests/0093_docket_photos_test.sql passed.
 --
 -- WHY (Justin, 2 Nov 2026): most orders are phoned through or bought at the
 -- counter, not itemised in the app. When the goods turn up the crew take a

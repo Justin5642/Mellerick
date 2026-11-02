@@ -63,9 +63,8 @@ async function listOrders(admin: Admin, jobId: string) {
     .eq("job_id", jobId)
     .order("created_at", { ascending: false });
   if (error) throw error;
-  // Docket photos taken against each order (0093 — DRAFT, not applied yet).
-  // Read on their own and never fatal: until 0093 is applied the column
-  // doesn't exist, and the orders must still load.
+  // Docket photos taken against each order (0093). Read on their own and
+  // never fatal: a docket count is not worth failing the order list over.
   const dockets = new Map<string, number>();
   const { data: photos, error: photosError } = await admin
     .from("job_photos")

@@ -140,8 +140,8 @@ export function JobPO({ jobId, jobNumber, customerName, site, pos: initialPos, t
   const [invoiceBusy, setInvoiceBusy] = useState(false);
   const [addLines, setAddLines] = useState<BuilderPoLineInput[]>([blankLine()]);
   const [suppliers, setSuppliers] = useState<{ id: string; name: string }[]>([]);
-  // Docket photos the crew took against each order (0093 — DRAFT, not applied
-  // yet; until it is, this read fails quietly and no docket links show).
+  // Docket photos the crew took against each order (0093). A failed read just
+  // shows no docket links.
   const [dockets, setDockets] = useState<Record<string, string[]>>({});
 
   useEffect(() => {

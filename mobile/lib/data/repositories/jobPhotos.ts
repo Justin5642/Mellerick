@@ -16,7 +16,7 @@ export interface AddPhotoInput {
   localUri: string;
   /** File extension for the Storage object key; photos are always jpg. */
   ext?: string;
-  /** A delivery docket: the supplier PO it belongs to (0093 — DRAFT, not applied yet). */
+  /** A delivery docket: the supplier PO it belongs to (0093). */
   vendorOrderId?: string;
   caption?: string;
 }
