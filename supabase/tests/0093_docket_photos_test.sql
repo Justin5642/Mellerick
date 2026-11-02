@@ -26,7 +26,7 @@ begin
       has_column_privilege('authenticated', 'public.job_photos', 'vendor_order_id', 'insert'));
 
     select p.job_id, c.id into j, cc
-    from po_cost_centers c join purchase_orders p on p.id = c.purchase_order_id
+    from po_cost_centers c join purchase_orders p on p.id = c.po_id
     limit 1;
     if j is null then
       raise exception 'fixture missing: need a job with a cost centre';
