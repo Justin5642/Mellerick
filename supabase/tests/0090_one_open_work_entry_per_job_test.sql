@@ -27,7 +27,7 @@ begin
       raise exception 'fixture missing: need a job and a profile';
     end if;
     -- Start clean for this person on these jobs.
-    update time_entries set clock_out = clock_in where staff_id = st and job_id in (j, j2) and clock_out is null;
+    update time_entries set clock_out = clock_in + interval '1 second' where staff_id = st and job_id in (j, j2) and clock_out is null;
 
     -- 1. No duplicates are left anywhere.
     res := res || format('duplicate open entries left|0|%s', (
