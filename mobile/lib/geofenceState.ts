@@ -14,8 +14,16 @@ import { clockInCostCentre, type BookingWindow } from "./bookings";
 // decision callable from both the foreground watcher and the background task,
 // so the two cannot drift apart.
 
-/** Inside a site: within this distance of its coordinates. */
+/**
+ * Inside a site: within this distance of its coordinates — unless the office
+ * gave the site its own size (sites.geofence_radius_m, 0094 — DRAFT, not
+ * applied yet; Justin, 2 Nov 2026: "some of the bigger jobs, 150 meters would
+ * not be big enough").
+ */
 export const GEOFENCE_RADIUS_METERS = 150;
+
+/** How far past a site's arrival fence counts as having left it. */
+export const GEOFENCE_EXIT_BUFFER_METERS = 100;
 
 /**
  * Left a site: beyond THIS distance, not the arrival radius (Stage 5, 31 Oct
@@ -24,7 +32,7 @@ export const GEOFENCE_RADIUS_METERS = 150;
  * clocked a tech off and straight back on, splitting the day and inventing a
  * travel leg. The gap between 150 and 250 is the buffer.
  */
-export const GEOFENCE_EXIT_RADIUS_METERS = 250;
+export const GEOFENCE_EXIT_RADIUS_METERS = GEOFENCE_RADIUS_METERS + GEOFENCE_EXIT_BUFFER_METERS;
 
 /**
  * A reading less accurate than this is ignored. Balanced accuracy is ~100 m
@@ -46,6 +54,8 @@ export interface TrackedSite {
    * or a site list loaded before bookings exist, simply has none.
    */
   bookings?: BookingWindow[];
+  /** This site's own arrival fence in metres; absent = the standard 150 m. */
+  radiusM?: number;
 }
 
 /** The cost centre an arrival at `site` at `atMs` clocks in against. */
@@ -98,8 +108,13 @@ export function nextGeofenceState(
     return { insideJobId: currentInsideJobId, previousJobId: currentInsideJobId, transition: "none" };
   }
 
+  // Sites can differ in size, so "nearest" is the one we are furthest INSIDE
+  // (distance less that site's fence): a reading at the edge of a 400 m
+  // subdivision and 140 m from a house next door's 150 m pin belongs to the
+  // house only if it is deeper inside it.
+  const fence = (s: TrackedSite) => (typeof s.radiusM === "number" && s.radiusM > 0 ? s.radiusM : radiusMeters);
   let nearestJobId: string | null = null;
-  let nearestDist = Infinity;
+  let nearestMargin = Infinity;
 
   for (const site of sites) {
     // A site with no coordinates is not at (0, 0) — that is in the Atlantic, and
@@ -107,9 +122,9 @@ export function nextGeofenceState(
     if (typeof site.lat !== "number" || typeof site.lng !== "number") continue;
     if (!Number.isFinite(site.lat) || !Number.isFinite(site.lng)) continue;
 
-    const d = haversineDistance(coords.latitude, coords.longitude, site.lat, site.lng);
-    if (d < nearestDist) {
-      nearestDist = d;
+    const margin = haversineDistance(coords.latitude, coords.longitude, site.lat, site.lng) - fence(site);
+    if (margin < nearestMargin) {
+      nearestMargin = margin;
       nearestJobId = site.jobId;
     }
   }
@@ -124,14 +139,14 @@ export function nextGeofenceState(
   // side on an estate), which is a move from one to the other.
   const current = currentInsideJobId ? sites.find((s) => s.jobId === currentInsideJobId) : undefined;
   if (current && Number.isFinite(current.lat) && Number.isFinite(current.lng)) {
-    const dCurrent = haversineDistance(coords.latitude, coords.longitude, current.lat, current.lng);
-    const movedNext = nearestJobId !== currentInsideJobId && nearestDist <= radiusMeters && nearestDist < dCurrent;
-    if (dCurrent <= GEOFENCE_EXIT_RADIUS_METERS && !movedNext) {
+    const marginCurrent = haversineDistance(coords.latitude, coords.longitude, current.lat, current.lng) - fence(current);
+    const movedNext = nearestJobId !== currentInsideJobId && nearestMargin <= 0 && nearestMargin < marginCurrent;
+    if (marginCurrent <= GEOFENCE_EXIT_BUFFER_METERS && !movedNext) {
       return { insideJobId: currentInsideJobId, previousJobId: currentInsideJobId, transition: "none" };
     }
   }
 
-  const insideJobId = nearestDist <= radiusMeters ? nearestJobId : null;
+  const insideJobId = nearestMargin <= 0 ? nearestJobId : null;
 
   if (insideJobId === currentInsideJobId) {
     return { insideJobId, previousJobId: currentInsideJobId, transition: "none" };

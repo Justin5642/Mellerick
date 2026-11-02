@@ -2178,6 +2178,7 @@ export type Database = {
           address_line2: string | null
           created_at: string | null
           customer_id: string
+          geofence_radius_m: number | null
           geocode_attempted_at: string | null
           id: string
           is_active: boolean
@@ -2199,6 +2200,7 @@ export type Database = {
           address_line2?: string | null
           created_at?: string | null
           customer_id: string
+          geofence_radius_m?: number | null
           geocode_attempted_at?: string | null
           id?: string
           is_active?: boolean
@@ -2220,6 +2222,7 @@ export type Database = {
           address_line2?: string | null
           created_at?: string | null
           customer_id?: string
+          geofence_radius_m?: number | null
           geocode_attempted_at?: string | null
           id?: string
           is_active?: boolean

@@ -172,7 +172,7 @@ export const SQL_LIST_MY_JOBS = `
 // Soonest first: the off-hours wake regions keep only the first 20
 // (lib/trackingGate.ts).
 export const SQL_LIST_MY_JOB_SITES = `
-  SELECT j.id, j.scheduled_cost_center_id, j.scheduled_start, j.scheduled_end, s.site_lat, s.site_lng,
+  SELECT j.id, j.scheduled_cost_center_id, j.scheduled_start, j.scheduled_end, s.site_lat, s.site_lng, s.geofence_radius_m,
          CASE WHEN j.id IN (SELECT te.job_id FROM time_entries te
                             WHERE te.staff_id = ?1 AND te.clock_out IS NULL AND te.entry_type = 'work')
               THEN 1 ELSE 0 END AS clocked_in
@@ -493,6 +493,8 @@ export interface MyJobSite {
   lat: number;
   lng: number;
   scheduledCostCenterId: string | null;
+  /** The site's own fence (0094 — DRAFT, not applied yet); absent = the standard 150 m. */
+  radiusM?: number;
 }
 
 export interface RawJobSiteRow {
@@ -502,6 +504,7 @@ export interface RawJobSiteRow {
   scheduled_end?: string | null;
   site_lat: number | string | null;
   site_lng: number | string | null;
+  geofence_radius_m?: number | string | null;
   /** 1 when I have an open work entry on the job. */
   clocked_in?: number | boolean | null;
 }
@@ -535,7 +538,14 @@ function mapJobSites(all: RawJobSiteRow[]): MyJobSite[] {
     const lat = numOrNull(r.site_lat);
     const lng = numOrNull(r.site_lng);
     if (!lat || !lng) continue;
-    out.push({ jobId: r.id, lat, lng, scheduledCostCenterId: r.scheduled_cost_center_id ?? null });
+    const radius = numOrNull(r.geofence_radius_m ?? null);
+    out.push({
+      jobId: r.id,
+      lat,
+      lng,
+      scheduledCostCenterId: r.scheduled_cost_center_id ?? null,
+      ...(radius ? { radiusM: radius } : {}),
+    });
   }
   return out;
 }
@@ -557,14 +567,14 @@ export async function listMyJobSites(userId: string): Promise<MyJobSite[]> {
       const [res, openRes] = await Promise.all([
         supabase
           .from("jobs")
-          .select("id, scheduled_cost_center_id, scheduled_start, scheduled_end, sites(site_lat, site_lng)")
+          .select("id, scheduled_cost_center_id, scheduled_start, scheduled_end, sites(site_lat, site_lng, geofence_radius_m)")
           .or(assignedOrCrewFilter(userId, crew))
           .not("status", "in", '("completed","cancelled")')
           .order("scheduled_start", { ascending: true, nullsFirst: false })
           .order("id", { ascending: true }),
         supabase
           .from("time_entries")
-          .select("job_id, jobs(id, scheduled_cost_center_id, scheduled_start, scheduled_end, sites(site_lat, site_lng))")
+          .select("job_id, jobs(id, scheduled_cost_center_id, scheduled_start, scheduled_end, sites(site_lat, site_lng, geofence_radius_m))")
           .eq("staff_id", userId)
           .eq("entry_type", "work")
           .is("clock_out", null),
@@ -574,7 +584,7 @@ export async function listMyJobSites(userId: string): Promise<MyJobSite[]> {
         scheduled_cost_center_id: string | null;
         scheduled_start: string | null;
         scheduled_end: string | null;
-        sites: { site_lat: number | null; site_lng: number | null } | null;
+        sites: { site_lat: number | null; site_lng: number | null; geofence_radius_m?: number | null } | null;
       };
       const rows = unwrapRows(res as never, "listMyJobSites") as unknown as Remote[];
       const open = (unwrapRows(openRes as never, "listMyJobSites open") as unknown as { jobs: Remote | null }[])
@@ -588,6 +598,7 @@ export async function listMyJobSites(userId: string): Promise<MyJobSite[]> {
         scheduled_end: r.scheduled_end,
         site_lat: r.sites?.site_lat ?? null,
         site_lng: r.sites?.site_lng ?? null,
+        geofence_radius_m: r.sites?.geofence_radius_m ?? null,
         clocked_in: openIds.has(r.id),
       });
       const listed = new Set(rows.map((r) => r.id));

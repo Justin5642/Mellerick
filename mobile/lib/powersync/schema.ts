@@ -511,6 +511,7 @@ const sites = new Table({
   site_lat: column.real,
   site_lng: column.real,
   is_active: column.integer,
+  geofence_radius_m: column.integer,
 }, {
   indexes: {
     customer: ['customer_id'],

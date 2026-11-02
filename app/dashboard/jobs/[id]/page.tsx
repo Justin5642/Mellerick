@@ -127,7 +127,7 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
     // Only per-job rows load here. The shared catalogs (pricing_items,
     // variation_types, equipment) are fetched by JobDetailClient the first
     // time the tab that reads them is opened — most visits never do.
-    supabase.from("jobs").select("*, customers(id, name, phone, mobile, email), sites(name, address_line1, suburb, state, postcode, site_lat, site_lng)").eq("id", id).single(),
+    supabase.from("jobs").select("*, customers(id, name, phone, mobile, email), sites(name, address_line1, suburb, state, postcode, site_lat, site_lng, geofence_radius_m)").eq("id", id).single(),
     supabase.from("job_photos").select("*, profiles(full_name)").eq("job_id", id).order("created_at", { ascending: false }),
     supabase.from("job_documents").select("*, profiles(full_name)").eq("job_id", id).order("created_at", { ascending: false }),
     supabase.from("job_notes").select("*, profiles(full_name)").eq("job_id", id).order("created_at", { ascending: false }),

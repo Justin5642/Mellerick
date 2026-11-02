@@ -126,3 +126,28 @@ describe("nextGeofenceState — accuracy and the exit buffer", () => {
     expect(s).toEqual({ insideJobId: "job-c", previousJobId: "job-a", transition: "arrival" });
   });
 });
+
+// A site's own fence size (0094 — DRAFT, not applied yet; Justin, 2 Nov 2026).
+describe("nextGeofenceState with a bigger site", () => {
+  const BIG: TrackedSite = { ...SITE_A, jobId: "job-big", radiusM: 400 };
+  const at = (metresNorth: number) => ({ latitude: -37.8136 + metresNorth / 111_000, longitude: 144.9631, accuracy: 10 });
+
+  it("arrives 300 m from the pin, outside the standard fence", () => {
+    expect(nextGeofenceState(at(300), [SITE_A], null).insideJobId).toBeNull();
+    expect(nextGeofenceState(at(300), [BIG], null)).toMatchObject({ insideJobId: "job-big", transition: "arrival" });
+  });
+
+  it("stays clocked on until 100 m past its own fence", () => {
+    expect(nextGeofenceState(at(480), [BIG], "job-big").transition).toBe("none");
+    expect(nextGeofenceState(at(520), [BIG], "job-big").transition).toBe("departure");
+  });
+
+  it("a small site next door wins only when the reading is deeper inside it", () => {
+    const HOUSE: TrackedSite = { jobId: "job-house", lat: -37.8136 + 350 / 111_000, lng: 144.9631, scheduledCostCenterId: null };
+    // 340 m from the big pin (60 m inside), 10 m from the house (140 m inside).
+    expect(nextGeofenceState(at(340), [BIG, HOUSE], null).insideJobId).toBe("job-house");
+    // 200 m from the big pin (200 m inside), 150 m from the house (0 m inside).
+    expect(nextGeofenceState(at(200), [BIG, HOUSE], null).insideJobId).toBe("job-big");
+  });
+});
+

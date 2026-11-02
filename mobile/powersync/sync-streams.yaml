@@ -107,14 +107,14 @@ streams:
   tech_sites:
     auto_subscribe: true
     query: |
-      SELECT id, customer_id, name, address_line1, address_line2, suburb, state, postcode, site_lat, site_lng, notes, is_active
+      SELECT id, customer_id, name, address_line1, address_line2, suburb, state, postcode, site_lat, site_lng, notes, is_active, geofence_radius_m
       FROM sites
       WHERE id IN (SELECT site_id FROM jobs WHERE sync_tech IS NOT false AND id IN (SELECT job_id FROM job_assignments WHERE staff_id = auth.user_id()))
 
   backflow_sites:
     auto_subscribe: true
     query: |
-      SELECT id, customer_id, name, address_line1, address_line2, suburb, state, postcode, site_lat, site_lng, notes, is_active
+      SELECT id, customer_id, name, address_line1, address_line2, suburb, state, postcode, site_lat, site_lng, notes, is_active, geofence_radius_m
       FROM sites
       WHERE sync_backflow IS NOT false
 
@@ -296,7 +296,7 @@ streams:
 
   office_sites:
     auto_subscribe: true
-    query: SELECT sites.id, sites.customer_id, sites.name, sites.address_line1, sites.address_line2, sites.suburb, sites.state, sites.postcode, sites.site_lat, sites.site_lng, sites.notes, sites.is_active FROM sites JOIN profiles ON profiles.id = auth.user_id() WHERE (profiles.role = 'office' OR profiles.role = 'admin')
+    query: SELECT sites.id, sites.customer_id, sites.name, sites.address_line1, sites.address_line2, sites.suburb, sites.state, sites.postcode, sites.site_lat, sites.site_lng, sites.notes, sites.is_active, sites.geofence_radius_m FROM sites JOIN profiles ON profiles.id = auth.user_id() WHERE (profiles.role = 'office' OR profiles.role = 'admin')
 
   # WINDOWED (0068): `<table>.sync_office IS NOT false` on jobs and every
   # history table. Unwindowed on purpose — small, current-state tables a
