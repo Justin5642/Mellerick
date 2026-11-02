@@ -49,8 +49,12 @@ function displayDate(key: string): string {
   return `${d}/${m}/${y}`;
 }
 
-export function JobSupplierOrdersTab({ jobId, costCentres }: Props) {
+export function JobSupplierOrdersTab({ jobId, costCentres: localCostCentres }: Props) {
   const [state, setState] = useState<SupplierOrdersState | null>(null);
+  // The server's list, read fresh on every load, wins over the phone's copy:
+  // that copy is read once when the job opens, so a cost centre the office
+  // added while the job was open never appeared here (2 Nov 2026).
+  const costCentres: JobCostCentre[] = state?.costCentres ?? localCostCentres;
   const [loadError, setLoadError] = useState<string | null>(null);
   const [formOpen, setFormOpen] = useState(false);
   const [sending, setSending] = useState(false);
@@ -215,6 +219,9 @@ export function JobSupplierOrdersTab({ jobId, costCentres }: Props) {
         <View style={styles.noticeBox}>
           <Text style={styles.noticeTitle}>No cost centres on this job yet</Text>
           <Text style={styles.noticeDetail}>A PO has to go against a cost centre. Ask the office to add one, then raise the PO here.</Text>
+          <TouchableOpacity onPress={load} style={styles.checkAgain} accessibilityLabel="Check again for cost centres">
+            <Text style={styles.checkAgainText}>Check again</Text>
+          </TouchableOpacity>
         </View>
       )}
 
@@ -470,6 +477,8 @@ const styles = StyleSheet.create({
   hint: { fontSize: 11, color: colors.slate500, marginTop: 4 },
   deliveredBtn: { marginTop: 8, paddingVertical: 12, borderRadius: 8, alignItems: "center", backgroundColor: colors.green100 },
   deliveredText: { fontSize: 16, fontWeight: "700", color: colors.green600 },
+  checkAgain: { marginTop: 10, alignSelf: "flex-start", paddingVertical: 10, paddingHorizontal: 16, borderRadius: 8, backgroundColor: "#fff" },
+  checkAgainText: { fontSize: 15, fontWeight: "700", color: colors.blue600 },
   linkText: { color: colors.blue600, fontSize: 13, paddingVertical: 6 },
   supplierRow: { paddingVertical: 14, paddingHorizontal: 12, borderBottomWidth: 1, borderBottomColor: colors.border },
   supplierRowText: { fontSize: 16, fontWeight: "600", color: colors.slate700 },

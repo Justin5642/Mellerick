@@ -39,6 +39,8 @@ export interface SupplierOrdersState {
   suppliers: Supplier[];
   /** Which company cost centre each of the job's budget lines belongs to. Absent from servers before 0087. */
   costCentreLines?: { id: string; costCentreId: string | null }[];
+  /** The job's cost centres, read fresh by the server on every load. Absent from older servers. */
+  costCentres?: { id: string; name: string; code: string | null; po_number: string }[];
 }
 
 export interface Supplier {

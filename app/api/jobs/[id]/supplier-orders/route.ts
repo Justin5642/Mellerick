@@ -118,7 +118,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
         .order("name"),
       admin
         .from("po_cost_centers")
-        .select("id, cost_centre_id, purchase_orders!inner(job_id)")
+        .select("id, name, cost_centre_id, sort_order, cost_centres(name), purchase_orders!inner(job_id, po_number)")
         .eq("purchase_orders.job_id", id),
     ]);
     if (suppliersError) throw suppliersError;
@@ -139,6 +139,20 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       deliveryAddress: siteOneLine(job.sites) || null,
       suppliers,
       costCentreLines: (lines ?? []).map((l) => ({ id: l.id as string, costCentreId: (l.cost_centre_id as string | null) ?? null })),
+      // The job's cost centres, read fresh with every load (2 Nov 2026): the
+      // phone's own copy is read once when the job opens, so one added on the
+      // web while the job was open never appeared on the Orders tab. Names
+      // only — no budgets.
+      costCentres: ((lines ?? []) as unknown as {
+        id: string;
+        name: string;
+        sort_order: number | null;
+        cost_centres: { name: string } | null;
+        purchase_orders: { po_number: string } | null;
+      }[])
+        .slice()
+        .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
+        .map((l) => ({ id: l.id, name: l.name, code: null, po_number: l.purchase_orders?.po_number ?? "", costCentre: l.cost_centres?.name ?? null })),
     });
   } catch (err) {
     console.error("supplier orders list error:", err);
