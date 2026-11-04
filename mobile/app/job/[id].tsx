@@ -17,6 +17,7 @@ import { JobTodayCard } from "../../components/job/today-card";
 import { AutoClockStatus } from "../../components/job/auto-clock-status";
 import { JobPlantUsage } from "../../components/job/plant-usage";
 import { JobSignatureTab } from "../../components/job/signature";
+import { isMultiDay } from "../../lib/jobStages";
 import { JobDocumentsTab } from "../../components/job/documents";
 import { JobVariationsTab } from "../../components/job/variations";
 import { JobSupplierOrdersTab } from "../../components/job/supplier-orders";
@@ -367,6 +368,7 @@ export default function JobDetailScreen() {
             jobId={job.id}
             currentUserId={userId}
             signedOff={job.status === "completed"}
+            multiDay={isMultiDay(job)}
             scheduledCostCenterId={job.scheduled_cost_center_id}
             myBookings={bookings ? bookings.filter((b) => b.staff_id === userId) : null}
             onGo={setTab}
@@ -403,6 +405,7 @@ export default function JobDetailScreen() {
             currentUserId={userId}
             existingSignature={job.status === "completed" ? job.completion_notes : null}
             existingVoiceTranscript={job.voice_report_transcript}
+            multiDay={isMultiDay(job)}
             onCompleted={loadJob}
           />
         )}

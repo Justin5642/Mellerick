@@ -35,6 +35,11 @@ describe("todaySteps", () => {
     expect(s.find((x) => x.state === "next")?.key).toBe("finish");
   });
 
+  it("on a multi-day job the last step is Finish for today, not completing the job", () => {
+    const s = todaySteps({ clockedInSince: "x", orders: [], signedOff: false, multiDay: true, formatTime: fmt });
+    expect(s[4]).toMatchObject({ key: "finish", title: "Finish for today", state: "next" });
+  });
+
   it("ignores cancelled orders", () => {
     const s = todaySteps({ clockedInSince: "x", orders: [{ status: "cancelled" }], signedOff: false, formatTime: fmt });
     expect(s[1].state).toBe("optional");

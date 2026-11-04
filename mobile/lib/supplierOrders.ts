@@ -71,7 +71,8 @@ export interface RaisedSupplierOrder {
   warning?: string;
 }
 
-async function call<T>(path: string, init: RequestInit = {}): Promise<T> {
+/** A call to the office server with the signed-in user's token. Also used by lib/jobStages.ts. */
+export async function call<T>(path: string, init: RequestInit = {}): Promise<T> {
   if (!API_BASE_URL) throw new Error("App isn't configured to reach the office server.");
   const { data: sessionData } = await supabase.auth.getSession();
   const accessToken = sessionData.session?.access_token;

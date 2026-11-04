@@ -5,23 +5,31 @@ import { colors } from "../../lib/theme";
 import { VoiceReportRecorder } from "./voice-report";
 import { useSignoff } from "../../lib/data/hooks/useSignoff";
 import { readCachedProfile } from "../../lib/profileCache";
+import { FinishForToday } from "./finish-for-today";
 
 // Most jobs finish with nobody home (Justin, 2 Nov 2026: "9 times out of 10,
 // the customer is not there"), so the technician signing off themselves is the
 // default. A customer who is there can still sign on the glass.
 type SignoffMode = "technician" | "customer";
 
+// A multi-day job opens on "Finish for today" (Justin, 4 Nov 2026); "Job
+// complete" is for the last day.
+type Step = "today" | "complete";
+
 export function JobSignatureTab({
   jobId,
   currentUserId,
   existingSignature,
   existingVoiceTranscript,
+  multiDay = false,
   onCompleted,
 }: {
   jobId: string;
   currentUserId: string;
   existingSignature?: string | null;
   existingVoiceTranscript?: string | null;
+  /** Booked over several days and not on its last: open on Finish for today. */
+  multiDay?: boolean;
   onCompleted?: () => void;
 }) {
   const ref = useRef<SignatureViewRef>(null);
@@ -30,6 +38,7 @@ export function JobSignatureTab({
   const [saved, setSaved] = useState(false);
   const [clockedOut, setClockedOut] = useState(false);
   const [mode, setMode] = useState<SignoffMode>("technician");
+  const [step, setStep] = useState<Step>(multiDay ? "today" : "complete");
   const signoff = useSignoff();
 
   function confirmTechnicianSignoff() {
@@ -111,60 +120,84 @@ export function JobSignatureTab({
     <View style={styles.container}>
       <VoiceReportRecorder jobId={jobId} currentUserId={currentUserId} existingTranscript={existingVoiceTranscript} />
 
-      <Text style={styles.label}>Who is signing off?</Text>
       <View style={styles.modeRow}>
         {(
           [
-            ["technician", "Me (customer not here)"],
-            ["customer", "The customer"],
+            ["today", "Finish for today"],
+            ["complete", "Job complete"],
           ] as const
-        ).map(([m, label]) => (
+        ).map(([st, label]) => (
           <TouchableOpacity
-            key={m}
-            style={[styles.modeBtn, mode === m && styles.modeBtnActive]}
-            onPress={() => setMode(m)}
+            key={st}
+            style={[styles.modeBtn, step === st && styles.modeBtnActive]}
+            onPress={() => setStep(st)}
             accessibilityLabel={label}
           >
-            <Text style={[styles.modeText, mode === m && styles.modeTextActive]}>{label}</Text>
+            <Text style={[styles.modeText, step === st && styles.modeTextActive]}>{label}</Text>
           </TouchableOpacity>
         ))}
       </View>
 
-      {mode === "technician" ? (
-        <>
-          <Text style={styles.hint}>No customer name or signature needed. The office sees you signed it off.</Text>
-          <TouchableOpacity style={styles.saveButton} onPress={confirmTechnicianSignoff} disabled={saving}>
-            <Text style={styles.saveButtonText}>{saving ? "Saving..." : "Complete Job"}</Text>
-          </TouchableOpacity>
-        </>
+      {step === "today" ? (
+        <FinishForToday jobId={jobId} currentUserId={currentUserId} onFinished={onCompleted} />
       ) : (
         <>
-          <Text style={styles.label}>Customer Name</Text>
-          <TextInput
-            style={styles.input}
-            value={signerName}
-            onChangeText={setSignerName}
-            placeholder="e.g. John Smith"
-          />
-
-          <Text style={styles.label}>Signature</Text>
-          <View style={styles.canvasWrap}>
-            <Signature
-              ref={ref}
-              onOK={handleOK}
-              onEmpty={() => Alert.alert("Signature required", "Please sign before saving.")}
-              descriptionText=""
-              clearText="Clear"
-              confirmText="Confirm"
-              webStyle={signatureWebStyle}
-              autoClear={false}
-            />
+          <Text style={styles.label}>Who is signing off?</Text>
+          <View style={styles.modeRow}>
+            {(
+              [
+                ["technician", "Me (customer not here)"],
+                ["customer", "The customer"],
+              ] as const
+            ).map(([m, label]) => (
+              <TouchableOpacity
+                key={m}
+                style={[styles.modeBtn, mode === m && styles.modeBtnActive]}
+                onPress={() => setMode(m)}
+                accessibilityLabel={label}
+              >
+                <Text style={[styles.modeText, mode === m && styles.modeTextActive]}>{label}</Text>
+              </TouchableOpacity>
+            ))}
           </View>
-          <Text style={styles.hint}>Sign above, then tap Confirm to complete the job.</Text>
 
-          <TouchableOpacity style={styles.saveButton} onPress={handleSavePress} disabled={saving}>
-            <Text style={styles.saveButtonText}>{saving ? "Saving..." : "Save & Complete Job"}</Text>
-          </TouchableOpacity>
+          {mode === "technician" ? (
+            <>
+              <Text style={styles.hint}>No customer name or signature needed. The office sees you signed it off.</Text>
+              <TouchableOpacity style={styles.saveButton} onPress={confirmTechnicianSignoff} disabled={saving}>
+                <Text style={styles.saveButtonText}>{saving ? "Saving..." : "Complete Job"}</Text>
+              </TouchableOpacity>
+            </>
+          ) : (
+            <>
+              <Text style={styles.label}>Customer Name</Text>
+              <TextInput
+                style={styles.input}
+                value={signerName}
+                onChangeText={setSignerName}
+                placeholder="e.g. John Smith"
+              />
+
+              <Text style={styles.label}>Signature</Text>
+              <View style={styles.canvasWrap}>
+                <Signature
+                  ref={ref}
+                  onOK={handleOK}
+                  onEmpty={() => Alert.alert("Signature required", "Please sign before saving.")}
+                  descriptionText=""
+                  clearText="Clear"
+                  confirmText="Confirm"
+                  webStyle={signatureWebStyle}
+                  autoClear={false}
+                />
+              </View>
+              <Text style={styles.hint}>Sign above, then tap Confirm to complete the job.</Text>
+
+              <TouchableOpacity style={styles.saveButton} onPress={handleSavePress} disabled={saving}>
+                <Text style={styles.saveButtonText}>{saving ? "Saving..." : "Save & Complete Job"}</Text>
+              </TouchableOpacity>
+            </>
+          )}
         </>
       )}
     </View>

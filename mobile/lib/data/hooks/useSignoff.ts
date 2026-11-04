@@ -18,6 +18,13 @@ export interface Signoff {
     signatureBase64: string;
     signedOffDate: string;
   }): Promise<{ photoId: string; storagePath: string; clockedOut: boolean; synced: boolean }>;
+  /** End of a day on a multi-day job: a note, finished stages, clock off. Job stays open. */
+  finishForToday(input: {
+    jobId: string;
+    staffId: string;
+    note: string;
+    stages: { id: string; name: string }[];
+  }): Promise<{ clockedOut: boolean; synced: boolean }>;
   /** Customer not on site: the technician completes the job, no signature. */
   completeAsTechnician(input: {
     jobId: string;
@@ -74,5 +81,18 @@ export function useSignoff(): Signoff {
     return { clockedOut, synced: await flush() };
   }, [layer, flush, clockOutOfJob]);
 
-  return { ready: !!layer, signOff, completeAsTechnician };
+  const finishForToday = useCallback<Signoff["finishForToday"]>(async (input) => {
+    if (!layer) throw new Error("Data layer not ready");
+    await layer.signature.finishForToday({
+      jobId: input.jobId,
+      authorId: input.staffId,
+      date: new Date().toLocaleDateString("en-AU"),
+      note: input.note,
+      stages: input.stages,
+    });
+    const clockedOut = await clockOutOfJob(input.staffId, input.jobId);
+    return { clockedOut, synced: await flush() };
+  }, [layer, flush, clockOutOfJob]);
+
+  return { ready: !!layer, signOff, completeAsTechnician, finishForToday };
 }
