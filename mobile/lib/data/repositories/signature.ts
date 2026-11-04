@@ -15,6 +15,16 @@ export interface SignOffInput {
   signedOffDate: string;
 }
 
+/**
+ * The completion note for a job the technician signed off themselves because
+ * the customer wasn't there (2 Nov 2026: "9 times out of 10, the customer is
+ * not there when we finish the job").
+ */
+export function technicianSignOffNote(technicianName: string | null, signedOffDate: string): string {
+  const who = technicianName?.trim() ? `technician ${technicianName.trim()}` : "the technician";
+  return `Signed off by ${who} on ${signedOffDate} (customer not on site)`;
+}
+
 // Offline-first job completion via customer signature — a compound write mirroring
 // the web/mobile handleOK: (1) the signature image as an attachment insert into
 // job_photos, (2) a jobs UPDATE marking the job completed + ready to invoice,
@@ -101,5 +111,44 @@ export class SignatureRepository {
     await this.outbox.enqueue(calOp);
 
     return { photoId: photoRowId, storagePath };
+  }
+
+  /**
+   * The customer isn't there: the technician completes the job themselves. The
+   * same job update and calendar resync as signOff, with no signature image to
+   * wait for.
+   */
+  async completeAsTechnician(input: { jobId: string; technicianName: string | null; signedOffDate: string }): Promise<void> {
+    const jobsOpId = this.ids.newId();
+    await this.outbox.enqueue({
+      kind: "write",
+      id: jobsOpId,
+      rowId: input.jobId,
+      aggregate: "job",
+      op: "update",
+      table: "jobs",
+      payload: {
+        completion_notes: technicianSignOffNote(input.technicianName, input.signedOffDate),
+        status: "completed",
+        actual_end: this.time.nowIso(),
+        ready_to_invoice: true,
+      },
+      status: "pending",
+      attempts: 0,
+      nextAttemptAt: 0,
+      createdAt: this.time.nowMs(),
+    });
+    await this.outbox.enqueue({
+      kind: "side_effect",
+      id: this.ids.newId(),
+      effect: "sync-calendar",
+      coalesceKey: `sync-calendar:${input.jobId}`,
+      payload: { jobId: input.jobId },
+      dependsOn: jobsOpId,
+      status: "pending",
+      attempts: 0,
+      nextAttemptAt: 0,
+      createdAt: this.time.nowMs(),
+    });
   }
 }
