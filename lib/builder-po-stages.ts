@@ -1,7 +1,7 @@
 import type { createAdminClient } from "@/lib/supabase/admin";
 
 // A job's stages — the lines of its builder PO (po_cost_centers) — and which
-// are complete (0095 — DRAFT, not applied yet). Multi-day jobs (Justin, 4 Nov 2026): the crew mark a
+// are complete (0095). Multi-day jobs (Justin, 4 Nov 2026): the crew mark a
 // stage done from site so the office can claim it, while the job stays open.
 //
 // No money here: the crew read this through the service role, so it selects

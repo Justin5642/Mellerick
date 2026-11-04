@@ -4,7 +4,7 @@ import { requireUser } from "@/lib/api/guards";
 import { reportError } from "@/lib/monitoring";
 import { isOnJob } from "@/lib/builder-po-stages";
 
-// Mark a stage of the job complete (0095 — DRAFT, not applied yet; Justin, 4 Nov 2026), from the phone's
+// Mark a stage of the job complete (0095; Justin, 4 Nov 2026), from the phone's
 // Finish for today screen or the web PO tab. The phone sends this through its
 // offline outbox, so a stage finished with no signal lands when signal returns,
 // stamped with when it was tapped (completedAt, if sane).

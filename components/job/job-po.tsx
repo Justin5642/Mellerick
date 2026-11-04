@@ -20,7 +20,7 @@ interface CostCenter {
   code: string | null;
   allocated_amount: number;
   allocated_hours: number;
-  /** Marked complete from site or here (0095 — DRAFT, not applied yet). */
+  /** Marked complete from site or here (0095). */
   completed_at?: string | null;
 }
 
@@ -474,7 +474,7 @@ export function JobPO({ jobId, jobNumber, customerName, site, pos: initialPos, t
     else toast.error("Couldn't open the docket photo");
   }
 
-  // A stage done, so it can be claimed (0095 — DRAFT, not applied yet; Justin, 4 Nov 2026). Through the
+  // A stage done, so it can be claimed (0095; Justin, 4 Nov 2026). Through the
   // same route the phone uses; the office can also reopen one.
   async function setStageComplete(cc: CostCenter, reopen: boolean) {
     try {

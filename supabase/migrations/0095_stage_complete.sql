@@ -1,7 +1,8 @@
 -- ============================================================================
 -- A job stage marked complete from site.
 --
--- STATUS: DRAFT, not applied yet.
+-- STATUS: ✅ APPLIED IN PRODUCTION (2026-11-04, via SQL editor). Gate test
+-- supabase/tests/0095_stage_complete_test.sql passed.
 --
 -- WHY (Justin, 4 Nov 2026): multi-day jobs need a sign-off that isn't "job
 -- complete". At the end of a day the crew "Finish for today" (a dated job note,

@@ -92,7 +92,7 @@ export type SideEffectKind =
   | "transcribe-voice-report"
   | "backflow-submit"
   | "assign-technicians"
-  // A stage of the job's builder PO marked complete from site (0095 — DRAFT, not applied yet).
+  // A stage of the job's builder PO marked complete from site (0095).
   | "stage-complete";
 
 export interface SideEffectOperation {

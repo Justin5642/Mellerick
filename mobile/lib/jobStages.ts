@@ -1,7 +1,7 @@
 import { call } from "./supplierOrders";
 
 // A job's stages — the lines of its builder PO — and which are complete
-// (0095 — DRAFT, not applied yet; Justin, 4 Nov 2026). Read from the office
+// (0095; Justin, 4 Nov 2026). Read from the office
 // server: the phone's own copy has no completion. Finishing a stage goes
 // through the outbox (SignatureRepository.finishForToday), so it works offline.
 
