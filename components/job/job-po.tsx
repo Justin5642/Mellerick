@@ -20,6 +20,8 @@ interface CostCenter {
   code: string | null;
   allocated_amount: number;
   allocated_hours: number;
+  /** Marked complete from site or here (0095 — DRAFT, not applied yet). */
+  completed_at?: string | null;
 }
 
 interface PurchaseOrder {
@@ -472,6 +474,31 @@ export function JobPO({ jobId, jobNumber, customerName, site, pos: initialPos, t
     else toast.error("Couldn't open the docket photo");
   }
 
+  // A stage done, so it can be claimed (0095 — DRAFT, not applied yet; Justin, 4 Nov 2026). Through the
+  // same route the phone uses; the office can also reopen one.
+  async function setStageComplete(cc: CostCenter, reopen: boolean) {
+    try {
+      const res = await fetch(`/api/jobs/${jobId}/stages/${cc.id}/complete`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(reopen ? { reopen: true } : {}),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        toast.error(body.error ?? "Couldn't change the stage.");
+        return;
+      }
+      setPos((prev) =>
+        prev.map((p) => ({
+          ...p,
+          po_cost_centers: (p.po_cost_centers ?? []).map((l) => (l.id === cc.id ? { ...l, completed_at: body.completedAt ?? null } : l)),
+        }))
+      );
+    } catch {
+      toast.error("Couldn't reach the server. Check your connection.");
+    }
+  }
+
   async function deleteVendorOrder(id: string) {
     const { error, count } = await supabase.from("vendor_orders").delete({ count: "exact" }).eq("id", id);
     if (error || count === 0) { toast.error(error?.message ?? "Could not remove this vendor order."); return; }
@@ -713,6 +740,14 @@ export function JobPO({ jobId, jobNumber, customerName, site, pos: initialPos, t
                       <p className="text-sm font-semibold text-slate-800">
                         {cc.name}
                         {cc.code && <span className="ml-2 text-xs text-slate-400 font-mono font-normal">{cc.code}</span>}
+                        {cc.completed_at ? (
+                          <span className="ml-2 text-xs font-medium text-green-700 bg-green-50 px-1.5 py-0.5 rounded">
+                            ✓ Stage complete {new Date(cc.completed_at).toLocaleDateString("en-AU")}
+                            <button onClick={() => setStageComplete(cc, true)} className="ml-1.5 text-slate-400 hover:text-slate-600 underline font-normal">reopen</button>
+                          </span>
+                        ) : (
+                          <button onClick={() => setStageComplete(cc, false)} className="ml-2 text-xs font-normal text-blue-600 hover:underline">Mark stage complete</button>
+                        )}
                       </p>
                       <select
                         value={cc.cost_centre_id ?? ""}

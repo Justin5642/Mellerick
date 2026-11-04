@@ -91,7 +91,9 @@ export type SideEffectKind =
   | "sync-calendar"
   | "transcribe-voice-report"
   | "backflow-submit"
-  | "assign-technicians";
+  | "assign-technicians"
+  // A stage of the job's builder PO marked complete from site (0095 — DRAFT, not applied yet).
+  | "stage-complete";
 
 export interface SideEffectOperation {
   kind: "side_effect";

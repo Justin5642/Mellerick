@@ -25,6 +25,15 @@ export function technicianSignOffNote(technicianName: string | null, signedOffDa
   return `Signed off by ${who} on ${signedOffDate} (customer not on site)`;
 }
 
+/** The job note left by "Finish for today" on a multi-day job. */
+export function dayFinishNote(input: { date: string; note: string; stagesCompleted: string[] }): string {
+  const lines = [`Finished for today (${input.date})${input.note.trim() ? `: ${input.note.trim()}` : ""}`];
+  if (input.stagesCompleted.length) lines.push(`Stage complete: ${input.stagesCompleted.join(", ")}`);
+  return lines.join("\n");
+}
+
+export const DAY_FINISH_SOURCE = "day_finish";
+
 // Offline-first job completion via customer signature — a compound write mirroring
 // the web/mobile handleOK: (1) the signature image as an attachment insert into
 // job_photos, (2) a jobs UPDATE marking the job completed + ready to invoice,
@@ -111,6 +120,52 @@ export class SignatureRepository {
     await this.outbox.enqueue(calOp);
 
     return { photoId: photoRowId, storagePath };
+  }
+
+  /**
+   * End of a day on a multi-day job (Justin, 4 Nov 2026): a dated note of what
+   * was done, and any stages finished — the job stays open. Each stage goes to
+   * the server as its own side effect, carrying when it was tapped, so a stage
+   * finished with no signal lands later with the right time.
+   */
+  async finishForToday(input: {
+    jobId: string;
+    authorId: string;
+    date: string;
+    note: string;
+    stages: { id: string; name: string }[];
+  }): Promise<void> {
+    await this.outbox.enqueue({
+      kind: "write",
+      id: this.ids.newId(),
+      rowId: this.ids.newId(),
+      aggregate: "job_note",
+      op: "insert",
+      table: "job_notes",
+      payload: {
+        job_id: input.jobId,
+        author_id: input.authorId,
+        content: dayFinishNote({ date: input.date, note: input.note, stagesCompleted: input.stages.map((s) => s.name) }),
+        source: DAY_FINISH_SOURCE,
+      },
+      status: "pending",
+      attempts: 0,
+      nextAttemptAt: 0,
+      createdAt: this.time.nowMs(),
+    });
+    for (const stage of input.stages) {
+      await this.outbox.enqueue({
+        kind: "side_effect",
+        id: this.ids.newId(),
+        effect: "stage-complete",
+        coalesceKey: `stage-complete:${stage.id}`,
+        payload: { jobId: input.jobId, stageId: stage.id, completedAt: this.time.nowIso() },
+        status: "pending",
+        attempts: 0,
+        nextAttemptAt: 0,
+        createdAt: this.time.nowMs(),
+      });
+    }
   }
 
   /**

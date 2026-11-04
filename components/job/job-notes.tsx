@@ -326,6 +326,9 @@ export function JobNotes({ jobId, notes, onUpdate, currentUserId, stageNotes, on
                   <span className="text-xs text-slate-400">
                     {formatDate(note.created_at, { day: "numeric", month: "short", year: "numeric" })} at {formatTime(note.created_at)}
                   </span>
+                  {note.source === "day_finish" && (
+                    <span className="text-xs text-blue-700 bg-blue-50 px-1.5 py-0.5 rounded">End of day</span>
+                  )}
                 </div>
                 <p className="text-sm text-slate-700 whitespace-pre-wrap">{note.content}</p>
               </div>

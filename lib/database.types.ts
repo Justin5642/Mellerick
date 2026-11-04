@@ -1840,6 +1840,8 @@ export type Database = {
           allocated_amount: number | null
           allocated_hours: number | null
           code: string | null
+          completed_at: string | null
+          completed_by: string | null
           cost_centre_id: string | null
           created_at: string | null
           id: string
@@ -1852,6 +1854,8 @@ export type Database = {
           allocated_amount?: number | null
           allocated_hours?: number | null
           code?: string | null
+          completed_at?: string | null
+          completed_by?: string | null
           cost_centre_id?: string | null
           created_at?: string | null
           id?: string
@@ -1864,6 +1868,8 @@ export type Database = {
           allocated_amount?: number | null
           allocated_hours?: number | null
           code?: string | null
+          completed_at?: string | null
+          completed_by?: string | null
           cost_centre_id?: string | null
           created_at?: string | null
           id?: string
@@ -1873,6 +1879,13 @@ export type Database = {
           sort_order?: number | null
         }
         Relationships: [
+          {
+            foreignKeyName: "po_cost_centers_completed_by_fkey"
+            columns: ["completed_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "po_cost_centers_po_id_fkey"
             columns: ["po_id"]

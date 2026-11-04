@@ -408,6 +408,8 @@ const po_cost_centers = new Table({
   created_at: column.text,
   simpro_cost_center_id: column.integer,
   cost_centre_id: column.text,
+  completed_at: column.text,
+  completed_by: column.text,
 }, {
   indexes: {
     po: ['po_id'],
