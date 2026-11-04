@@ -28,7 +28,7 @@ begin
     res := res || format('stage marked complete|t|%s', (select completed_at is not null and completed_by = who from po_cost_centers where id = cc));
 
     -- Technicians still read stages only through the money-free view.
-    res := res || format('techs' stage view still has no money|f|%s', exists (
+    res := res || format('tech stage view still has no money|f|%s', exists (
       select 1 from information_schema.columns
       where table_name = 'po_cost_centers_public' and column_name in ('allocated_amount')));
 
