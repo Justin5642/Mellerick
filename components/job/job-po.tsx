@@ -108,6 +108,9 @@ const VENDOR_ORDER_STATUS_COLORS: Record<VendorOrder["status"], string> = {
   cancelled: "bg-slate-100 text-slate-400 line-through",
 };
 
+const OTHER_SUPPLIER = "__other";
+const BLANK_VO_FORM = { supplier_id: "", other_name: "", order_date: "", notes: "" };
+
 function progressColor(pct: number) {
   if (pct >= 95) return "bg-red-500";
   if (pct >= 75) return "bg-orange-400";
@@ -120,7 +123,10 @@ export function JobPO({ jobId, jobNumber, customerName, site, pos: initialPos, t
   const [vendorOrders, setVendorOrders] = useState<VendorOrder[]>(initialVendorOrders);
   const [voFormOpenFor, setVoFormOpenFor] = useState<string | null>(null);
   const [voSaving, setVoSaving] = useState(false);
-  const [voForm, setVoForm] = useState({ vendor_name: "", order_number: "", amount: "", order_date: "", notes: "" });
+  // Supplier picked from our list (0087), or OTHER_SUPPLIER plus a typed name.
+  // No amount and no order number: the price comes from the supplier's invoice
+  // and the PO number is assigned by the database (0085).
+  const [voForm, setVoForm] = useState(BLANK_VO_FORM);
   const [showForm, setShowForm] = useState(false);
   const [geocoding, setGeocoding] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -354,30 +360,31 @@ export function JobPO({ jobId, jobNumber, customerName, site, pos: initialPos, t
   }
 
   async function saveVendorOrder(costCenterId: string) {
-    if (!voForm.vendor_name.trim()) { toast.error("Vendor name is required"); return; }
+    // A supplier from the list links the order to that account (0087); "Other"
+    // is a one-off, kept by name only.
+    const picked = voForm.supplier_id === OTHER_SUPPLIER ? null : suppliers.find((s) => s.id === voForm.supplier_id) ?? null;
+    const name = picked?.name ?? (voForm.supplier_id === OTHER_SUPPLIER ? voForm.other_name.trim() : "");
+    if (!name) { toast.error(voForm.supplier_id === OTHER_SUPPLIER ? "Type the supplier's name" : "Choose a supplier"); return; }
     setVoSaving(true);
-    // A name picked from the supplier list links the order to that supplier
-    // (0087); anything else is a one-off, kept by name only.
-    const picked = suppliers.find((s) => s.name.toLowerCase() === voForm.vendor_name.trim().toLowerCase());
     const { data, error } = await supabase.from("vendor_orders").insert({
       cost_center_id: costCenterId,
       job_id: jobId,
-      vendor_name: picked?.name ?? voForm.vendor_name.trim(),
+      vendor_name: name,
       supplier_id: picked?.id ?? null,
-      order_number: voForm.order_number || null,
-      amount: parseFloat(voForm.amount) || 0,
+      amount: 0,
       order_date: voForm.order_date || null,
-      notes: voForm.notes || null,
+      notes: voForm.notes.trim() || null,
     }).select("*, vendor_order_items(description, quantity, sort_order), profiles!vendor_orders_entered_by_fkey(full_name)").single();
 
-    if (error || !data) { toast.error("Failed to save vendor order"); setVoSaving(false); return; }
+    if (error || !data) { toast.error("Failed to raise the PO"); setVoSaving(false); return; }
 
-    const updated = [data as VendorOrder, ...vendorOrders];
+    const order = data as VendorOrder;
+    const updated = [order, ...vendorOrders];
     setVendorOrders(updated);
     onVendorOrdersUpdate(updated);
     setVoFormOpenFor(null);
-    setVoForm({ vendor_name: "", order_number: "", amount: "", order_date: "", notes: "" });
-    toast.success("Vendor order raised");
+    setVoForm(BLANK_VO_FORM);
+    toast.success(`${order.po_number} raised for ${order.vendor_name} — give the supplier this number`);
     setVoSaving(false);
   }
 
@@ -797,43 +804,49 @@ export function JobPO({ jobId, jobNumber, customerName, site, pos: initialPos, t
 
                       {voFormOpenFor === cc.id ? (
                         <div className="rounded border border-slate-200 p-2 space-y-2">
-                          <datalist id="po-supplier-list">
-                            {suppliers.map((s) => <option key={s.id} value={s.name} />)}
-                          </datalist>
                           <div className="grid grid-cols-2 gap-2">
-                            <Input
-                              value={voForm.vendor_name}
-                              onChange={e => setVoForm(p => ({ ...p, vendor_name: e.target.value }))}
-                              placeholder="Supplier *"
-                              className="text-xs h-7"
-                              list="po-supplier-list"
-                            />
-                            <Input
-                              value={voForm.order_number}
-                              onChange={e => setVoForm(p => ({ ...p, order_number: e.target.value }))}
-                              placeholder="Order #"
-                              className="text-xs h-7 font-mono"
-                            />
-                            <Input
-                              type="number" step="0.01"
-                              value={voForm.amount}
-                              onChange={e => setVoForm(p => ({ ...p, amount: e.target.value }))}
-                              placeholder="$ Amount"
-                              className="text-xs h-7"
-                            />
+                            <select
+                              aria-label="Supplier"
+                              value={voForm.supplier_id}
+                              onChange={e => setVoForm(p => ({ ...p, supplier_id: e.target.value }))}
+                              className={`col-span-2 h-7 rounded-md border border-input bg-white px-2 text-xs ${voForm.supplier_id ? "text-slate-800" : "text-slate-400"}`}
+                            >
+                              <option value="" disabled>Choose a supplier *</option>
+                              {suppliers.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+                              <option value={OTHER_SUPPLIER}>Other supplier (not in the list)…</option>
+                            </select>
+                            {voForm.supplier_id === OTHER_SUPPLIER && (
+                              <Input
+                                autoFocus
+                                value={voForm.other_name}
+                                onChange={e => setVoForm(p => ({ ...p, other_name: e.target.value }))}
+                                placeholder="Supplier name *"
+                                className="col-span-2 text-xs h-7"
+                              />
+                            )}
                             <Input
                               type="date"
+                              aria-label="Order date"
                               value={voForm.order_date}
                               onChange={e => setVoForm(p => ({ ...p, order_date: e.target.value }))}
                               className="text-xs h-7"
                             />
+                            <Input
+                              value={voForm.notes}
+                              onChange={e => setVoForm(p => ({ ...p, notes: e.target.value }))}
+                              placeholder="Notes (optional)"
+                              className="text-xs h-7"
+                            />
                           </div>
+                          <p className="text-[11px] text-slate-400">
+                            A PO number is given when you save. The price comes later, from the supplier&apos;s invoice.
+                          </p>
                           <div className="flex justify-end gap-2">
-                            <Button type="button" variant="ghost" size="sm" className="h-7 text-xs" onClick={() => { setVoFormOpenFor(null); setVoForm({ vendor_name: "", order_number: "", amount: "", order_date: "", notes: "" }); }}>
+                            <Button type="button" variant="ghost" size="sm" className="h-7 text-xs" onClick={() => { setVoFormOpenFor(null); setVoForm(BLANK_VO_FORM); }}>
                               <X className="w-3 h-3" />
                             </Button>
                             <Button type="button" size="sm" className="h-7 text-xs" onClick={() => saveVendorOrder(cc.id)} disabled={voSaving}>
-                              {voSaving ? "Saving..." : "Save"}
+                              {voSaving ? "Raising..." : "Raise PO"}
                             </Button>
                           </div>
                         </div>
@@ -842,7 +855,7 @@ export function JobPO({ jobId, jobNumber, customerName, site, pos: initialPos, t
                           onClick={() => setVoFormOpenFor(cc.id)}
                           className="flex items-center gap-1 text-xs text-slate-400 hover:text-slate-600 transition-colors"
                         >
-                          <ShoppingCart className="w-3 h-3" />Raise Vendor Order
+                          <ShoppingCart className="w-3 h-3" />Raise supplier PO
                         </button>
                       )}
                     </div>
