@@ -22,12 +22,29 @@ declare
   n_fail int := 0;
 begin
   begin
+    -- A database with no suppliers or office user yet (the CI stack) gets
+    -- throwaway ones; the closing ZX001 undoes them with everything else.
     select id into sup from suppliers limit 1;
+    if sup is null then
+      insert into suppliers (name) values ('0097 test supplier') returning id into sup;
+    end if;
     select pc.id, po.job_id into cc, job from po_cost_centers pc join purchase_orders po on po.id = pc.po_id limit 1;
     select id into who from profiles where role in ('office', 'admin') and coalesce(is_active, true)
       order by (role = 'office') desc limit 1;
-    if sup is null or cc is null or who is null then
-      raise exception 'fixture missing: need a supplier, a job cost centre line and an office user or admin';
+    if who is null then
+      who := gen_random_uuid();
+      insert into auth.users (id, instance_id, aud, role, email, encrypted_password, email_confirmed_at, created_at, updated_at)
+        values (who, '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', 'ci-0097-office@test.local',
+                crypt('ci-password-0097', gen_salt('bf')), now(), now(), now());
+      -- As the service role: if a signup trigger already made a technician
+      -- profile, 0044 lets only the service role or an admin change its role.
+      perform set_config('request.jwt.claims', json_build_object('role', 'service_role')::text, true);
+      insert into profiles (id, full_name, email, role, is_active)
+        values (who, 'CI Office 0097', 'ci-0097-office@test.local', 'office', true)
+        on conflict (id) do update set role = 'office', is_active = true;
+    end if;
+    if cc is null then
+      raise exception 'fixture missing: need a job with a PO cost centre line';
     end if;
 
     -- 1. The column exists and takes a position.
