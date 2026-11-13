@@ -44,6 +44,21 @@ export function bookingWindow(b: Pick<Booking, "starts_at" | "ends_at" | "daily"
   };
 }
 
+/** A new booking row, as the board model (./boardModel.ts planBoardAdd) plans it. Same shape as the web's. */
+export type BookingInsert = Pick<Booking, "job_id" | "staff_id" | "cost_center_id" | "starts_at" | "ends_at" | "daily" | "all_day">;
+
+function instant(iso: string | null): number | null {
+  return iso === null ? null : new Date(iso).getTime();
+}
+
+/** Whether two windows are the same booking time (instants, not strings — PostgREST reformats). Mirrors the web lib/bookings.ts. */
+export function sameBookingWindow(
+  a: Pick<Booking, "starts_at" | "ends_at" | "daily" | "all_day">,
+  b: Pick<Booking, "starts_at" | "ends_at" | "daily" | "all_day">,
+): boolean {
+  return instant(a.starts_at) === instant(b.starts_at) && instant(a.ends_at) === instant(b.ends_at) && a.daily === b.daily && a.all_day === b.all_day;
+}
+
 /**
  * A window to write: buildScheduleColumns() output, or a moved window
  * (moveSchedule / computeRescheduleWithTime), whose end may be absent.

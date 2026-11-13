@@ -9,6 +9,7 @@ import { initMonitoring, wrapRoot } from "../lib/monitoring";
 import { useEffect } from "react";
 import { Stack, useRouter, useSegments } from "expo-router";
 import { StatusBar } from "expo-status-bar";
+import { GestureHandlerRootView } from "react-native-gesture-handler";
 import {
   ActivityIndicator,
   View,
@@ -196,18 +197,23 @@ function RootNavigation() {
 initMonitoring();
 
 function RootLayout() {
+  // GestureHandlerRootView: react-native-gesture-handler (already a linked
+  // dependency) needs it at the root for the office schedule grid's
+  // long-press-and-drag. It renders a plain flex:1 View otherwise.
   return (
-    <AuthProvider>
-      <DataProvider>
-        <PowerSyncProvider>
-          <LocationTrackingProvider>
-            <StatusBar style="dark" />
-            <RootNavigation />
-            <SyncStatusOverlay />
-          </LocationTrackingProvider>
-        </PowerSyncProvider>
-      </DataProvider>
-    </AuthProvider>
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <AuthProvider>
+        <DataProvider>
+          <PowerSyncProvider>
+            <LocationTrackingProvider>
+              <StatusBar style="dark" />
+              <RootNavigation />
+              <SyncStatusOverlay />
+            </LocationTrackingProvider>
+          </PowerSyncProvider>
+        </DataProvider>
+      </AuthProvider>
+    </GestureHandlerRootView>
   );
 }
 
