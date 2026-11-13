@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import { View, Text, Modal, TextInput, TouchableOpacity, StyleSheet, ScrollView, Alert } from "react-native";
+import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert } from "react-native";
+import { KeyboardSheet, KEYBOARD_SHEET_INPUT_FONT_SIZE } from "../KeyboardSheet";
 import { colors } from "../../lib/theme";
 import { useCustomers } from "../../lib/data/hooks/useCustomers";
 import { useWriteOutcome } from "../../lib/data/hooks/useWriteOutcome";
@@ -200,50 +201,49 @@ export function SiteFormSheet({
   };
 
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={() => !saving && onClose()}>
-      <View style={styles.overlay}>
-        <View style={styles.sheet}>
-          <Text style={styles.title}>{existing ? "Edit site" : "New site"}</Text>
-          <ScrollView automaticallyAdjustKeyboardInsets keyboardDismissMode="interactive" keyboardShouldPersistTaps="handled">
-            <Field label="Street address" value={draft.address_line1} onChange={set("address_line1")} error={errors.address_line1} placeholder="12 Smith St" />
-            <Field label="Address line 2" value={draft.address_line2} onChange={set("address_line2")} placeholder="Unit, lot (optional)" />
-            <Field label="Suburb" value={draft.suburb} onChange={set("suburb")} error={errors.suburb} />
-            <View style={styles.twoCol}>
-              <View style={{ flex: 1 }}><Field label="State" value={draft.state} onChange={(t) => set("state")(t.toUpperCase())} error={errors.state} placeholder="VIC" /></View>
-              <View style={{ flex: 1 }}><Field label="Postcode" value={draft.postcode} onChange={set("postcode")} error={errors.postcode} keyboardType="number-pad" /></View>
-            </View>
-            <Field label="Site name (optional)" value={draft.name} onChange={set("name")} placeholder="Defaults to the street address" />
-            {existing ? (
-              <Field label="Notes" value={draft.notes} onChange={set("notes")} multiline />
+    <KeyboardSheet
+      visible={visible}
+      onRequestClose={() => !saving && onClose()}
+      title={<Text style={styles.title}>{existing ? "Edit site" : "New site"}</Text>}
+      footer={
+        <View style={styles.actions}>
+          {existing ? (
+            existing.is_active ? (
+              <TouchableOpacity style={styles.remove} onPress={confirmArchive} disabled={saving}>
+                <Text style={styles.removeText}>Archive</Text>
+              </TouchableOpacity>
             ) : (
-              <>
-                <Field label="Site contact (optional)" value={draft.contact} onChange={set("contact")} placeholder="Name and phone" />
-                <Field label="Access notes (optional)" value={draft.access} onChange={set("access")} placeholder="Gate code, parking, dogs…" multiline />
-              </>
-            )}
-          </ScrollView>
-          <View style={styles.actions}>
-            {existing ? (
-              existing.is_active ? (
-                <TouchableOpacity style={styles.remove} onPress={confirmArchive} disabled={saving}>
-                  <Text style={styles.removeText}>Archive</Text>
-                </TouchableOpacity>
-              ) : (
-                <TouchableOpacity style={styles.restore} onPress={() => void setActive(true)} disabled={saving}>
-                  <Text style={styles.restoreText}>Restore</Text>
-                </TouchableOpacity>
-              )
-            ) : null}
-            <TouchableOpacity style={styles.cancel} onPress={onClose} disabled={saving}>
-              <Text style={styles.cancelText}>Cancel</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={[styles.saveBtn, saving && styles.saveBtnDisabled]} onPress={save} disabled={saving}>
-              <Text style={styles.saveText}>{saving ? "Saving…" : "Save"}</Text>
-            </TouchableOpacity>
-          </View>
+              <TouchableOpacity style={styles.restore} onPress={() => void setActive(true)} disabled={saving}>
+                <Text style={styles.restoreText}>Restore</Text>
+              </TouchableOpacity>
+            )
+          ) : null}
+          <TouchableOpacity style={styles.cancel} onPress={onClose} disabled={saving}>
+            <Text style={styles.cancelText}>Cancel</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={[styles.saveBtn, saving && styles.saveBtnDisabled]} onPress={save} disabled={saving}>
+            <Text style={styles.saveText}>{saving ? "Saving…" : "Save"}</Text>
+          </TouchableOpacity>
         </View>
+      }
+    >
+      <Field label="Street address" value={draft.address_line1} onChange={set("address_line1")} error={errors.address_line1} placeholder="12 Smith St" />
+      <Field label="Address line 2" value={draft.address_line2} onChange={set("address_line2")} placeholder="Unit, lot (optional)" />
+      <Field label="Suburb" value={draft.suburb} onChange={set("suburb")} error={errors.suburb} />
+      <View style={styles.twoCol}>
+        <View style={{ flex: 1 }}><Field label="State" value={draft.state} onChange={(t) => set("state")(t.toUpperCase())} error={errors.state} placeholder="VIC" /></View>
+        <View style={{ flex: 1 }}><Field label="Postcode" value={draft.postcode} onChange={set("postcode")} error={errors.postcode} keyboardType="number-pad" /></View>
       </View>
-    </Modal>
+      <Field label="Site name (optional)" value={draft.name} onChange={set("name")} placeholder="Defaults to the street address" />
+      {existing ? (
+        <Field label="Notes" value={draft.notes} onChange={set("notes")} multiline />
+      ) : (
+        <>
+          <Field label="Site contact (optional)" value={draft.contact} onChange={set("contact")} placeholder="Name and phone" />
+          <Field label="Access notes (optional)" value={draft.access} onChange={set("access")} placeholder="Gate code, parking, dogs…" multiline />
+        </>
+      )}
+    </KeyboardSheet>
   );
 }
 
@@ -283,12 +283,10 @@ function Field({
 }
 
 const styles = StyleSheet.create({
-  overlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.4)", justifyContent: "flex-end" },
-  sheet: { backgroundColor: colors.card, borderTopLeftRadius: 16, borderTopRightRadius: 16, padding: 16, paddingBottom: 28, maxHeight: "88%" },
   title: { fontSize: 16, fontWeight: "800", color: colors.slate900, marginBottom: 12 },
   field: { marginBottom: 12 },
   fieldLabel: { fontSize: 12, fontWeight: "700", color: colors.slate500, textTransform: "uppercase", marginBottom: 6 },
-  input: { borderWidth: 1, borderColor: colors.border, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10, fontSize: 14, backgroundColor: colors.bg, color: colors.slate900 },
+  input: { borderWidth: 1, borderColor: colors.border, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10, fontSize: KEYBOARD_SHEET_INPUT_FONT_SIZE, backgroundColor: colors.bg, color: colors.slate900 },
   inputError: { borderColor: colors.red600 },
   errorText: { fontSize: 12, color: colors.red600, marginTop: 4 },
   multiline: { minHeight: 60, textAlignVertical: "top" },
