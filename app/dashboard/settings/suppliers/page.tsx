@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { ArrowLeft, Plus, RefreshCw, Loader2 } from "lucide-react";
+import { ArrowLeft, Plus, RefreshCw, Loader2, Pin, PinOff, ChevronUp, ChevronDown } from "lucide-react";
 import Link from "next/link";
 import { ListPageSkeleton } from "@/components/ui/loading-skeletons";
 
@@ -15,6 +15,10 @@ import { ListPageSkeleton } from "@/components/ui/loading-skeletons";
 // raise a PO. Copied from Xero (nightly, or the button here); Xero owns the
 // name, account number and phone of those. The ordering email and default
 // cost centre are set here. Suppliers not in Xero can be added by hand.
+//
+// Pinned suppliers (0097, drafted — not applied yet) sit at the top of every PO supplier picker, web and
+// phone, in the order set here. Without the pin_order column the pin controls
+// are hidden.
 
 interface Supplier {
   id: string;
@@ -25,6 +29,7 @@ interface Supplier {
   default_cost_centre_id: string | null;
   xero_contact_id: string | null;
   is_active: boolean;
+  pin_order?: number | null;
 }
 
 interface CostCentre {
@@ -46,13 +51,20 @@ export default function SuppliersPage() {
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState({ name: "", email: "", phone: "", account_number: "" });
   const [saving, setSaving] = useState(false);
+  const [canPin, setCanPin] = useState(false);
 
   async function load() {
+    const readSuppliers = async () => {
+      const first = await supabase.from("suppliers").select(`${COLS}, pin_order`).order("name");
+      if (first.error?.code !== "42703") return { ...first, pins: !first.error };
+      return { ...(await supabase.from("suppliers").select(COLS).order("name")), pins: false };
+    };
     const [s, c] = await Promise.all([
-      supabase.from("suppliers").select(COLS).order("name"),
+      readSuppliers(),
       supabase.from("cost_centres").select("id, name").eq("is_active", true).order("sort_order"),
     ]);
     setLoadFailed(!!(s.error || c.error));
+    setCanPin(s.pins);
     setSuppliers((s.data as Supplier[]) ?? []);
     setCentres((c.data as CostCentre[]) ?? []);
     setLoading(false);
@@ -90,6 +102,29 @@ export default function SuppliersPage() {
       return;
     }
     setSuppliers((prev) => prev.map((s) => (s.id === id ? { ...s, ...patch } : s)));
+  }
+
+  const pinned = suppliers
+    .filter((s) => s.pin_order != null)
+    .sort((a, b) => (a.pin_order as number) - (b.pin_order as number) || a.name.localeCompare(b.name));
+
+  function togglePin(s: Supplier) {
+    if (s.pin_order != null) return update(s.id, { pin_order: null });
+    const last = pinned.reduce((max, p) => Math.max(max, p.pin_order as number), 0);
+    return update(s.id, { pin_order: last + 1 });
+  }
+
+  // Swaps two neighbours in the pinned order. Numbers them 1..n first, so two
+  // equal positions (or gaps left by unpinning) can't make a swap a no-op.
+  async function movePin(index: number, by: -1 | 1) {
+    const other = index + by;
+    if (other < 0 || other >= pinned.length) return;
+    const order = pinned.map((p) => p.id);
+    [order[index], order[other]] = [order[other], order[index]];
+    for (const [n, id] of order.entries()) {
+      const s = pinned.find((p) => p.id === id);
+      if (s && s.pin_order !== n + 1) await update(id, { pin_order: n + 1 });
+    }
   }
 
   async function addSupplier(e: React.FormEvent) {
@@ -145,6 +180,54 @@ export default function SuppliersPage() {
 
       {loadFailed && <p className="text-sm text-red-600">Couldn&apos;t load suppliers. Refresh the page to try again.</p>}
 
+      {canPin && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Pinned suppliers</CardTitle>
+            <p className="text-sm text-slate-500">
+              Shown first, in this order, whenever anyone raises a purchase order — on the website and on the phone. Pin a
+              supplier with the pin on its row below.
+            </p>
+          </CardHeader>
+          <CardContent className="pt-0">
+            {pinned.length === 0 ? (
+              <p className="text-sm text-slate-400">Nothing pinned yet.</p>
+            ) : (
+              <ol className="divide-y divide-slate-100 rounded-md border border-slate-100">
+                {pinned.map((s, i) => (
+                  <li key={s.id} className={`flex items-center gap-2 px-3 py-1.5 ${!s.is_active ? "opacity-50" : ""}`}>
+                    <span className="w-5 text-xs text-slate-400">{i + 1}</span>
+                    <span className="flex-1 truncate text-sm text-slate-800">
+                      {s.name}
+                      {!s.is_active && <span className="ml-2 text-xs text-slate-400">(inactive — not shown)</span>}
+                    </span>
+                    <button
+                      onClick={() => movePin(i, -1)}
+                      disabled={i === 0}
+                      aria-label={`Move ${s.name} up`}
+                      className="p-1 text-slate-400 hover:text-slate-700 disabled:opacity-30"
+                    >
+                      <ChevronUp className="h-4 w-4" />
+                    </button>
+                    <button
+                      onClick={() => movePin(i, 1)}
+                      disabled={i === pinned.length - 1}
+                      aria-label={`Move ${s.name} down`}
+                      className="p-1 text-slate-400 hover:text-slate-700 disabled:opacity-30"
+                    >
+                      <ChevronDown className="h-4 w-4" />
+                    </button>
+                    <button onClick={() => togglePin(s)} aria-label={`Unpin ${s.name}`} className="p-1 text-slate-400 hover:text-red-600">
+                      <PinOff className="h-4 w-4" />
+                    </button>
+                  </li>
+                ))}
+              </ol>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
       <div className="flex items-center gap-3">
         <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search suppliers" className="max-w-xs" />
         <label className="flex items-center gap-1.5 text-sm text-slate-500">
@@ -165,7 +248,20 @@ export default function SuppliersPage() {
               {shown.map((s) => (
                 <div key={s.id} className={`grid grid-cols-12 gap-3 items-center px-4 py-2.5 ${!s.is_active ? "opacity-50" : ""}`}>
                   <div className="col-span-4 min-w-0">
-                    <p className="text-sm font-medium text-slate-800 truncate">{s.name}</p>
+                    <p className="text-sm font-medium text-slate-800 truncate flex items-center gap-1.5">
+                      {canPin && (
+                        <button
+                          onClick={() => togglePin(s)}
+                          aria-label={s.pin_order != null ? `Unpin ${s.name}` : `Pin ${s.name} to the top of the PO supplier list`}
+                          aria-pressed={s.pin_order != null}
+                          title={s.pin_order != null ? "Pinned — click to unpin" : "Pin to the top of the PO supplier list"}
+                          className={`shrink-0 ${s.pin_order != null ? "text-blue-600" : "text-slate-300 hover:text-slate-500"}`}
+                        >
+                          <Pin className="w-3.5 h-3.5" fill={s.pin_order != null ? "currentColor" : "none"} />
+                        </button>
+                      )}
+                      <span className="truncate">{s.name}</span>
+                    </p>
                     <p className="text-xs text-slate-400 truncate">
                       {[s.account_number && `Acct ${s.account_number}`, s.phone, s.xero_contact_id ? "Xero" : "Added here"].filter(Boolean).join(" · ")}
                     </p>

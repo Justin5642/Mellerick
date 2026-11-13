@@ -227,7 +227,7 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
               Suppliers
             </CardTitle>
             <CardDescription className="mt-1">
-              The supplier accounts the crew pick from when they raise a purchase order, copied from Xero every night
+              The supplier accounts the crew pick from when they raise a purchase order, copied from Xero every night. Pin the main ones to the top of the list
             </CardDescription>
           </div>
         </CardHeader>

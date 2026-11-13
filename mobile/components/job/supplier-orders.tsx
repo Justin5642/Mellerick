@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { View, Text, StyleSheet, TextInput, TouchableOpacity, ActivityIndicator, Alert, Platform } from "react-native";
 import DateTimePicker, { type DateTimePickerEvent } from "@react-native-community/datetimepicker";
 import * as ImagePicker from "expo-image-picker";
@@ -13,12 +13,12 @@ import {
   costCentreLineForSupplier,
   loadSupplierOrders,
   markSupplierOrderDelivered,
-  matchSuppliers,
   raiseSupplierOrder,
   supplierOrderProblem,
   type Supplier,
   type SupplierOrdersState,
 } from "../../lib/supplierOrders";
+import { SupplierPickerSheet } from "./supplier-picker";
 
 // Supplier POs on a job (Justin, 28 Oct 2026): any tech, any job, any
 // supplier — and always against a cost centre, picked first, so the materials
@@ -87,7 +87,7 @@ export function JobSupplierOrdersTab({ jobId, currentUserId, costCentres: localC
   const [costCentreTouched, setCostCentreTouched] = useState(false);
   const [supplierId, setSupplierId] = useState<string | null>(null);
   const [otherSupplier, setOtherSupplier] = useState(false);
-  const [supplierSearch, setSupplierSearch] = useState("");
+  const [pickerOpen, setPickerOpen] = useState(false);
   const [supplierName, setSupplierName] = useState("");
   const [supplierEmail, setSupplierEmail] = useState("");
   const [items, setItems] = useState<ItemRow[]>([newRow()]);
@@ -126,7 +126,7 @@ export function JobSupplierOrdersTab({ jobId, currentUserId, costCentres: localC
     setCostCentreTouched(false);
     setSupplierId(null);
     setOtherSupplier(false);
-    setSupplierSearch("");
+    setPickerOpen(false);
     setSupplierName("");
     setSupplierEmail("");
     setItems([newRow()]);
@@ -134,12 +134,8 @@ export function JobSupplierOrdersTab({ jobId, currentUserId, costCentres: localC
     setNotes("");
   }
 
-  const supplierMatches = useMemo(
-    () => matchSuppliers(state?.suppliers ?? [], supplierSearch),
-    [supplierSearch, state?.suppliers]
-  );
-
   function pickSupplier(s: Supplier) {
+    setPickerOpen(false);
     setSupplierId(s.id ?? null);
     setSupplierName(s.name);
     setSupplierEmail(s.email ?? "");
@@ -154,7 +150,14 @@ export function JobSupplierOrdersTab({ jobId, currentUserId, costCentres: localC
     setSupplierId(null);
     setSupplierName("");
     setSupplierEmail("");
-    setSupplierSearch("");
+  }
+
+  function chooseOtherSupplier(typed: string) {
+    setPickerOpen(false);
+    setOtherSupplier(true);
+    setSupplierId(null);
+    setSupplierName(typed);
+    setSupplierEmail("");
   }
 
   function updateItem(key: string, patch: Partial<ItemRow>) {
@@ -346,7 +349,7 @@ export function JobSupplierOrdersTab({ jobId, currentUserId, costCentres: localC
             <View style={styles.pickedSupplier}>
               <Ionicons name="checkmark-circle" size={22} color={colors.green600} />
               <Text style={styles.pickedSupplierName}>{supplierName}</Text>
-              <TouchableOpacity onPress={clearSupplier} accessibilityLabel="Change supplier" style={styles.changeBtn}>
+              <TouchableOpacity onPress={() => { clearSupplier(); setPickerOpen(true); }} accessibilityLabel="Change supplier" style={styles.changeBtn}>
                 <Text style={styles.changeText}>Change</Text>
               </TouchableOpacity>
             </View>
@@ -360,41 +363,32 @@ export function JobSupplierOrdersTab({ jobId, currentUserId, costCentres: localC
                 placeholderTextColor={colors.slate400}
                 autoFocus
               />
-              <TouchableOpacity onPress={() => { setOtherSupplier(false); clearSupplier(); }}>
+              <TouchableOpacity onPress={() => { setOtherSupplier(false); clearSupplier(); setPickerOpen(true); }}>
                 <Text style={[styles.hint, styles.linkText]}>Back to the supplier list</Text>
               </TouchableOpacity>
             </>
           ) : (
-            <>
-              <TextInput
-                style={styles.input}
-                value={supplierSearch}
-                onChangeText={setSupplierSearch}
-                placeholder="Search our suppliers"
-                placeholderTextColor={colors.slate400}
-                autoCorrect={false}
-              />
-              {supplierMatches.map((s) => (
-                <TouchableOpacity key={s.id ?? s.name} style={styles.supplierRow} onPress={() => pickSupplier(s)}>
-                  <Text style={styles.supplierRowText}>{s.name}</Text>
-                </TouchableOpacity>
-              ))}
-              {supplierSearch.trim() !== "" && supplierMatches.length === 0 && (
-                <Text style={styles.hint}>{"No supplier by that name on our list."}</Text>
-              )}
-              <TouchableOpacity
-                style={styles.supplierRow}
-                onPress={() => {
-                  setOtherSupplier(true);
-                  setSupplierId(null);
-                  setSupplierName(supplierSearch.trim());
-                  setSupplierEmail("");
-                }}
-              >
-                <Text style={[styles.supplierRowText, { color: colors.blue600 }]}>Other supplier (not on the list)</Text>
-              </TouchableOpacity>
-            </>
+            // Opens the full-screen picker: Pinned, Recent, then A–Z, with the
+            // search box at the top where the keyboard can't cover it.
+            <TouchableOpacity
+              style={styles.choosePicker}
+              onPress={() => setPickerOpen(true)}
+              accessibilityRole="button"
+              accessibilityLabel="Choose a supplier"
+            >
+              <Ionicons name="search" size={18} color={colors.slate400} />
+              <Text style={styles.choosePickerText}>Choose a supplier</Text>
+              <Ionicons name="chevron-forward" size={18} color={colors.slate400} />
+            </TouchableOpacity>
           )}
+          <SupplierPickerSheet
+            visible={pickerOpen}
+            suppliers={state?.suppliers ?? []}
+            recentIds={state?.recentSupplierIds ?? []}
+            onPick={pickSupplier}
+            onOther={chooseOtherSupplier}
+            onClose={() => setPickerOpen(false)}
+          />
 
           {mode === "email" && (
             <>
@@ -590,8 +584,18 @@ const styles = StyleSheet.create({
   checkAgain: { marginTop: 10, alignSelf: "flex-start", paddingVertical: 10, paddingHorizontal: 16, borderRadius: 8, backgroundColor: "#fff" },
   checkAgainText: { fontSize: 15, fontWeight: "700", color: colors.blue600 },
   linkText: { color: colors.blue600, fontSize: 13, paddingVertical: 6 },
-  supplierRow: { paddingVertical: 14, paddingHorizontal: 12, borderBottomWidth: 1, borderBottomColor: colors.border },
-  supplierRowText: { fontSize: 16, fontWeight: "600", color: colors.slate700 },
+  choosePicker: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    paddingVertical: 14,
+    paddingHorizontal: 12,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 8,
+    backgroundColor: colors.card,
+  },
+  choosePickerText: { flex: 1, fontSize: 16, color: colors.slate500 },
   pickedSupplier: { flexDirection: "row", alignItems: "center", gap: 8, padding: 12, borderRadius: 8, backgroundColor: colors.green100 },
   pickedSupplierName: { flex: 1, fontSize: 16, fontWeight: "700", color: colors.slate700 },
   changeBtn: { paddingVertical: 6, paddingHorizontal: 10 },

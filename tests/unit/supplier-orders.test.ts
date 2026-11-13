@@ -201,9 +201,32 @@ describe("/api/jobs/[id]/supplier-orders", () => {
     tableData.po_cost_centers = { one: { id: CC }, list: [{ id: CC, cost_centre_id: "transport" }] };
     const res = await GET(new NextRequest("http://localhost/x"), params);
     const json = await res.json();
-    expect(json.suppliers).toEqual([{ id: SUPPLIER, name: "Boral Quarries", email: null, defaultCostCentreId: "transport" }]);
+    expect(json.suppliers).toEqual([{ id: SUPPLIER, name: "Boral Quarries", email: null, defaultCostCentreId: "transport", pinOrder: null }]);
     expect(json.costCentreLines).toEqual([{ id: CC, costCentreId: "transport" }]);
     expect(JSON.stringify(json)).not.toMatch(/ACCT-9|0399999999/);
+  });
+
+  it("gives the picker each supplier's pin and the caller's recent suppliers first", async () => {
+    requireUser.mockResolvedValue(tech);
+    const OTHER = "55555555-5555-4555-8555-555555555555";
+    tableData.suppliers = {
+      list: [
+        { id: SUPPLIER, name: "Boral Quarries", email: null, default_cost_centre_id: null, pin_order: 1 },
+        { id: OTHER, name: "Tradelink", email: null, default_cost_centre_id: null, pin_order: null },
+      ],
+    };
+    tableData.vendor_orders = {
+      list: [
+        { id: "o1", po_number: "PO-2", vendor_name: "Boral Quarries", supplier_id: SUPPLIER, entered_by: "someone-else", created_at: "2026-11-09T00:00:00Z" },
+        { id: "o2", po_number: "PO-1", vendor_name: "Tradelink", supplier_id: null, entered_by: "tech-1", created_at: "2026-11-01T00:00:00Z" },
+      ],
+    };
+    const json = await (await GET(new NextRequest("http://localhost/x"), params)).json();
+    expect(json.suppliers.map((s: { pinOrder: number | null }) => s.pinOrder)).toEqual([1, null]);
+    expect(json.recentSupplierIds).toEqual([OTHER, SUPPLIER]);
+    // The recent read names suppliers and who raised them — never an amount.
+    const recentRead = selects.find((s) => s.table === "vendor_orders" && /entered_by/.test(s.cols));
+    expect(recentRead?.cols).not.toMatch(/amount/);
   });
 
   it("returns the job's cost centres fresh, so one added on the web shows straight away", async () => {
