@@ -46,7 +46,7 @@ export function CustomerFormSheet({
   visible: boolean;
   existing?: EditableCustomer | null;
   onClose: () => void;
-  onSaved: (id: string, synced: boolean) => void;
+  onSaved: (id: string, synced: boolean, name: string) => void;
 }) {
   const customers = useCustomers();
   const [draft, setDraft] = useState<Draft>(toDraft(existing ?? null));
@@ -76,10 +76,10 @@ export function CustomerFormSheet({
       };
       if (existing) {
         const { synced } = await customers.updateCustomer(existing.id, input);
-        onSaved(existing.id, synced);
+        onSaved(existing.id, synced, input.name);
       } else {
         const { result, synced } = await customers.createCustomer(input);
-        onSaved(result as string, synced);
+        onSaved(result as string, synced, input.name);
       }
     } catch (e) {
       // try/finally with no catch left a thrown write silently discarded: the

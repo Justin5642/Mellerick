@@ -201,6 +201,7 @@ export default function CustomerDetailScreen() {
         visible={siteDraft !== null}
         customerId={customer.id}
         existing={siteDraft === "new" ? null : siteDraft}
+        existingSites={customer.sites}
         onClose={() => setSiteDraft(null)}
         onSaved={() => { setSiteDraft(null); void load(); }}
       />

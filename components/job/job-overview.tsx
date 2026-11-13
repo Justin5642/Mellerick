@@ -184,8 +184,8 @@ export function JobOverview({ job, readOnly = false, bookings, bookingsError, on
                   <SelectTrigger><SelectValue placeholder={form.customer_id ? "Select site" : "Select customer first"} /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value={NO_SITE_VALUE}>No site</SelectItem>
+                    {sites.map((s) => <SelectItem key={s.id} value={s.id}>{s.name}{s.suburb ? ` — ${s.suburb}` : ""}</SelectItem>)}
                     <SelectItem value={ADD_NEW_SITE_VALUE}>+ Add new site</SelectItem>
-                    {sites.map((s) => <SelectItem key={s.id} value={s.id}>{s.name} — {s.suburb}</SelectItem>)}
                   </SelectContent>
                 </Select>
               </div>
@@ -450,7 +450,7 @@ export function JobOverview({ job, readOnly = false, bookings, bookingsError, on
         open={addSiteOpen}
         onOpenChange={setAddSiteOpen}
         onCreated={(site) => {
-          setSites((prev) => [...prev, site]);
+          setSites((prev) => (prev.some((s) => s.id === site.id) ? prev : [...prev, site]));
           set("site_id", site.id);
         }}
       />
