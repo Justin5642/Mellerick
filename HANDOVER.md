@@ -347,6 +347,57 @@ one once, against its PO, and the app makes the Xero bill.
   counted twice in the ledger.
 - 0089 was applied before this merged (the supplier-orders route selects `delivered_at`).
 
+**Scheduling and PO batch (13 Nov 2026; migrations `0096`, `0097` — DRAFT, NOT APPLIED).**
+- **Closed jobs can't be scheduled.** The board and the phone's Schedule tab
+  hide completed/cancelled jobs, so a booking on one used to "save" and never
+  appear. Web "Schedule Job" is disabled for them with a link to change the
+  status; the phone sheet explains and offers "Change status". Rule in
+  `lib/job-schedulable.ts`, mirrored at `mobile/lib/jobSchedulable.ts`
+  (`tests/unit/job-schedulable.test.ts`). `0096` makes the database refuse new
+  or moved bookings and job-level schedule writes on closed jobs (ERRCODE
+  MJ001, HTTP 400); status changes, deletes, unassigning, calendar links,
+  flag-only refreshes and 0079's own follow-on writes still pass. The calendar
+  poll counts a refusal as skipped. Gate test
+  `supabase/tests/0096_refuse_scheduling_closed_jobs_test.sql`.
+- **Keyboard-safe forms.** Phone sheets with text fields use
+  `mobile/components/KeyboardSheet.tsx` (buttons outside the scroll, Done bar,
+  dismiss on tap/drag, 16pt); web dialogs use
+  `components/ui/keyboard-safe-dialog.tsx`, sized to the *visual* viewport —
+  iPhone Safari does not shrink `vh`/`dvh` for the keyboard. Use these for any
+  new form with a text area.
+- **Add a site while creating a job** (web New Job and job Overview, phone New
+  Job). Address rules and duplicate check in `lib/site-address.ts`, mirrored at
+  `mobile/lib/siteAddress.ts` (`tests/unit/site-address.test.ts`). Contact and
+  access notes go into `sites.notes`, labelled (no columns for them). On the
+  phone a site waits for its still-queued customer, and a job for its
+  still-queued site (`Outbox.pendingInsertOpId`). No database duplicate guard
+  yet.
+- **Web board: resize and name tags.** Week view: drag a booking's first/last
+  day edge (mouse or touch) to change its days — `planBookingResize` in
+  `components/schedule/board-model.ts`, through the dialog's own
+  `buildBookingWindow`; clashes on added days ask first (`resizeConflicts`);
+  success only after the server confirms, snap-back on refusal. Every tile
+  names its technician (initials when narrow, "+N" others on the job that day).
+- **Phone schedule grid.** Office Schedule tab is Day / Week / List
+  (`mobile/components/schedule/ScheduleGrid.tsx`, layout in
+  `mobile/lib/scheduleGrid.ts`), placement from `mobile/lib/boardModel.ts` —
+  a copy of the web board model pinned by `tests/unit/board-model-mirror.test.ts`
+  (change the web file first, then copy its body). Long-press drag moves; the
+  Week-view grip resizes; both go through `ScheduleRepository.updateBooking`.
+  `GestureHandlerRootView` now wraps the app root. The phone's
+  `lib/bookings.ts` `BookingWindowColumns` now has the web's booking shape; the
+  old schedule-shaped type is `ScheduleWindowColumns`.
+- **Supplier picker: Pinned / Recent / A–Z** on every PO supplier picker (web
+  `components/job/supplier-picker.tsx`, phone
+  `mobile/components/job/supplier-picker.tsx`), rules in
+  `lib/supplier-picker.ts` mirrored at `mobile/lib/supplierPicker.ts`. Pins are
+  `suppliers.pin_order` (0097; Settings → Suppliers); Recent comes from
+  `vendor_orders` (user's own first, then the company's). 0097 also defaults
+  `vendor_orders.entered_by` to the signed-in user and seeds the four pins by
+  name. Before 0097 there is simply no Pinned group.
+- **Allowed hours per cost centre already existed** — PO tab, Hours on each
+  cost-centre line (`po_cost_centers.allocated_hours`); not rebuilt.
+
 ---
 
 ## 2. The one rule that must never break
