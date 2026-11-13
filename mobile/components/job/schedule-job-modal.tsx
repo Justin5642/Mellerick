@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Modal, Alert, Platform, TextInput } from "react-native";
+import { useEffect, useState, type ReactNode } from "react";
+import { View, Text, StyleSheet, TouchableOpacity, Alert, Platform, TextInput, Keyboard } from "react-native";
 import DateTimePicker, { type DateTimePickerEvent } from "@react-native-community/datetimepicker";
 import { Ionicons } from "@expo/vector-icons";
 import { colors } from "../../lib/theme";
@@ -20,6 +20,8 @@ import { localDateKey } from "../../lib/date";
 import type { JobCostCentre } from "../../lib/data/reads/jobBilling";
 import type { JobBooking } from "../../lib/data/reads/bookings";
 import { bookingColumns, bookingWindow } from "../../lib/bookings";
+import { closedJobScheduleMessage, isJobClosedForScheduling } from "../../lib/jobSchedulable";
+import { KeyboardSheet, KEYBOARD_SHEET_INPUT_FONT_SIZE } from "../KeyboardSheet";
 
 interface Props {
   visible: boolean;
@@ -44,6 +46,8 @@ interface Props {
   bookings?: JobBooking[] | null;
   /** The list after an add / edit / delete — the screen shows it at once, offline included. */
   onBookingsChanged?: (next: JobBooking[]) => void;
+  /** Open the job's status editor — offered when the job is completed or cancelled. */
+  onReopen?: () => void;
   onScheduled: (patch: {
     scheduled_start: string;
     scheduled_end: string;
@@ -64,6 +68,14 @@ type Step = "technician" | "time" | "stage" | "notes" | "confirm";
 
 /** The bookings editor shows the list, or the add / edit form over it. */
 type Mode = { kind: "list" } | { kind: "add" } | { kind: "edit"; booking: JobBooking } | { kind: "legacy" };
+
+/**
+ * Schedule changes go through the outbox: "saved" means saved on this phone.
+ * The server can still refuse one (say the job was completed meanwhile); it
+ * then shows as "not synced" on the sync badge at the top of the app.
+ */
+const SAVED_ON_PHONE_HINT =
+  "Changes save on this phone first and sync when there's signal. If one can't be saved on the server, the sync badge at the top shows it as not synced.";
 
 function friendlyTime(hhmm: string): string {
   const [h, m] = hhmm.split(":").map(Number);
@@ -105,6 +117,7 @@ export function ScheduleJobModal({
   currentScheduledCostCenterId,
   bookings = null,
   onBookingsChanged,
+  onReopen,
   onScheduled,
 }: Props) {
   const { schedule, addBookings, updateBooking, deleteBooking, ready } = useSchedule();
@@ -297,7 +310,7 @@ export function ScheduleJobModal({
   }
 
   async function confirmBooking() {
-    if (!columns || saving || !ready || !bookings) return;
+    if (!columns || saving || !ready || !bookings || isJobClosedForScheduling(jobStatus)) return;
     setSaving(true);
     try {
       if (mode.kind === "edit") {
@@ -339,7 +352,7 @@ export function ScheduleJobModal({
     }
     setSaving(false);
     setMode({ kind: "list" });
-    if (noteFailed) Alert.alert("Booking saved", "The note could not be saved — add it from the Notes tab.");
+    if (noteFailed) Alert.alert("Booking saved on this phone", "The note could not be saved — add it from the Notes tab.");
   }
 
   function confirmDelete(b: JobBooking) {
@@ -367,7 +380,7 @@ export function ScheduleJobModal({
 
   async function confirm() {
     if (isBookings) return confirmBooking();
-    if (technicianIds.length === 0 || !columns || saving || !ready) return;
+    if (technicianIds.length === 0 || !columns || saving || !ready || isJobClosedForScheduling(jobStatus)) return;
     setSaving(true);
     try {
       await schedule(jobId, technicianIds, columns, costCenterId);
@@ -398,298 +411,345 @@ export function ScheduleJobModal({
     setSaving(false);
     onClose();
     if (noteFailed) {
-      Alert.alert("Job scheduled", "The note could not be saved — add it from the Notes tab.");
+      Alert.alert("Schedule saved on this phone", "The note could not be saved — add it from the Notes tab.");
     }
   }
 
-  return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={() => !saving && onClose()}>
-      <View style={styles.overlay}>
-        <ScrollView automaticallyAdjustKeyboardInsets keyboardDismissMode="interactive" style={styles.sheetScroll} contentContainerStyle={styles.sheet} keyboardShouldPersistTaps="handled">
-          <Text style={styles.title}>
-            {mode.kind === "add" ? "Add booking" : mode.kind === "edit" ? "Edit booking" : "Schedule job"}
-          </Text>
+  const jobClosed = isJobClosedForScheduling(jobStatus);
+  const sheetTitle = jobClosed ? "Schedule job" : mode.kind === "add" ? "Add booking" : mode.kind === "edit" ? "Edit booking" : "Schedule job";
 
-          {mode.kind === "list" && bookings && (
-            <View style={{ gap: 8 }}>
-              {bookings.length === 0 && <Text style={styles.hint}>Not booked yet. Add who is going, when, and against which cost centre.</Text>}
-              {bookings.map((b) => (
-                <View key={b.id} style={styles.bookingRow}>
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.rowText}>{b.staff_name ?? (b.staff_id ? "Technician" : "Unassigned")}</Text>
-                    <Text style={styles.bookingSub}>
-                      {formatScheduleSummary(bookingWindow(b))}
-                      {b.all_day ? " · All day" : ""}
-                    </Text>
-                    {b.cost_center_id && (
-                      <Text style={styles.bookingSub}>
-                        Stage: {costCenters.find((cc) => cc.id === b.cost_center_id)?.name ?? "—"}
-                      </Text>
-                    )}
-                  </View>
-                  <TouchableOpacity onPress={() => openForm({ kind: "edit", booking: b })} accessibilityLabel="Edit booking" style={styles.iconBtn}>
-                    <Ionicons name="create-outline" size={19} color={colors.blue600} />
-                  </TouchableOpacity>
-                  <TouchableOpacity onPress={() => confirmDelete(b)} accessibilityLabel="Delete booking" style={styles.iconBtn}>
-                    <Ionicons name="trash-outline" size={19} color={colors.red600} />
-                  </TouchableOpacity>
-                </View>
-              ))}
-              <View style={styles.actions}>
-                <TouchableOpacity style={styles.cancelBtn} onPress={onClose}>
-                  <Text style={styles.cancelText}>Done</Text>
-                </TouchableOpacity>
-                <TouchableOpacity style={styles.doneBtn} onPress={() => openForm({ kind: "add" })} disabled={!ready}>
-                  <Text style={styles.doneText}>Add booking</Text>
-                </TouchableOpacity>
-              </View>
-            </View>
-          )}
-
-          {mode.kind !== "list" && (
-          <>
-          {step === "technician" && (
-            <View style={{ gap: 6 }}>
-              {isBookings && (
-                <Text style={styles.hint}>
-                  {mode.kind === "edit"
-                    ? "Who this booking is for — or nobody, to leave it unassigned."
-                    : "Pick everyone going (one booking each, same time and stage) — or nobody for an unassigned booking."}
-                </Text>
-              )}
-              {staff.length === 0 && <Text style={styles.hint}>No active staff found.</Text>}
-              {staff.map((s) => {
-                const active = technicianIds.includes(s.id);
-                return (
-                  <TouchableOpacity
-                    key={s.id}
-                    style={[styles.row, active && styles.rowActive]}
-                    onPress={() => toggleTechnician(s.id)}
-                  >
-                    <View style={{ flex: 1 }}>
-                      <Text style={styles.rowText}>{s.full_name}</Text>
-                      <Text style={styles.rowSub}>{s.role}</Text>
-                    </View>
-                    {active && <Ionicons name="checkmark" size={18} color={colors.blue600} />}
-                  </TouchableOpacity>
-                );
-              })}
-            </View>
-          )}
-
-          {step === "time" && (
-            <View style={{ gap: 14 }}>
-              <View style={{ flexDirection: "row", gap: 10 }}>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.label}>Start date</Text>
-                  <TouchableOpacity style={styles.selector} onPress={() => setShowDatePicker("start")}>
-                    <Text style={styles.selectorText}>{shortDayLabel(startDateKey)}</Text>
-                    <Ionicons name="calendar-outline" size={16} color={colors.slate400} />
-                  </TouchableOpacity>
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.label}>End date</Text>
-                  <TouchableOpacity style={styles.selector} onPress={() => setShowDatePicker("end")}>
-                    <Text style={styles.selectorText}>{shortDayLabel(endDateKey)}</Text>
-                    <Ionicons name="calendar-outline" size={16} color={colors.slate400} />
-                  </TouchableOpacity>
-                </View>
-              </View>
-              {showDatePicker && (
-                <DateTimePicker
-                  value={keyToPickerDate(showDatePicker === "start" ? startDateKey : endDateKey)}
-                  minimumDate={showDatePicker === "end" ? keyToPickerDate(startDateKey) : undefined}
-                  mode="date"
-                  onChange={(e, d) => onDateChange(showDatePicker, e, d)}
-                />
-              )}
-              {endDateKey > startDateKey && (
-                <Text style={styles.hint}>Same hours on each weekday — Saturdays and Sundays between the dates are skipped.</Text>
-              )}
-
-              <TouchableOpacity style={styles.allDayRow} onPress={toggleAllDay}>
-                <Ionicons name={allDay ? "checkbox" : "square-outline"} size={20} color={allDay ? colors.blue600 : colors.slate400} />
-                <Text style={styles.allDayText}>
-                  All day ({friendlyTime(DEFAULT_SHIFT_START_TIME)} – {friendlyTime(DEFAULT_SHIFT_END_TIME)})
-                </Text>
-              </TouchableOpacity>
-
-              {Object.entries(conflictsByTechnician).map(([staffId, n]) => {
-                const name = staff.find((s) => s.id === staffId)?.full_name ?? "This technician";
-                return (
-                  <Text key={staffId} style={styles.warnHint}>
-                    {name} already has {n} job{n === 1 ? "" : "s"} on {shortDayLabel(startDateKey)} — set a custom time block below.
-                  </Text>
-                );
-              })}
-
-              {!allDay && (
-                <View style={{ flexDirection: "row", gap: 10 }}>
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.label}>Start</Text>
-                    <TouchableOpacity style={styles.selector} onPress={() => setShowTimePicker("start")}>
-                      <Text style={styles.selectorText}>{friendlyTime(startTime)}</Text>
-                    </TouchableOpacity>
-                  </View>
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.label}>End</Text>
-                    <TouchableOpacity style={styles.selector} onPress={() => setShowTimePicker("end")}>
-                      <Text style={styles.selectorText}>{friendlyTime(endTime)}</Text>
-                    </TouchableOpacity>
-                  </View>
-                </View>
-              )}
-              {!allDay && showTimePicker && (
-                <DateTimePicker
-                  value={timeAsDate(showTimePicker === "start" ? startTime : endTime)}
-                  mode="time"
-                  onChange={(e, d) => onTimeChange(showTimePicker, e, d)}
-                />
-              )}
-
-              {windowError ? (
-                <Text style={styles.errorText}>{windowError}</Text>
-              ) : summary ? (
-                <Text style={styles.summaryText}>{summary}</Text>
-              ) : null}
-            </View>
-          )}
-
-          {step === "stage" && (
-            <View style={{ gap: 6 }}>
-              <Text style={styles.label}>Cost centre (optional)</Text>
-              <TouchableOpacity
-                style={[styles.row, costCenterId === null && styles.rowActive]}
-                onPress={() => setCostCenterId(null)}
-              >
-                <Text style={styles.rowText}>No stage selected</Text>
-                {costCenterId === null && <Ionicons name="checkmark" size={18} color={colors.blue600} />}
-              </TouchableOpacity>
-              {costCenters.map((cc) => {
-                const active = costCenterId === cc.id;
-                return (
-                  <TouchableOpacity
-                    key={cc.id}
-                    style={[styles.row, active && styles.rowActive]}
-                    onPress={() => setCostCenterId(cc.id)}
-                  >
-                    <Text style={styles.rowText}>
-                      {cc.name}{cc.po_number ? ` (PO #${cc.po_number})` : ""}
-                    </Text>
-                    {active && <Ionicons name="checkmark" size={18} color={colors.blue600} />}
-                  </TouchableOpacity>
-                );
-              })}
-              <Text style={styles.hint}>
-                Time logged on this job defaults to this stage at clock-in — the technician can still change it per entry.
-              </Text>
-            </View>
-          )}
-
-          {step === "notes" && (
-            <View style={{ gap: 6 }}>
-              <Text style={styles.label}>Notes for the technician (optional)</Text>
-              <TextInput
-                style={[styles.input, styles.inputMultiline]}
-                value={noteText}
-                onChangeText={setNoteText}
-                placeholder="What should they achieve on this job today?"
-                placeholderTextColor={colors.slate400}
-                multiline
-              />
-              <Text style={styles.hint}>
-                Posted to this job&apos;s Notes tab, visible to everyone assigned.
-              </Text>
-            </View>
-          )}
-
-          {step === "confirm" && (
-            <View style={styles.confirmBox}>
-              <Text style={styles.confirmTech}>{selectedTechnicians.map((t) => t.full_name).join(", ") || "Unassigned"}</Text>
-              <Text style={styles.confirmLine}>
-                {summary}
-                {allDay ? " · All day" : ""}
-              </Text>
-              {hasCostCenters && (
-                <Text style={styles.confirmLine}>
-                  Stage: {costCenters.find((cc) => cc.id === costCenterId)?.name ?? "None"}
-                </Text>
-              )}
-              <Text style={styles.hint}>
-                This sets the planned schedule block only — worked hours are still captured separately via clock-on/clock-off.
-              </Text>
-            </View>
-          )}
-
-          <View style={styles.actions}>
-            <TouchableOpacity
-              style={styles.cancelBtn}
-              onPress={() =>
-                step === "technician"
-                  ? (isBookings ? setMode({ kind: "list" }) : onClose())
-                  : setStep(
-                      step === "confirm"
-                        ? (skipNotes ? (hasCostCenters ? "stage" : "time") : "notes")
-                        : step === "notes"
-                        ? (hasCostCenters ? "stage" : "time")
-                        : step === "stage"
-                        ? "time"
-                        : "technician"
-                    )
-              }
-              disabled={saving}
-            >
-              <Text style={styles.cancelText}>{step === "technician" ? "Cancel" : "Back"}</Text>
-            </TouchableOpacity>
-            {step === "technician" && (
-              <TouchableOpacity
-                style={[styles.doneBtn, needsTechnician && technicianIds.length === 0 && styles.doneBtnDisabled]}
-                onPress={() => setStep("time")}
-                disabled={needsTechnician && technicianIds.length === 0}
-              >
-                <Text style={styles.doneText}>Next</Text>
-              </TouchableOpacity>
-            )}
-            {step === "time" && (
-              <TouchableOpacity
-                style={[styles.doneBtn, !!windowError && styles.doneBtnDisabled]}
-                onPress={() => setStep(hasCostCenters ? "stage" : skipNotes ? "confirm" : "notes")}
-                disabled={!!windowError}
-              >
-                <Text style={styles.doneText}>Next</Text>
-              </TouchableOpacity>
-            )}
-            {step === "stage" && (
-              <TouchableOpacity style={styles.doneBtn} onPress={() => setStep(skipNotes ? "confirm" : "notes")}>
-                <Text style={styles.doneText}>Next</Text>
-              </TouchableOpacity>
-            )}
-            {step === "notes" && (
-              <TouchableOpacity style={styles.doneBtn} onPress={() => setStep("confirm")}>
-                <Text style={styles.doneText}>Next</Text>
-              </TouchableOpacity>
-            )}
-            {step === "confirm" && (
-              <TouchableOpacity style={styles.doneBtn} onPress={confirm} disabled={saving}>
-                <Text style={styles.doneText}>{saving ? "Saving…" : "Confirm"}</Text>
-              </TouchableOpacity>
-            )}
-          </View>
-          </>
-          )}
-        </ScrollView>
+  // The action row, outside the scrolling form (KeyboardSheet): always on
+  // screen and above the keyboard, so Next is reachable after typing a note.
+  let footer: ReactNode = null;
+  if (jobClosed) {
+    footer = (
+      <View style={styles.actions}>
+        <TouchableOpacity style={styles.cancelBtn} onPress={onClose}>
+          <Text style={styles.cancelText}>Close</Text>
+        </TouchableOpacity>
+        {onReopen && (
+          <TouchableOpacity
+            style={styles.doneBtn}
+            onPress={() => {
+              onClose();
+              onReopen();
+            }}
+          >
+            <Text style={styles.doneText}>Change status</Text>
+          </TouchableOpacity>
+        )}
       </View>
-    </Modal>
+    );
+  } else if (mode.kind === "list") {
+    footer = bookings ? (
+      <View style={styles.actions}>
+        <TouchableOpacity style={styles.cancelBtn} onPress={onClose}>
+          <Text style={styles.cancelText}>Done</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={styles.doneBtn} onPress={() => openForm({ kind: "add" })} disabled={!ready}>
+          <Text style={styles.doneText}>Add booking</Text>
+        </TouchableOpacity>
+      </View>
+    ) : null;
+  } else {
+    footer = (
+      <View style={styles.actions}>
+        <TouchableOpacity
+          style={styles.cancelBtn}
+          onPress={() =>
+            step === "technician"
+              ? (isBookings ? setMode({ kind: "list" }) : onClose())
+              : setStep(
+                  step === "confirm"
+                    ? (skipNotes ? (hasCostCenters ? "stage" : "time") : "notes")
+                    : step === "notes"
+                    ? (hasCostCenters ? "stage" : "time")
+                    : step === "stage"
+                    ? "time"
+                    : "technician"
+                )
+          }
+          disabled={saving}
+        >
+          <Text style={styles.cancelText}>{step === "technician" ? "Cancel" : "Back"}</Text>
+        </TouchableOpacity>
+        {step === "technician" && (
+          <TouchableOpacity
+            style={[styles.doneBtn, needsTechnician && technicianIds.length === 0 && styles.doneBtnDisabled]}
+            onPress={() => setStep("time")}
+            disabled={needsTechnician && technicianIds.length === 0}
+          >
+            <Text style={styles.doneText}>Next</Text>
+          </TouchableOpacity>
+        )}
+        {step === "time" && (
+          <TouchableOpacity
+            style={[styles.doneBtn, !!windowError && styles.doneBtnDisabled]}
+            onPress={() => setStep(hasCostCenters ? "stage" : skipNotes ? "confirm" : "notes")}
+            disabled={!!windowError}
+          >
+            <Text style={styles.doneText}>Next</Text>
+          </TouchableOpacity>
+        )}
+        {step === "stage" && (
+          <TouchableOpacity style={styles.doneBtn} onPress={() => setStep(skipNotes ? "confirm" : "notes")}>
+            <Text style={styles.doneText}>Next</Text>
+          </TouchableOpacity>
+        )}
+        {step === "notes" && (
+          <TouchableOpacity
+            style={styles.doneBtn}
+            onPress={() => {
+              Keyboard.dismiss();
+              setStep("confirm");
+            }}
+          >
+            <Text style={styles.doneText}>Next</Text>
+          </TouchableOpacity>
+        )}
+        {step === "confirm" && (
+          <TouchableOpacity style={styles.doneBtn} onPress={confirm} disabled={saving}>
+            <Text style={styles.doneText}>{saving ? "Saving…" : "Confirm"}</Text>
+          </TouchableOpacity>
+        )}
+      </View>
+    );
+  }
+
+  return (
+    <KeyboardSheet visible={visible} onRequestClose={() => !saving && onClose()} title={sheetTitle} footer={footer}>
+      {jobClosed && (
+        <View style={{ gap: 8 }}>
+          <View style={styles.closedBox}>
+            <Text style={styles.closedText}>{closedJobScheduleMessage(jobStatus)}</Text>
+          </View>
+          {(bookings ?? []).map((b) => (
+            <View key={b.id} style={styles.bookingRow}>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.rowText}>{b.staff_name ?? (b.staff_id ? "Technician" : "Unassigned")}</Text>
+                <Text style={styles.bookingSub}>{formatScheduleSummary(bookingWindow(b))}</Text>
+              </View>
+            </View>
+          ))}
+        </View>
+      )}
+
+      {!jobClosed && mode.kind === "list" && bookings && (
+        <View style={{ gap: 8 }}>
+          {bookings.length === 0 && <Text style={styles.hint}>Not booked yet. Add who is going, when, and against which cost centre.</Text>}
+          {bookings.map((b) => (
+            <View key={b.id} style={styles.bookingRow}>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.rowText}>{b.staff_name ?? (b.staff_id ? "Technician" : "Unassigned")}</Text>
+                <Text style={styles.bookingSub}>
+                  {formatScheduleSummary(bookingWindow(b))}
+                  {b.all_day ? " · All day" : ""}
+                </Text>
+                {b.cost_center_id && (
+                  <Text style={styles.bookingSub}>
+                    Stage: {costCenters.find((cc) => cc.id === b.cost_center_id)?.name ?? "—"}
+                  </Text>
+                )}
+              </View>
+              <TouchableOpacity onPress={() => openForm({ kind: "edit", booking: b })} accessibilityLabel="Edit booking" style={styles.iconBtn}>
+                <Ionicons name="create-outline" size={19} color={colors.blue600} />
+              </TouchableOpacity>
+              <TouchableOpacity onPress={() => confirmDelete(b)} accessibilityLabel="Delete booking" style={styles.iconBtn}>
+                <Ionicons name="trash-outline" size={19} color={colors.red600} />
+              </TouchableOpacity>
+            </View>
+          ))}
+          {bookings.length > 0 && <Text style={styles.hint}>{SAVED_ON_PHONE_HINT}</Text>}
+        </View>
+      )}
+
+      {!jobClosed && mode.kind !== "list" && (
+      <>
+      {step === "technician" && (
+        <View style={{ gap: 6 }}>
+          {isBookings && (
+            <Text style={styles.hint}>
+              {mode.kind === "edit"
+                ? "Who this booking is for — or nobody, to leave it unassigned."
+                : "Pick everyone going (one booking each, same time and stage) — or nobody for an unassigned booking."}
+            </Text>
+          )}
+          {staff.length === 0 && <Text style={styles.hint}>No active staff found.</Text>}
+          {staff.map((s) => {
+            const active = technicianIds.includes(s.id);
+            return (
+              <TouchableOpacity
+                key={s.id}
+                style={[styles.row, active && styles.rowActive]}
+                onPress={() => toggleTechnician(s.id)}
+              >
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.rowText}>{s.full_name}</Text>
+                  <Text style={styles.rowSub}>{s.role}</Text>
+                </View>
+                {active && <Ionicons name="checkmark" size={18} color={colors.blue600} />}
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+      )}
+
+      {step === "time" && (
+        <View style={{ gap: 14 }}>
+          <View style={{ flexDirection: "row", gap: 10 }}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.label}>Start date</Text>
+              <TouchableOpacity style={styles.selector} onPress={() => setShowDatePicker("start")}>
+                <Text style={styles.selectorText}>{shortDayLabel(startDateKey)}</Text>
+                <Ionicons name="calendar-outline" size={16} color={colors.slate400} />
+              </TouchableOpacity>
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.label}>End date</Text>
+              <TouchableOpacity style={styles.selector} onPress={() => setShowDatePicker("end")}>
+                <Text style={styles.selectorText}>{shortDayLabel(endDateKey)}</Text>
+                <Ionicons name="calendar-outline" size={16} color={colors.slate400} />
+              </TouchableOpacity>
+            </View>
+          </View>
+          {showDatePicker && (
+            <DateTimePicker
+              value={keyToPickerDate(showDatePicker === "start" ? startDateKey : endDateKey)}
+              minimumDate={showDatePicker === "end" ? keyToPickerDate(startDateKey) : undefined}
+              mode="date"
+              onChange={(e, d) => onDateChange(showDatePicker, e, d)}
+            />
+          )}
+          {endDateKey > startDateKey && (
+            <Text style={styles.hint}>Same hours on each weekday — Saturdays and Sundays between the dates are skipped.</Text>
+          )}
+
+          <TouchableOpacity style={styles.allDayRow} onPress={toggleAllDay}>
+            <Ionicons name={allDay ? "checkbox" : "square-outline"} size={20} color={allDay ? colors.blue600 : colors.slate400} />
+            <Text style={styles.allDayText}>
+              All day ({friendlyTime(DEFAULT_SHIFT_START_TIME)} – {friendlyTime(DEFAULT_SHIFT_END_TIME)})
+            </Text>
+          </TouchableOpacity>
+
+          {Object.entries(conflictsByTechnician).map(([staffId, n]) => {
+            const name = staff.find((s) => s.id === staffId)?.full_name ?? "This technician";
+            return (
+              <Text key={staffId} style={styles.warnHint}>
+                {name} already has {n} job{n === 1 ? "" : "s"} on {shortDayLabel(startDateKey)} — set a custom time block below.
+              </Text>
+            );
+          })}
+
+          {!allDay && (
+            <View style={{ flexDirection: "row", gap: 10 }}>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.label}>Start</Text>
+                <TouchableOpacity style={styles.selector} onPress={() => setShowTimePicker("start")}>
+                  <Text style={styles.selectorText}>{friendlyTime(startTime)}</Text>
+                </TouchableOpacity>
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.label}>End</Text>
+                <TouchableOpacity style={styles.selector} onPress={() => setShowTimePicker("end")}>
+                  <Text style={styles.selectorText}>{friendlyTime(endTime)}</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          )}
+          {!allDay && showTimePicker && (
+            <DateTimePicker
+              value={timeAsDate(showTimePicker === "start" ? startTime : endTime)}
+              mode="time"
+              onChange={(e, d) => onTimeChange(showTimePicker, e, d)}
+            />
+          )}
+
+          {windowError ? (
+            <Text style={styles.errorText}>{windowError}</Text>
+          ) : summary ? (
+            <Text style={styles.summaryText}>{summary}</Text>
+          ) : null}
+        </View>
+      )}
+
+      {step === "stage" && (
+        <View style={{ gap: 6 }}>
+          <Text style={styles.label}>Cost centre (optional)</Text>
+          <TouchableOpacity
+            style={[styles.row, costCenterId === null && styles.rowActive]}
+            onPress={() => setCostCenterId(null)}
+          >
+            <Text style={styles.rowText}>No stage selected</Text>
+            {costCenterId === null && <Ionicons name="checkmark" size={18} color={colors.blue600} />}
+          </TouchableOpacity>
+          {costCenters.map((cc) => {
+            const active = costCenterId === cc.id;
+            return (
+              <TouchableOpacity
+                key={cc.id}
+                style={[styles.row, active && styles.rowActive]}
+                onPress={() => setCostCenterId(cc.id)}
+              >
+                <Text style={styles.rowText}>
+                  {cc.name}{cc.po_number ? ` (PO #${cc.po_number})` : ""}
+                </Text>
+                {active && <Ionicons name="checkmark" size={18} color={colors.blue600} />}
+              </TouchableOpacity>
+            );
+          })}
+          <Text style={styles.hint}>
+            Time logged on this job defaults to this stage at clock-in — the technician can still change it per entry.
+          </Text>
+        </View>
+      )}
+
+      {step === "notes" && (
+        <View style={{ gap: 6 }}>
+          <Text style={styles.label}>Notes for the technician (optional)</Text>
+          <TextInput
+            style={[styles.input, styles.inputMultiline]}
+            value={noteText}
+            onChangeText={setNoteText}
+            placeholder="What should they achieve on this job today?"
+            placeholderTextColor={colors.slate400}
+            multiline
+          />
+          <Text style={styles.hint}>
+            Posted to this job&apos;s Notes tab, visible to everyone assigned.
+          </Text>
+        </View>
+      )}
+
+      {step === "confirm" && (
+        <View style={styles.confirmBox}>
+          <Text style={styles.confirmTech}>{selectedTechnicians.map((t) => t.full_name).join(", ") || "Unassigned"}</Text>
+          <Text style={styles.confirmLine}>
+            {summary}
+            {allDay ? " · All day" : ""}
+          </Text>
+          {hasCostCenters && (
+            <Text style={styles.confirmLine}>
+              Stage: {costCenters.find((cc) => cc.id === costCenterId)?.name ?? "None"}
+            </Text>
+          )}
+          <Text style={styles.hint}>
+            This sets the planned schedule block only — worked hours are still captured separately via clock-on/clock-off.
+          </Text>
+          <Text style={styles.hint}>{SAVED_ON_PHONE_HINT}</Text>
+        </View>
+      )}
+
+      </>
+      )}
+    </KeyboardSheet>
   );
 }
 
 const styles = StyleSheet.create({
-  input: { borderWidth: 1, borderColor: colors.border, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10, fontSize: 14, backgroundColor: colors.bg, color: colors.slate900 },
+  input: { borderWidth: 1, borderColor: colors.border, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10, fontSize: KEYBOARD_SHEET_INPUT_FONT_SIZE, backgroundColor: colors.bg, color: colors.slate900 },
   inputMultiline: { minHeight: 90, textAlignVertical: "top" },
-  overlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.4)", justifyContent: "flex-end" },
-  sheetScroll: { maxHeight: "88%", flexGrow: 0 },
-  sheet: { backgroundColor: colors.card, borderTopLeftRadius: 16, borderTopRightRadius: 16, padding: 16, paddingBottom: 28 },
-  title: { fontSize: 16, fontWeight: "800", color: colors.slate900, marginBottom: 12 },
+  closedBox: { padding: 12, borderRadius: 10, backgroundColor: colors.yellow100 },
+  closedText: { fontSize: 14, color: colors.yellow700, fontWeight: "600" },
   hint: { fontSize: 12, color: colors.slate400, marginTop: 4 },
   warnHint: { fontSize: 12, color: colors.yellow700 },
   errorText: { fontSize: 12, color: colors.red600 },
@@ -706,7 +766,7 @@ const styles = StyleSheet.create({
   confirmBox: { borderWidth: 1, borderColor: colors.border, borderRadius: 10, padding: 14, gap: 4 },
   confirmTech: { fontSize: 15, fontWeight: "700", color: colors.slate900 },
   confirmLine: { fontSize: 13, color: colors.slate500 },
-  actions: { flexDirection: "row", gap: 10, marginTop: 18 },
+  actions: { flexDirection: "row", gap: 10 },
   cancelBtn: { flex: 1, paddingVertical: 12, borderRadius: 10, backgroundColor: colors.bg, alignItems: "center", borderWidth: 1, borderColor: colors.border },
   cancelText: { color: colors.slate700, fontWeight: "600", fontSize: 14 },
   doneBtn: { flex: 1, paddingVertical: 12, borderRadius: 10, backgroundColor: colors.blue600, alignItems: "center" },

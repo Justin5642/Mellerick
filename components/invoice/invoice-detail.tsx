@@ -9,13 +9,12 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import {
   Dialog,
-  DialogContent,
   DialogHeader,
   DialogTitle,
   DialogDescription,
-  DialogFooter,
   DialogTrigger,
 } from "@/components/ui/dialog";
+import { KeyboardSafeDialogContent } from "@/components/ui/keyboard-safe-dialog";
 import { ArrowLeft, Send, CheckCircle2, ExternalLink, Pencil, FileDown, Trash2 } from "lucide-react";
 import Link from "next/link";
 import { formatDate } from "@/lib/date";
@@ -119,11 +118,22 @@ export function InvoiceDetail({ invoice, jobSite, xeroConnected, payments }: Pro
                 </Button>
               }
             />
-            <DialogContent>
-              <DialogHeader>
-                <DialogTitle>Send Invoice {formatInvoiceNumber(invoice.invoice_number)}</DialogTitle>
-                <DialogDescription>Emails a PDF copy of this invoice to the customer.</DialogDescription>
-              </DialogHeader>
+            <KeyboardSafeDialogContent
+              header={
+                <DialogHeader>
+                  <DialogTitle>Send Invoice {formatInvoiceNumber(invoice.invoice_number)}</DialogTitle>
+                  <DialogDescription>Emails a PDF copy of this invoice to the customer.</DialogDescription>
+                </DialogHeader>
+              }
+              footer={
+                <div className="flex justify-end">
+                  <Button onClick={sendInvoice} disabled={sending} className="gap-2 bg-blue-600 hover:bg-blue-700">
+                    <Send className="w-4 h-4" />
+                    {sending ? "Sending..." : "Send Email"}
+                  </Button>
+                </div>
+              }
+            >
               <div className="space-y-3">
                 <div className="space-y-2">
                   <Label>Send to</Label>
@@ -134,13 +144,7 @@ export function InvoiceDetail({ invoice, jobSite, xeroConnected, payments }: Pro
                   <Textarea value={sendMessage} onChange={(e) => setSendMessage(e.target.value)} rows={3} placeholder="Add a personal note..." />
                 </div>
               </div>
-              <DialogFooter>
-                <Button onClick={sendInvoice} disabled={sending} className="gap-2 bg-blue-600 hover:bg-blue-700">
-                  <Send className="w-4 h-4" />
-                  {sending ? "Sending..." : "Send Email"}
-                </Button>
-              </DialogFooter>
-            </DialogContent>
+            </KeyboardSafeDialogContent>
           </Dialog>
 
           {pushed && (

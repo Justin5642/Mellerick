@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import { View, Text, Modal, TextInput, TouchableOpacity, StyleSheet, ScrollView, Alert } from "react-native";
+import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert } from "react-native";
+import { KeyboardSheet, KEYBOARD_SHEET_INPUT_FONT_SIZE } from "../KeyboardSheet";
 import { colors } from "../../lib/theme";
 import { useCustomers } from "../../lib/data/hooks/useCustomers";
 
@@ -99,32 +100,31 @@ export function CustomerFormSheet({
   const set = (k: keyof Draft) => (v: string) => setDraft((d) => ({ ...d, [k]: v }));
 
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={() => !saving && onClose()}>
-      <View style={styles.overlay}>
-        <View style={styles.sheet}>
-          <Text style={styles.title}>{existing ? "Edit customer" : "New customer"}</Text>
-          <ScrollView automaticallyAdjustKeyboardInsets keyboardDismissMode="interactive" keyboardShouldPersistTaps="handled">
-            <Field label="Name" value={draft.name} onChange={set("name")} />
-            <Field label="Company" value={draft.company} onChange={set("company")} />
-            <Field label="Email" value={draft.email} onChange={set("email")} keyboardType="email-address" />
-            <View style={styles.twoCol}>
-              <View style={{ flex: 1 }}><Field label="Phone" value={draft.phone} onChange={set("phone")} keyboardType="phone-pad" /></View>
-              <View style={{ flex: 1 }}><Field label="Mobile" value={draft.mobile} onChange={set("mobile")} keyboardType="phone-pad" /></View>
-            </View>
-            <Field label="ABN" value={draft.abn} onChange={set("abn")} />
-            <Field label="Notes" value={draft.notes} onChange={set("notes")} multiline />
-          </ScrollView>
-          <View style={styles.actions}>
-            <TouchableOpacity style={styles.cancel} onPress={onClose} disabled={saving}>
-              <Text style={styles.cancelText}>Cancel</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.saveBtn} onPress={save} disabled={saving}>
-              <Text style={styles.saveText}>{saving ? "…" : "Save"}</Text>
-            </TouchableOpacity>
-          </View>
+    <KeyboardSheet
+      visible={visible}
+      onRequestClose={() => !saving && onClose()}
+      title={<Text style={styles.title}>{existing ? "Edit customer" : "New customer"}</Text>}
+      footer={
+        <View style={styles.actions}>
+          <TouchableOpacity style={styles.cancel} onPress={onClose} disabled={saving}>
+            <Text style={styles.cancelText}>Cancel</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.saveBtn} onPress={save} disabled={saving}>
+            <Text style={styles.saveText}>{saving ? "…" : "Save"}</Text>
+          </TouchableOpacity>
         </View>
+      }
+    >
+      <Field label="Name" value={draft.name} onChange={set("name")} />
+      <Field label="Company" value={draft.company} onChange={set("company")} />
+      <Field label="Email" value={draft.email} onChange={set("email")} keyboardType="email-address" />
+      <View style={styles.twoCol}>
+        <View style={{ flex: 1 }}><Field label="Phone" value={draft.phone} onChange={set("phone")} keyboardType="phone-pad" /></View>
+        <View style={{ flex: 1 }}><Field label="Mobile" value={draft.mobile} onChange={set("mobile")} keyboardType="phone-pad" /></View>
       </View>
-    </Modal>
+      <Field label="ABN" value={draft.abn} onChange={set("abn")} />
+      <Field label="Notes" value={draft.notes} onChange={set("notes")} multiline />
+    </KeyboardSheet>
   );
 }
 
@@ -146,15 +146,13 @@ function Field({ label, value, onChange, keyboardType, multiline }: { label: str
 }
 
 const styles = StyleSheet.create({
-  overlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.4)", justifyContent: "flex-end" },
-  sheet: { backgroundColor: colors.card, borderTopLeftRadius: 16, borderTopRightRadius: 16, padding: 16, paddingBottom: 28, maxHeight: "88%" },
   title: { fontSize: 16, fontWeight: "800", color: colors.slate900, marginBottom: 12 },
   field: { marginBottom: 12 },
   fieldLabel: { fontSize: 12, fontWeight: "700", color: colors.slate500, textTransform: "uppercase", marginBottom: 6 },
-  input: { borderWidth: 1, borderColor: colors.border, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10, fontSize: 14, backgroundColor: colors.bg, color: colors.slate900 },
+  input: { borderWidth: 1, borderColor: colors.border, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10, fontSize: KEYBOARD_SHEET_INPUT_FONT_SIZE, backgroundColor: colors.bg, color: colors.slate900 },
   multiline: { minHeight: 64, textAlignVertical: "top" },
   twoCol: { flexDirection: "row", gap: 12 },
-  actions: { flexDirection: "row", gap: 10, marginTop: 12 },
+  actions: { flexDirection: "row", gap: 10 },
   cancel: { flex: 1, paddingVertical: 12, borderRadius: 10, backgroundColor: colors.bg, alignItems: "center", borderWidth: 1, borderColor: colors.border },
   cancelText: { color: colors.slate700, fontWeight: "600", fontSize: 14 },
   saveBtn: { flex: 1, paddingVertical: 12, borderRadius: 10, backgroundColor: colors.blue600, alignItems: "center" },
