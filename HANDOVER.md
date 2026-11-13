@@ -1224,6 +1224,13 @@ are written and live outside the repo at
 `OneDrive - BAS & More/DevOps/Mellerick Plumbing/{Android,Apple}/`, as PDFs and
 markdown.
 
+**Distribution is private (Justin, 13 Nov 2026).** Staff-only app: Apple
+**Unlisted** distribution (request form after review approval) and Google
+**Managed Google Play** private app for the Mellerick organisation — no public
+listing on either store. iPhone only: `ios.supportsTablet` is `false`, so no
+iPad screenshots are needed. Apple refuses dropping iPad support on an app that
+has ever been *released* with it; this was turned off before the first release.
+
 **Signing key** — nothing to prepare. Let **EAS manage credentials**; the upload
 keystore is created on the first production build. The alternative, a local
 `.keystore`, means losing the file makes the app permanently un-updatable on Play.
