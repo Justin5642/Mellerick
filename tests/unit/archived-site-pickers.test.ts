@@ -95,8 +95,10 @@ describe("archived sites are not offered in site pickers", () => {
     // mobile/app/jobs/new.tsx reads sites through getCustomer() (which must
     // return archived sites too, for the customer screen), so the filter lives
     // at the call site.
+    // Every read of getCustomer()'s site list is filtered. (Other setSites
+    // calls clear the list or add a site just created from the screen.)
     const src = readFileSync(join(ROOT, "mobile/app/jobs/new.tsx"), "utf8");
-    const uses = src.match(/setSites\([^;]*\);/g) ?? [];
+    const uses = src.match(/detail\??\.sites[^;]*;/g) ?? [];
     expect(uses.length).toBeGreaterThan(0);
     for (const u of uses) expect(u).toMatch(/is_active/);
   });

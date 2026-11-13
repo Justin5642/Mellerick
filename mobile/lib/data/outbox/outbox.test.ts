@@ -404,6 +404,31 @@ describe("Outbox — offline delete/insert ordering + recovery", () => {
     expect(ids.has("R1")).toBe(false); // done → not pending
   });
 
+  it("pendingInsertOpId finds a row's outstanding insert, and nothing once it is done", async () => {
+    const box = new Outbox(new InMemoryOutboxStore(), mockClock());
+    await box.enqueue(write("cust-op", { rowId: "C1", table: "customers", aggregate: "customer" }));
+    await box.enqueue(write("upd-op", { rowId: "C2", table: "customers", aggregate: "customer", op: "update" }));
+    expect(await box.pendingInsertOpId("customers", "C1")).toBe("cust-op");
+    expect(await box.pendingInsertOpId("sites", "C1")).toBeNull(); // other table
+    expect(await box.pendingInsertOpId("customers", "C2")).toBeNull(); // update, not insert
+    await box.markDone("cust-op");
+    expect(await box.pendingInsertOpId("customers", "C1")).toBeNull();
+  });
+
+  it("a site queued after its customer's backed-off insert does not overtake it", async () => {
+    const clock = mockClock();
+    const store = new InMemoryOutboxStore();
+    const box = new Outbox(store, clock);
+    await box.enqueue(write("cust-op", { rowId: "C1", table: "customers", aggregate: "customer", createdAt: 1 }));
+    const after = await box.pendingInsertOpId("customers", "C1");
+    await box.enqueue(write("site-op", { rowId: "S1", table: "sites", aggregate: "site", createdAt: 2, dependsOn: after }));
+    // The customer insert fails (backs off); the site must still wait.
+    await box.markFailed((await store.all()).find((o) => o.id === "cust-op")!, "network");
+    expect((await box.nextReady())?.id).not.toBe("site-op");
+    await box.markDone("cust-op");
+    expect((await box.nextReady())?.id).toBe("site-op");
+  });
+
   it("writeStatus reports a row's sync outcome (settled / pending / failed)", async () => {
     const store = new InMemoryOutboxStore();
     const box = new Outbox(store, mockClock());

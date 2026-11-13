@@ -11,7 +11,14 @@ function seqIds(): IdGen {
 const fixedTime = (ms = 1_000): TimeSource => ({ nowMs: () => ms, nowIso: () => "2026-07-26T00:00:00.000Z" });
 function captureOutbox(): { outbox: Outbox; ops: Operation[] } {
   const ops: Operation[] = [];
-  const outbox = { enqueue: jest.fn(async (op: Operation) => void ops.push(op)) } as unknown as Outbox;
+  const outbox = {
+    enqueue: jest.fn(async (op: Operation) => void ops.push(op)),
+    // Every captured op is still queued (nothing drains here).
+    pendingInsertOpId: jest.fn(
+      async (table: string, rowId: string) =>
+        ops.find((o) => o.kind === "write" && o.op === "insert" && o.table === table && o.rowId === rowId)?.id ?? null
+    ),
+  } as unknown as Outbox;
   return { outbox, ops };
 }
 const writes = (ops: Operation[]) => ops.filter((o): o is WriteOperation => o.kind === "write");
@@ -110,6 +117,27 @@ describe("JobsRepository.createJob", () => {
     expect(cal.coalesceKey).toBe("sync-calendar:id-1");
     expect(cal.dependsOn).toBe(insert.id);
     expect(cal.payload).toEqual({ jobId: "id-1" });
+  });
+
+  it("has no dependency when the customer and site are already on the server", async () => {
+    const { outbox, ops } = captureOutbox();
+    await makeRepo(outbox).createJob({ customerId: "c1", siteId: "s1", title: "T" });
+    expect(writes(ops)[0].dependsOn).toBeUndefined();
+  });
+
+  it("waits for a site still queued on the phone", async () => {
+    const { outbox, ops } = captureOutbox();
+    const queuedSite = { kind: "write", id: "op-site", rowId: "s-new", op: "insert", table: "sites", status: "pending" } as WriteOperation;
+    ops.push(queuedSite);
+    await makeRepo(outbox).createJob({ customerId: "c1", siteId: "s-new", title: "T" });
+    expect(writes(ops)[1]).toMatchObject({ table: "jobs", dependsOn: "op-site" });
+  });
+
+  it("waits for a customer still queued on the phone when there is no queued site", async () => {
+    const { outbox, ops } = captureOutbox();
+    ops.push({ kind: "write", id: "op-cust", rowId: "c-new", op: "insert", table: "customers", status: "pending" } as WriteOperation);
+    await makeRepo(outbox).createJob({ customerId: "c-new", title: "T" });
+    expect(writes(ops)[1]).toMatchObject({ table: "jobs", dependsOn: "op-cust" });
   });
 });
 
