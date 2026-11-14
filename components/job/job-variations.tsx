@@ -6,10 +6,11 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { FileDropzone } from "@/components/ui/file-dropzone";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Plus, Trash2, Zap, Clock3, CheckCircle2, XCircle, ImageIcon, Paperclip, Upload } from "lucide-react";
+import { Plus, Trash2, Zap, Clock3, CheckCircle2, XCircle, ImageIcon, Paperclip } from "lucide-react";
 import { formatDate } from "@/lib/date";
 import { loadTechVariations } from "@/lib/variations-public";
 import { isCustomVariation, variationQtyText } from "@/lib/variation-qty";
@@ -84,7 +85,6 @@ export function JobVariations({
   const [description, setDescription] = useState("");
   const [pricing, setPricing] = useState<Record<string, { rate: string; quantity: string; notes: string }>>({});
   const [attachmentFile, setAttachmentFile] = useState<File | null>(null);
-  const [attachmentDragActive, setAttachmentDragActive] = useState(false);
   const [viewingId, setViewingId] = useState<string | null>(null);
   const highlightRef = useRef<HTMLDivElement | null>(null);
 
@@ -427,47 +427,7 @@ export function JobVariations({
               <div className="space-y-1.5">
                 <Label>Supporting file (optional)</Label>
                 <p className="text-xs text-slate-400">Attach a supplier quote/invoice PDF or photo backing this variation</p>
-                <div
-                  className={`flex flex-col items-center justify-center gap-2 rounded-md border-2 border-dashed p-4 text-center transition-colors ${
-                    attachmentDragActive ? "border-blue-400 bg-blue-50/40 text-blue-500" : "border-slate-200 text-slate-400"
-                  }`}
-                  onDragOver={(e) => { e.preventDefault(); setAttachmentDragActive(true); }}
-                  onDragLeave={(e) => { e.preventDefault(); setAttachmentDragActive(false); }}
-                  onDrop={(e) => {
-                    e.preventDefault();
-                    setAttachmentDragActive(false);
-                    const file = e.dataTransfer.files?.[0];
-                    if (file) setAttachmentFile(file);
-                  }}
-                >
-                  {attachmentFile ? (
-                    <div className="flex items-center gap-2">
-                      <Paperclip className="w-3.5 h-3.5" />
-                      <p className="text-sm text-slate-700">{attachmentFile.name}</p>
-                      <button type="button" onClick={() => setAttachmentFile(null)} className="text-slate-300 hover:text-red-400">
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-                  ) : (
-                    <>
-                      <Upload className="w-5 h-5 opacity-50" />
-                      <p className="text-xs">{attachmentDragActive ? "Drop to attach" : "Drag and drop a file here, or"}</p>
-                    </>
-                  )}
-                  <label className="text-xs font-medium text-blue-600 hover:text-blue-700 cursor-pointer">
-                    {attachmentFile ? "Replace file" : "Browse files"}
-                    <input
-                      type="file"
-                      accept=".pdf,.png,.jpg,.jpeg"
-                      className="hidden"
-                      onChange={(e) => {
-                        const file = e.target.files?.[0];
-                        if (file) setAttachmentFile(file);
-                        e.target.value = "";
-                      }}
-                    />
-                  </label>
-                </div>
+                <FileDropzone file={attachmentFile} onFileChange={setAttachmentFile} accept=".pdf,.png,.jpg,.jpeg" hint="PDF, PNG or JPG" />
               </div>
               <div className="flex justify-end gap-2">
                 <Button type="button" variant="outline" onClick={() => setShowForm(false)}>Cancel</Button>

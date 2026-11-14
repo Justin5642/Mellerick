@@ -596,6 +596,11 @@ function bookedNames(bookings: readonly BoardBooking[], staffById: Map<string, S
   return names.join(", ");
 }
 
+// A name cell in the Week grid: pinned to the left edge while the days scroll
+// under it, with a soft edge so it reads as floating above them.
+const PINNED_NAME =
+  "bg-white p-2 flex items-center gap-2 min-w-0 sticky left-0 z-10 shadow-[4px_0_6px_-4px_rgba(0,0,0,0.12)]";
+
 export function TeamScheduleView({
   jobs,
   bookings: initialBookings,
@@ -1319,14 +1324,20 @@ export function TeamScheduleView({
           </DndContext>
         ) : (
           <DndContext sensors={sensors} collisionDetection={closestCenter} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
-            <div className="overflow-x-auto pb-2" data-board-scroller>
+            {/* Names stay pinned on the left as you scroll across the days, and
+                the days stay pinned on top as you scroll down the team — the
+                way the phone's schedule grid works (Justin, 15 Nov 2026). The
+                scroller scrolls both ways inside a capped height so both edges
+                have something to stick to; the grid itself must NOT clip
+                (overflow-hidden), or sticky cells stop sticking. */}
+            <div className="overflow-auto pb-2 max-h-[calc(100vh_-_13rem)] rounded-xl border border-slate-200" data-board-scroller>
               <div
-                className="grid min-w-[960px] rounded-xl border border-slate-200 bg-slate-200 gap-px overflow-hidden"
+                className="grid min-w-[960px] bg-slate-200 gap-px"
                 style={{ gridTemplateColumns: "160px repeat(7, minmax(120px, 1fr))" }}
               >
-                <div className="bg-white p-2" />
+                <div className="bg-white p-2 sticky top-0 left-0 z-30" />
                 {weekKeys.map((key) => (
-                  <div key={key} className={cn("bg-white p-2 text-center", key === todayKey && "bg-blue-50")}>
+                  <div key={key} className={cn("bg-white p-2 text-center sticky top-0 z-20 shadow-[0_1px_0_0_rgb(226_232_240)]", key === todayKey && "bg-blue-50")}>
                     <p className="text-xs font-semibold text-slate-900">
                       {formatDate(anchorForDateKey(key), { weekday: "short" })}
                     </p>
@@ -1336,7 +1347,7 @@ export function TeamScheduleView({
                   </div>
                 ))}
 
-                <div className="bg-white p-2 flex items-center gap-2 min-w-0">
+                <div className={PINNED_NAME}>
                   <div className="w-6 h-6 rounded-full bg-amber-100 flex items-center justify-center flex-shrink-0">
                     <span className="text-[10px] font-bold text-amber-700">!</span>
                   </div>
@@ -1366,7 +1377,7 @@ export function TeamScheduleView({
                   const weekHours = periodHours.get(member.id) ?? 0;
                   return (
                     <Fragment key={member.id}>
-                      <div className="bg-white p-2 flex items-center gap-2 min-w-0">
+                      <div className={PINNED_NAME}>
                         <Avatar className="w-6 h-6 flex-shrink-0">
                           <AvatarFallback className={`text-white text-[10px] ${accentFor(member.id)}`}>
                             {initials(member.full_name)}
