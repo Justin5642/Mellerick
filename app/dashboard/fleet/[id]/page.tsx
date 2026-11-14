@@ -4,6 +4,8 @@ import { getViewer } from "@/lib/auth/viewer";
 import { createClient } from "@/lib/supabase/server";
 import { notFound } from "next/navigation";
 import { EquipmentDetailClient } from "@/components/fleet/equipment-detail-client";
+import { attachEffectiveRates } from "@/lib/fleet-rates";
+import { dateKeyInBusinessTZ } from "@/lib/date";
 
 export default async function EquipmentDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -27,6 +29,11 @@ export default async function EquipmentDetailPage({ params }: { params: Promise<
 
   if (!equipment) notFound();
 
+  // The rate job costing uses for this machine: actual over the last 12
+  // months once there is enough logged, else the estimate (lib/fleet-costs.ts).
+  const today = dateKeyInBusinessTZ(new Date());
+  const [withRate] = await attachEffectiveRates(supabase as any, [equipment as any], today);
+
   let isAdmin = false;
   const user = viewer?.user;
   if (user) {
@@ -35,7 +42,8 @@ export default async function EquipmentDetailPage({ params }: { params: Promise<
 
   return (
     <EquipmentDetailClient
-      equipment={equipment}
+      equipment={withRate}
+      today={today}
       currentUserId={user!.id}
       isAdmin={isAdmin}
       documents={documents ?? []}
