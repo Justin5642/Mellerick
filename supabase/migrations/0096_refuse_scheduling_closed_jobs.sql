@@ -1,10 +1,8 @@
 -- ============================================================================
 -- Completed and cancelled jobs cannot be scheduled.
 --
--- STATUS: DRAFT — NOT APPLIED. Written 13 Nov 2026; apply in the SQL editor,
--- then run supabase/tests/0096_refuse_scheduling_closed_jobs_test.sql. The
--- web and phone already refuse in their own UI and read this refusal when it
--- arrives, so merging before applying changes nothing in the database.
+-- STATUS: ✅ APPLIED IN PRODUCTION (2026-11-14, via SQL editor). Gate test
+-- supabase/tests/0096_refuse_scheduling_closed_jobs_test.sql passed.
 --
 -- WHY (bug report, Nov 2026): the office could "schedule" a job that was
 -- already completed. The save landed and the app said so, but the schedule
