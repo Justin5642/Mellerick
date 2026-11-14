@@ -1,8 +1,8 @@
 -- ============================================================================
 -- Each phone reports whether its automatic clock in/out can actually work.
 --
--- STATUS: DRAFT — NOT APPLIED. Gate test:
--- supabase/tests/0102_auto_clock_status_test.sql
+-- STATUS: ✅ APPLIED IN PRODUCTION (2026-11-15, via SQL editor). Gate test
+-- supabase/tests/0102_auto_clock_status_test.sql passed.
 --
 -- WHY (auto clock bug, 15 Nov 2026): auto clock-in hadn't fired since 10 Nov.
 -- One cause was in the app (fixed in PR 143). The other is on the phones: sites

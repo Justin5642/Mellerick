@@ -640,8 +640,7 @@ export function LocationTrackingProvider({ children }: { children: ReactNode }) 
   }
 
 
-  // Tell the office whether auto clock can work on this phone (0102 — draft, not
-  // applied yet). On every change, and every few hours otherwise; best-effort,
+  // Tell the office whether auto clock can work on this phone (0102). On every change, and every few hours otherwise; best-effort,
   // never in the way of clocking — see lib/autoClockStatusReport.ts.
   const lastReportRef = useRef<{ report: AutoClockReport; atMs: number } | null>(null);
   useEffect(() => {

@@ -26,7 +26,7 @@ interface Props {
   role: string | null;
   staff: any[];
   vehicles: any[];
-  /** Each phone's auto clock status by staff id (0102 — draft, not applied yet); null = not available. */
+  /** Each phone's auto clock status by staff id (0102); null = not available. */
   autoClockStatus?: Record<string, AutoClockStatusRow> | null;
   fetchError: string | null;
 }

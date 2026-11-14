@@ -1,4 +1,4 @@
-// What a phone's auto clock status (migration 0102 — draft, not applied yet)
+// What a phone's auto clock status (migration 0102)
 // means, in words the office can act on. Shown on the Staff page next to each
 // person's Auto clock switch.
 

@@ -17,8 +17,8 @@ export default async function StaffPage() {
     getViewer(),
     supabase.from("profiles").select("id, full_name, email, phone, role, is_active, auto_clock").order("full_name"),
     supabase.from("equipment").select("id, name, assigned_to").not("assigned_to", "is", null),
-    // What each phone says about its auto clock (0102 — draft, not applied
-    // yet). Missing table or any error: the column just isn't shown.
+    // What each phone says about its auto clock (0102). Any error: the status
+    // line just isn't shown.
     supabase.from("auto_clock_status").select("*"),
   ]);
   const autoClockStatus = statusRes.error

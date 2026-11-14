@@ -3,7 +3,7 @@ import Constants from "expo-constants";
 import { supabase } from "./supabase";
 
 // Tells the office whether this phone's automatic clock in/out can actually
-// work (migration 0102 — draft, not applied yet; shown on the web Staff page).
+// work (migration 0102; shown on the web Staff page).
 //
 // Auto clock bug, 15 Nov 2026: sites that were being watched never fired and
 // clock-outs went missing, and nobody could see why — the phone knew ("Always"
