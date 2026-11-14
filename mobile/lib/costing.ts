@@ -78,13 +78,14 @@ export interface JobTimeEntry {
   hours: number | null;
 }
 export type StaffCostProfile = StaffCostInputs & { staff_id: string };
-export type EquipmentOption = EquipmentCostInputs & { id: string; assigned_to?: string | null };
+export type EquipmentOption = EquipmentCostInputs & { id: string; assigned_to?: string | null; day_rate?: number | string | null };
 
 export interface JobProfitabilityInput {
   timeEntries: JobTimeEntry[];
   staffCostProfiles: StaffCostProfile[];
   expenses: { amount: number | null }[];
-  equipmentUsage: { equipment_id: string; hours: number }[];
+  /** days: tool days (migration 0100 — draft, not applied yet), costed at the item's day rate. */
+  equipmentUsage: { equipment_id: string; hours: number; days?: number | null }[];
   equipmentOptions: EquipmentOption[];
   invoices: { subtotal: number | null; status: string }[];
   jobItems: { total: number | null }[];
@@ -144,7 +145,10 @@ export function computeJobProfitability(input: JobProfitabilityInput): JobProfit
   const excludedEquipmentUsageCount = input.equipmentUsage.length - unassignedEquipmentUsage.length;
   const equipmentCost = unassignedEquipmentUsage.reduce((s, u) => {
     const eq = equipmentById.get(u.equipment_id);
-    return s + Number(u.hours) * (eq ? computeEquipmentCost(eq).costPerHour : 0);
+    if (!eq) return s;
+    // Hours at cost per hour, plus tool days at the day rate (0100 — draft, not applied yet) — the web's
+    // rule (lib/fleet-costs.ts usageCost).
+    return s + Number(u.hours) * computeEquipmentCost(eq).costPerHour + Number(u.days ?? 0) * Number(eq.day_rate ?? 0);
   }, 0);
 
   const totalCost = labourCost + materialsCost + equipmentCost;

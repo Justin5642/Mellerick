@@ -1,12 +1,18 @@
 import { useCallback, useEffect, useState } from "react";
 import { View, Text, StyleSheet, TouchableOpacity, Alert, ActivityIndicator } from "react-native";
 import { colors } from "../../lib/theme";
-import { defaultPlantLine, loadPlant, logPlant, type PlantState } from "../../lib/plantUsage";
+import { dayRatedTools, defaultPlantLine, hourlyPlant, loadPlant, logPlant, logToolDay, removeToolDay, type PlantState } from "../../lib/plantUsage";
 
 // Truck & plant on the Time tab (Stage 7, 31 Oct 2026): the driver logs a
 // cartage run — hours and/or loads — against the job's cost centre, the
 // Transport line by default for a vehicle. Big steppers, no typing: the crew
 // are often in gloves. Names only; no costs on the phone.
+//
+// Tools used today (migration 0100 — draft, not applied yet): the small plant & equipment list — demo
+// saw, compactors, core drill... One tap ticks a tool as used on this job
+// today (one full day at its day rate, worked out on the server); tapping your
+// own tick again removes it. Hired-in tools aren't here: their hire invoice
+// goes on the job instead (Justin, 14 Nov 2026).
 
 function Stepper({ label, value, step, onChange }: { label: string; value: number; step: number; onChange: (v: number) => void }) {
   return (
@@ -34,6 +40,7 @@ export function JobPlantUsage({ jobId }: { jobId: string }) {
   const [hours, setHours] = useState(0);
   const [loads, setLoads] = useState(0);
   const [saving, setSaving] = useState(false);
+  const [toolBusy, setToolBusy] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -73,6 +80,27 @@ export function JobPlantUsage({ jobId }: { jobId: string }) {
     }
   }
 
+  async function toggleTool(equipmentId: string, name: string) {
+    if (toolBusy) return;
+    const tick = state?.toolsToday?.find((t) => t.equipmentId === equipmentId);
+    if (tick && !tick.mine) {
+      return Alert.alert(name, `Already ticked today${tick.loggedBy ? ` by ${tick.loggedBy}` : ""}. It only counts once per day.`);
+    }
+    setToolBusy(equipmentId);
+    try {
+      if (tick) await removeToolDay(jobId, tick.id);
+      else await logToolDay(jobId, equipmentId);
+      await load();
+    } catch (e: any) {
+      Alert.alert("Not saved", e?.message ?? "Try again.");
+    } finally {
+      setToolBusy(null);
+    }
+  }
+
+  const tools = state ? dayRatedTools(state.equipment) : [];
+  const ticked = new Set((state?.toolsToday ?? []).map((t) => t.equipmentId));
+
   const lineName = (id: string | null) => (id ? state?.lines.find((l) => l.id === id)?.name ?? "cost centre" : "Not tagged");
 
   return (
@@ -85,6 +113,33 @@ export function JobPlantUsage({ jobId }: { jobId: string }) {
       )}
       {!state && !error && <ActivityIndicator color={colors.blue600} />}
 
+      {state && tools.length > 0 && (
+        <View style={{ gap: 8 }}>
+          <Text style={styles.label}>Tools used today</Text>
+          <View style={styles.chipRow}>
+            {tools.map((t) => {
+              const on = ticked.has(t.id);
+              return (
+                <TouchableOpacity
+                  key={t.id}
+                  style={[styles.toolChip, on && styles.toolChipOn]}
+                  onPress={() => toggleTool(t.id, t.name)}
+                  disabled={toolBusy !== null}
+                  accessibilityRole="checkbox"
+                  accessibilityState={{ checked: on, busy: toolBusy === t.id }}
+                  accessibilityLabel={`${t.name}, ${on ? "used today" : "not used today"}`}
+                >
+                  <Text style={[styles.toolChipText, on && styles.toolChipTextOn]}>
+                    {toolBusy === t.id ? "…" : on ? "✓ " : ""}{t.name}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+          <Text style={styles.meta}>Tap each tool you used on this job today. Tap again to undo.</Text>
+        </View>
+      )}
+
       {state && !open && (
         <TouchableOpacity style={styles.addButton} onPress={() => setOpen(true)} accessibilityLabel="Log truck or plant">
           <Text style={styles.addButtonText}>+ Log truck / plant</Text>
@@ -95,12 +150,12 @@ export function JobPlantUsage({ jobId }: { jobId: string }) {
         <View style={{ gap: 10 }}>
           <Text style={styles.label}>Truck or machine</Text>
           <View style={styles.chipRow}>
-            {state.equipment.map((e) => (
+            {hourlyPlant(state.equipment).map((e) => (
               <TouchableOpacity key={e.id} style={[styles.chip, equipmentId === e.id && styles.chipActive]} onPress={() => pick(e.id)}>
                 <Text style={[styles.chipText, equipmentId === e.id && styles.chipTextActive]}>{e.name}</Text>
               </TouchableOpacity>
             ))}
-            {state.equipment.length === 0 && <Text style={styles.meta}>No trucks or plant set up yet. Ask the office.</Text>}
+            {hourlyPlant(state.equipment).length === 0 && <Text style={styles.meta}>No trucks or plant set up yet. Ask the office.</Text>}
           </View>
 
           <Text style={styles.label}>Cost centre</Text>
@@ -128,7 +183,7 @@ export function JobPlantUsage({ jobId }: { jobId: string }) {
         </View>
       )}
 
-      {state?.usage.map((u) => (
+      {state?.usage.filter((u) => !u.days).map((u) => (
         <Text key={u.id} style={styles.meta}>
           {[u.equipment, u.hours ? `${u.hours}h` : null, u.loads ? `${u.loads} load${u.loads === 1 ? "" : "s"}` : null, lineName(u.costCenterId), new Date(u.date).toLocaleDateString("en-AU"), u.loggedBy]
             .filter(Boolean)
@@ -151,6 +206,10 @@ const styles = StyleSheet.create({
   chipActive: { backgroundColor: colors.blue600, borderColor: colors.blue600 },
   chipText: { fontSize: 14, fontWeight: "600", color: colors.slate700 },
   chipTextActive: { color: "#fff" },
+  toolChip: { minHeight: 48, justifyContent: "center", paddingHorizontal: 16, borderRadius: 12, backgroundColor: colors.bg, borderWidth: 2, borderColor: colors.border },
+  toolChipOn: { backgroundColor: "#dcfce7", borderColor: "#16a34a" },
+  toolChipText: { fontSize: 15, fontWeight: "600", color: colors.slate700 },
+  toolChipTextOn: { color: "#166534", fontWeight: "700" },
   stepPair: { flexDirection: "row", gap: 12 },
   stepper: { flex: 1, gap: 4 },
   stepLabel: { fontSize: 13, fontWeight: "700", color: colors.slate700 },

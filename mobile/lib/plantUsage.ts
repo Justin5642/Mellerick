@@ -9,10 +9,16 @@ import { fetchWithTimeout } from "./fetchWithTimeout";
 const API_BASE_URL = process.env.EXPO_PUBLIC_API_BASE_URL;
 
 export interface PlantState {
-  equipment: { id: string; name: string; category: string }[];
+  /**
+   * dayRated: small plant & equipment logged a day at a time ("Tools used
+   * today", migration 0100 — draft, not applied yet). Absent from an older server = false.
+   */
+  equipment: { id: string; name: string; category: string; dayRated?: boolean }[];
   /** The job's PO lines, with the company cost centre each belongs to. */
   lines: { id: string; name: string; costCentre: string | null }[];
-  usage: { id: string; date: string; hours: number; loads: number; costCenterId: string | null; equipment: string; loggedBy: string | null }[];
+  usage: { id: string; date: string; hours: number; loads: number; days?: number; costCenterId: string | null; equipment: string; loggedBy: string | null }[];
+  /** Tools ticked on this job today. `mine` = this user ticked it, so may untick it. */
+  toolsToday?: { id: string; equipmentId: string; loggedBy: string | null; mine: boolean }[];
 }
 
 async function call<T>(path: string, init: RequestInit = {}): Promise<T> {
@@ -50,4 +56,24 @@ export function defaultPlantLine(category: string | undefined, lines: PlantState
   if (category !== "vehicle") return null;
   const transport = lines.filter((l) => (l.costCentre ?? "").toLowerCase() === "transport");
   return transport.length === 1 ? transport[0].id : null;
+}
+
+/** Tick a tool as used on this job today: one full day at its day rate. */
+export function logToolDay(jobId: string, equipmentId: string): Promise<{ ok: true; alreadyLogged?: boolean }> {
+  return call(`/api/jobs/${jobId}/plant-usage`, { method: "POST", body: JSON.stringify({ equipmentId, hours: 0, loads: 0, days: 1 }) });
+}
+
+/** Untick a tool this user ticked today. */
+export function removeToolDay(jobId: string, usageId: string): Promise<{ ok: true }> {
+  return call(`/api/jobs/${jobId}/plant-usage?usageId=${encodeURIComponent(usageId)}`, { method: "DELETE" });
+}
+
+/** Truck & plant picker: everything that is NOT logged by the day. */
+export function hourlyPlant(equipment: PlantState["equipment"]): PlantState["equipment"] {
+  return equipment.filter((e) => !e.dayRated);
+}
+
+/** Tools used today: the day-rated items. */
+export function dayRatedTools(equipment: PlantState["equipment"]): PlantState["equipment"] {
+  return equipment.filter((e) => e.dayRated);
 }

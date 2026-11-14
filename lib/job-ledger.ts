@@ -1,6 +1,6 @@
 import { computeLoadedCost } from "@/lib/staff-cost";
 import type { EquipmentCostInputs } from "@/lib/equipment-cost";
-import { costPerHourOf, type EffectiveRate } from "@/lib/fleet-costs";
+import { costPerHourOf, usageCost, type EffectiveRate } from "@/lib/fleet-costs";
 
 // The job ledger (Stage 3 of the 31 Oct 2026 workflow review): for one job,
 // per company cost centre, the budget from the builder's PO split (Stage 2)
@@ -43,6 +43,8 @@ export interface EquipmentInput extends EquipmentCostInputs {
   assigned_to?: string | null;
   /** $ per load carted (0091). */
   cost_per_load?: number | null;
+  /** $ per day used (0100 — draft, not applied yet). */
+  day_rate?: number | null;
   /** Attached by lib/fleet-rates.ts; absent = cost at the estimate. */
   effective_rate?: EffectiveRate | null;
 }
@@ -69,7 +71,7 @@ export function loadedRatesByStaff(profiles: StaffCostProfileInput[], equipment:
  * loads × cost per load.
  */
 export function plantCosts(
-  usage: { equipment_id: string; hours: number; loads?: number | null; cost_center_id?: string | null }[],
+  usage: { equipment_id: string; hours: number; loads?: number | null; days?: number | null; cost_center_id?: string | null }[],
   equipment: EquipmentInput[]
 ): { cost: number; cost_center_id: string | null }[] {
   const byId = new Map(equipment.map((e) => [e.id, e]));
@@ -77,9 +79,7 @@ export function plantCosts(
     .map((u) => {
       const eq = byId.get(u.equipment_id);
       if (!eq) return { cost: 0, cost_center_id: u.cost_center_id ?? null };
-      const hoursCost = eq.assigned_to ? 0 : Number(u.hours) * costPerHourOf(eq);
-      const loadsCost = Number(u.loads ?? 0) * Number(eq.cost_per_load ?? 0);
-      return { cost: hoursCost + loadsCost, cost_center_id: u.cost_center_id ?? null };
+      return { cost: usageCost(u, eq), cost_center_id: u.cost_center_id ?? null };
     })
     .filter((p) => p.cost > 0);
 }

@@ -72,7 +72,7 @@ const EXPECTED_PO_COST_CENTERS = norm(`
   FROM po_cost_centers WHERE po_id IN (SELECT id FROM purchase_orders WHERE job_id = ?)`);
 
 const EXPECTED_EQUIP_USAGE = norm(`
-  SELECT u.id, u.equipment_id, u.usage_date, u.hours, u.notes,
+  SELECT u.id, u.equipment_id, u.usage_date, u.hours, u.days, u.notes,
          e.name AS equipment_name, e.category AS equipment_category
   FROM equipment_usage_log u LEFT JOIN equipment e ON e.id = u.equipment_id
   WHERE u.job_id = ? ORDER BY u.usage_date DESC, u.created_at DESC`);
@@ -80,7 +80,7 @@ const EXPECTED_EQUIP_USAGE = norm(`
 const EXPECTED_EQUIP_OPTIONS = norm(`
   SELECT id, name, category, purchase_cost, estimated_life_years, insurance_annual,
          maintenance_annual, registration_annual, other_annual_costs,
-         fuel_cost_per_hour, target_hours_per_year
+         fuel_cost_per_hour, target_hours_per_year, day_rate
   FROM equipment WHERE is_active = 1 ORDER BY category COLLATE NOCASE, name COLLATE NOCASE`);
 
 function fakeReads(over: Partial<LocalReads> = {}): LocalReads {
@@ -273,6 +273,8 @@ describe("getJobEquipment (local path)", () => {
         { id: "u-2", equipment_id: "e-gone", usage_date: "2026-07-19", hours: 3, notes: null, equipment_name: "Old digger", equipment_category: "Excavation" },
         // missing join (equipment row absent locally) → PostgREST-null fallbacks
         { id: "u-3", equipment_id: "e-void", usage_date: "2026-07-18", hours: 1, notes: null, equipment_name: null, equipment_category: null },
+        // a tool day (0100 — draft, not applied yet): no hours, one day at the item's day rate
+        { id: "u-4", equipment_id: "e-2", usage_date: "2026-07-17", hours: 0, days: 1, notes: null, equipment_name: "Demo saw", equipment_category: "tool" },
       ],
       [EXPECTED_EQUIP_OPTIONS]: [
         {
@@ -288,6 +290,7 @@ describe("getJobEquipment (local path)", () => {
           fuel_cost_per_hour: "10",
           target_hours_per_year: 500,
         },
+        { id: "e-2", name: "Demo saw", category: "tool", purchase_cost: 0, estimated_life_years: 5, insurance_annual: 0, maintenance_annual: 0, registration_annual: 0, other_annual_costs: 0, fuel_cost_per_hour: 0, target_hours_per_year: 1000, day_rate: "150" },
       ],
     });
     setLocalReads(fakeReads({ getAll }));
@@ -296,11 +299,15 @@ describe("getJobEquipment (local path)", () => {
 
     const expected: JobEquipment = {
       usage: [
-        { id: "u-1", equipment_id: "e-1", equipment_name: "Mini excavator", category: "Excavation", usage_date: "2026-07-20", hours: 2.5, notes: "trench", cost_per_hour: 14, total_cost: 35 },
-        { id: "u-2", equipment_id: "e-gone", equipment_name: "Old digger", category: "Excavation", usage_date: "2026-07-19", hours: 3, notes: null, cost_per_hour: 0, total_cost: 0 },
-        { id: "u-3", equipment_id: "e-void", equipment_name: "Unknown equipment", category: "", usage_date: "2026-07-18", hours: 1, notes: null, cost_per_hour: 0, total_cost: 0 },
+        { id: "u-1", equipment_id: "e-1", equipment_name: "Mini excavator", category: "Excavation", usage_date: "2026-07-20", hours: 2.5, days: 0, notes: "trench", cost_per_hour: 14, total_cost: 35 },
+        { id: "u-2", equipment_id: "e-gone", equipment_name: "Old digger", category: "Excavation", usage_date: "2026-07-19", hours: 3, days: 0, notes: null, cost_per_hour: 0, total_cost: 0 },
+        { id: "u-3", equipment_id: "e-void", equipment_name: "Unknown equipment", category: "", usage_date: "2026-07-18", hours: 1, days: 0, notes: null, cost_per_hour: 0, total_cost: 0 },
+        { id: "u-4", equipment_id: "e-2", equipment_name: "Demo saw", category: "tool", usage_date: "2026-07-17", hours: 0, days: 1, notes: null, cost_per_hour: 0, total_cost: 150 },
       ],
-      options: [{ id: "e-1", name: "Mini excavator", category: "Excavation", cost_per_hour: 14 }],
+      options: [
+        { id: "e-1", name: "Mini excavator", category: "Excavation", cost_per_hour: 14 },
+        { id: "e-2", name: "Demo saw", category: "tool", cost_per_hour: 0 },
+      ],
     };
     expect(result).toEqual(expected);
 

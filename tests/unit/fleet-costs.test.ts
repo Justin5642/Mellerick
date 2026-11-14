@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   costPerHourOf,
+  usageCost,
   effectiveCostRate,
   financialYear,
   financialYearStartOf,
@@ -121,5 +122,20 @@ describe("effectiveCostRate", () => {
     const r = effectiveCostRate({ equipment: truck, expenses: [{ category: "fuel", amount: 4_000, expense_date: "2026-05-01" }], hoursWorked: 200, window });
     expect(costPerHourOf({ ...truck, effective_rate: r })).toBe(70); // (10,000 + 4,000) / 200
     expect(costPerHourOf(truck)).toBe(36);
+  });
+});
+
+describe("usageCost (hours, loads, tool days)", () => {
+  const base = { ...truck, cost_per_load: 40, day_rate: 0 };
+  it("hours at cost per hour plus loads at cost per load", () => {
+    expect(usageCost({ hours: 2, loads: 3 }, base)).toBe(2 * 36 + 3 * 40);
+  });
+  it("an assigned vehicle's hours are in its driver's rate, but loads still count", () => {
+    expect(usageCost({ hours: 2, loads: 3 }, { ...base, assigned_to: "tech-1" })).toBe(120);
+  });
+  it("a tool day costs the day rate (0100)", () => {
+    const saw = { ...truck, purchase_cost: 0, insurance_annual: 0, maintenance_annual: 0, registration_annual: 0, fuel_cost_per_hour: 0, day_rate: "150" };
+    expect(usageCost({ hours: 0, loads: 0, days: 1 }, saw)).toBe(150);
+    expect(usageCost({ hours: 0, days: null }, saw)).toBe(0);
   });
 });
