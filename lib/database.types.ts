@@ -2333,6 +2333,7 @@ export type Database = {
       }
       staff_cost_profiles: {
         Row: {
+          xero_employee_id: string | null
           annual_fixed_oncosts: number
           charge_out_rate: number | null
           hourly_rate: number
@@ -2346,6 +2347,7 @@ export type Database = {
           workers_comp_rate: number
         }
         Insert: {
+          xero_employee_id?: string | null
           annual_fixed_oncosts?: number
           charge_out_rate?: number | null
           hourly_rate?: number
@@ -2359,6 +2361,7 @@ export type Database = {
           workers_comp_rate?: number
         }
         Update: {
+          xero_employee_id?: string | null
           annual_fixed_oncosts?: number
           charge_out_rate?: number | null
           hourly_rate?: number
@@ -2390,6 +2393,7 @@ export type Database = {
       }
       staff_leave: {
         Row: {
+          xero_leave_application_id: string | null
           created_at: string | null
           created_by: string | null
           end_date: string
@@ -2401,6 +2405,7 @@ export type Database = {
           start_date: string
         }
         Insert: {
+          xero_leave_application_id?: string | null
           created_at?: string | null
           created_by?: string | null
           end_date: string
@@ -2412,6 +2417,7 @@ export type Database = {
           start_date: string
         }
         Update: {
+          xero_leave_application_id?: string | null
           created_at?: string | null
           created_by?: string | null
           end_date?: string
