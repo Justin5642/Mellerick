@@ -15,6 +15,7 @@ import { computeEquipmentCost, EQUIPMENT_CATEGORY_LABELS } from "@/lib/equipment
 import { equipmentCategoryColors } from "@/lib/badge-colors";
 import { costPerHourOf, financialYearsSince, type FleetExpense } from "@/lib/fleet-costs";
 import { FleetYearSummary } from "@/components/fleet/fleet-year-summary";
+import { dueLabel, serviceDue, type ServiceDue, type ServiceRecord } from "@/lib/service-due";
 
 // Radix/shadcn's SelectItem can't take value="", so an explicit "Unassigned"
 // option needs a sentinel value that gets translated back to "" (-> null on
@@ -30,16 +31,30 @@ interface Props {
   expenses: FleetExpense[] | null;
   expensesError: string | null;
   today: string;
+  /** All service records (0099); null when unavailable. */
+  services: ServiceRecord[] | null;
   fetchError: string | null;
 }
 
 // The fleet list and its actions. The page (app/dashboard/fleet/page.tsx) loads
 // the rows and the viewer's role on the server and hands them in.
-export function FleetClient({ role, currentUserId, equipment: initialEquipment, staff, expenses, expensesError, today, fetchError }: Props) {
+export function FleetClient({ role, currentUserId, equipment: initialEquipment, staff, expenses, expensesError, today, services, fetchError }: Props) {
   const supabase = createClient();
   const [equipment, setEquipment] = useState(initialEquipment);
   const years = useMemo(() => financialYearsSince((expenses ?? []).map((e) => e.expense_date), today), [expenses, today]);
   const [yearLabel, setYearLabel] = useState(years[0].label);
+  // Next-service status per item, from its latest service record.
+  const dueByEquipment = useMemo(() => {
+    const m = new Map<string, ServiceDue>();
+    if (!services) return m;
+    const by = new Map<string, ServiceRecord[]>();
+    for (const r of services) (by.get(r.equipment_id) ?? by.set(r.equipment_id, []).get(r.equipment_id)!).push(r);
+    for (const [id, list] of by) m.set(id, serviceDue(list, today));
+    return m;
+  }, [services, today]);
+  const overdueCount = [...dueByEquipment.entries()].filter(
+    ([id, d]) => d.state === "overdue" && initialEquipment.find((e) => e.id === id)?.is_active
+  ).length;
   const period = years.find((y) => y.label === yearLabel) ?? years[0];
   // Each item's logged cost in the chosen financial year (ex GST).
   const spendByEquipment = useMemo(() => {
@@ -133,7 +148,10 @@ export function FleetClient({ role, currentUserId, equipment: initialEquipment, 
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Fleet</h1>
-          <p className="text-slate-500 text-sm mt-1">{equipment.filter((e) => e.is_active).length} active vehicles/machinery</p>
+          <p className="text-slate-500 text-sm mt-1">
+            {equipment.filter((e) => e.is_active).length} active vehicles/machinery
+            {overdueCount > 0 && <span className="text-red-700 font-medium"> · {overdueCount} overdue for service</span>}
+          </p>
         </div>
         {isAdmin && (
           <Button className="gap-2" onClick={() => setShowForm((v) => !v)}>
@@ -218,6 +236,12 @@ export function FleetClient({ role, currentUserId, equipment: initialEquipment, 
                             ${costPerHour.toFixed(2)}/hr <span className={actual ? "text-green-700" : "text-slate-400"}>({actual ? "actual" : "est."})</span>
                             {" · "}est. ${annualTotalCost.toLocaleString("en-AU", { maximumFractionDigits: 0 })}/yr
                           </span>
+                          {(() => {
+                            const d = dueByEquipment.get(item.id);
+                            if (!d || d.state === "no_due_date") return null;
+                            const tone = d.state === "overdue" ? "bg-red-50 text-red-700" : d.state === "due_soon" ? "bg-amber-50 text-amber-700" : "text-slate-500";
+                            return <span className={`text-xs px-1.5 py-0.5 rounded ${tone}`}>{dueLabel(d)}</span>;
+                          })()}
                           {expenses && (
                             <span className="text-xs font-medium text-slate-700">
                               {period.label}: ${spent.toLocaleString("en-AU", { maximumFractionDigits: 0 })}

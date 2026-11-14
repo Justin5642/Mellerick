@@ -4,7 +4,7 @@ import { useState } from "react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { ArrowLeft, Truck, FileText, DollarSign, Gauge, Settings } from "lucide-react";
+import { ArrowLeft, Truck, FileText, DollarSign, Gauge, Settings, Wrench } from "lucide-react";
 import Link from "next/link";
 import { EquipmentDocuments } from "./equipment-documents";
 import { EquipmentExpenses } from "./equipment-expenses";
@@ -13,11 +13,16 @@ import { computeEquipmentCost, EQUIPMENT_CATEGORY_LABELS } from "@/lib/equipment
 import { equipmentCategoryColors } from "@/lib/badge-colors";
 import { formatDate } from "@/lib/date";
 import { EquipmentYearCost } from "./equipment-year-cost";
+import { EquipmentServiceRecords } from "./equipment-service-records";
+import { dueLabel, serviceDue, type ServiceRecord } from "@/lib/service-due";
 import type { EffectiveRate } from "@/lib/fleet-costs";
 
 interface Props {
   equipment: any;
   today: string;
+  /** null = service records not in this database yet (0099). */
+  services: ServiceRecord[] | null;
+  canEditServices: boolean;
   currentUserId: string;
   isAdmin: boolean;
   documents: any[];
@@ -26,9 +31,11 @@ interface Props {
   staff: any[];
 }
 
-export function EquipmentDetailClient({ equipment, today, currentUserId, isAdmin, documents: initialDocuments, expenses: initialExpenses, usage, staff }: Props) {
+export function EquipmentDetailClient({ equipment, today, services: initialServices, canEditServices, currentUserId, isAdmin, documents: initialDocuments, expenses: initialExpenses, usage, staff }: Props) {
   const [documents, setDocuments] = useState(initialDocuments);
   const [expenses, setExpenses] = useState(initialExpenses);
+  const [services, setServices] = useState(initialServices);
+  const due = services ? serviceDue(services, today) : null;
   const [costDialogOpen, setCostDialogOpen] = useState(false);
 
   const { costPerHour: estimatePerHour, annualTotalCost } = computeEquipmentCost(equipment);
@@ -78,6 +85,7 @@ export function EquipmentDetailClient({ equipment, today, currentUserId, isAdmin
               {[
                 { value: "overview", label: "Overview", icon: Truck },
                 { value: "documents", label: "Documents", icon: FileText },
+                { value: "service", label: "Service history", icon: Wrench },
                 { value: "expenses", label: "Expenses & Service", icon: DollarSign },
               ].map(({ value, label, icon: Icon }) => (
                 <TabsTrigger
@@ -125,6 +133,14 @@ export function EquipmentDetailClient({ equipment, today, currentUserId, isAdmin
                 </Card>
               </div>
 
+              {due && (
+                <p className={`text-sm font-medium ${due.state === "overdue" ? "text-red-700" : due.state === "due_soon" ? "text-amber-700" : "text-slate-600"}`}>
+                  <Wrench className="w-3.5 h-3.5 inline mr-1.5 -mt-0.5" />
+                  {dueLabel(due)}{due.dueDate ? ` (${formatDate(due.dueDate)})` : ""}
+                  {due.dueKm != null ? ` · or at ${due.dueKm.toLocaleString("en-AU")} km` : ""}
+                </p>
+              )}
+
               <EquipmentYearCost expenses={expenses} usage={usage} today={today} estimatedAnnualCost={annualTotalCost} />
 
               {rate?.source === "actual" && (
@@ -167,6 +183,19 @@ export function EquipmentDetailClient({ equipment, today, currentUserId, isAdmin
 
             <TabsContent value="documents" className="m-0 h-full">
               <EquipmentDocuments equipmentId={equipment.id} documents={documents} onUpdate={setDocuments} currentUserId={currentUserId} />
+            </TabsContent>
+
+            <TabsContent value="service" className="m-0 h-full">
+              <EquipmentServiceRecords
+                equipmentId={equipment.id}
+                records={services}
+                onRecordsChange={setServices}
+                expenses={expenses}
+                onExpenseCreated={(e) => setExpenses((list: any[]) => [e, ...list].sort((a, b) => (a.expense_date < b.expense_date ? 1 : -1)))}
+                canEdit={canEditServices}
+                currentUserId={currentUserId}
+                today={today}
+              />
             </TabsContent>
 
             <TabsContent value="expenses" className="m-0 h-full">
