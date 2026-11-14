@@ -44,7 +44,7 @@ function toDraft(s: StaffMember): Draft {
     is_active: s.is_active,
     phone: s.phone ?? "",
     hourly_rate: String(c?.hourly_rate ?? 0),
-    super_rate: String(c?.super_rate ?? 11.5),
+    super_rate: String(c?.super_rate ?? 12), // Super Guarantee from 1 July 2025
     workers_comp_rate: String(c?.workers_comp_rate ?? 0),
     leave_loading_rate: String(c?.leave_loading_rate ?? 0),
     annual_fixed_oncosts: String(c?.annual_fixed_oncosts ?? 0),
