@@ -1,6 +1,7 @@
 jest.mock("./supabase", () => ({ supabase: { auth: { getSession: jest.fn() } } }));
 
-import { costCentreLineForSupplier, matchSuppliers, supplierOrderProblem } from "./supplierOrders";
+import { costCentreLineForSupplier, supplierOrderProblem, type Supplier } from "./supplierOrders";
+import { groupSuppliers } from "./supplierPicker";
 
 // The form refuses what the server would refuse, so the tech hears about it
 // before tapping Send rather than after a round trip with no signal.
@@ -44,26 +45,36 @@ describe("supplierOrderProblem", () => {
 
 // The supplier list (copied from Xero) is searched as the tech types, often
 // with gloves on: a few letters of any word should find it.
-describe("matchSuppliers", () => {
-  const list = [
-    { id: "1", name: "Reece Epping", email: null },
+// The picker's groups (lib/supplierPicker.ts, identical to the web's — the
+// full cases are in tests/unit/supplier-picker.test.ts at the repo root).
+describe("groupSuppliers on the phone's supplier list", () => {
+  const list: Supplier[] = [
+    { id: "1", name: "Reece Epping", email: null, pinOrder: 1 },
     { id: "2", name: "Tradelink Thomastown", email: null },
-    { id: "3", name: "Boral Quarries - Epping", email: null },
+    { id: "3", name: "Boral Quarries - Epping", email: null, pinOrder: 2 },
     { id: "4", name: "Plumbing Plus", email: null },
+    { id: "5", name: "Apex Pipes", email: null },
   ];
+  const shape = (query = "", recentIds: string[] = []) =>
+    groupSuppliers(list, { query, recentIds }).map((g) => [g.key, g.suppliers.map((s) => s.id)]);
 
-  it("shows the first few with nothing typed", () => {
-    expect(matchSuppliers(list, "", 2).map((s) => s.id)).toEqual(["1", "2"]);
+  it("is Pinned, then Recent without the pinned, then the rest A–Z", () => {
+    expect(shape("", ["3", "4"])).toEqual([
+      ["pinned", ["1", "3"]],
+      ["recent", ["4"]],
+      ["all", ["5", "2"]],
+    ]);
   });
 
-  it("puts names starting with the search first, then any word", () => {
-    expect(matchSuppliers(list, "epp").map((s) => s.id)).toEqual(["1", "3"]);
-    expect(matchSuppliers(list, "quarr").map((s) => s.id)).toEqual(["3"]);
-    expect(matchSuppliers(list, "tr").map((s) => s.id)).toEqual(["2"]);
+  it("searches every group by any word", () => {
+    expect(shape("epp", ["4"])).toEqual([["pinned", ["1", "3"]]]);
+    expect(shape("tr")).toEqual([["all", ["2"]]]);
+    expect(shape("  PLUS ", ["4"])).toEqual([["recent", ["4"]]]);
   });
 
-  it("is case-insensitive and ignores spaces around the search", () => {
-    expect(matchSuppliers(list, "  REECE ").map((s) => s.id)).toEqual(["1"]);
+  it("copes with a server before 0087/0097 (no ids, no pins)", () => {
+    const old = list.map(({ name, email }) => ({ name, email }));
+    expect(groupSuppliers(old, { recentIds: ["1"] }).map((g) => g.key)).toEqual(["all"]);
   });
 });
 

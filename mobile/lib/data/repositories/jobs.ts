@@ -63,6 +63,13 @@ export class JobsRepository {
     if (input.scheduledEndIso !== undefined) payload.scheduled_end = input.scheduledEndIso;
     if (input.description !== undefined) payload.description = input.description;
 
+    // A site (or customer) added moments ago on this phone may still be
+    // queued: the job waits for it, so it can't arrive first and fail the
+    // foreign key. The site's own insert already waits for its customer's.
+    const after =
+      (input.siteId ? await this.outbox.pendingInsertOpId("sites", input.siteId) : null) ??
+      (await this.outbox.pendingInsertOpId("customers", input.customerId));
+
     const insertId = this.ids.newId();
     const op: WriteOperation = {
       kind: "write",
@@ -72,6 +79,7 @@ export class JobsRepository {
       op: "insert",
       table: "jobs",
       payload,
+      ...(after ? { dependsOn: after } : {}),
       status: "pending",
       attempts: 0,
       nextAttemptAt: 0,

@@ -7,6 +7,7 @@ import { getResend, getFromAddress } from "@/lib/resend";
 import { siteOneLine } from "@/lib/job-site";
 import { parseSupplierOrder, supplierOrderEmail } from "@/lib/supplier-orders";
 import { reportError } from "@/lib/monitoring";
+import { recentSupplierIds, RECENT_SUPPLIER_CANDIDATES } from "@/lib/supplier-picker";
 
 // Supplier POs raised from the phone (migration 0085). Justin, 28 Oct 2026:
 // any technician, any job, any supplier, straight to the supplier.
@@ -95,6 +96,48 @@ async function listOrders(admin: Admin, jobId: string) {
   }));
 }
 
+interface SupplierRow {
+  id: string;
+  name: string;
+  email: string | null;
+  default_cost_centre_id: string | null;
+  pin_order?: number | null;
+}
+
+// The active supplier list, with each one's place in the Pinned group
+// (pin_order, from 0097 — drafted, not applied yet).
+// A database without pin_order (42703) gets the list unpinned.
+async function loadSuppliers(admin: Admin): Promise<SupplierRow[]> {
+  const read = (cols: string) => admin.from("suppliers").select(cols).eq("is_active", true).order("name");
+  let { data, error } = await read("id, name, email, default_cost_centre_id, pin_order");
+  if (error?.code === "42703") ({ data, error } = await read("id, name, email, default_cost_centre_id"));
+  if (error) throw error;
+  return (data ?? []) as unknown as SupplierRow[];
+}
+
+// How many of the newest POs (every job) "recent" is worked out from.
+const RECENT_ORDERS_READ = 300;
+
+// The suppliers the caller used most recently on POs, then the company's
+// (lib/supplier-picker.ts). Only supplier ids from the list go back — no
+// order, job or amount. Never fatal: without it the picker just has no
+// Recent group.
+async function loadRecentSupplierIds(admin: Admin, userId: string, suppliers: SupplierRow[]): Promise<string[]> {
+  const { data, error } = await admin
+    .from("vendor_orders")
+    .select("supplier_id, vendor_name, entered_by, created_at")
+    .order("created_at", { ascending: false })
+    .limit(RECENT_ORDERS_READ);
+  if (error) {
+    console.error("supplier orders: recent suppliers not read:", error.message);
+    return [];
+  }
+  const uses = (
+    (data ?? []) as { supplier_id: string | null; vendor_name: string | null; entered_by: string | null; created_at: string | null }[]
+  ).map((o) => ({ supplierId: o.supplier_id, vendorName: o.vendor_name, enteredBy: o.entered_by, createdAt: o.created_at }));
+  return recentSupplierIds(uses, suppliers, userId, RECENT_SUPPLIER_CANDIDATES);
+}
+
 // What the Raise PO form starts with: the orders already on the job, the cost
 // centre the tech is clocked into (else the one the job is scheduled to), the
 // site address, the supplier list (0087), and which company cost centre each
@@ -110,7 +153,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     const job = await loadJob(admin, id);
     if (!job) return NextResponse.json({ error: "Job not found" }, { status: 404 });
 
-    const [orders, { data: openEntry }, { data: supplierRows, error: suppliersError }, { data: lines, error: linesError }] = await Promise.all([
+    const [orders, { data: openEntry }, supplierRows, { data: lines, error: linesError }] = await Promise.all([
       listOrders(admin, id),
       admin
         .from("time_entries")
@@ -122,26 +165,23 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
         .order("clock_in", { ascending: false })
         .limit(1)
         .maybeSingle(),
-      admin
-        .from("suppliers")
-        .select("id, name, email, default_cost_centre_id")
-        .eq("is_active", true)
-        .order("name"),
+      loadSuppliers(admin),
       admin
         .from("po_cost_centers")
         .select("id, name, cost_centre_id, sort_order, cost_centres(name), purchase_orders!inner(job_id, po_number)")
         .eq("purchase_orders.job_id", id),
     ]);
-    if (suppliersError) throw suppliersError;
     if (linesError) throw linesError;
 
     // Field by field: a supplier's account number and phone stay office-side.
-    const suppliers = (supplierRows ?? []).map((s) => ({
-      id: s.id as string,
-      name: s.name as string,
-      email: (s.email as string | null) ?? null,
-      defaultCostCentreId: (s.default_cost_centre_id as string | null) ?? null,
+    const suppliers = supplierRows.map((s) => ({
+      id: s.id,
+      name: s.name,
+      email: s.email ?? null,
+      defaultCostCentreId: s.default_cost_centre_id ?? null,
+      pinOrder: s.pin_order ?? null,
     }));
+    const recentIds = await loadRecentSupplierIds(admin, guard.userId, supplierRows);
 
     return NextResponse.json({
       orders,
@@ -149,6 +189,9 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       clockedIn: !!openEntry,
       deliveryAddress: siteOneLine(job.sites) || null,
       suppliers,
+      // Supplier ids for the picker's Recent group, most recent first: the
+      // caller's own POs, then the company's. Older phone builds ignore it.
+      recentSupplierIds: recentIds,
       costCentreLines: (lines ?? []).map((l) => ({ id: l.id as string, costCentreId: (l.cost_centre_id as string | null) ?? null })),
       // The job's cost centres, read fresh with every load (2 Nov 2026): the
       // phone's own copy is read once when the job opens, so one added on the

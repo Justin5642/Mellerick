@@ -12,6 +12,8 @@ import { nextJobPoNumber } from "@/lib/job-po-number";
 import { siteOneLine, type JobSiteParts } from "@/lib/job-site";
 import { planBuilderPo, planBuilderPoLines, type BuilderPoLineInput, type CostCentreOption } from "@/lib/builder-po";
 import { BuilderPoLines, blankLine, type StageOption } from "@/components/job/builder-po-lines";
+import { SupplierPicker, OTHER_SUPPLIER } from "@/components/job/supplier-picker";
+import { recentSupplierIds } from "@/lib/supplier-picker";
 
 interface CostCenter {
   id: string;
@@ -108,7 +110,6 @@ const VENDOR_ORDER_STATUS_COLORS: Record<VendorOrder["status"], string> = {
   cancelled: "bg-slate-100 text-slate-400 line-through",
 };
 
-const OTHER_SUPPLIER = "__other";
 const BLANK_VO_FORM = { supplier_id: "", other_name: "", order_date: "", notes: "" };
 
 function progressColor(pct: number) {
@@ -147,7 +148,9 @@ export function JobPO({ jobId, jobNumber, customerName, site, pos: initialPos, t
   const [invoiceFile, setInvoiceFile] = useState<File | null>(null);
   const [invoiceBusy, setInvoiceBusy] = useState(false);
   const [addLines, setAddLines] = useState<BuilderPoLineInput[]>([blankLine()]);
-  const [suppliers, setSuppliers] = useState<{ id: string; name: string }[]>([]);
+  const [suppliers, setSuppliers] = useState<{ id: string; name: string; pinOrder: number | null }[]>([]);
+  const [recentSuppliers, setRecentSupplierIds] = useState<string[]>([]);
+  const [myId, setMyId] = useState<string | null>(null);
   // Docket photos the crew took against each order (0093). A failed read just
   // shows no docket links.
   const [dockets, setDockets] = useState<Record<string, string[]>>({});
@@ -187,14 +190,45 @@ export function JobPO({ jobId, jobNumber, customerName, site, pos: initialPos, t
         setCostCentresFailed(!!error);
         setCostCentreOptions((data as CostCentreOption[]) ?? []);
       });
-    supabase
-      .from("suppliers")
-      .select("id, name")
-      .eq("is_active", true)
-      .order("name")
-      .then(({ data }) => setSuppliers((data as { id: string; name: string }[]) ?? []));
+    loadSupplierPicker();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // The supplier picker's list: each supplier's place in the Pinned group
+  // (0097, drafted — not applied yet; a database without pin_order (42703)
+  // shows none pinned), and the
+  // Recent group from the newest POs on every job — this user's first, then
+  // the company's (lib/supplier-picker.ts). A failed recent read just leaves
+  // Recent out.
+  async function loadSupplierPicker() {
+    const [{ data: auth }, recent] = await Promise.all([
+      supabase.auth.getUser(),
+      supabase
+        .from("vendor_orders")
+        .select("supplier_id, vendor_name, entered_by, created_at")
+        .order("created_at", { ascending: false })
+        .limit(300),
+    ]);
+    const userId = auth.user?.id ?? null;
+    setMyId(userId);
+    const read = (cols: string) => supabase.from("suppliers").select(cols).eq("is_active", true).order("name");
+    let { data, error } = await read("id, name, pin_order");
+    if (error?.code === "42703") ({ data, error } = await read("id, name"));
+    const list = ((data ?? []) as unknown as { id: string; name: string; pin_order?: number | null }[]).map((s) => ({
+      id: s.id,
+      name: s.name,
+      pinOrder: s.pin_order ?? null,
+    }));
+    setSuppliers(list);
+    if (recent.error) return;
+    const uses = (recent.data ?? []).map((o) => ({
+      supplierId: o.supplier_id,
+      vendorName: o.vendor_name,
+      enteredBy: o.entered_by,
+      createdAt: o.created_at,
+    }));
+    setRecentSupplierIds(recentSupplierIds(uses, list, userId));
+  }
 
   function fieldErr(field: string) {
     return errors[field] ? "border-red-500 focus-visible:ring-red-500" : "";
@@ -371,6 +405,8 @@ export function JobPO({ jobId, jobNumber, customerName, site, pos: initialPos, t
       job_id: jobId,
       vendor_name: name,
       supplier_id: picked?.id ?? null,
+      // Who raised it — the picker's Recent group is worked out from this.
+      entered_by: myId ?? undefined,
       amount: 0,
       order_date: voForm.order_date || null,
       notes: voForm.notes.trim() || null,
@@ -382,6 +418,7 @@ export function JobPO({ jobId, jobNumber, customerName, site, pos: initialPos, t
     const updated = [order, ...vendorOrders];
     setVendorOrders(updated);
     onVendorOrdersUpdate(updated);
+    if (picked) setRecentSupplierIds(prev => [picked.id, ...prev.filter(id => id !== picked.id)]);
     setVoFormOpenFor(null);
     setVoForm(BLANK_VO_FORM);
     toast.success(`${order.po_number} raised for ${order.vendor_name} — give the supplier this number`);
@@ -805,23 +842,22 @@ export function JobPO({ jobId, jobNumber, customerName, site, pos: initialPos, t
                       {voFormOpenFor === cc.id ? (
                         <div className="rounded border border-slate-200 p-2 space-y-2">
                           <div className="grid grid-cols-2 gap-2">
-                            <select
-                              aria-label="Supplier"
+                            <SupplierPicker
+                              className="col-span-2"
+                              suppliers={suppliers}
+                              recentIds={recentSuppliers}
                               value={voForm.supplier_id}
-                              onChange={e => setVoForm(p => ({ ...p, supplier_id: e.target.value }))}
-                              className={`col-span-2 h-7 rounded-md border border-input bg-white px-2 text-xs ${voForm.supplier_id ? "text-slate-800" : "text-slate-400"}`}
-                            >
-                              <option value="" disabled>Choose a supplier *</option>
-                              {suppliers.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-                              <option value={OTHER_SUPPLIER}>Other supplier (not in the list)…</option>
-                            </select>
+                              onChange={(id, typed) =>
+                                setVoForm(p => ({ ...p, supplier_id: id, other_name: id === OTHER_SUPPLIER ? typed || p.other_name : p.other_name }))
+                              }
+                            />
                             {voForm.supplier_id === OTHER_SUPPLIER && (
                               <Input
                                 autoFocus
                                 value={voForm.other_name}
                                 onChange={e => setVoForm(p => ({ ...p, other_name: e.target.value }))}
                                 placeholder="Supplier name *"
-                                className="col-span-2 text-xs h-7"
+                                className="col-span-2 text-base sm:text-xs h-7"
                               />
                             )}
                             <Input

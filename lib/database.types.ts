@@ -2380,6 +2380,7 @@ export type Database = {
           is_active: boolean
           name: string
           phone: string | null
+          pin_order: number | null
           updated_at: string | null
           xero_contact_id: string | null
         }
@@ -2392,6 +2393,7 @@ export type Database = {
           is_active?: boolean
           name: string
           phone?: string | null
+          pin_order?: number | null
           updated_at?: string | null
           xero_contact_id?: string | null
         }
@@ -2404,6 +2406,7 @@ export type Database = {
           is_active?: boolean
           name?: string
           phone?: string | null
+          pin_order?: number | null
           updated_at?: string | null
           xero_contact_id?: string | null
         }

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { View, Text, SectionList, StyleSheet, RefreshControl, TouchableOpacity, Modal, TextInput, Alert, ScrollView, ActivityIndicator } from "react-native";
+import { KeyboardSheet, KEYBOARD_SHEET_INPUT_FONT_SIZE } from "../components/KeyboardSheet";
 import { Stack, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { colors } from "../lib/theme";
@@ -274,47 +275,46 @@ export default function FleetScreen() {
         }
       />
 
-      <Modal visible={!!draft} transparent animationType="slide" onRequestClose={() => !saving && setDraft(null)}>
-        <View style={styles.overlay}>
-          <View style={styles.sheet}>
-            <Text style={styles.sheetTitle}>{draft?.id ? "Edit equipment" : "New equipment"}</Text>
-            <ScrollView automaticallyAdjustKeyboardInsets keyboardDismissMode="interactive" keyboardShouldPersistTaps="handled">
-              <Field label="Name" value={draft?.name ?? ""} onChange={set("name")} />
-              <Text style={styles.fieldLabel}>Category</Text>
-              <View style={styles.segment}>
-                {CATEGORIES.map((c) => (
-                  <TouchableOpacity key={c} style={[styles.segItem, draft?.category === c && styles.segItemActive]} onPress={() => setDraft((d) => d && { ...d, category: c })}>
-                    <Text style={[styles.segText, draft?.category === c && styles.segTextActive]}>{c}</Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-              <Field label="Registration" value={draft?.registration ?? ""} onChange={set("registration")} />
-              <View style={styles.twoCol}>
-                <View style={{ flex: 1 }}><Field label="Purchase cost" value={draft?.purchase_cost ?? ""} onChange={set("purchase_cost")} num /></View>
-                <View style={{ flex: 1 }}><Field label="Life (years)" value={draft?.estimated_life_years ?? ""} onChange={set("estimated_life_years")} num /></View>
-              </View>
-              <View style={styles.twoCol}>
-                <View style={{ flex: 1 }}><Field label="Insurance /yr" value={draft?.insurance_annual ?? ""} onChange={set("insurance_annual")} num /></View>
-                <View style={{ flex: 1 }}><Field label="Maintenance /yr" value={draft?.maintenance_annual ?? ""} onChange={set("maintenance_annual")} num /></View>
-              </View>
-              <View style={styles.twoCol}>
-                <View style={{ flex: 1 }}><Field label="Registration /yr" value={draft?.registration_annual ?? ""} onChange={set("registration_annual")} num /></View>
-                <View style={{ flex: 1 }}><Field label="Other /yr" value={draft?.other_annual_costs ?? ""} onChange={set("other_annual_costs")} num /></View>
-              </View>
-              <View style={styles.twoCol}>
-                <View style={{ flex: 1 }}><Field label="Fuel /hr" value={draft?.fuel_cost_per_hour ?? ""} onChange={set("fuel_cost_per_hour")} num /></View>
-                <View style={{ flex: 1 }}><Field label="Target hrs/yr" value={draft?.target_hours_per_year ?? ""} onChange={set("target_hours_per_year")} num /></View>
-              </View>
-              <Field label="Notes" value={draft?.notes ?? ""} onChange={set("notes")} multiline />
-            </ScrollView>
-            <View style={styles.actions}>
-              {draft?.id ? <TouchableOpacity style={styles.deactivate} onPress={deactivate} disabled={saving}><Text style={styles.deactivateText}>Deactivate</Text></TouchableOpacity> : null}
-              <TouchableOpacity style={styles.cancel} onPress={() => setDraft(null)} disabled={saving}><Text style={styles.cancelText}>Cancel</Text></TouchableOpacity>
-              <TouchableOpacity style={styles.saveBtn} onPress={save} disabled={saving}><Text style={styles.saveText}>{saving ? "…" : "Save"}</Text></TouchableOpacity>
-            </View>
+      <KeyboardSheet
+        visible={!!draft}
+        onRequestClose={() => !saving && setDraft(null)}
+        title={<Text style={styles.sheetTitle}>{draft?.id ? "Edit equipment" : "New equipment"}</Text>}
+        footer={
+          <View style={styles.actions}>
+            {draft?.id ? <TouchableOpacity style={styles.deactivate} onPress={deactivate} disabled={saving}><Text style={styles.deactivateText}>Deactivate</Text></TouchableOpacity> : null}
+            <TouchableOpacity style={styles.cancel} onPress={() => setDraft(null)} disabled={saving}><Text style={styles.cancelText}>Cancel</Text></TouchableOpacity>
+            <TouchableOpacity style={styles.saveBtn} onPress={save} disabled={saving}><Text style={styles.saveText}>{saving ? "…" : "Save"}</Text></TouchableOpacity>
           </View>
+        }
+      >
+        <Field label="Name" value={draft?.name ?? ""} onChange={set("name")} />
+        <Text style={styles.fieldLabel}>Category</Text>
+        <View style={styles.segment}>
+          {CATEGORIES.map((c) => (
+            <TouchableOpacity key={c} style={[styles.segItem, draft?.category === c && styles.segItemActive]} onPress={() => setDraft((d) => d && { ...d, category: c })}>
+              <Text style={[styles.segText, draft?.category === c && styles.segTextActive]}>{c}</Text>
+            </TouchableOpacity>
+          ))}
         </View>
-      </Modal>
+        <Field label="Registration" value={draft?.registration ?? ""} onChange={set("registration")} />
+        <View style={styles.twoCol}>
+          <View style={{ flex: 1 }}><Field label="Purchase cost" value={draft?.purchase_cost ?? ""} onChange={set("purchase_cost")} num /></View>
+          <View style={{ flex: 1 }}><Field label="Life (years)" value={draft?.estimated_life_years ?? ""} onChange={set("estimated_life_years")} num /></View>
+        </View>
+        <View style={styles.twoCol}>
+          <View style={{ flex: 1 }}><Field label="Insurance /yr" value={draft?.insurance_annual ?? ""} onChange={set("insurance_annual")} num /></View>
+          <View style={{ flex: 1 }}><Field label="Maintenance /yr" value={draft?.maintenance_annual ?? ""} onChange={set("maintenance_annual")} num /></View>
+        </View>
+        <View style={styles.twoCol}>
+          <View style={{ flex: 1 }}><Field label="Registration /yr" value={draft?.registration_annual ?? ""} onChange={set("registration_annual")} num /></View>
+          <View style={{ flex: 1 }}><Field label="Other /yr" value={draft?.other_annual_costs ?? ""} onChange={set("other_annual_costs")} num /></View>
+        </View>
+        <View style={styles.twoCol}>
+          <View style={{ flex: 1 }}><Field label="Fuel /hr" value={draft?.fuel_cost_per_hour ?? ""} onChange={set("fuel_cost_per_hour")} num /></View>
+          <View style={{ flex: 1 }}><Field label="Target hrs/yr" value={draft?.target_hours_per_year ?? ""} onChange={set("target_hours_per_year")} num /></View>
+        </View>
+        <Field label="Notes" value={draft?.notes ?? ""} onChange={set("notes")} multiline />
+      </KeyboardSheet>
 
       <Modal visible={!!assignFor} transparent animationType="slide" onRequestClose={() => !saving && setAssignFor(null)}>
         <View style={styles.overlay}>
@@ -379,7 +379,7 @@ const styles = StyleSheet.create({
   sheetTitle: { fontSize: 16, fontWeight: "800", color: colors.slate900, marginBottom: 12 },
   field: { marginBottom: 12 },
   fieldLabel: { fontSize: 12, fontWeight: "700", color: colors.slate500, textTransform: "uppercase", marginBottom: 6 },
-  input: { borderWidth: 1, borderColor: colors.border, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10, fontSize: 14, backgroundColor: colors.bg, color: colors.slate900 },
+  input: { borderWidth: 1, borderColor: colors.border, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10, fontSize: KEYBOARD_SHEET_INPUT_FONT_SIZE, backgroundColor: colors.bg, color: colors.slate900 },
   multiline: { minHeight: 56, textAlignVertical: "top" },
   segment: { flexDirection: "row", gap: 6, marginBottom: 12 },
   segItem: { flex: 1, paddingVertical: 9, borderRadius: 8, borderWidth: 1, borderColor: colors.border, alignItems: "center", backgroundColor: colors.bg },

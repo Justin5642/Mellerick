@@ -28,7 +28,9 @@ import {
 import { dateKeyInBusinessTZ } from "@/lib/date";
 import { ScheduleFields } from "./schedule-fields";
 import { toast } from "sonner";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { Dialog, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { KeyboardSafeDialogContent } from "@/components/ui/keyboard-safe-dialog";
+import { closedJobScheduleMessage, isJobClosedForScheduling } from "@/lib/job-schedulable";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
@@ -66,6 +68,8 @@ interface Props {
    * nothing here can be saved.
    */
   bookingsReady: boolean;
+  /** Take the office to where the job's status is changed (Overview). */
+  onReopen?: () => void;
 }
 
 /** A dialog row: what will be saved, plus local UI state. */
@@ -135,6 +139,7 @@ export function ScheduleJobDialog({
   costCenters = [],
   bookings,
   bookingsReady,
+  onReopen,
 }: Props) {
   const router = useRouter();
   const supabaseClient = createClient();
@@ -146,13 +151,21 @@ export function ScheduleJobDialog({
   const [saving, setSaving] = useState(false);
   const staffById = useMemo(() => new Map(staff.map((s) => [s.id, s])), [staff]);
   const costCenterName = (id: string | null) => (id ? costCenters.find((cc) => cc.id === id)?.name ?? null : null);
+  // A completed or cancelled job is off the schedule board: nothing here may
+  // be saved for it (the page's button is disabled too; this covers a dialog
+  // already open when the status changed).
+  const jobClosed = isJobClosedForScheduling(jobStatus);
+  const editable = bookingsReady && !jobClosed;
 
   // Fresh list every time the dialog opens, seeded from the saved bookings.
   // An unscheduled job opens with one blank row ready to fill in.
   useEffect(() => {
     if (!open) return;
     const seeded = bookings.map(rowFromBooking);
-    if (seeded.length === 0) {
+    if (seeded.length === 0 && !editable) {
+      setRows([]);
+      setEditingKey(null);
+    } else if (seeded.length === 0) {
       const first = newRow(undefined);
       setRows([first]);
       setEditingKey(first.key);
@@ -162,7 +175,7 @@ export function ScheduleJobDialog({
     }
     setConflicts({});
     setNoteText("");
-  }, [open, bookings]);
+  }, [open, bookings, editable]);
 
   const editing = rows.find((r) => r.key === editingKey) ?? null;
 
@@ -261,7 +274,7 @@ export function ScheduleJobDialog({
   }, [rows]);
 
   async function save() {
-    if (!bookingsReady || rowErrors.size > 0) return;
+    if (!editable || rowErrors.size > 0) return;
     const plan = planBookingSave(jobId, bookings, rows);
     const trimmed = noteText.trim();
     if (isEmptyPlan(plan) && !trimmed) {
@@ -287,9 +300,13 @@ export function ScheduleJobDialog({
     // past that (in progress, on hold, etc.) is left alone. A status-only
     // write: it is not a schedule column, so the compatibility trigger
     // leaves the bookings just written alone.
+    // `count`: a write RLS filters out "succeeds" against zero rows.
     if (jobStatus === "pending" && rows.length > 0) {
-      const { error: statusError } = await supabaseClient.from("jobs").update({ status: "scheduled" }).eq("id", jobId);
-      if (statusError) toast.warning("Bookings saved — the job's status could not be set to Scheduled");
+      const { error: statusError, count } = await supabaseClient
+        .from("jobs")
+        .update({ status: "scheduled" }, { count: "exact" })
+        .eq("id", jobId);
+      if (statusError || count === 0) toast.warning("Bookings saved — the job's status could not be set to Scheduled");
     }
 
     // The bookings landed — a note failure shouldn't read as the whole
@@ -313,16 +330,51 @@ export function ScheduleJobDialog({
 
   return (
     <Dialog open={open} onOpenChange={(o) => !saving && onOpenChange(o)}>
-      <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle>Schedule job #{jobNumber}</DialogTitle>
-        </DialogHeader>
+      <KeyboardSafeDialogContent
+        className="sm:max-w-lg"
+        header={
+          <DialogHeader>
+            <DialogTitle>Schedule job #{jobNumber}</DialogTitle>
+          </DialogHeader>
+        }
+        footer={
+          <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-between">
+            <Button variant="outline" onClick={() => onOpenChange(false)} disabled={saving}>
+              Cancel
+            </Button>
+            {editable && (
+              <Button className="gap-1.5" onClick={save} disabled={saving || rowErrors.size > 0}>
+                <Check className="w-4 h-4" />
+                {saving ? "Saving…" : "Save schedule"}
+              </Button>
+            )}
+          </div>
+        }
+      >
+        {jobClosed && (
+          <div className="text-sm rounded-md bg-amber-50 text-amber-800 px-3 py-2 space-y-2" role="alert">
+            <p>{closedJobScheduleMessage(jobStatus)}</p>
+            {onReopen && (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  onOpenChange(false);
+                  onReopen();
+                }}
+              >
+                Change the job&apos;s status
+              </Button>
+            )}
+          </div>
+        )}
 
         <p className="text-xs text-slate-500">
           Each booking is a technician&apos;s own time on this job. Pick several technicians on one booking to book each of
           them on the same days and hours.
         </p>
-        {!bookingsReady && (
+        {!bookingsReady && !jobClosed && (
           <p className="text-xs rounded-md bg-amber-50 text-amber-800 px-3 py-2">
             Per-technician bookings aren&apos;t switched on in the database yet, so this schedule can&apos;t be changed here.
           </p>
@@ -331,7 +383,7 @@ export function ScheduleJobDialog({
         <div className="space-y-2">
           {rows.length === 0 && (
             <p className="text-sm text-slate-400 py-4 text-center border border-dashed border-slate-200 rounded-lg">
-              No bookings — saving leaves this job unscheduled.
+              {editable ? "No bookings — saving leaves this job unscheduled." : "No bookings."}
             </p>
           )}
           {rows.map((row) => {
@@ -347,7 +399,7 @@ export function ScheduleJobDialog({
                     type="button"
                     className="flex-1 min-w-0 text-left"
                     onClick={() => setEditingKey(isEditing ? null : row.key)}
-                    disabled={!bookingsReady}
+                    disabled={!editable}
                   >
                     <p className={cn("text-sm font-medium truncate", row.staffIds.length === 0 ? "text-amber-700" : "text-slate-900")}>
                       {namesOf(row.staffIds, staffById)}
@@ -358,7 +410,7 @@ export function ScheduleJobDialog({
                       {!error && row.schedule.allDay ? " · All day" : ""}
                     </p>
                   </button>
-                  {bookingsReady && (
+                  {editable && (
                     <>
                       <Button
                         type="button"
@@ -449,7 +501,7 @@ export function ScheduleJobDialog({
             );
           })}
 
-          {bookingsReady && (
+          {editable && (
             <Button type="button" variant="outline" size="sm" className="gap-1.5" onClick={addRow}>
               <Plus className="w-4 h-4" />
               Add booking
@@ -457,7 +509,7 @@ export function ScheduleJobDialog({
           )}
         </div>
 
-        {bookingsReady && (
+        {editable && (
           <div className="space-y-2">
             <Label>Notes for the technicians (optional)</Label>
             <Textarea
@@ -472,19 +524,7 @@ export function ScheduleJobDialog({
             </p>
           </div>
         )}
-
-        <DialogFooter className="sm:justify-between">
-          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={saving}>
-            Cancel
-          </Button>
-          {bookingsReady && (
-            <Button className="gap-1.5" onClick={save} disabled={saving || rowErrors.size > 0}>
-              <Check className="w-4 h-4" />
-              {saving ? "Saving…" : "Save schedule"}
-            </Button>
-          )}
-        </DialogFooter>
-      </DialogContent>
+      </KeyboardSafeDialogContent>
     </Dialog>
   );
 }

@@ -43,6 +43,8 @@ export interface SupplierOrdersState {
   costCentreLines?: { id: string; costCentreId: string | null }[];
   /** The job's cost centres, read fresh by the server on every load. Absent from older servers. */
   costCentres?: { id: string; name: string; code: string | null; po_number: string }[];
+  /** Supplier ids for the picker's Recent group, most recent first (this user's POs, then the company's). Absent from older servers. */
+  recentSupplierIds?: string[];
 }
 
 export interface Supplier {
@@ -50,6 +52,8 @@ export interface Supplier {
   name: string;
   email: string | null;
   defaultCostCentreId?: string | null;
+  /** Position in the picker's Pinned group (0097, drafted — not applied yet). Null/absent = not pinned. */
+  pinOrder?: number | null;
 }
 
 export interface NewSupplierOrder {
@@ -125,19 +129,6 @@ export function supplierOrderProblem(
   const bad = filled.find((i) => !Number.isFinite(i.quantity) || i.quantity <= 0);
   if (bad) return `Check the quantity for "${bad.description.trim()}".`;
   return null;
-}
-
-/**
- * Up to `limit` suppliers whose name (or any word in it) starts with what was
- * typed — "epp" finds "Reece Epping". Empty search = the first few.
- */
-export function matchSuppliers(all: Supplier[], query: string, limit = 8): Supplier[] {
-  const q = query.trim().toLowerCase();
-  if (!q) return all.slice(0, limit);
-  const starts = all.filter((s) => s.name.toLowerCase().startsWith(q));
-  const words = all.filter((s) => !starts.includes(s) && s.name.toLowerCase().split(/[\s\-&/()]+/).some((w) => w.startsWith(q)));
-  const anywhere = all.filter((s) => !starts.includes(s) && !words.includes(s) && s.name.toLowerCase().includes(q));
-  return [...starts, ...words, ...anywhere].slice(0, limit);
 }
 
 /**

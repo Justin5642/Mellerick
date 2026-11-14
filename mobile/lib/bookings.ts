@@ -13,7 +13,14 @@
 // back to the job-level window. Those fallbacks are encoded here too, so the
 // screens cannot each invent their own.
 import { dateKeyInBusinessTZ } from "./date";
-import { scheduleDays, type ScheduleColumns, type ScheduledJobWindow } from "./scheduling";
+import {
+  buildScheduleColumns,
+  scheduleDays,
+  scheduleInputFromJob,
+  type ScheduleColumns,
+  type ScheduledJobWindow,
+  type ScheduleInput,
+} from "./scheduling";
 
 export interface Booking {
   id: string;
@@ -44,20 +51,55 @@ export function bookingWindow(b: Pick<Booking, "starts_at" | "ends_at" | "daily"
   };
 }
 
+/** A new booking row, as the board model (./boardModel.ts planBoardAdd) plans it. Same shape as the web's. */
+export type BookingInsert = Pick<Booking, "job_id" | "staff_id" | "cost_center_id" | "starts_at" | "ends_at" | "daily" | "all_day">;
+
+function instant(iso: string | null): number | null {
+  return iso === null ? null : new Date(iso).getTime();
+}
+
+/** Whether two windows are the same booking time (instants, not strings — PostgREST reformats). Mirrors the web lib/bookings.ts. */
+export function sameBookingWindow(
+  a: Pick<Booking, "starts_at" | "ends_at" | "daily" | "all_day">,
+  b: Pick<Booking, "starts_at" | "ends_at" | "daily" | "all_day">,
+): boolean {
+  return instant(a.starts_at) === instant(b.starts_at) && instant(a.ends_at) === instant(b.ends_at) && a.daily === b.daily && a.all_day === b.all_day;
+}
+
 /**
  * A window to write: buildScheduleColumns() output, or a moved window
  * (moveSchedule / computeRescheduleWithTime), whose end may be absent.
  */
-export type BookingWindowColumns = Omit<ScheduleColumns, "scheduled_end"> & { scheduled_end: string | null };
+export type ScheduleWindowColumns = Omit<ScheduleColumns, "scheduled_end"> & { scheduled_end: string | null };
 
 /** A window as booking columns — one window, written per technician. */
-export function bookingColumns(columns: BookingWindowColumns): Pick<Booking, "starts_at" | "ends_at" | "daily" | "all_day"> {
+export function bookingColumns(columns: ScheduleWindowColumns): Pick<Booking, "starts_at" | "ends_at" | "daily" | "all_day"> {
   return {
     starts_at: columns.scheduled_start,
     ends_at: columns.scheduled_end,
     daily: columns.schedule_daily,
     all_day: columns.schedule_all_day,
   };
+}
+
+/** The window columns a booking write sets — buildBookingWindow() returns exactly these. */
+export interface BookingWindowColumns {
+  starts_at: string;
+  ends_at: string | null;
+  daily: boolean;
+  all_day: boolean;
+}
+
+/** A schedule form's input as booking columns. Call validateScheduleInput first. Same as the web's lib/bookings.ts. */
+export function buildBookingWindow(input: ScheduleInput): BookingWindowColumns {
+  return bookingColumns(buildScheduleColumns(input));
+}
+
+/** A saved booking as schedule form input (the reverse of buildBookingWindow). */
+export function bookingScheduleInput(b: Pick<Booking, "starts_at" | "ends_at" | "daily" | "all_day">): ScheduleInput {
+  // scheduleInputFromJob only returns null for a missing start, and a booking
+  // always has one (starts_at is NOT NULL).
+  return scheduleInputFromJob(bookingWindow(b))!;
 }
 
 // ---------------------------------------------------------------------------
