@@ -347,7 +347,7 @@ one once, against its PO, and the app makes the Xero bill.
   counted twice in the ledger.
 - 0089 was applied before this merged (the supplier-orders route selects `delivered_at`).
 
-**Scheduling and PO batch (13 Nov 2026; migrations `0096`, `0097` — DRAFT, NOT APPLIED).**
+**Scheduling and PO batch (13 Nov 2026; migrations `0096`, `0097` applied 2026-11-14).**
 - **Closed jobs can't be scheduled.** The board and the phone's Schedule tab
   hide completed/cancelled jobs, so a booking on one used to "save" and never
   appear. Web "Schedule Job" is disabled for them with a link to change the
@@ -394,7 +394,7 @@ one once, against its PO, and the app makes the Xero bill.
   `suppliers.pin_order` (0097; Settings → Suppliers); Recent comes from
   `vendor_orders` (user's own first, then the company's). 0097 also defaults
   `vendor_orders.entered_by` to the signed-in user and seeds the four pins by
-  name. Before 0097 there is simply no Pinned group.
+  name (applied: Reece, Plumbers Co-op, Northern Quarries, Boral pinned).
 - **Allowed hours per cost centre already existed** — PO tab, Hours on each
   cost-centre line (`po_cost_centers.allocated_hours`); not rebuilt.
 

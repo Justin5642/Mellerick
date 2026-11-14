@@ -1,11 +1,8 @@
 -- ============================================================================
 -- Pinned suppliers for the PO supplier picker.
 --
--- STATUS: DRAFT — NOT APPLIED. Written 13 Nov 2026 with the picker change and
--- not yet run against production; apply it in the SQL editor, then run
--- supabase/tests/0097_pinned_suppliers_test.sql. The code is safe before it:
--- without pin_order the pickers show no Pinned group (Recent and A–Z still
--- work) and Settings → Suppliers hides the pin controls.
+-- STATUS: ✅ APPLIED IN PRODUCTION (2026-11-14, via SQL editor). Gate test
+-- supabase/tests/0097_pinned_suppliers_test.sql passed.
 --
 -- WHY (Justin, Nov 2026): picking a supplier on a PO meant scrolling the whole
 -- Xero contact list. The pickers (web PO tab, phone Orders tab) now show
