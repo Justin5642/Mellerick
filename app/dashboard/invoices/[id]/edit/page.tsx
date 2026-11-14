@@ -17,7 +17,10 @@ import { FormSkeleton } from "@/components/ui/loading-skeletons";
 import { replaceLineItems, moneyTotals } from "@/lib/replace-line-items";
 import { ProgressClaimFields, emptyClaimDraft, claimColumns, claimDraftFromInvoice, type ClaimDraft } from "@/components/invoice/progress-claim-fields";
 
-interface LineItem { id?: string; name: string; description: string; quantity: string; unit_price: string; }
+// `source` rides along unchanged so lines built by "Apply hourly rate" stay
+// marked as hours lines when this screen re-saves them (0098). Without it a
+// re-apply would no longer find and replace them, and would bill twice.
+interface LineItem { id?: string; name: string; description: string; quantity: string; unit_price: string; source?: string | null; }
 
 export default function EditInvoicePage() {
   const params = useParams();
@@ -57,6 +60,7 @@ export default function EditInvoicePage() {
           description: i.description ?? "",
           quantity: String(i.quantity),
           unit_price: String(i.unit_price),
+          source: i.source ?? null,
         })));
       }
       setPricingItems(pricing ?? []);
@@ -115,6 +119,7 @@ export default function EditInvoicePage() {
         description: i.description || null,
         quantity: parseFloat(i.quantity) || 1,
         unit_price: parseFloat(i.unit_price),
+        source: i.source ?? null,
       }));
 
     const replaced = await replaceLineItems(supabase, "invoice_items", "invoice_id", id, validItems);
