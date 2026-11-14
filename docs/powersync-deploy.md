@@ -9,8 +9,9 @@ dashboard. This page is that procedure.
 
 - **Service:** PowerSync Cloud, project **mellerick**, the app's instance
   `6a5f0bf6367771958b496c5e` (the one `EXPO_PUBLIC_POWERSYNC_URL` points at).
-  A second instance, `6a5f0bf73ab36f9f81820437`, exists and is **not** the
-  app's — see HANDOVER §6 ("Second replication outage").
+  It is labelled **"Development"** in the dashboard. A second instance
+  (`6a5f0bf73ab36f9f81820437`, labelled "Production", never the app's) was
+  deleted on 2026-11-14.
 - **Dialect:** Sync Streams edition 3 (`config: edition: 3` at the top of the
   file). There is no legacy `sync-rules.yaml` any more; do not create one.
 - **History so far:** v2 (2026-07-27), v3, v4 (2026-10-12, new slot after the
@@ -25,7 +26,7 @@ Username under the instance's Database Connection). Migration 0080 granted
 `job_bookings` to `powersync_role`, which this instance does not use, so the
 v5 deploy failed with `permission denied for table job_bookings` until the
 grant below was run (2026-11-14). A third role, `powersync_7dc56333…`, reads
-nothing — probably the second, unused instance.
+nothing — left over from the deleted second instance.
 
 **Any migration that adds a table to the `powersync` publication must grant it
 to the user PowerSync actually connects as.** Check with:
