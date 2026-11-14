@@ -807,6 +807,7 @@ export type Database = {
           name: string
           pricing_item_id: string | null
           quantity: number | null
+          source: string | null
           sync_office: boolean
           total: number | null
           unit_price: number
@@ -819,6 +820,7 @@ export type Database = {
           name: string
           pricing_item_id?: string | null
           quantity?: number | null
+          source?: string | null
           sync_office?: boolean
           total?: number | null
           unit_price: number
@@ -831,6 +833,7 @@ export type Database = {
           name?: string
           pricing_item_id?: string | null
           quantity?: number | null
+          source?: string | null
           sync_office?: boolean
           total?: number | null
           unit_price?: number
@@ -2462,6 +2465,7 @@ export type Database = {
           entry_type: string
           hours: number | null
           id: string
+          invoice_id: string | null
           job_id: string
           notes: string | null
           rate_override: string | null
@@ -2486,6 +2490,7 @@ export type Database = {
           entry_type?: string
           hours?: number | null
           id?: string
+          invoice_id?: string | null
           job_id: string
           notes?: string | null
           rate_override?: string | null
@@ -2510,6 +2515,7 @@ export type Database = {
           entry_type?: string
           hours?: number | null
           id?: string
+          invoice_id?: string | null
           job_id?: string
           notes?: string | null
           rate_override?: string | null
@@ -2518,6 +2524,13 @@ export type Database = {
           travel_from_job_id?: string | null
         }
         Relationships: [
+          {
+            foreignKeyName: "time_entries_invoice_id_fkey"
+            columns: ["invoice_id"]
+            isOneToOne: false
+            referencedRelation: "invoices"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "time_entries_cost_center_id_fkey"
             columns: ["cost_center_id"]
@@ -3016,6 +3029,10 @@ export type Database = {
       }
     }
     Functions: {
+      apply_invoice_hours: {
+        Args: { p_invoice_id: string; p_lines: Json }
+        Returns: Json
+      }
       check_login_lockout: { Args: { p_user_id: string }; Returns: Json }
       clear_login_lockout: { Args: { p_user_id: string }; Returns: undefined }
       consume_rate_limit: {
