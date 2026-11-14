@@ -8,7 +8,7 @@ import { dayRatedTools, defaultPlantLine, hourlyPlant, loadPlant, logPlant, logT
 // Transport line by default for a vehicle. Big steppers, no typing: the crew
 // are often in gloves. Names only; no costs on the phone.
 //
-// Tools used today (migration 0100 — draft, not applied yet): the small plant & equipment list — demo
+// Tools used today (migration 0100): the small plant & equipment list — demo
 // saw, compactors, core drill... One tap ticks a tool as used on this job
 // today (one full day at its day rate, worked out on the server); tapping your
 // own tick again removes it. Hired-in tools aren't here: their hire invoice

@@ -1,8 +1,8 @@
 -- ============================================================================
 -- Small plant & equipment with a day rate, and "tools used today" on a job.
 --
--- STATUS: DRAFT — NOT APPLIED. Gate test:
--- supabase/tests/0100_plant_equipment_day_rates_test.sql
+-- STATUS: ✅ APPLIED IN PRODUCTION (2026-11-15, via SQL editor; the 8 seeded tools
+-- are live). Gate test supabase/tests/0100_plant_equipment_day_rates_test.sql passed.
 --
 -- WHY (Justin, 14 Nov 2026): demo saws, compactors, core drills and the like
 -- get used on jobs every week and their wear, repairs and replacement were

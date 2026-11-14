@@ -18,7 +18,7 @@ interface EquipmentOption extends EquipmentCostInputs {
   name: string;
   category: string;
   cost_per_load?: number | null;
-  /** $ per day used (0100 — draft, not applied yet). Day-rated items log whole days. */
+  /** $ per day used (0100). Day-rated items log whole days. */
   day_rate?: number | null;
 }
 
@@ -68,7 +68,7 @@ export function JobEquipment({ jobId, usage: initialUsage, equipmentOptions, onU
   }
 
   // Hours × cost per hour, plus loads × cost per load (0091), plus tool days
-  // × day rate (0100 — draft, not applied yet).
+  // × day rate (0100).
   function costOf(u: UsageEntry) {
     const eq = equipmentById.get(u.equipment_id);
     return (

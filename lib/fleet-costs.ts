@@ -246,7 +246,7 @@ export function trailingYear(today: string): { start: string; end: string } {
 export interface UsageCostEquipment extends EquipmentCostInputs {
   assigned_to?: string | null;
   cost_per_load?: number | string | null;
-  /** $ per day used (0100 — draft, not applied yet), hire-equivalent for owned small plant. */
+  /** $ per day used (0100), hire-equivalent for owned small plant. */
   day_rate?: number | string | null;
   effective_rate?: EffectiveRate | null;
 }
@@ -256,7 +256,7 @@ export interface UsageCostEquipment extends EquipmentCostInputs {
  *   hours × cost per hour   (not for a vehicle assigned to someone — its cost
  *                            is already in their loaded hourly rate)
  * + loads × cost per load   (0091)
- * + days  × day rate        (0100 — draft, not applied yet: "tools used today")
+ * + days  × day rate        (0100: "tools used today")
  */
 export function usageCost(
   u: { hours: number | string | null; loads?: number | string | null; days?: number | string | null },

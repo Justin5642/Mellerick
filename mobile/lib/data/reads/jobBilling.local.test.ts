@@ -273,7 +273,7 @@ describe("getJobEquipment (local path)", () => {
         { id: "u-2", equipment_id: "e-gone", usage_date: "2026-07-19", hours: 3, notes: null, equipment_name: "Old digger", equipment_category: "Excavation" },
         // missing join (equipment row absent locally) → PostgREST-null fallbacks
         { id: "u-3", equipment_id: "e-void", usage_date: "2026-07-18", hours: 1, notes: null, equipment_name: null, equipment_category: null },
-        // a tool day (0100 — draft, not applied yet): no hours, one day at the item's day rate
+        // a tool day (0100): no hours, one day at the item's day rate
         { id: "u-4", equipment_id: "e-2", usage_date: "2026-07-17", hours: 0, days: 1, notes: null, equipment_name: "Demo saw", equipment_category: "tool" },
       ],
       [EXPECTED_EQUIP_OPTIONS]: [

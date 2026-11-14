@@ -293,7 +293,7 @@ export interface JobEquipmentUsage {
   category: string;
   usage_date: string;
   hours: number;
-  /** Tool days (0100 — draft, not applied yet), costed at the item's day rate. */
+  /** Tool days (0100), costed at the item's day rate. */
   days: number;
   notes: string | null;
   cost_per_hour: number;

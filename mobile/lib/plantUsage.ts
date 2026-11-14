@@ -11,7 +11,7 @@ const API_BASE_URL = process.env.EXPO_PUBLIC_API_BASE_URL;
 export interface PlantState {
   /**
    * dayRated: small plant & equipment logged a day at a time ("Tools used
-   * today", migration 0100 — draft, not applied yet). Absent from an older server = false.
+   * today", migration 0100). Absent from an older server = false.
    */
   equipment: { id: string; name: string; category: string; dayRated?: boolean }[];
   /** The job's PO lines, with the company cost centre each belongs to. */

@@ -84,7 +84,7 @@ export interface JobProfitabilityInput {
   timeEntries: JobTimeEntry[];
   staffCostProfiles: StaffCostProfile[];
   expenses: { amount: number | null }[];
-  /** days: tool days (migration 0100 — draft, not applied yet), costed at the item's day rate. */
+  /** days: tool days (migration 0100), costed at the item's day rate. */
   equipmentUsage: { equipment_id: string; hours: number; days?: number | null }[];
   equipmentOptions: EquipmentOption[];
   invoices: { subtotal: number | null; status: string }[];
@@ -146,7 +146,7 @@ export function computeJobProfitability(input: JobProfitabilityInput): JobProfit
   const equipmentCost = unassignedEquipmentUsage.reduce((s, u) => {
     const eq = equipmentById.get(u.equipment_id);
     if (!eq) return s;
-    // Hours at cost per hour, plus tool days at the day rate (0100 — draft, not applied yet) — the web's
+    // Hours at cost per hour, plus tool days at the day rate (0100) — the web's
     // rule (lib/fleet-costs.ts usageCost).
     return s + Number(u.hours) * computeEquipmentCost(eq).costPerHour + Number(u.days ?? 0) * Number(eq.day_rate ?? 0);
   }, 0);

@@ -91,7 +91,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   if (typeof equipmentId !== "string" || !UUID.test(equipmentId)) return NextResponse.json({ error: "Pick the truck or machine." }, { status: 400 });
   const hours = Number(b.hours ?? 0);
   const loads = Number(b.loads ?? 0);
-  // A "tool used today" tap (0100 — draft, not applied yet): one full day,
+  // A "tool used today" tap (0100): one full day,
   // nothing else.
   const days = Number(b.days ?? 0);
   if (days !== 0 && days !== 1) return NextResponse.json({ error: "Tools are logged one day at a time." }, { status: 400 });
@@ -142,7 +142,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   }
 }
 
-// Untick a tool logged on this job today (0100 — draft, not applied yet).
+// Untick a tool logged on this job today (0100).
 // Only a tool-day row from today: anything older is the office's to correct,
 // and hours/loads entries are not touched from here. Runs as the caller, so
 // RLS (0074: jobs you're on) decides as it does for the insert.

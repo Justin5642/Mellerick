@@ -51,7 +51,7 @@ interface EquipmentUsage {
   equipment_id: string;
   hours: number;
   loads?: number | null;
-  /** Tool days (0100 — draft, not applied yet). */
+  /** Tool days (0100). */
   days?: number | null;
 }
 
@@ -137,7 +137,7 @@ export function JobProfitability({ timeEntries, staffCostProfiles, expenses, equ
   const unassignedEquipmentUsage = equipmentUsage.filter((u) => !equipmentById.get(u.equipment_id)?.assigned_to);
   const excludedEquipmentUsageCount = equipmentUsage.length - unassignedEquipmentUsage.length;
   // Hours on assigned vehicles are in labour above; their truck loads, and every
-  // tool day (0100 — draft, not applied yet), are costed here — same rule as
+  // tool day (0100), are costed here — same rule as
   // the job ledger (lib/fleet-costs.ts usageCost).
   const equipmentCost = equipmentUsage.reduce((sum, u) => {
     const eq = equipmentById.get(u.equipment_id);

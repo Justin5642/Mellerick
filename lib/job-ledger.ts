@@ -43,7 +43,7 @@ export interface EquipmentInput extends EquipmentCostInputs {
   assigned_to?: string | null;
   /** $ per load carted (0091). */
   cost_per_load?: number | null;
-  /** $ per day used (0100 — draft, not applied yet). */
+  /** $ per day used (0100). */
   day_rate?: number | null;
   /** Attached by lib/fleet-rates.ts; absent = cost at the estimate. */
   effective_rate?: EffectiveRate | null;
