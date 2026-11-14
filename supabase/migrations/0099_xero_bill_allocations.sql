@@ -1,7 +1,8 @@
 -- ============================================================================
 -- Which job (or overhead) each Xero supplier bill belongs to.
 --
--- STATUS: DRAFT — NOT APPLIED. Written 14 Nov 2026 on branch feat/unallocated-bills.
+-- STATUS: ✅ APPLIED IN PRODUCTION (2026-11-14, via SQL editor). Gate test
+-- supabase/tests/0099_xero_bill_allocations_test.sql passed.
 -- Needs 0098 first (xero_invoices). Apply (SQL editor), run
 -- supabase/tests/0099_xero_bill_allocations_test.sql, THEN merge.
 --

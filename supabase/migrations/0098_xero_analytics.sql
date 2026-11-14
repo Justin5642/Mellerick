@@ -2,7 +2,8 @@
 -- Local copy of Xero's invoices, bills, payments and monthly profit & loss,
 -- so "where should the business head" can be answered from our own database.
 --
--- STATUS: DRAFT — NOT APPLIED. Written 14 Nov 2026 on branch feat/xero-analytics-sync.
+-- STATUS: ✅ APPLIED IN PRODUCTION (2026-11-14, via SQL editor). Gate test
+-- supabase/tests/0098_xero_analytics_test.sql passed.
 -- Apply (SQL editor), run supabase/tests/0098_xero_analytics_test.sql, THEN merge.
 -- The sync route reports "Xero analytics tables not found" until this is applied;
 -- nothing else in the app reads these tables.
