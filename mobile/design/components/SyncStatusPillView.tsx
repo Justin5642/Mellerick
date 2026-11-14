@@ -5,28 +5,29 @@ import { colors } from "../../lib/theme";
 // Pure presentational pill — NO data-layer coupling, so it's trivially testable
 // without the native SQLite/AsyncStorage stack. Renders nothing when fully
 // synced (no clutter); an amber "Syncing N…" while writes are in flight; and a
-// red, tappable "N not synced · Retry" when writes have terminally failed (dead)
-// — the actionable state the reviews asked for.
+// red, tappable "N not synced · Details" when writes have terminally failed
+// (dead); tapping opens the list of what didn't sync and why (UnsyncedSheet),
+// with Retry and Discard there.
 export function SyncStatusPillView({
   pending,
   failed,
-  onRetry,
+  onPress,
 }: {
   pending: number;
   failed: number;
-  onRetry: () => void;
+  onPress: () => void;
 }) {
   if (failed > 0) {
     return (
       <TouchableOpacity
         style={[styles.pill, styles.failed]}
-        onPress={onRetry}
+        onPress={onPress}
         accessibilityRole="button"
-        accessibilityLabel={`${failed} change${failed === 1 ? "" : "s"} not synced. Tap to retry.`}
+        accessibilityLabel={`${failed} change${failed === 1 ? "" : "s"} not synced. Tap for details.`}
         testID="sync-status-failed"
       >
         <Ionicons name="warning-outline" size={13} color={colors.red600} />
-        <Text style={[styles.text, styles.failedText]}>{failed} not synced · Retry</Text>
+        <Text style={[styles.text, styles.failedText]}>{failed} not synced · Details</Text>
       </TouchableOpacity>
     );
   }

@@ -554,3 +554,35 @@ describe("Outbox — per-row ordering", () => {
     expect((await box.nextReady())?.id).toBe("b");
   });
 });
+
+describe("the not-synced sheet: deadOperations / discardDead", () => {
+  it("lists only dead operations, oldest first", async () => {
+    const store = new InMemoryOutboxStore();
+    const box = new Outbox(store, mockClock());
+    await store.insert(write("b", { status: "dead", createdAt: 20, error: "this time entry has been billed" }));
+    await store.insert(write("a", { status: "dead", createdAt: 10, error: "duplicate key" }));
+    await store.insert(write("c", { status: "pending", createdAt: 5 }));
+    expect((await box.deadOperations()).map((o) => o.id)).toEqual(["a", "b"]);
+  });
+
+  it("discarding closes the op as done, keeps the reason, and drops it from the count", async () => {
+    const store = new InMemoryOutboxStore();
+    const box = new Outbox(store, mockClock());
+    await store.insert(write("x", { status: "dead", error: "permission denied" }));
+    expect(await box.deadCount()).toBe(1);
+    expect(await box.discardDead("x")).toBe(true);
+    expect(await box.deadCount()).toBe(0);
+    const [op] = await store.all();
+    expect(op.status).toBe("done");
+    expect(op.error).toBe("discarded by user: permission denied");
+  });
+
+  it("refuses to discard anything that isn't dead (it may still sync)", async () => {
+    const store = new InMemoryOutboxStore();
+    const box = new Outbox(store, mockClock());
+    await store.insert(write("p", { status: "pending" }));
+    expect(await box.discardDead("p")).toBe(false);
+    expect((await store.all())[0].status).toBe("pending");
+    expect(await box.discardDead("missing")).toBe(false);
+  });
+});
