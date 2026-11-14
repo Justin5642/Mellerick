@@ -398,6 +398,39 @@ one once, against its PO, and the app makes the Xero bill.
 - **Allowed hours per cost centre already existed** — PO tab, Hours on each
   cost-centre line (`po_cost_centers.allocated_hours`); not rebuilt.
 
+**Customer job report with the invoice (14 Nov 2026; no migration).** Justin
+approved: the web **Send Invoice** dialog has "Include job report and photos"
+(only when the invoice has a job). Ticked, it loads a draft
+(`GET /api/invoices/[id]/job-report`) and the email gets a second PDF,
+`job-report-<invoice no>.pdf`, with a line in the body saying so.
+- **Content:** header as on the invoice; job number/title, customer, site,
+  invoice number; **dates attended** with each day's technicians (work
+  `time_entries`, Melbourne days, names from `profiles` — **no hours, no
+  money**: fixed-price builders must not see hours); **work carried out** —
+  defaulted from `job_stage_notes`, the voice report and `completion_notes`
+  (never `job_notes`, which can be internal), edited by the office, sent
+  exactly as left (plain text, ≤20,000 chars); **photos**, all ticked by
+  default, two per row with caption and date; the latest **signature** row as
+  the customer sign-off (tickbox). Excluded always: `photo_type='signature'`
+  from the photo grid, **docket photos** (`vendor_order_id` set — they can show
+  prices), and files that are not JPEG/PNG/WebP (HEIC etc.; the dialog says how
+  many).
+- **Server:** photos are downloaded through the caller's client (4 at a time)
+  and re-encoded with `sharp` (now a direct dependency) to ≤1200px JPEG q70;
+  at most 40 photos / ~14 MB of images — the first N go in and the office is
+  told the rest did not fit. The requested photo ids are intersected with the
+  job's eligible photos; the client list is never trusted. **If a requested
+  report can't be made, nothing is sent** (500 with a fixed sentence; reported
+  to Sentry by tag). `maxDuration` 60 on send and preview. A send without
+  `jobReport` (the phone's) is unchanged.
+- "Preview report" posts the same selection to
+  `/api/invoices/[id]/job-report/preview` and opens the PDF in a new tab.
+- Files: rules `lib/job-report.ts` (tested in `tests/unit/job-report.test.ts`),
+  loading/rendering `lib/job-report-data.ts`, PDF
+  `lib/pdf/job-report-template.tsx` + `render-job-report.ts`, dialog panel
+  `components/invoice/job-report-options.tsx`; route behaviour in
+  `tests/unit/invoice-send-job-report.test.ts`. Not yet on the phone.
+
 ---
 
 ## 2. The one rule that must never break
