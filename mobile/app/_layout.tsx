@@ -64,8 +64,9 @@ function RootNavigation() {
     if (!session && !inAuthGroup) {
       router.replace("/login");
     } else if (session && inAuthGroup) {
-      // Role-aware landing: office/admin start on the dashboard, techs on My Jobs.
-      router.replace(isOffice ? "/dashboard" : "/");
+      // Role-aware landing: office/admin start on the Schedule (the most-used
+      // screen — Justin, 15 Nov 2026), techs on My Jobs.
+      router.replace(isOffice ? "/schedule" : "/");
     }
   }, [session, loading, isOffice, segments]);
 
