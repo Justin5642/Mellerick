@@ -213,6 +213,7 @@ export function FleetClient({ role, currentUserId, equipment: initialEquipment, 
               {equipment.map((item) => {
                 const { annualTotalCost } = computeEquipmentCost(item);
                 const costPerHour = costPerHourOf(item);
+                const dayRate = Number(item.day_rate ?? 0);
                 const actual = item.effective_rate?.source === "actual";
                 const spent = spendByEquipment.get(item.id) ?? 0;
                 const assignedStaff = staff.find((s) => s.id === item.assigned_to);
@@ -232,10 +233,14 @@ export function FleetClient({ role, currentUserId, equipment: initialEquipment, 
                             {EQUIPMENT_CATEGORY_LABELS[item.category] ?? item.category}
                           </span>
                           {item.registration && <span className="text-xs text-slate-500">{item.registration}</span>}
+                          {dayRate > 0 ? (
+                            <span className="text-xs text-slate-500">${dayRate.toFixed(0)}/day used</span>
+                          ) : (
                           <span className="text-xs text-slate-500" title={actual ? "Actual cost per hour, last 12 months" : item.effective_rate?.reason ? `Estimate — ${item.effective_rate.reason}` : "Estimate from the cost profile"}>
                             ${costPerHour.toFixed(2)}/hr <span className={actual ? "text-green-700" : "text-slate-400"}>({actual ? "actual" : "est."})</span>
                             {" · "}est. ${annualTotalCost.toLocaleString("en-AU", { maximumFractionDigits: 0 })}/yr
                           </span>
+                          )}
                           {(() => {
                             const d = dueByEquipment.get(item.id);
                             if (!d || d.state === "no_due_date") return null;

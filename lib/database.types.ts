@@ -457,6 +457,7 @@ export type Database = {
       }
       equipment: {
         Row: {
+          day_rate: number
           assigned_to: string | null
           category: string
           cost_per_load: number
@@ -479,6 +480,7 @@ export type Database = {
           updated_by: string | null
         }
         Insert: {
+          day_rate?: number
           assigned_to?: string | null
           category?: string
           cost_per_load?: number
@@ -501,6 +503,7 @@ export type Database = {
           updated_by?: string | null
         }
         Update: {
+          day_rate?: number
           assigned_to?: string | null
           category?: string
           cost_per_load?: number
@@ -718,6 +721,7 @@ export type Database = {
       }
       equipment_usage_log: {
         Row: {
+          days: number
           cost_center_id: string | null
           created_at: string | null
           equipment_id: string
@@ -731,6 +735,7 @@ export type Database = {
           usage_date: string
         }
         Insert: {
+          days?: number
           cost_center_id?: string | null
           created_at?: string | null
           equipment_id: string
@@ -744,6 +749,7 @@ export type Database = {
           usage_date?: string
         }
         Update: {
+          days?: number
           cost_center_id?: string | null
           created_at?: string | null
           equipment_id?: string
