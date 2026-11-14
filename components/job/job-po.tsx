@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { FileDropzone } from "@/components/ui/file-dropzone";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Plus, Trash2, Navigation, MapPin, Loader2, ShoppingCart, X } from "lucide-react";
 import { nextJobPoNumber } from "@/lib/job-po-number";
@@ -631,8 +632,8 @@ export function JobPO({ jobId, jobNumber, customerName, site, pos: initialPos, t
               <Input inputMode="decimal" value={invoiceForm.amount} onChange={e => setInvoiceForm(f => ({ ...f, amount: e.target.value }))} placeholder="$ ex GST" className="h-7 text-xs text-right" />
             </div>
             <div className="flex items-center justify-between gap-2">
-              <input type="file" accept="application/pdf,image/*" onChange={e => setInvoiceFile(e.target.files?.[0] ?? null)} className="text-[11px] text-slate-500" />
-              <div className="flex gap-1">
+              <FileDropzone compact file={invoiceFile} onFileChange={setInvoiceFile} accept="application/pdf,image/*" hint="PDF or image" className="min-w-0 flex-1" />
+              <div className="flex shrink-0 gap-1">
                 <Button type="button" variant="ghost" size="sm" className="h-7 text-xs" onClick={() => setInvoiceFor(null)}>Cancel</Button>
                 <Button type="button" size="sm" className="h-7 text-xs" onClick={() => saveInvoice(vo)} disabled={invoiceBusy}>{invoiceBusy ? "Saving..." : "Save invoice"}</Button>
               </div>
