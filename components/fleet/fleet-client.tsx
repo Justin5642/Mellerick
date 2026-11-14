@@ -31,7 +31,7 @@ interface Props {
   expenses: FleetExpense[] | null;
   expensesError: string | null;
   today: string;
-  /** All service records (0099 — draft, not applied yet); null when unavailable. */
+  /** All service records (0099); null when unavailable. */
   services: ServiceRecord[] | null;
   fetchError: string | null;
 }

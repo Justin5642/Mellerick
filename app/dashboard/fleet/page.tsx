@@ -27,7 +27,7 @@ export default async function FleetPage() {
     fetchAllRows<FleetExpense>((c) =>
       supabase.from("equipment_expenses").select("equipment_id, category, amount, gst_amount, expense_date", c).order("id") as never
     ),
-    // For each item's next-service status. Needs 0099 (draft, not applied yet); without it the list
+    // For each item's next-service status. Needs 0099; without it the list
     // simply shows no service status.
     fetchAllRows<ServiceRecord>((c) =>
       supabase

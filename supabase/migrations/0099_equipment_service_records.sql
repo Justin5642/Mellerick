@@ -1,8 +1,8 @@
 -- ============================================================================
 -- Service records for fleet vehicles and plant.
 --
--- STATUS: DRAFT — NOT APPLIED. Gate test:
--- supabase/tests/0099_equipment_service_records_test.sql
+-- STATUS: ✅ APPLIED IN PRODUCTION (2026-11-14, via SQL editor). Gate test
+-- supabase/tests/0099_equipment_service_records_test.sql passed.
 --
 -- WHY (Justin, 14 Nov 2026 — Fleet department): log every service against each
 -- vehicle and piece of plant, so its history, odometer / engine hours and when

@@ -37,7 +37,7 @@ export default async function EquipmentDetailPage({ params }: { params: Promise<
   const today = dateKeyInBusinessTZ(new Date());
   const [withRate] = await attachEffectiveRates(supabase as any, [equipment as any], today);
 
-  // Service records need 0099 (draft, not applied yet). Without it the tab says so; any other read
+  // Service records need 0099. Without it the tab says so; any other read
   // failure is logged and shown the same way rather than taking the page down.
   if (servicesRes.error && !isServiceTableMissing(servicesRes.error)) console.error("fleet: service records unavailable", servicesRes.error);
   const services = servicesRes.error ? null : ((servicesRes.data ?? []) as ServiceRecord[]);

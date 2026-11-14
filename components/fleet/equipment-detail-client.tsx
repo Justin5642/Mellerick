@@ -20,7 +20,7 @@ import type { EffectiveRate } from "@/lib/fleet-costs";
 interface Props {
   equipment: any;
   today: string;
-  /** null = service records not in this database yet (0099 — draft, not applied yet). */
+  /** null = service records not in this database yet (0099). */
   services: ServiceRecord[] | null;
   canEditServices: boolean;
   currentUserId: string;

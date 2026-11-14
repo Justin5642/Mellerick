@@ -41,7 +41,7 @@ const blankForm = (today: string) => ({
 const num = (v: string) => (v.trim() === "" ? null : Number(v));
 
 /**
- * Service history for one fleet item (0099 — draft, not applied yet): readings,
+ * Service history for one fleet item (0099): readings,
  * what was done, the next one due, and the invoice it was paid on. The cost
  * itself is an equipment_expenses row (new or existing), so the yearly summary
  * and the actual cost rate count it once.
