@@ -1,5 +1,4 @@
-// When a fleet item's next service is due, from its service records (0099 —
-// draft, not applied yet).
+// When a fleet item's next service is due, from its service records (0099).
 //
 // Pure. The due date is the only thing checkable without a live odometer:
 // km and engine-hours targets are shown alongside, with the latest reading on
