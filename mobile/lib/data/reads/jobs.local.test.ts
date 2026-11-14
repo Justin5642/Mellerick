@@ -21,7 +21,7 @@ jest.mock("../../supabase", () => {
 
 import { supabase } from "../../supabase";
 import { resetSourceForTests, setLocalReads, type LocalReads, type LocalRole } from "./source";
-import { getJob, listMyJobs, listMyJobSites, listOfficeJobs, searchJobs, searchOfficeJobs, todaysJobSites } from "./jobs";
+import { getJob, listMyJobs, listMyJobSites, listOfficeJobs, searchJobs, searchOfficeJobs, rankJobSites } from "./jobs";
 
 /** Whitespace-normalize SQL for comparison. */
 function norm(sql: string): string {
@@ -139,31 +139,38 @@ describe("listMyJobSites (local)", () => {
   });
 });
 
-// Stage 5 (31 Oct 2026): only today's jobs compete for the clock-in, so the
-// wrong job on the same estate can't take it.
-describe("todaysJobSites", () => {
+// Auto clock bug (15 Nov 2026): every open job is watched; today's (and the
+// one I'm clocked into) are PREFERRED — first in the list, and they win an
+// overlap in nextGeofenceState. Stage 5's "today only" dropped too much.
+describe("rankJobSites", () => {
   const now = new Date(2026, 9, 31, 9, 0); // 31 Oct, 9am local
   const row = (id: string, start: string | null, end: string | null = null, clocked = false) =>
     ({ id, scheduled_cost_center_id: null, scheduled_start: start, scheduled_end: end, site_lat: 1, site_lng: 1, clocked_in: clocked });
 
-  it("keeps today's jobs (including a multi-day one running through today) and drops the rest", () => {
+  it("keeps every job, today's (incl. multi-day through today) first and marked preferred", () => {
     const rows = [
-      row("today", new Date(2026, 9, 31, 7).toISOString(), new Date(2026, 9, 31, 15).toISOString()),
-      row("spanning", new Date(2026, 9, 29, 7).toISOString(), new Date(2026, 10, 2, 15).toISOString()),
       row("last-week", new Date(2026, 9, 24, 7).toISOString(), new Date(2026, 9, 24, 15).toISOString()),
+      row("today", new Date(2026, 9, 31, 7).toISOString(), new Date(2026, 9, 31, 15).toISOString()),
       row("unscheduled", null),
+      row("spanning", new Date(2026, 9, 29, 7).toISOString(), new Date(2026, 10, 2, 15).toISOString()),
     ];
-    expect(todaysJobSites(rows, now).map((r) => r.id)).toEqual(["today", "spanning"]);
+    const ranked = rankJobSites(rows, now);
+    expect(ranked.map((r) => [r.id, r.preferred])).toEqual([
+      ["today", true],
+      ["spanning", true],
+      ["last-week", false],
+      ["unscheduled", false],
+    ]);
   });
 
-  it("always keeps a job I'm clocked into", () => {
+  it("puts a job I'm clocked into first, even if it isn't scheduled today", () => {
     const rows = [row("today", new Date(2026, 9, 31, 7).toISOString()), row("old", null, null, true)];
-    expect(todaysJobSites(rows, now).map((r) => r.id)).toEqual(["today", "old"]);
+    expect(rankJobSites(rows, now).map((r) => [r.id, r.preferred])).toEqual([["old", true], ["today", true]]);
   });
 
-  it("falls back to every job on a day with nothing scheduled", () => {
+  it("keeps everything on a day with nothing scheduled, none preferred", () => {
     const rows = [row("a", null), row("b", new Date(2026, 9, 20, 7).toISOString())];
-    expect(todaysJobSites(rows, now).map((r) => r.id)).toEqual(["a", "b"]);
+    expect(rankJobSites(rows, now).map((r) => [r.id, r.preferred])).toEqual([["a", false], ["b", false]]);
   });
 });
 
