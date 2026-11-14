@@ -3,7 +3,8 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { TrendingUp, TrendingDown, AlertTriangle } from "lucide-react";
 import { computeLoadedCost } from "@/lib/staff-cost";
-import { computeEquipmentCost, type EquipmentCostInputs } from "@/lib/equipment-cost";
+import type { EquipmentCostInputs } from "@/lib/equipment-cost";
+import { costPerHourOf, type EffectiveRate } from "@/lib/fleet-costs";
 
 // Admin-only "true job profitability" rollup: labour (hours logged * each
 // staff member's fully-loaded hourly cost, from staff_cost_profiles) +
@@ -54,6 +55,8 @@ interface EquipmentUsage {
 interface EquipmentOption extends EquipmentCostInputs {
   id: string;
   assigned_to?: string | null;
+  /** Actual rate from logged Fleet costs (lib/fleet-rates.ts); absent = estimate. */
+  effective_rate?: EffectiveRate | null;
 }
 
 interface Invoice {
@@ -95,7 +98,7 @@ export function JobProfitability({ timeEntries, staffCostProfiles, expenses, equ
     if (!eq.assigned_to) return;
     vehicleCostPerHourByStaff.set(
       eq.assigned_to,
-      (vehicleCostPerHourByStaff.get(eq.assigned_to) ?? 0) + computeEquipmentCost(eq).costPerHour
+      (vehicleCostPerHourByStaff.get(eq.assigned_to) ?? 0) + costPerHourOf(eq)
     );
   });
 
@@ -130,7 +133,7 @@ export function JobProfitability({ timeEntries, staffCostProfiles, expenses, equ
   const excludedEquipmentUsageCount = equipmentUsage.length - unassignedEquipmentUsage.length;
   const equipmentCost = unassignedEquipmentUsage.reduce((sum, u) => {
     const eq = equipmentById.get(u.equipment_id);
-    const costPerHour = eq ? computeEquipmentCost(eq).costPerHour : 0;
+    const costPerHour = eq ? costPerHourOf(eq) : 0;
     return sum + Number(u.hours) * costPerHour;
   }, 0);
 

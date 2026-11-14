@@ -6,13 +6,15 @@ import { balanceOf } from "@/lib/invoice-payments";
 import { ReportsDashboard } from "@/components/reports/reports-dashboard";
 import { computeLoadedCost } from "@/lib/staff-cost";
 import { computeEquipmentCost } from "@/lib/equipment-cost";
+import { costPerHourOf } from "@/lib/fleet-costs";
+import { attachEffectiveRates } from "@/lib/fleet-rates";
 import { businessDateParts, formatDate } from "@/lib/date";
 import { fetchAllRows } from "@/lib/fetch-all-rows";
 
 // What computeEquipmentCost / computeLoadedCost read, plus the keys the page
 // joins on — not "*", which carried every other column of both tables.
 const EQUIPMENT_COST_COLUMNS =
-  "id, name, assigned_to, purchase_cost, estimated_life_years, insurance_annual, maintenance_annual, " +
+  "id, name, assigned_to, purchase_date, created_at, purchase_cost, estimated_life_years, insurance_annual, maintenance_annual, " +
   "registration_annual, other_annual_costs, fuel_cost_per_hour, target_hours_per_year";
 const STAFF_COST_COLUMNS =
   "staff_id, hourly_rate, super_rate, workers_comp_rate, leave_loading_rate, annual_fixed_oncosts, target_hours_per_week";
@@ -119,7 +121,9 @@ export default async function ReportsPage() {
   const quotes = quotesResult.ok ? quotesResult.rows : [];
   const jobs = jobsResult.ok ? jobsResult.rows : [];
   const profiles = profilesResult.ok ? profilesResult.rows : [];
-  const equipmentList = equipmentResult.ok ? equipmentResult.rows : [];
+  // Each item's actual cost rate from logged Fleet costs (lib/fleet-costs.ts),
+  // so the reports cost plant the same way job costing does.
+  const equipmentList = equipmentResult.ok ? await attachEffectiveRates(supabase as any, equipmentResult.rows as any[]) : [];
   const equipmentUsage = equipmentUsageResult.ok ? equipmentUsageResult.rows : [];
 
   // Same test the admin reads above started on.
@@ -137,7 +141,7 @@ export default async function ReportsPage() {
   const vehicleCostPerHourByStaff = new Map<string, number>();
   (equipmentList ?? []).forEach((eq: any) => {
     if (!eq.assigned_to) return;
-    const { costPerHour } = computeEquipmentCost(eq);
+    const costPerHour = costPerHourOf(eq);
     vehicleCostPerHourByStaff.set(eq.assigned_to, (vehicleCostPerHourByStaff.get(eq.assigned_to) ?? 0) + costPerHour);
   });
 
@@ -223,7 +227,12 @@ export default async function ReportsPage() {
         budgetedCostPerHour: costPerHour,
         annualTotalCost,
         utilizationPct: targetHours > 0 ? (hoursUsed / targetHours) * 100 : null,
-        trueCostPerHourUsed: hoursUsed > 0 ? annualFixedCost / hoursUsed + Number(eq.fuel_cost_per_hour ?? 0) : null,
+        // From logged expenses when Fleet has enough data (lib/fleet-costs.ts);
+        // otherwise the estimated fixed cost spread over the hours used.
+        trueCostPerHourUsed:
+          eq.effective_rate?.source === "actual"
+            ? eq.effective_rate.actual.costPerHour
+            : hoursUsed > 0 ? annualFixedCost / hoursUsed + Number(eq.fuel_cost_per_hour ?? 0) : null,
       };
     })
     .sort((a, b) => (b.trueCostPerHourUsed ?? 0) - (a.trueCostPerHourUsed ?? 0));

@@ -5,6 +5,7 @@ import { getViewer } from "@/lib/auth/viewer";
 import { createClient } from "@/lib/supabase/server";
 import { fetchAllRows } from "@/lib/fetch-all-rows";
 import { belowMinimumMargin, computeJobLedger, loadedRatesByStaff, plantCosts, type JobLedger } from "@/lib/job-ledger";
+import { attachEffectiveRates } from "@/lib/fleet-rates";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { ArrowLeft, AlertTriangle } from "lucide-react";
@@ -19,7 +20,7 @@ import { ArrowLeft, AlertTriangle } from "lucide-react";
 // and billed).
 
 const EQUIPMENT_COST_COLUMNS =
-  "id, assigned_to, purchase_cost, estimated_life_years, insurance_annual, maintenance_annual, " +
+  "id, assigned_to, purchase_date, created_at, purchase_cost, estimated_life_years, insurance_annual, maintenance_annual, " +
   "registration_annual, other_annual_costs, fuel_cost_per_hour, target_hours_per_year, cost_per_load";
 const STAFF_COST_COLUMNS =
   "staff_id, hourly_rate, super_rate, workers_comp_rate, leave_loading_rate, annual_fixed_oncosts, target_hours_per_week";
@@ -100,7 +101,9 @@ export default async function JobMarginsPage() {
     for (const r of [equipmentRes, profilesRes, centresRes, configRes]) if (r.error) throw new Error(r.error.message);
     if (configRes.data?.min_margin_pct != null) minMarginPct = Number(configRes.data.min_margin_pct);
 
-    const equipment = (equipmentRes.data ?? []) as never[];
+    // Plant at the actual rate from logged Fleet costs where there is enough
+    // data (lib/fleet-costs.ts) — the same rate the job's Costing tab uses.
+    const equipment = (await attachEffectiveRates(supabase as any, (equipmentRes.data ?? []) as any[])) as never[];
     const rates = loadedRatesByStaff((profilesRes.data ?? []) as never[], equipment);
     const byJob = <T extends { job_id: string }>(list: T[]) => {
       const m = new Map<string, T[]>();

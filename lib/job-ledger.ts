@@ -1,5 +1,6 @@
 import { computeLoadedCost } from "@/lib/staff-cost";
-import { computeEquipmentCost, type EquipmentCostInputs } from "@/lib/equipment-cost";
+import type { EquipmentCostInputs } from "@/lib/equipment-cost";
+import { costPerHourOf, type EffectiveRate } from "@/lib/fleet-costs";
 
 // The job ledger (Stage 3 of the 31 Oct 2026 workflow review): for one job,
 // per company cost centre, the budget from the builder's PO split (Stage 2)
@@ -9,7 +10,9 @@ import { computeEquipmentCost, type EquipmentCostInputs } from "@/lib/equipment-
 //
 // Pure, so the job's Costing tab and the open-jobs list compute it the same
 // way. Everything is ex GST. Costing follows the Costing tab's existing rules
-// (lib/staff-cost.ts loaded rates, lib/equipment-cost.ts plant rates, and the
+// (lib/staff-cost.ts loaded rates, plant at lib/fleet-costs.ts costPerHourOf —
+// the actual rate from logged Fleet costs once there is enough, else the
+// lib/equipment-cost.ts estimate — and the
 // vehicle double-count guard), now split by cost centre:
 //
 //   budget     po_cost_centers.allocated_amount, by cost_centre_id (0087)
@@ -40,6 +43,8 @@ export interface EquipmentInput extends EquipmentCostInputs {
   assigned_to?: string | null;
   /** $ per load carted (0091). */
   cost_per_load?: number | null;
+  /** Attached by lib/fleet-rates.ts; absent = cost at the estimate. */
+  effective_rate?: EffectiveRate | null;
 }
 
 /** Each person's loaded $/hour, with any vehicle assigned to them folded in. */
@@ -47,7 +52,7 @@ export function loadedRatesByStaff(profiles: StaffCostProfileInput[], equipment:
   const vehicleByStaff = new Map<string, number>();
   for (const eq of equipment) {
     if (!eq.assigned_to) continue;
-    vehicleByStaff.set(eq.assigned_to, (vehicleByStaff.get(eq.assigned_to) ?? 0) + computeEquipmentCost(eq).costPerHour);
+    vehicleByStaff.set(eq.assigned_to, (vehicleByStaff.get(eq.assigned_to) ?? 0) + costPerHourOf(eq));
   }
   return new Map(
     profiles.map((p) => [
@@ -72,7 +77,7 @@ export function plantCosts(
     .map((u) => {
       const eq = byId.get(u.equipment_id);
       if (!eq) return { cost: 0, cost_center_id: u.cost_center_id ?? null };
-      const hoursCost = eq.assigned_to ? 0 : Number(u.hours) * computeEquipmentCost(eq).costPerHour;
+      const hoursCost = eq.assigned_to ? 0 : Number(u.hours) * costPerHourOf(eq);
       const loadsCost = Number(u.loads ?? 0) * Number(eq.cost_per_load ?? 0);
       return { cost: hoursCost + loadsCost, cost_center_id: u.cost_center_id ?? null };
     })
