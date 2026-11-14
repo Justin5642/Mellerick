@@ -14,6 +14,7 @@ import { StaffCostDialog } from "@/components/staff/staff-cost-dialog";
 import { StaffEditDialog } from "@/components/staff/staff-edit-dialog";
 import { staffRoleColors } from "@/lib/badge-colors";
 import { autoClockEnabled } from "@/lib/auto-clock";
+import { describeAutoClockStatus, type AutoClockStatusRow } from "@/lib/auto-clock-status";
 
 const roleIcons: Record<string, any> = {
   admin: Shield,
@@ -25,12 +26,21 @@ interface Props {
   role: string | null;
   staff: any[];
   vehicles: any[];
+  /** Each phone's auto clock status by staff id (0102 — draft, not applied yet); null = not available. */
+  autoClockStatus?: Record<string, AutoClockStatusRow> | null;
   fetchError: string | null;
 }
 
+const STATUS_TONE: Record<string, string> = {
+  ok: "text-green-700",
+  warn: "text-amber-700",
+  bad: "text-red-700",
+  idle: "text-slate-400",
+};
+
 // The roster and its actions. The page (app/dashboard/staff/page.tsx) loads the
 // rows and the viewer's role on the server and hands them in.
-export function StaffClient({ role, staff: initialStaff, vehicles, fetchError }: Props) {
+export function StaffClient({ role, staff: initialStaff, vehicles, autoClockStatus = null, fetchError }: Props) {
   const supabase = createClient();
   const [staff, setStaff] = useState(initialStaff);
   const [saving, setSaving] = useState(false);
@@ -271,6 +281,20 @@ export function StaffClient({ role, staff: initialStaff, vehicles, fetchError }:
                             </span>
                           )}
                         </div>
+                        {autoClockStatus && autoClockEnabled(member) && (() => {
+                          const st = describeAutoClockStatus(autoClockStatus[member.id]);
+                          const row = autoClockStatus[member.id];
+                          return (
+                            <p
+                              className={`text-xs mt-0.5 flex items-center gap-1 ${STATUS_TONE[st.tone]}`}
+                              title={[st.fix, row?.app_version ? `App ${row.app_version}` : null].filter(Boolean).join(" · ") || undefined}
+                            >
+                              <MapPin className="w-3 h-3 shrink-0" />
+                              <span>Auto clock: {st.text}</span>
+                              {st.fix && <span className="text-slate-400 hidden md:inline">— {st.fix}</span>}
+                            </p>
+                          );
+                        })()}
                       </div>
                     </div>
                     <div className="flex flex-wrap items-center gap-2 sm:pl-14 xl:shrink-0 xl:justify-end xl:pl-0">
