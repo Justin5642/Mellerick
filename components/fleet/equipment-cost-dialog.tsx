@@ -52,6 +52,7 @@ export function EquipmentCostDialog({ equipmentId, equipmentName, open, onOpenCh
   const [addingUsage, setAddingUsage] = useState(false);
   // $ per load carted (0091) — the truck's cartage is costed per hour AND per load.
   const [costPerLoad, setCostPerLoad] = useState(0);
+  const [dayRate, setDayRate] = useState(0);
 
   useEffect(() => {
     if (!open) return;
@@ -78,6 +79,7 @@ export function EquipmentCostDialog({ equipmentId, equipmentName, open, onOpenCh
         });
         setPurchaseDate(equipment.purchase_date ?? "");
         setCostPerLoad(Number(equipment.cost_per_load ?? 0));
+        setDayRate(Number(equipment.day_rate ?? 0));
       } else {
         setCostForm(emptyCostForm);
         setPurchaseDate("");
@@ -103,6 +105,7 @@ export function EquipmentCostDialog({ equipmentId, equipmentName, open, onOpenCh
       .update({
         ...costForm,
         cost_per_load: costPerLoad,
+        day_rate: dayRate,
         purchase_date: purchaseDate || null,
         updated_at: new Date().toISOString(),
         updated_by: user?.id ?? null,
@@ -206,6 +209,11 @@ export function EquipmentCostDialog({ equipmentId, equipmentName, open, onOpenCh
                 <div className="space-y-1.5">
                   <Label>Fuel ($/hour)</Label>
                   <Input type="number" step="0.5" value={costForm.fuel_cost_per_hour} onChange={(e) => setField("fuel_cost_per_hour", e.target.value)} />
+                </div>
+                <div className="space-y-1.5">
+                  <Label>Day rate ($/day used)</Label>
+                  <Input type="number" step="5" min="0" value={dayRate} onChange={(e) => setDayRate(e.target.value === "" ? 0 : Math.max(0, parseFloat(e.target.value)))} />
+                  <p className="text-[11px] text-slate-400">Small plant &amp; equipment: each day a tech ticks it on a job costs this (hire-equivalent, ex GST). 0 = not day-rated.</p>
                 </div>
                 <div className="space-y-1.5">
                   <Label>Per load carted ($)</Label>

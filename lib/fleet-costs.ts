@@ -238,3 +238,32 @@ export function trailingYear(today: string): { start: string; end: string } {
   const start = new Date(Date.UTC(y - 1, m - 1, d + 1));
   return { start: start.toISOString().slice(0, 10), end: today };
 }
+
+// ---------------------------------------------------------------------------
+// Cost of one usage entry
+// ---------------------------------------------------------------------------
+
+export interface UsageCostEquipment extends EquipmentCostInputs {
+  assigned_to?: string | null;
+  cost_per_load?: number | string | null;
+  /** $ per day used (0100 — draft, not applied yet), hire-equivalent for owned small plant. */
+  day_rate?: number | string | null;
+  effective_rate?: EffectiveRate | null;
+}
+
+/**
+ * What one equipment_usage_log row costs the job, ex GST:
+ *   hours × cost per hour   (not for a vehicle assigned to someone — its cost
+ *                            is already in their loaded hourly rate)
+ * + loads × cost per load   (0091)
+ * + days  × day rate        (0100 — draft, not applied yet: "tools used today")
+ */
+export function usageCost(
+  u: { hours: number | string | null; loads?: number | string | null; days?: number | string | null },
+  eq: UsageCostEquipment
+): number {
+  const hours = eq.assigned_to ? 0 : (Number(u.hours) || 0) * costPerHourOf(eq);
+  const loads = (Number(u.loads) || 0) * (Number(eq.cost_per_load) || 0);
+  const days = (Number(u.days) || 0) * (Number(eq.day_rate) || 0);
+  return hours + loads + days;
+}

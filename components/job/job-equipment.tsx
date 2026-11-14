@@ -18,7 +18,11 @@ interface EquipmentOption extends EquipmentCostInputs {
   name: string;
   category: string;
   cost_per_load?: number | null;
+  /** $ per day used (0100 — draft, not applied yet). Day-rated items log whole days. */
+  day_rate?: number | null;
 }
+
+const isDayRated = (eq: EquipmentOption | undefined) => Number(eq?.day_rate ?? 0) > 0;
 
 interface UsageEntry {
   id: string;
@@ -27,6 +31,7 @@ interface UsageEntry {
   hours: number;
   notes: string | null;
   loads?: number | null;
+  days?: number | null;
   cost_center_id?: string | null;
 }
 
@@ -62,17 +67,24 @@ export function JobEquipment({ jobId, usage: initialUsage, equipmentOptions, onU
     return eq ? costPerHourOf(eq) : 0;
   }
 
-  // Hours × cost per hour, plus loads × cost per load (0091).
+  // Hours × cost per hour, plus loads × cost per load (0091), plus tool days
+  // × day rate (0100 — draft, not applied yet).
   function costOf(u: UsageEntry) {
     const eq = equipmentById.get(u.equipment_id);
-    return Number(u.hours) * costPerHourFor(u.equipment_id) + Number(u.loads ?? 0) * Number(eq?.cost_per_load ?? 0);
+    return (
+      Number(u.hours) * costPerHourFor(u.equipment_id) +
+      Number(u.loads ?? 0) * Number(eq?.cost_per_load ?? 0) +
+      Number(u.days ?? 0) * Number(eq?.day_rate ?? 0)
+    );
   }
 
   async function saveUsage() {
     if (!form.equipment_id) { setErrors({ equipment_id: true }); return; }
     if (!form.usage_date) { setErrors({ usage_date: true }); return; }
-    // Hours, loads, or both — a truck run can be loads only.
-    if (!(Number(form.hours) > 0) && !(Number(form.loads) > 0)) { setErrors({ hours: true }); return; }
+    // A day-rated tool is one full day; otherwise hours, loads, or both — a
+    // truck run can be loads only.
+    const dayRated = isDayRated(equipmentById.get(form.equipment_id));
+    if (!dayRated && !(Number(form.hours) > 0) && !(Number(form.loads) > 0)) { setErrors({ hours: true }); return; }
     setSaving(true);
 
     const {
@@ -85,8 +97,9 @@ export function JobEquipment({ jobId, usage: initialUsage, equipmentOptions, onU
         job_id: jobId,
         equipment_id: form.equipment_id,
         usage_date: form.usage_date,
-        hours: Number(form.hours) || 0,
-        loads: Math.max(0, Math.round(Number(form.loads) || 0)),
+        hours: dayRated ? 0 : Number(form.hours) || 0,
+        loads: dayRated ? 0 : Math.max(0, Math.round(Number(form.loads) || 0)),
+        days: dayRated ? 1 : 0,
         cost_center_id: form.cost_center_id || null,
         notes: form.notes || null,
         logged_by: user?.id ?? null,
@@ -94,7 +107,12 @@ export function JobEquipment({ jobId, usage: initialUsage, equipmentOptions, onU
       .select()
       .single();
 
-    if (error || !data) { toast.error("Failed to log equipment usage"); setSaving(false); return; }
+    if (error || !data) {
+      // 23505: this tool is already logged on this job for that day (0100).
+      toast.error(error?.code === "23505" ? "That tool is already logged on this job for that day." : "Failed to log equipment usage");
+      setSaving(false);
+      return;
+    }
 
     const updated = [data as UsageEntry, ...usage];
     setUsage(updated);
@@ -172,8 +190,10 @@ export function JobEquipment({ jobId, usage: initialUsage, equipmentOptions, onU
             </CardHeader>
             <CardContent className="pt-0 space-y-1">
               <div className="flex justify-between text-sm">
-                <span className="text-slate-500">Hours</span>
-                <span className="font-medium text-slate-800">{Number(entry.hours).toFixed(1)}h</span>
+                <span className="text-slate-500">{Number(entry.days) > 0 ? "Used" : "Hours"}</span>
+                <span className="font-medium text-slate-800">
+                  {Number(entry.days) > 0 ? `1 day @ $${Number(eq?.day_rate ?? 0).toFixed(2)}` : `${Number(entry.hours).toFixed(1)}h`}
+                </span>
               </div>
               <div className="flex justify-between text-sm">
                 <span className="text-slate-500">Cost</span>
@@ -213,6 +233,14 @@ export function JobEquipment({ jobId, usage: initialUsage, equipmentOptions, onU
                       className={errors.usage_date ? "border-red-500 focus-visible:ring-red-500" : ""}
                     />
                   </div>
+                  {isDayRated(equipmentById.get(form.equipment_id)) ? (
+                    <div className="space-y-1.5">
+                      <Label>Used</Label>
+                      <p className="h-9 flex items-center text-sm text-slate-700">
+                        1 full day @ ${Number(equipmentById.get(form.equipment_id)?.day_rate ?? 0).toFixed(2)}
+                      </p>
+                    </div>
+                  ) : (
                   <div className="space-y-1.5">
                     <Label>Hours</Label>
                     <Input
@@ -223,12 +251,15 @@ export function JobEquipment({ jobId, usage: initialUsage, equipmentOptions, onU
                       className={errors.hours ? "border-red-500 focus-visible:ring-red-500" : ""}
                     />
                   </div>
+                  )}
                 </div>
                 <div className="grid grid-cols-2 gap-4">
+                  {isDayRated(equipmentById.get(form.equipment_id)) ? <div /> : (
                   <div className="space-y-1.5">
                     <Label>Loads</Label>
                     <Input type="number" step="1" min="0" value={form.loads} onChange={(e) => { setForm((f) => ({ ...f, loads: e.target.value })); setErrors({}); }} placeholder="0" />
                   </div>
+                  )}
                   <div className="space-y-1.5">
                     <Label>Cost centre</Label>
                     <select

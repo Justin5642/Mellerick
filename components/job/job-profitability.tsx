@@ -4,7 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { TrendingUp, TrendingDown, AlertTriangle } from "lucide-react";
 import { computeLoadedCost } from "@/lib/staff-cost";
 import type { EquipmentCostInputs } from "@/lib/equipment-cost";
-import { costPerHourOf, type EffectiveRate } from "@/lib/fleet-costs";
+import { costPerHourOf, usageCost, type EffectiveRate } from "@/lib/fleet-costs";
 
 // Admin-only "true job profitability" rollup: labour (hours logged * each
 // staff member's fully-loaded hourly cost, from staff_cost_profiles) +
@@ -50,11 +50,16 @@ interface Expense {
 interface EquipmentUsage {
   equipment_id: string;
   hours: number;
+  loads?: number | null;
+  /** Tool days (0100 — draft, not applied yet). */
+  days?: number | null;
 }
 
 interface EquipmentOption extends EquipmentCostInputs {
   id: string;
   assigned_to?: string | null;
+  cost_per_load?: number | null;
+  day_rate?: number | null;
   /** Actual rate from logged Fleet costs (lib/fleet-rates.ts); absent = estimate. */
   effective_rate?: EffectiveRate | null;
 }
@@ -131,10 +136,12 @@ export function JobProfitability({ timeEntries, staffCostProfiles, expenses, equ
   // cost is already counted above via that staff member's loaded rate.
   const unassignedEquipmentUsage = equipmentUsage.filter((u) => !equipmentById.get(u.equipment_id)?.assigned_to);
   const excludedEquipmentUsageCount = equipmentUsage.length - unassignedEquipmentUsage.length;
-  const equipmentCost = unassignedEquipmentUsage.reduce((sum, u) => {
+  // Hours on assigned vehicles are in labour above; their truck loads, and every
+  // tool day (0100 — draft, not applied yet), are costed here — same rule as
+  // the job ledger (lib/fleet-costs.ts usageCost).
+  const equipmentCost = equipmentUsage.reduce((sum, u) => {
     const eq = equipmentById.get(u.equipment_id);
-    const costPerHour = eq ? costPerHourOf(eq) : 0;
-    return sum + Number(u.hours) * costPerHour;
+    return sum + (eq ? usageCost(u, eq) : 0);
   }, 0);
 
   const totalCost = labourCost + materialsCost + equipmentCost;
