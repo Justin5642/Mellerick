@@ -90,14 +90,22 @@ export function ReportsDashboard({
           <h1 className="text-2xl font-bold text-slate-900">Reports &amp; Analytics</h1>
           <p className="text-slate-500 text-sm mt-1">Revenue, quotes, jobs and customer performance at a glance</p>
         </div>
-        {showJobMargins && (
+        <div className="flex flex-wrap gap-2">
           <Link
-            href="/dashboard/reports/job-margins"
+            href="/dashboard/reports/unallocated-bills"
             className="inline-flex items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
           >
-            <Target className="w-4 h-4 text-blue-600" /> Job margins
+            <DollarSign className="w-4 h-4 text-blue-600" /> Unallocated bills
           </Link>
-        )}
+          {showJobMargins && (
+            <Link
+              href="/dashboard/reports/job-margins"
+              className="inline-flex items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+            >
+              <Target className="w-4 h-4 text-blue-600" /> Job margins
+            </Link>
+          )}
+        </div>
       </div>
 
       {/* Stat cards */}

@@ -2770,6 +2770,36 @@ export type Database = {
           },
         ]
       }
+      xero_bill_allocations: {
+        Row: {
+          allocated_at: string
+          allocated_by: string | null
+          cost_centre_id: string | null
+          job_id: string | null
+          kind: string
+          note: string | null
+          xero_invoice_id: string
+        }
+        Insert: {
+          allocated_at?: string
+          allocated_by?: string | null
+          cost_centre_id?: string | null
+          job_id?: string | null
+          kind: string
+          note?: string | null
+          xero_invoice_id: string
+        }
+        Update: {
+          allocated_at?: string
+          allocated_by?: string | null
+          cost_centre_id?: string | null
+          job_id?: string | null
+          kind?: string
+          note?: string | null
+          xero_invoice_id?: string
+        }
+        Relationships: []
+      }
       xero_invoices: {
         Row: {
           amount_due: number

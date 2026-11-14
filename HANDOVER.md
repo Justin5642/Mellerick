@@ -460,6 +460,35 @@ from our own database. Read-only toward Xero; nothing is written back.
 - `lib/database.types.ts` got the four tables by hand (`gen:types` needs the linked
   CLI); regenerate after applying.
 
+**Unallocated bills + Monday office email (14 Nov 2026; branch `feat/unallocated-bills`, stacked on `feat/xero-analytics-sync`; migration `0099` DRAFT — NOT applied).**
+Justin: job profit has been inaccurate because a supplier bill reaches Xero by
+account, not by job. This finds the bills with no job and gets them assigned.
+- **Rules:** `lib/unallocated-bills.ts`. A Xero ACCPAY bill (AUTHORISED/PAID, ex-GST
+  `sub_total`) is `crm` (the app made it: a `vendor_orders` / `job_expenses`
+  `xero_bill_id`), `manual` (office assigned it), `overhead` (office marked it a
+  running cost), `referenced` (PO-/JOB- number in its Xero reference — NOT checked
+  against the CRM), else `unallocated`. Precedence: what the app knows > what the
+  office decided > what a reference suggests. "Traced %" = (crm+manual+referenced) /
+  (everything except overhead), per month.
+- **`0099` `xero_bill_allocations`:** one row per bill the office has decided
+  (job or overhead; no amounts — they are read from `xero_invoices`). Office/admin
+  RLS, granted explicitly. Needs `0098`. Deleting a job deletes its allocations
+  (the bill shows as unallocated again).
+- **Page:** Reports → **Unallocated bills** (`app/dashboard/reports/unallocated-bills`,
+  office/admin): traced-% by month and the oldest 100 bills with an assign control
+  (job number, or Overhead) → `POST/DELETE /api/xero/bills/[id]/allocate`
+  (office/admin guard; runs as the caller under RLS; job resolved by number
+  server-side). Until 0098/0099 are applied the page says so.
+- **Email:** `GET /api/reports/weekly-digest` (cron secret; Sunday 19:30 UTC = Monday
+  06:30 Melbourne in daylight time) emails bills-with-no-job, traced-% for the last 3
+  months, overdue debtors and supplier POs still waiting for an invoice, linking to the
+  page. **Recipients are the `WEEKLY_DIGEST_TO` env var (comma-separated) — set it in
+  Vercel; unset = skipped.** Addresses are deliberately not in source (public repo).
+  Sends from `EMAIL_FROM` (must be a Resend-verified domain, as for supplier POs).
+- **Next (not built):** pull supplier invoices from the admin Gmail label, read the PO
+  number off each PDF and attach it to the job automatically (needs Gmail read scope on
+  the Google connection → reconnect); unmatched ones land in this queue.
+
 ---
 
 ## 2. The one rule that must never break
@@ -1288,6 +1317,7 @@ a shippable release.
 | **`APP_URL`** (optional) | Justin | Origin for emailed reset links. Unset = `https://mellerick-app.vercel.app`, which is right for production. Set it only for a different domain, or `http://localhost:3000` in `.env.local` to test resets locally. |
 | **Check `EMAIL_FROM` for supplier POs** | Justin | Supplier PO emails go from `EMAIL_FROM` — it must be on a domain verified in Resend, or suppliers never receive them. (0085 itself applied 2026-10-28.) |
 | **Xero analytics: apply `0098`, reconnect Xero** | Justin | Apply `supabase/migrations/0098_xero_analytics.sql` (SQL editor) and run `supabase/tests/0098_xero_analytics_test.sql`, change its header to APPLIED, THEN merge. After deploy, click **Connect Xero** once so the new read scopes are granted, then `POST /api/xero/sync-analytics` as admin (or wait for the nightly cron) to start the 24-month backfill. |
+| **Unallocated bills: apply `0099`, set `WEEKLY_DIGEST_TO`** | Justin | After `0098`: apply `supabase/migrations/0099_xero_bill_allocations.sql`, run `supabase/tests/0099_xero_bill_allocations_test.sql`, set both headers to APPLIED, then merge. Set `WEEKLY_DIGEST_TO` in Vercel (Production) to the office recipients' addresses. |
 | **Maestro flow 02** | Avi | Needs `ADMIN_EMAIL` / `ADMIN_PASSWORD` in the environment. The login subflow deliberately skips when a session already exists, so a password never passes through a script — which is why flows 01/03/04 could be run and 02 could not. |
 
 ### QA fixture — do not delete
