@@ -431,6 +431,64 @@ approved: the web **Send Invoice** dialog has "Include job report and photos"
   `components/invoice/job-report-options.tsx`; route behaviour in
   `tests/unit/invoice-send-job-report.test.ts`. Not yet on the phone.
 
+**Xero analytics mirror (14 Nov 2026; branch `feat/xero-analytics-sync`; migration `0098` applied 2026-11-14).**
+Justin: pull Xero's data back so "where should the business head" can be answered
+from our own database. Read-only toward Xero; nothing is written back.
+- **Already existed, unchanged:** `pollXeroInvoicePayments` (`lib/xero.ts`, cron
+  `/api/xero/poll-invoices` every 30 min) marks CRM-pushed invoices paid. It only
+  sees invoices the CRM pushed. The mirror below covers everything else.
+- **Tables (`0098`, office/admin read by RLS, service-role write, in no PowerSync
+  stream):** `xero_invoices` (sales invoices AND bills, last 24 months, header
+  totals only), `xero_payments`, `xero_pl_monthly` (one row per account line per
+  month), `xero_sync_state` (resume point + last result per entity).
+- **Sync:** `lib/xero-analytics.ts` `syncXeroAnalytics`. Invoices/payments are read
+  `UpdatedDateUTC ASC` and the cursor is saved after every page, so a run that
+  hits its 40 s budget or Xero's 429 just resumes next run — the first runs are the
+  backfill. P&L: 24 months while the table is empty, then the latest 3 months
+  (closed months can still change). Route `/api/xero/sync-analytics`: GET = cron
+  (secret, nightly 17:25 UTC), POST = admin manual run. Before `0098` was applied
+  the route answered `{skipped: true}`.
+- **Scopes:** `XERO_SCOPES` in `lib/xero.ts` gained `accounting.payments.read` and
+  `accounting.reports.profitandloss.read` (granular names; the broad
+  `accounting.transactions` / `accounting.reports.read` are retired for apps created
+  after 2 Mar 2026). They take effect only when Xero is **reconnected**; the current
+  connection keeps its old scopes and keeps working. Without them the sync fails
+  with Xero's own error, recorded in `xero_sync_state.last_error`.
+- **Not verified against live Xero.** Tests mock the Xero SDK. The P&L column-header
+  parser (`monthFromHeader`) is the likeliest thing to need a tweak on first real
+  run; it throws naming the header rather than filing figures under a guessed month.
+- `lib/database.types.ts` got the four tables by hand (`gen:types` needs the linked
+  CLI); regenerate after applying.
+
+**Unallocated bills + Monday office email (14 Nov 2026; branch `feat/unallocated-bills`, stacked on `feat/xero-analytics-sync`; migration `0099` applied 2026-11-14).**
+Justin: job profit has been inaccurate because a supplier bill reaches Xero by
+account, not by job. This finds the bills with no job and gets them assigned.
+- **Rules:** `lib/unallocated-bills.ts`. A Xero ACCPAY bill (AUTHORISED/PAID, ex-GST
+  `sub_total`) is `crm` (the app made it: a `vendor_orders` / `job_expenses`
+  `xero_bill_id`), `manual` (office assigned it), `overhead` (office marked it a
+  running cost), `referenced` (PO-/JOB- number in its Xero reference — NOT checked
+  against the CRM), else `unallocated`. Precedence: what the app knows > what the
+  office decided > what a reference suggests. "Traced %" = (crm+manual+referenced) /
+  (everything except overhead), per month.
+- **`0099` `xero_bill_allocations`:** one row per bill the office has decided
+  (job or overhead; no amounts — they are read from `xero_invoices`). Office/admin
+  RLS, granted explicitly. Needs `0098`. Deleting a job deletes its allocations
+  (the bill shows as unallocated again).
+- **Page:** Reports → **Unallocated bills** (`app/dashboard/reports/unallocated-bills`,
+  office/admin): traced-% by month and the oldest 100 bills with an assign control
+  (job number, or Overhead) → `POST/DELETE /api/xero/bills/[id]/allocate`
+  (office/admin guard; runs as the caller under RLS; job resolved by number
+  server-side). Without 0098/0099 the page says so.
+- **Email:** `GET /api/reports/weekly-digest` (cron secret; Sunday 19:30 UTC = Monday
+  06:30 Melbourne in daylight time) emails bills-with-no-job, traced-% for the last 3
+  months, overdue debtors and supplier POs still waiting for an invoice, linking to the
+  page. **Recipients are the `WEEKLY_DIGEST_TO` env var (comma-separated) — set it in
+  Vercel; unset = skipped.** Addresses are deliberately not in source (public repo).
+  Sends from `EMAIL_FROM` (must be a Resend-verified domain, as for supplier POs).
+- **Next (not built):** pull supplier invoices from the admin Gmail label, read the PO
+  number off each PDF and attach it to the job automatically (needs Gmail read scope on
+  the Google connection → reconnect); unmatched ones land in this queue.
+
 ---
 
 ## 2. The one rule that must never break
@@ -1258,6 +1316,8 @@ a shippable release.
 | **Turn off public sign-up** | Justin | Dashboard → Authentication → Sign In / Providers → untick **"Allow new users to sign up"**. `supabase/config.toml` now has `[auth] enable_signup = false`, but that file only configures the local stack — the hosted project still lets anyone with the anon key call `/auth/v1/signup`. Invites keep working (GoTrue's admin invite does not check this switch). Leave the **Email provider** itself enabled. |
 | **`APP_URL`** (optional) | Justin | Origin for emailed reset links. Unset = `https://mellerick-app.vercel.app`, which is right for production. Set it only for a different domain, or `http://localhost:3000` in `.env.local` to test resets locally. |
 | **Check `EMAIL_FROM` for supplier POs** | Justin | Supplier PO emails go from `EMAIL_FROM` — it must be on a domain verified in Resend, or suppliers never receive them. (0085 itself applied 2026-10-28.) |
+| **Xero analytics: reconnect Xero** | Justin | `0098` is applied (2026-11-14). After deploy, click **Connect Xero** once so the new read scopes are granted, then `POST /api/xero/sync-analytics` as admin (or wait for the nightly cron) to start the 24-month backfill. |
+| **Unallocated bills: set `WEEKLY_DIGEST_TO`** | Justin | `0099` is applied (2026-11-14). Set `WEEKLY_DIGEST_TO` in Vercel (Production) to the office recipients' addresses. |
 | **Maestro flow 02** | Avi | Needs `ADMIN_EMAIL` / `ADMIN_PASSWORD` in the environment. The login subflow deliberately skips when a session already exists, so a password never passes through a script — which is why flows 01/03/04 could be run and 02 could not. |
 
 ### QA fixture — do not delete

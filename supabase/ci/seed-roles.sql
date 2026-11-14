@@ -292,6 +292,22 @@ values ('e1e1e1e1-0000-0000-0000-000000000001', 'eeeeeeee-0000-0000-0000-0000000
         'CI quote line', 1, 500.00)
 on conflict (id) do nothing;
 
+-- Xero mirror (0098): office/admin read only. One row each so the sweep sees
+-- real figures, not an empty table.
+insert into xero_invoices (xero_invoice_id, type, invoice_number, status, invoice_date,
+                           sub_total, total_tax, total, amount_due, amount_paid)
+values ('ci-xero-invoice-1', 'ACCPAY', 'CI-BILL-1', 'AUTHORISED', date '2026-10-01',
+        1000.00, 100.00, 1100.00, 1100.00, 0)
+on conflict (xero_invoice_id) do nothing;
+
+insert into xero_payments (xero_payment_id, xero_invoice_id, payment_type, payment_date, amount)
+values ('ci-xero-payment-1', 'ci-xero-invoice-1', 'ACCPAYPAYMENT', date '2026-10-15', 500.00)
+on conflict (xero_payment_id) do nothing;
+
+insert into xero_pl_monthly (month, section, account_name, amount)
+values (date '2026-10-01', 'Income', 'CI Sales', 2500.00)
+on conflict (month, section, account_name) do nothing;
+
 -- billing_rate_config is the seventeenth and gets no insert here: 0024 creates
 -- its singleton row (qualified_base_rate 130, call_out_fee 180) as part of the
 -- migration, so CI already holds real figures for it. The guard below covers it

@@ -21,6 +21,14 @@
     {
       "path": "/api/xero/poll-suppliers",
       "schedule": "40 16 * * *"
+    },
+    {
+      "path": "/api/xero/sync-analytics",
+      "schedule": "25 17 * * *"
+    },
+    {
+      "path": "/api/reports/weekly-digest",
+      "schedule": "30 19 * * 0"
     }
   ]
 }

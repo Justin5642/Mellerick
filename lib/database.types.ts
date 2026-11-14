@@ -2770,6 +2770,189 @@ export type Database = {
           },
         ]
       }
+      xero_bill_allocations: {
+        Row: {
+          allocated_at: string
+          allocated_by: string | null
+          cost_centre_id: string | null
+          job_id: string | null
+          kind: string
+          note: string | null
+          xero_invoice_id: string
+        }
+        Insert: {
+          allocated_at?: string
+          allocated_by?: string | null
+          cost_centre_id?: string | null
+          job_id?: string | null
+          kind: string
+          note?: string | null
+          xero_invoice_id: string
+        }
+        Update: {
+          allocated_at?: string
+          allocated_by?: string | null
+          cost_centre_id?: string | null
+          job_id?: string | null
+          kind?: string
+          note?: string | null
+          xero_invoice_id?: string
+        }
+        Relationships: []
+      }
+      xero_invoices: {
+        Row: {
+          amount_due: number
+          amount_paid: number
+          contact_name: string | null
+          currency_code: string | null
+          due_date: string | null
+          fully_paid_on: string | null
+          invoice_date: string | null
+          invoice_number: string | null
+          reference: string | null
+          status: string
+          sub_total: number
+          synced_at: string
+          total: number
+          total_tax: number
+          type: string
+          xero_contact_id: string | null
+          xero_invoice_id: string
+          xero_updated_at: string | null
+        }
+        Insert: {
+          amount_due?: number
+          amount_paid?: number
+          contact_name?: string | null
+          currency_code?: string | null
+          due_date?: string | null
+          fully_paid_on?: string | null
+          invoice_date?: string | null
+          invoice_number?: string | null
+          reference?: string | null
+          status: string
+          sub_total?: number
+          synced_at?: string
+          total?: number
+          total_tax?: number
+          type: string
+          xero_contact_id?: string | null
+          xero_invoice_id: string
+          xero_updated_at?: string | null
+        }
+        Update: {
+          amount_due?: number
+          amount_paid?: number
+          contact_name?: string | null
+          currency_code?: string | null
+          due_date?: string | null
+          fully_paid_on?: string | null
+          invoice_date?: string | null
+          invoice_number?: string | null
+          reference?: string | null
+          status?: string
+          sub_total?: number
+          synced_at?: string
+          total?: number
+          total_tax?: number
+          type?: string
+          xero_contact_id?: string | null
+          xero_invoice_id?: string
+          xero_updated_at?: string | null
+        }
+        Relationships: []
+      }
+      xero_payments: {
+        Row: {
+          account_code: string | null
+          amount: number
+          payment_date: string | null
+          payment_type: string | null
+          reference: string | null
+          status: string | null
+          synced_at: string
+          xero_invoice_id: string | null
+          xero_payment_id: string
+          xero_updated_at: string | null
+        }
+        Insert: {
+          account_code?: string | null
+          amount?: number
+          payment_date?: string | null
+          payment_type?: string | null
+          reference?: string | null
+          status?: string | null
+          synced_at?: string
+          xero_invoice_id?: string | null
+          xero_payment_id: string
+          xero_updated_at?: string | null
+        }
+        Update: {
+          account_code?: string | null
+          amount?: number
+          payment_date?: string | null
+          payment_type?: string | null
+          reference?: string | null
+          status?: string | null
+          synced_at?: string
+          xero_invoice_id?: string | null
+          xero_payment_id?: string
+          xero_updated_at?: string | null
+        }
+        Relationships: []
+      }
+      xero_pl_monthly: {
+        Row: {
+          account_name: string
+          amount: number
+          month: string
+          section: string
+          synced_at: string
+          xero_account_id: string | null
+        }
+        Insert: {
+          account_name: string
+          amount?: number
+          month: string
+          section: string
+          synced_at?: string
+          xero_account_id?: string | null
+        }
+        Update: {
+          account_name?: string
+          amount?: number
+          month?: string
+          section?: string
+          synced_at?: string
+          xero_account_id?: string | null
+        }
+        Relationships: []
+      }
+      xero_sync_state: {
+        Row: {
+          cursor: string | null
+          entity: string
+          last_error: string | null
+          last_rows: number | null
+          last_run_at: string | null
+        }
+        Insert: {
+          cursor?: string | null
+          entity: string
+          last_error?: string | null
+          last_rows?: number | null
+          last_run_at?: string | null
+        }
+        Update: {
+          cursor?: string | null
+          entity?: string
+          last_error?: string | null
+          last_rows?: number | null
+          last_run_at?: string | null
+        }
+        Relationships: []
+      }
       xero_tokens: {
         Row: {
           access_token: string
