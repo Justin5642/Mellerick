@@ -457,6 +457,7 @@ export type Database = {
       }
       equipment: {
         Row: {
+          day_rate: number
           assigned_to: string | null
           category: string
           cost_per_load: number
@@ -479,6 +480,7 @@ export type Database = {
           updated_by: string | null
         }
         Insert: {
+          day_rate?: number
           assigned_to?: string | null
           category?: string
           cost_per_load?: number
@@ -501,6 +503,7 @@ export type Database = {
           updated_by?: string | null
         }
         Update: {
+          day_rate?: number
           assigned_to?: string | null
           category?: string
           cost_per_load?: number
@@ -587,6 +590,75 @@ export type Database = {
           },
         ]
       }
+      equipment_service_records: {
+        Row: {
+          created_at: string
+          engine_hours: number | null
+          equipment_id: string
+          expense_id: string | null
+          id: string
+          logged_by: string | null
+          next_due_date: string | null
+          next_due_hours: number | null
+          next_due_km: number | null
+          odometer_km: number | null
+          provider: string | null
+          service_date: string
+          service_type: string
+          updated_at: string
+          work_done: string | null
+        }
+        Insert: {
+          created_at?: string
+          engine_hours?: number | null
+          equipment_id: string
+          expense_id?: string | null
+          id?: string
+          logged_by?: string | null
+          next_due_date?: string | null
+          next_due_hours?: number | null
+          next_due_km?: number | null
+          odometer_km?: number | null
+          provider?: string | null
+          service_date?: string
+          service_type?: string
+          updated_at?: string
+          work_done?: string | null
+        }
+        Update: {
+          created_at?: string
+          engine_hours?: number | null
+          equipment_id?: string
+          expense_id?: string | null
+          id?: string
+          logged_by?: string | null
+          next_due_date?: string | null
+          next_due_hours?: number | null
+          next_due_km?: number | null
+          odometer_km?: number | null
+          provider?: string | null
+          service_date?: string
+          service_type?: string
+          updated_at?: string
+          work_done?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "equipment_service_records_equipment_id_fkey"
+            columns: ["equipment_id"]
+            isOneToOne: false
+            referencedRelation: "equipment"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "equipment_service_records_expense_id_fkey"
+            columns: ["expense_id"]
+            isOneToOne: true
+            referencedRelation: "equipment_expenses"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       equipment_expenses: {
         Row: {
           amount: number
@@ -649,6 +721,7 @@ export type Database = {
       }
       equipment_usage_log: {
         Row: {
+          days: number
           cost_center_id: string | null
           created_at: string | null
           equipment_id: string
@@ -662,6 +735,7 @@ export type Database = {
           usage_date: string
         }
         Insert: {
+          days?: number
           cost_center_id?: string | null
           created_at?: string | null
           equipment_id: string
@@ -675,6 +749,7 @@ export type Database = {
           usage_date?: string
         }
         Update: {
+          days?: number
           cost_center_id?: string | null
           created_at?: string | null
           equipment_id?: string
@@ -2264,6 +2339,7 @@ export type Database = {
       }
       staff_cost_profiles: {
         Row: {
+          xero_employee_id: string | null
           annual_fixed_oncosts: number
           charge_out_rate: number | null
           hourly_rate: number
@@ -2277,6 +2353,7 @@ export type Database = {
           workers_comp_rate: number
         }
         Insert: {
+          xero_employee_id?: string | null
           annual_fixed_oncosts?: number
           charge_out_rate?: number | null
           hourly_rate?: number
@@ -2290,6 +2367,7 @@ export type Database = {
           workers_comp_rate?: number
         }
         Update: {
+          xero_employee_id?: string | null
           annual_fixed_oncosts?: number
           charge_out_rate?: number | null
           hourly_rate?: number
@@ -2321,6 +2399,7 @@ export type Database = {
       }
       staff_leave: {
         Row: {
+          xero_leave_application_id: string | null
           created_at: string | null
           created_by: string | null
           end_date: string
@@ -2332,6 +2411,7 @@ export type Database = {
           start_date: string
         }
         Insert: {
+          xero_leave_application_id?: string | null
           created_at?: string | null
           created_by?: string | null
           end_date: string
@@ -2343,6 +2423,7 @@ export type Database = {
           start_date: string
         }
         Update: {
+          xero_leave_application_id?: string | null
           created_at?: string | null
           created_by?: string | null
           end_date?: string

@@ -48,6 +48,6 @@ export function computeEquipmentCost(inputs: EquipmentCostInputs): EquipmentCost
 export const EQUIPMENT_CATEGORY_LABELS: Record<string, string> = {
   vehicle: "Vehicle",
   machinery: "Machinery",
-  tool: "Tool",
+  tool: "Plant & equipment",
   other: "Other",
 };
