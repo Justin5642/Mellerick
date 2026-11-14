@@ -567,6 +567,35 @@ export class Outbox {
   async deadCount(): Promise<number> {
     return this.countOwned(["dead"]);
   }
+
+  /**
+   * The terminally-failed operations the "not synced" sheet lists, oldest
+   * first — same ownership rule as deadCount(), so the list and the pill's
+   * number always agree.
+   */
+  async deadOperations(): Promise<Operation[]> {
+    const current = this.currentOwner();
+    const all = await this.store.all();
+    return all
+      .filter((o) => o.status === "dead" && (current === undefined || this.isOwned(o, current)))
+      .sort((a, b) => a.createdAt - b.createdAt);
+  }
+
+  /**
+   * The person chose to give up on one refused change. It is NOT erased: it is
+   * closed as done with the reason kept ("discarded: …"), so support can still
+   * see what was dropped, and pruneCompleted() tidies it (and any photo file it
+   * held) on its normal schedule. Operations waiting on it are already dead
+   * ("dependency failed") and are listed separately, so nothing else is
+   * silently thrown away.
+   */
+  async discardDead(id: string): Promise<boolean> {
+    const op = (await this.store.all()).find((o) => o.id === id);
+    if (!op || op.status !== "dead") return false;
+    await this.store.update(id, { status: "done", error: `discarded by user: ${op.error ?? "no reason recorded"}` });
+    this.notifyChange();
+    return true;
+  }
 }
 
 export type { OpStatus };
