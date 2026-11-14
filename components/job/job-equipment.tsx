@@ -10,7 +10,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Truck, Plus, Trash2 } from "lucide-react";
 import { formatDate } from "@/lib/date";
-import { computeEquipmentCost, EQUIPMENT_CATEGORY_LABELS, type EquipmentCostInputs } from "@/lib/equipment-cost";
+import { EQUIPMENT_CATEGORY_LABELS, type EquipmentCostInputs } from "@/lib/equipment-cost";
+import { costPerHourOf } from "@/lib/fleet-costs";
 
 interface EquipmentOption extends EquipmentCostInputs {
   id: string;
@@ -57,7 +58,8 @@ export function JobEquipment({ jobId, usage: initialUsage, equipmentOptions, onU
 
   function costPerHourFor(equipmentId: string) {
     const eq = equipmentById.get(equipmentId);
-    return eq ? computeEquipmentCost(eq).costPerHour : 0;
+    // Actual rate from logged Fleet costs when loaded (lib/fleet-costs.ts), else the estimate.
+    return eq ? costPerHourOf(eq) : 0;
   }
 
   // Hours × cost per hour, plus loads × cost per load (0091).

@@ -12,9 +12,12 @@ import { EquipmentCostDialog } from "./equipment-cost-dialog";
 import { computeEquipmentCost, EQUIPMENT_CATEGORY_LABELS } from "@/lib/equipment-cost";
 import { equipmentCategoryColors } from "@/lib/badge-colors";
 import { formatDate } from "@/lib/date";
+import { EquipmentYearCost } from "./equipment-year-cost";
+import type { EffectiveRate } from "@/lib/fleet-costs";
 
 interface Props {
   equipment: any;
+  today: string;
   currentUserId: string;
   isAdmin: boolean;
   documents: any[];
@@ -23,12 +26,16 @@ interface Props {
   staff: any[];
 }
 
-export function EquipmentDetailClient({ equipment, currentUserId, isAdmin, documents: initialDocuments, expenses: initialExpenses, usage, staff }: Props) {
+export function EquipmentDetailClient({ equipment, today, currentUserId, isAdmin, documents: initialDocuments, expenses: initialExpenses, usage, staff }: Props) {
   const [documents, setDocuments] = useState(initialDocuments);
   const [expenses, setExpenses] = useState(initialExpenses);
   const [costDialogOpen, setCostDialogOpen] = useState(false);
 
-  const { costPerHour, annualTotalCost } = computeEquipmentCost(equipment);
+  const { costPerHour: estimatePerHour, annualTotalCost } = computeEquipmentCost(equipment);
+  // The rate job costing uses (lib/fleet-costs.ts): actual once there is
+  // enough logged, else the estimate. Computed on the server at page load.
+  const rate: EffectiveRate | undefined = equipment.effective_rate;
+  const costPerHour = rate?.costPerHour ?? estimatePerHour;
   const assignedStaff = staff.find((s) => s.id === equipment.assigned_to);
   const totalUsageHours = usage.reduce((sum: number, u: any) => sum + Number(u.hours || 0), 0);
 
@@ -90,8 +97,15 @@ export function EquipmentDetailClient({ equipment, currentUserId, isAdmin, docum
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                 <Card>
                   <CardContent className="pt-4 pb-4">
-                    <p className="text-xs text-slate-500">Cost Per Hour</p>
+                    <p className="text-xs text-slate-500">Cost per hour (used for job costing)</p>
                     <p className="text-lg font-bold text-slate-900">${costPerHour.toFixed(2)}/hr</p>
+                    {rate && (
+                      <p className={`text-[11px] mt-0.5 ${rate.source === "actual" ? "text-green-700" : "text-amber-700"}`}>
+                        {rate.source === "actual"
+                          ? `Actual, last 12 months · estimate was $${rate.estimateCostPerHour.toFixed(2)}`
+                          : `Estimate — ${rate.reason}`}
+                      </p>
+                    )}
                   </CardContent>
                 </Card>
                 <Card>
@@ -110,6 +124,25 @@ export function EquipmentDetailClient({ equipment, currentUserId, isAdmin, docum
                   </CardContent>
                 </Card>
               </div>
+
+              <EquipmentYearCost expenses={expenses} usage={usage} today={today} estimatedAnnualCost={annualTotalCost} />
+
+              {rate?.source === "actual" && (
+                <Card>
+                  <CardContent className="pt-4 pb-4 text-sm space-y-1">
+                    <p className="text-xs font-semibold text-slate-600 uppercase tracking-wide">How the actual rate is worked out (last 12 months)</p>
+                    <div className="flex justify-between"><span className="text-slate-500">Depreciation for {rate.window.days} days</span><span>${rate.actual.depreciation.toFixed(2)}</span></div>
+                    <div className="flex justify-between"><span className="text-slate-500">Logged expenses (ex GST)</span><span>${rate.actual.expenses.toFixed(2)}</span></div>
+                    {rate.actual.fuelEstimate > 0 && (
+                      <div className="flex justify-between"><span className="text-slate-500">Fuel (estimated — none logged)</span><span>${rate.actual.fuelEstimate.toFixed(2)}</span></div>
+                    )}
+                    <div className="flex justify-between border-t pt-1 font-medium"><span>Total ÷ {rate.actual.hours.toFixed(1)}h worked</span><span>${rate.costPerHour.toFixed(2)}/hr</span></div>
+                    <p className="text-xs text-slate-400 pt-1">
+                      {equipment.assigned_to ? "Hours worked = the assigned driver's clocked work hours." : "Hours worked = usage logged against jobs."}
+                    </p>
+                  </CardContent>
+                </Card>
+              )}
 
               <Card>
                 <CardContent className="pt-4 pb-4 space-y-2 text-sm">

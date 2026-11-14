@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -13,6 +13,8 @@ import Link from "next/link";
 import { EquipmentCostDialog } from "@/components/fleet/equipment-cost-dialog";
 import { computeEquipmentCost, EQUIPMENT_CATEGORY_LABELS } from "@/lib/equipment-cost";
 import { equipmentCategoryColors } from "@/lib/badge-colors";
+import { costPerHourOf, financialYearsSince, type FleetExpense } from "@/lib/fleet-costs";
+import { FleetYearSummary } from "@/components/fleet/fleet-year-summary";
 
 // Radix/shadcn's SelectItem can't take value="", so an explicit "Unassigned"
 // option needs a sentinel value that gets translated back to "" (-> null on
@@ -24,14 +26,30 @@ interface Props {
   currentUserId: string;
   equipment: any[];
   staff: any[];
+  /** Every logged fleet expense (paged on the server); null if it could not be read. */
+  expenses: FleetExpense[] | null;
+  expensesError: string | null;
+  today: string;
   fetchError: string | null;
 }
 
 // The fleet list and its actions. The page (app/dashboard/fleet/page.tsx) loads
 // the rows and the viewer's role on the server and hands them in.
-export function FleetClient({ role, currentUserId, equipment: initialEquipment, staff, fetchError }: Props) {
+export function FleetClient({ role, currentUserId, equipment: initialEquipment, staff, expenses, expensesError, today, fetchError }: Props) {
   const supabase = createClient();
   const [equipment, setEquipment] = useState(initialEquipment);
+  const years = useMemo(() => financialYearsSince((expenses ?? []).map((e) => e.expense_date), today), [expenses, today]);
+  const [yearLabel, setYearLabel] = useState(years[0].label);
+  const period = years.find((y) => y.label === yearLabel) ?? years[0];
+  // Each item's logged cost in the chosen financial year (ex GST).
+  const spendByEquipment = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const e of expenses ?? []) {
+      if (e.expense_date < period.start || e.expense_date > period.end || !e.equipment_id) continue;
+      m.set(e.equipment_id, (m.get(e.equipment_id) ?? 0) + (Number(e.amount) || 0));
+    }
+    return m;
+  }, [expenses, period]);
   const [saving, setSaving] = useState(false);
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState({ name: "", category: "vehicle", registration: "" });
@@ -111,7 +129,7 @@ export function FleetClient({ role, currentUserId, equipment: initialEquipment, 
   if (fetchError) return <div className="p-6 text-red-500 text-sm">Error loading fleet: {fetchError}</div>;
 
   return (
-    <div className="p-6 space-y-6 max-w-3xl">
+    <div className="p-6 space-y-6 max-w-6xl">
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Fleet</h1>
@@ -123,6 +141,12 @@ export function FleetClient({ role, currentUserId, equipment: initialEquipment, 
           </Button>
         )}
       </div>
+
+      {expenses ? (
+        <FleetYearSummary expenses={expenses} years={years} period={period} onPeriodChange={setYearLabel} />
+      ) : (
+        <p className="text-sm text-red-600">Fleet costs could not be loaded ({expensesError}). Per-vehicle totals are hidden rather than shown short.</p>
+      )}
 
       {showForm && (
         <Card>
@@ -169,7 +193,10 @@ export function FleetClient({ role, currentUserId, equipment: initialEquipment, 
           ) : (
             <div className="divide-y">
               {equipment.map((item) => {
-                const { costPerHour, annualTotalCost } = computeEquipmentCost(item);
+                const { annualTotalCost } = computeEquipmentCost(item);
+                const costPerHour = costPerHourOf(item);
+                const actual = item.effective_rate?.source === "actual";
+                const spent = spendByEquipment.get(item.id) ?? 0;
                 const assignedStaff = staff.find((s) => s.id === item.assigned_to);
                 return (
                   <div key={item.id} className="flex items-center justify-between px-6 py-4 gap-4">
@@ -182,14 +209,20 @@ export function FleetClient({ role, currentUserId, equipment: initialEquipment, 
                           <p className="font-medium text-sm text-slate-900 group-hover:text-blue-600 transition-colors">{item.name}</p>
                           {!item.is_active && <span className="text-xs text-slate-400">(inactive)</span>}
                         </div>
-                        <div className="flex items-center gap-3 mt-0.5">
+                        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-0.5">
                           <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${equipmentCategoryColors[item.category] ?? ""}`}>
                             {EQUIPMENT_CATEGORY_LABELS[item.category] ?? item.category}
                           </span>
                           {item.registration && <span className="text-xs text-slate-500">{item.registration}</span>}
-                          <span className="text-xs text-slate-500">
-                            ${costPerHour.toFixed(2)}/hr · ${annualTotalCost.toLocaleString("en-AU", { maximumFractionDigits: 0 })}/yr
+                          <span className="text-xs text-slate-500" title={actual ? "Actual cost per hour, last 12 months" : item.effective_rate?.reason ? `Estimate — ${item.effective_rate.reason}` : "Estimate from the cost profile"}>
+                            ${costPerHour.toFixed(2)}/hr <span className={actual ? "text-green-700" : "text-slate-400"}>({actual ? "actual" : "est."})</span>
+                            {" · "}est. ${annualTotalCost.toLocaleString("en-AU", { maximumFractionDigits: 0 })}/yr
                           </span>
+                          {expenses && (
+                            <span className="text-xs font-medium text-slate-700">
+                              {period.label}: ${spent.toLocaleString("en-AU", { maximumFractionDigits: 0 })}
+                            </span>
+                          )}
                         </div>
                       </div>
                     </Link>

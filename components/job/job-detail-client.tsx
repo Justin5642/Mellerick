@@ -175,9 +175,20 @@ export function JobDetailClient({ job, currentUserId, photos: initialPhotos, doc
   // Equipment names and $/hour are part of what the Equipment and Costing
   // tabs draw (not just a picker), so those two tabs wait for it rather than
   // briefly showing "Unknown equipment" or an understated cost.
-  const equipmentOptions = useCatalogOnFirstUse<any>(activeTab === "equipment" || (isAdmin && activeTab === "costing"), () =>
-    createClient().from("equipment").select("*").eq("is_active", true).order("name")
-  );
+  //
+  // Loaded through /api/fleet/rates so plant is costed at its ACTUAL rate from
+  // logged Fleet costs (lib/fleet-costs.ts) — the same rate the job-margins
+  // report uses. If that route fails, the plain table read still works and
+  // costs at the estimate, as before.
+  const equipmentOptions = useCatalogOnFirstUse<any>(activeTab === "equipment" || (isAdmin && activeTab === "costing"), async () => {
+    try {
+      const res = await fetch("/api/fleet/rates");
+      if (res.ok) return { data: (await res.json()).equipment ?? [] };
+    } catch {
+      // fall through to the direct read
+    }
+    return createClient().from("equipment").select("*").eq("is_active", true).order("name");
+  });
   // Only "work" entries count against the allocated-hours budget — travel
   // time between jobs is tracked separately and shouldn't eat into it.
   const totalHoursLogged = timeEntries
