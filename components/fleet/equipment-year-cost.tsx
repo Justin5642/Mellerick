@@ -100,7 +100,7 @@ export function EquipmentYearCost({
               <div className="grid grid-cols-12 gap-1 items-end h-20" role="img" aria-label={`Monthly costs for ${period.label}`}>
                 {summary.byMonth.map((m) => (
                   <div key={m.month} className="flex flex-col items-center gap-1 h-full justify-end" title={`${monthLabel(m.month)}: ${money(m.exGst)}`}>
-                    <div className="w-full rounded-sm bg-blue-500/80" style={{ height: `${Math.max(m.exGst > 0 ? 4 : 0, (m.exGst / peak) * 100)}%` }} />
+                    <div className="w-full rounded-sm bg-blue-600" style={{ height: `${Math.max(m.exGst > 0 ? 4 : 0, (m.exGst / peak) * 100)}%` }} />
                     <span className="text-[10px] text-slate-400">{monthLabel(m.month).slice(0, 1)}</span>
                   </div>
                 ))}

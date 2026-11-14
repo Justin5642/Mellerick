@@ -587,6 +587,75 @@ export type Database = {
           },
         ]
       }
+      equipment_service_records: {
+        Row: {
+          created_at: string
+          engine_hours: number | null
+          equipment_id: string
+          expense_id: string | null
+          id: string
+          logged_by: string | null
+          next_due_date: string | null
+          next_due_hours: number | null
+          next_due_km: number | null
+          odometer_km: number | null
+          provider: string | null
+          service_date: string
+          service_type: string
+          updated_at: string
+          work_done: string | null
+        }
+        Insert: {
+          created_at?: string
+          engine_hours?: number | null
+          equipment_id: string
+          expense_id?: string | null
+          id?: string
+          logged_by?: string | null
+          next_due_date?: string | null
+          next_due_hours?: number | null
+          next_due_km?: number | null
+          odometer_km?: number | null
+          provider?: string | null
+          service_date?: string
+          service_type?: string
+          updated_at?: string
+          work_done?: string | null
+        }
+        Update: {
+          created_at?: string
+          engine_hours?: number | null
+          equipment_id?: string
+          expense_id?: string | null
+          id?: string
+          logged_by?: string | null
+          next_due_date?: string | null
+          next_due_hours?: number | null
+          next_due_km?: number | null
+          odometer_km?: number | null
+          provider?: string | null
+          service_date?: string
+          service_type?: string
+          updated_at?: string
+          work_done?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "equipment_service_records_equipment_id_fkey"
+            columns: ["equipment_id"]
+            isOneToOne: false
+            referencedRelation: "equipment"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "equipment_service_records_expense_id_fkey"
+            columns: ["expense_id"]
+            isOneToOne: true
+            referencedRelation: "equipment_expenses"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       equipment_expenses: {
         Row: {
           amount: number
