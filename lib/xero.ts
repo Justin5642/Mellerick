@@ -69,7 +69,11 @@ export function getXeroClient() {
     clientId: process.env.XERO_CLIENT_ID!,
     clientSecret: process.env.XERO_CLIENT_SECRET!,
     redirectUris: [process.env.XERO_REDIRECT_URI!],
-    scopes: ["openid", "profile", "email", "accounting.contacts", "accounting.invoices", "offline_access"],
+    // payroll.*.read (0101 — draft, not applied yet): Staff → Import from Xero reads
+    // pay rates and leave. READ-ONLY — the app never changes payroll. A
+    // connection made before these were added lacks them until an admin
+    // reconnects; lib/xero-payroll-import.ts checks and says so.
+    scopes: ["openid", "profile", "email", "accounting.contacts", "accounting.invoices", "payroll.employees.read", "payroll.settings.read", "offline_access"],
     httpTimeout: 30000,
   });
 }

@@ -25,7 +25,7 @@ interface LeaveEntry {
 
 const emptyCostForm: StaffCostInputs = {
   hourly_rate: 0,
-  super_rate: 11.5,
+  super_rate: 12, // Super Guarantee from 1 July 2025
   workers_comp_rate: 0,
   leave_loading_rate: 0,
   annual_fixed_oncosts: 0,
