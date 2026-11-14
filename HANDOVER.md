@@ -1197,9 +1197,12 @@ not referenced anywhere in the code) has its own active slot; the likeliest
 story is that `powersync_role`'s password was reset while setting that one up,
 locking the app's instance out. Fixed by setting a new password, entering it in
 the app instance's connection settings, and redeploying (v4, new slot
-`…_4_fc97`, active, 0 bytes behind). **Open:** find out what the second
-instance is — if unused, delete it and drop its slot; if used, it needs the new
-password too. Lesson repeated from August: **read the PowerSync dashboard log
+`…_4_fc97`, active, 0 bytes behind). **Resolved 2026-11-14:** the second
+instance (`…73ab…`, labelled "Production" in the dashboard but never used by
+the app — 0 clients in 30 days, sample template config) was deleted and its
+slot `…_1_db25` went with it; only `…496c5e_4_fc97` remains. Note the app's
+instance is the one labelled **"Development"**. The unused role
+`powersync_7dc56333…` (reads nothing) is still in the database, harmless. Lesson repeated from August: **read the PowerSync dashboard log
 first** — it says exactly why, and `npm run check:sync` (or the slot query) only
 says that something is wrong.
 
