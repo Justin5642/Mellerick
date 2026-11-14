@@ -8,7 +8,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Users, Plus, Mail, Phone, Shield, Wrench, Monitor, RotateCw, DollarSign, Pencil, Truck, KeyRound, MapPin } from "lucide-react";
+import { Users, Plus, Download, Mail, Phone, Shield, Wrench, Monitor, RotateCw, DollarSign, Pencil, Truck, KeyRound, MapPin } from "lucide-react";
+import Link from "next/link";
 import { StaffCostDialog } from "@/components/staff/staff-cost-dialog";
 import { StaffEditDialog } from "@/components/staff/staff-edit-dialog";
 import { staffRoleColors } from "@/lib/badge-colors";
@@ -178,9 +179,16 @@ export function StaffClient({ role, staff: initialStaff, vehicles, fetchError }:
           <h1 className="text-2xl font-bold text-slate-900">Staff</h1>
           <p className="text-slate-500 text-sm mt-1">{staff.filter(s => s.is_active).length} active team members</p>
         </div>
-        <Button className="gap-2" onClick={() => setShowForm(v => !v)}>
-          <Plus className="w-4 h-4" />Add Staff
-        </Button>
+        <div className="flex items-center gap-2">
+          {isAdmin && (
+            <Link prefetch={false} href="/dashboard/staff/xero-import">
+              <Button variant="outline" className="gap-2"><Download className="w-4 h-4" />Import from Xero</Button>
+            </Link>
+          )}
+          <Button className="gap-2" onClick={() => setShowForm(v => !v)}>
+            <Plus className="w-4 h-4" />Add Staff
+          </Button>
+        </div>
       </div>
 
       {/* Invite form */}

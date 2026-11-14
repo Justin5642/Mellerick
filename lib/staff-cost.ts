@@ -48,5 +48,6 @@ export const LEAVE_TYPE_LABELS: Record<string, string> = {
   sick: "Sick",
   annual: "Annual",
   public_holiday: "Public Holiday",
+  long_service: "Long Service",
   other: "Other",
 };
