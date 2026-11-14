@@ -2,18 +2,18 @@
 
 import { useState } from "react";
 import { createClient } from "@/lib/supabase/client";
-import { resolveExistingInvoice } from "@/lib/approval-invoice-guard";
 import { pushJobToCalendar } from "@/lib/schedule-dispatch";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
-import { CheckCircle2, XCircle, ClipboardList, Clock, User, MapPin, ChevronDown, ChevronUp, AlertTriangle, GitPullRequestArrow } from "lucide-react";
+import { CheckCircle2, XCircle, ClipboardList, Clock, User, MapPin, ChevronDown, ChevronUp, AlertTriangle, GitPullRequestArrow, Timer } from "lucide-react";
+import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { UnbilledVariations, type UnbilledVariation } from "./unbilled-variations";
 import { formatDate } from "@/lib/date";
-import { moneyTotals } from "@/lib/replace-line-items";
-import { variationLineDescription, variationQtyText } from "@/lib/variation-qty";
+import { variationQtyText } from "@/lib/variation-qty";
+import type { HoursGroup } from "@/lib/approved-hours";
 
 const OVERTIME_LABELS: Record<string, string> = {
   unexpected_issue: "Unexpected issue",
@@ -22,10 +22,18 @@ const OVERTIME_LABELS: Record<string, string> = {
   other: "Other",
 };
 
+/** Hours a pending job will carry onto its invoice (app/dashboard/approvals/page.tsx). */
+export interface JobHoursSummary {
+  groups: HoursGroup[];
+  total: number;
+  error: string | null;
+}
+
 interface Props {
   role: string | null;
   currentUserId: string;
   jobs: any[];
+  hoursByJob: Record<string, JobHoursSummary>;
   pendingVariations: any[];
   unbilledVariations: UnbilledVariation[];
 }
@@ -33,8 +41,9 @@ interface Props {
 // The list and both actions. The page (app/dashboard/approvals/page.tsx) loads
 // the rows and the viewer's role on the server and hands them in, so the screen
 // arrives filled instead of fetching after hydration.
-export function ApprovalsClient({ role, currentUserId, jobs: initialJobs, pendingVariations, unbilledVariations }: Props) {
+export function ApprovalsClient({ role, jobs: initialJobs, hoursByJob, pendingVariations, unbilledVariations }: Props) {
   const supabase = createClient();
+  const router = useRouter();
   const [jobs, setJobs] = useState(initialJobs);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [notes, setNotes] = useState<Record<string, string>>({});
@@ -51,158 +60,62 @@ export function ApprovalsClient({ role, currentUserId, jobs: initialJobs, pendin
       return;
     }
     setSaving(jobId);
-    const job = jobs.find((j) => j.id === jobId);
 
-    // Guard against double-creating an invoice if one already exists for
-    // this job (e.g. office manually built one before approval finished).
-    // FAILS CLOSED. This lookup's error used to be discarded, so a failed check
-    // read as "no invoice exists" and the approval created one — a duplicate
-    // invoice to a real customer, silently. Worse, .maybeSingle() RAISES when
-    // the job already has more than one invoice, so the case the guard exists
-    // for was the case that defeated it.
-    const guard = resolveExistingInvoice(
-      await supabase.from("invoices").select("id, xero_invoice_id").eq("job_id", jobId).maybeSingle()
-    );
-    if (!guard.proceed) {
-      toast.error(guard.reason);
-      setSaving(null);
-      return;
-    }
-
-    let invoiceId: string | null = guard.invoiceId;
-    const alreadyPushed = guard.alreadyPushed;
-    let invoiceCreated = false;
-
-    if (!invoiceId && job) {
-      const { data: jobItems } = await supabase.from("job_items").select("*").eq("job_id", jobId);
-      // Approved variations not yet on an invoice go on this one too. They
-      // used to be left off — only job_items were copied — so an approved
-      // variation stayed unbilled after its job was invoiced (Justin, 20 Oct
-      // 2026: "how do we track it through to the invoicing stage?").
-      const { data: unbilled } = await supabase
-        .from("job_variations")
-        .select("id, variation_type_id, custom_name, quantity, unit, rate, total_amount, variation_types(name)")
-        .eq("job_id", jobId)
-        .in("status", ["approved", "auto_approved"])
-        .is("invoice_id", null);
-      // Same line shape as the New Invoice screen's "add variation": one line
-      // at the variation's total, its quantity and rate in the description.
-      const variationLines = (unbilled ?? []).map((v: any) => ({
-        variationId: v.id as string,
-        pricing_item_id: null,
-        name: v.variation_types?.name ?? v.custom_name ?? "Variation",
-        description: variationLineDescription(v),
-        quantity: 1,
-        unit_price: Number(v.total_amount ?? Number(v.rate ?? 0) * Number(v.quantity ?? 0)),
-      }));
-      const items = [...(jobItems ?? []), ...variationLines];
-      if (items.length > 0) {
-        // moneyTotals, not raw floats. The three columns are decimal(10,2) and
-        // round INDEPENDENTLY, so summing unrounded and deriving GST from the
-        // unrounded subtotal produces a tax invoice whose subtotal plus GST
-        // does not equal its total. Four other sites were converted when that
-        // was found; this one was missed, and it is the only one where the
-        // invoice is pushed to Xero automatically below, with no human
-        // reviewing the figures first.
-        const { subtotal, tax: gst, total } = moneyTotals(
-          items.map((i: any) => ({ quantity: Number(i.quantity), unit_price: Number(i.unit_price) }))
-        );
-        const { data: newInvoice, error: invErr } = await supabase
-          .from("invoices")
-          .insert({
-            customer_id: job.customer_id,
-            job_id: jobId,
-            customer_po: job.customer_po ?? null,
-            title: `#${job.job_number} — ${job.title}`,
-            status: "draft",
-            subtotal,
-            tax_amount: gst,
-            total,
-            created_by: currentUserId,
-          })
-          .select()
-          .single();
-
-        if (!invErr && newInvoice) {
-          const { error: itemsErr } = await supabase.from("invoice_items").insert(
-            items.map((i: any) => ({
-              invoice_id: newInvoice.id,
-              pricing_item_id: i.pricing_item_id ?? null,
-              name: i.name,
-              description: i.description,
-              quantity: i.quantity,
-              unit_price: i.unit_price,
-            }))
-          );
-          // A discarded result here produces an invoice header with NO lines,
-          // reported as "invoice created" — a zero-dollar bill for work that
-          // was done. The header is left in place deliberately (deleting it
-          // could race the Xero push below) but it is NOT counted as created,
-          // so the job stays in the manual-invoicing queue where a human sees
-          // it rather than disappearing as handled.
-          if (itemsErr) {
-            toast.error(`Invoice created but its lines did not save (${itemsErr.message}). Complete it manually.`);
-          } else {
-            invoiceId = newInvoice.id;
-            invoiceCreated = true;
-            // Mark the variations billed, so they leave "Variations to
-            // invoice" and are never offered for a second invoice.
-            const ids = variationLines.map((v) => v.variationId);
-            if (ids.length > 0) {
-              const { error: billErr } = await supabase.from("job_variations").update({ invoice_id: newInvoice.id }).in("id", ids);
-              if (billErr) {
-                toast.error(`Invoice created, but ${ids.length} variation(s) were not marked as billed. Check them on the job before invoicing again.`);
-              }
-            }
-          }
-        }
-      }
-    }
-
-    // This write is the approval. Without it the job is not approved, no
-    // matter what the invoice did or what the toast below says — and the row
-    // is removed from the list immediately after, so a refusal would look
-    // exactly like a success until the next reload.
-    const { error: approveErr, count: approveCount } = await supabase
-      .from("jobs")
-      .update(
-        {
-          admin_status: "approved",
-          admin_notes: notes[jobId] || null,
-          // Still flagged "ready to invoice" if we couldn't auto-create one
-          // (no line items yet) so it shows up for manual invoicing.
-          ready_to_invoice: !invoiceId,
-        },
-        { count: "exact" }
-      )
-      .eq("id", jobId);
-
-    if (approveErr || approveCount === 0) {
-      toast.error(approveErr?.message ?? "The job could not be approved — it may have changed since this page loaded.");
+    // The whole approval — invoice, its lines, variations, the job's hours,
+    // the approval itself — runs on the server (lib/approve-job.ts), and this
+    // screen says "approved" only when the server confirms it. It used to be
+    // a chain of writes from here, each one able to fail after the last.
+    let data: any = null;
+    try {
+      const res = await fetch(`/api/jobs/${jobId}/approve`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ notes: notes[jobId] || null }),
+      });
+      data = await res.json().catch(() => null);
+      if (!res.ok) throw new Error(data?.error ?? `The server refused the approval (HTTP ${res.status}).`);
+    } catch (err: any) {
+      toast.error(err.message ?? "The job could not be approved.");
       setSaving(null);
       return;
     }
 
     setJobs((j) => j.filter((job) => job.id !== jobId));
+    for (const w of data.warnings ?? []) toast.warning(w);
 
-    if (invoiceId && !alreadyPushed) {
+    const { invoiceId, invoiceCreated, alreadyPushed, unpricedHours } = data as {
+      invoiceId: string | null; invoiceCreated: boolean; alreadyPushed: boolean; unpricedHours: number;
+    };
+    const openInvoice = invoiceId
+      ? { label: "Open invoice", onClick: () => router.push(`/dashboard/invoices/${invoiceId}`) }
+      : undefined;
+
+    if (invoiceId && unpricedHours > 0) {
+      // Held, not pushed: an invoice with unpriced hours would reach Xero
+      // under-billed. "Apply hourly rate" on the invoice prices them.
+      toast.success(
+        `Job approved — ${invoiceCreated ? "draft invoice created" : "added to the existing invoice"} with ${unpricedHours.toFixed(2)}h to price. ` +
+          "Apply an hourly rate on the invoice, then push it to Xero.",
+        { action: openInvoice, duration: 12000 }
+      );
+    } else if (invoiceId && !alreadyPushed) {
       try {
         const res = await fetch("/api/xero/push-invoice", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ invoiceId }),
         });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.error);
+        const push = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(push.error);
         toast.success("Job approved — invoice created and pushed to Xero");
       } catch (err: any) {
         toast.success(invoiceCreated ? "Job approved — invoice created (draft, not yet in Xero)" : "Job approved");
-        toast.error(`Xero push failed: ${err.message ?? "unknown error"} — push manually from the invoice page`);
+        toast.error(`Xero push failed: ${err.message ?? "unknown error"} — push manually from the invoice page`, { action: openInvoice });
       }
     } else if (invoiceId && alreadyPushed) {
       toast.success("Job approved — invoice already synced to Xero");
     } else {
-      toast.success("Job approved — moved to invoicing queue (no line items yet, create the invoice manually)");
+      toast.success("Job approved — moved to invoicing queue (no line items or hours yet, create the invoice manually)");
     }
 
     setSaving(null);
@@ -336,6 +249,11 @@ export function ApprovalsClient({ role, currentUserId, jobs: initialJobs, pendin
                       <span className="text-xs text-slate-400 flex items-center gap-1">
                         <Clock className="w-3 h-3" />Completed {formatDate(job.updated_at)}
                       </span>
+                      {hoursByJob[job.id]?.total > 0 && (
+                        <span className="text-xs font-medium text-blue-700 bg-blue-50 px-2 py-0.5 rounded-full flex items-center gap-1">
+                          <Timer className="w-3 h-3" />{hoursByJob[job.id].total.toFixed(2)}h to invoice
+                        </span>
+                      )}
                       {job.overtime_category && (
                         <span className="text-xs font-medium text-orange-700 bg-orange-100 px-2 py-0.5 rounded-full flex items-center gap-1">
                           <AlertTriangle className="w-3 h-3" />Exceeded hours
@@ -370,6 +288,8 @@ export function ApprovalsClient({ role, currentUserId, jobs: initialJobs, pendin
                         </p>
                       </div>
                     )}
+
+                    <JobHoursPanel summary={hoursByJob[job.id]} />
 
                     <div className="space-y-1.5">
                       <label className="text-xs font-medium text-slate-600">Notes (required if sending back)</label>
@@ -412,6 +332,51 @@ export function ApprovalsClient({ role, currentUserId, jobs: initialJobs, pendin
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+// What approving will carry onto the invoice, by cost centre and technician.
+function JobHoursPanel({ summary }: { summary: JobHoursSummary | undefined }) {
+  if (summary?.error) {
+    return (
+      <div className="bg-red-50 border border-red-200 rounded-md px-3 py-2 text-sm text-red-700">
+        Could not load this job&apos;s hours ({summary.error}). Approving will stop rather than leave them off the invoice.
+      </div>
+    );
+  }
+  if (!summary || summary.groups.length === 0) {
+    return <p className="text-xs text-slate-400">No clocked hours to invoice on this job.</p>;
+  }
+  return (
+    <div className="bg-white border rounded-md">
+      <div className="flex items-center justify-between px-3 py-2 border-b">
+        <p className="text-xs font-semibold text-slate-600 uppercase tracking-wide flex items-center gap-1.5">
+          <Timer className="w-3.5 h-3.5" />Hours to invoice
+        </p>
+        <p className="text-sm font-semibold text-slate-900">{summary.total.toFixed(2)}h</p>
+      </div>
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="text-xs text-slate-500">
+            <th className="text-left font-medium px-3 py-1.5">Cost centre</th>
+            <th className="text-left font-medium px-3 py-1.5">Technician</th>
+            <th className="text-right font-medium px-3 py-1.5">Hours</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y">
+          {summary.groups.map((g) => (
+            <tr key={g.key}>
+              <td className="px-3 py-1.5 text-slate-700">{g.costCentreName ?? <span className="text-slate-400">No cost centre</span>}</td>
+              <td className="px-3 py-1.5 text-slate-700">{g.staffName}</td>
+              <td className="px-3 py-1.5 text-right tabular-nums">{g.hours.toFixed(2)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <p className="px-3 py-2 border-t text-xs text-slate-500">
+        These hours go onto the job&apos;s draft invoice. Price them there with <span className="font-medium">Apply hourly rate</span>; the invoice is not pushed to Xero until they are.
+      </p>
     </div>
   );
 }

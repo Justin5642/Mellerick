@@ -39,8 +39,10 @@
  */
 // The clock_in_/clock_out_ position columns (0092)
 // are granted explicitly there.
+// invoice_id is 0098 (draft, not applied yet): every read through this list
+// fails until it is applied, so do not deploy ahead of the migration.
 export const TIME_ENTRY_COLUMNS =
-  "id, job_id, staff_id, clock_in, clock_out, hours, notes, auto_clocked, created_at, entry_type, travel_from_job_id, cost_center_id, edited_by, edited_at, clock_in_lat, clock_in_lng, clock_in_accuracy, clock_out_lat, clock_out_lng, clock_out_accuracy" as const;
+  "id, job_id, staff_id, clock_in, clock_out, hours, notes, auto_clocked, created_at, entry_type, travel_from_job_id, cost_center_id, edited_by, edited_at, clock_in_lat, clock_in_lng, clock_in_accuracy, clock_out_lat, clock_out_lng, clock_out_accuracy, invoice_id" as const;
 
 /**
  * The same list plus the staff-name embed.

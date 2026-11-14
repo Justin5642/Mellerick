@@ -26,6 +26,7 @@ import type { JobSite } from "@/lib/job-site";
 import { invoiceProgress } from "@/lib/progress-claim";
 import type { JobReportRequest } from "@/lib/job-report";
 import { JobReportOptions } from "./job-report-options";
+import { InvoiceHours } from "./invoice-hours";
 
 interface Props {
   invoice: any;
@@ -52,6 +53,8 @@ export function InvoiceDetail({ invoice, jobSite, xeroConnected, payments }: Pro
   const [reportShown, setReportShown] = useState(false);
   const [reportSelection, setReportSelection] = useState<JobReportRequest | null>(null);
   const onReportChange = useCallback((sel: JobReportRequest | null) => setReportSelection(sel), []);
+  // Hours on the job not yet priced on this invoice (InvoiceHours reports it).
+  const [unpricedHours, setUnpricedHours] = useState(0);
 
   async function sendInvoice() {
     if (!sendTo.trim()) {
@@ -91,6 +94,15 @@ export function InvoiceDetail({ invoice, jobSite, xeroConnected, payments }: Pro
   }
 
   async function pushToXero() {
+    if (
+      unpricedHours > 0 &&
+      !window.confirm(
+        `${unpricedHours.toFixed(2)}h on this job have not been priced on this invoice. ` +
+          `Push to Xero without them? (Use "Apply hourly rate" below to bill them.)`
+      )
+    ) {
+      return;
+    }
     setPushing(true);
     try {
       const res = await fetch("/api/xero/push-invoice", {
@@ -320,6 +332,8 @@ export function InvoiceDetail({ invoice, jobSite, xeroConnected, payments }: Pro
         inXero={!!invoice.xero_invoice_id}
         payments={payments}
       />
+
+      {invoice.job_id && <InvoiceHours invoiceId={invoice.id} onPricedChange={setUnpricedHours} />}
 
       <Card>
         <CardContent className="p-0">

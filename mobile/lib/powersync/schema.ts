@@ -162,6 +162,7 @@ const invoice_items = new Table({
   total: column.real,
   created_at: column.text,
   sync_office: column.integer,
+  source: column.text,
 }, {
   indexes: {
     invoice: ['invoice_id'],
@@ -551,6 +552,7 @@ const time_entries = new Table({
   clock_out_lat: column.real,
   clock_out_lng: column.real,
   clock_out_accuracy: column.real,
+  invoice_id: column.text,
 }, {
   indexes: {
     job_staff: ['job_id', 'staff_id'],
