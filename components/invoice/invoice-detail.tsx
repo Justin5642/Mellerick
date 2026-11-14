@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -24,6 +24,8 @@ import { DeleteInvoiceDialog } from "./delete-invoice-dialog";
 import { InvoicePayments, type InvoicePayment } from "./invoice-payments";
 import type { JobSite } from "@/lib/job-site";
 import { invoiceProgress } from "@/lib/progress-claim";
+import type { JobReportRequest } from "@/lib/job-report";
+import { JobReportOptions } from "./job-report-options";
 
 interface Props {
   invoice: any;
@@ -43,10 +45,21 @@ export function InvoiceDetail({ invoice, jobSite, xeroConnected, payments }: Pro
   const [sendMessage, setSendMessage] = useState("");
   const [status, setStatus] = useState(invoice.status);
   const [deleteOpen, setDeleteOpen] = useState(false);
+  // "Include job report and photos" (invoices linked to a job only). The
+  // panel mounts on first tick and stays mounted while the dialog is open, so
+  // unticking and re-ticking keeps the office's edits.
+  const [includeReport, setIncludeReport] = useState(false);
+  const [reportShown, setReportShown] = useState(false);
+  const [reportSelection, setReportSelection] = useState<JobReportRequest | null>(null);
+  const onReportChange = useCallback((sel: JobReportRequest | null) => setReportSelection(sel), []);
 
   async function sendInvoice() {
     if (!sendTo.trim()) {
       toast.error("Enter an email address to send to");
+      return;
+    }
+    if (includeReport && !reportSelection) {
+      toast.error("The job report hasn't loaded yet — wait for it, or untick it");
       return;
     }
     setSending(true);
@@ -54,11 +67,21 @@ export function InvoiceDetail({ invoice, jobSite, xeroConnected, payments }: Pro
       const res = await fetch(`/api/invoices/${invoice.id}/send`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ to: sendTo, message: sendMessage }),
+        body: JSON.stringify({
+          to: sendTo,
+          message: sendMessage,
+          ...(includeReport && reportSelection ? { jobReport: reportSelection } : {}),
+        }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
-      toast.success(`Invoice emailed to ${data.sentTo}`);
+      toast.success(
+        data.jobReportAttached
+          ? `Invoice and job report emailed to ${data.sentTo}`
+          : `Invoice emailed to ${data.sentTo}`
+      );
+      if (data.reportNotice) toast.warning(data.reportNotice);
+      if (data.warning) toast.warning(data.warning);
       setStatus("sent");
       setSendOpen(false);
     } catch (err: any) {
@@ -109,7 +132,17 @@ export function InvoiceDetail({ invoice, jobSite, xeroConnected, payments }: Pro
             <Button variant="outline" size="sm" className="gap-2"><Pencil className="w-3.5 h-3.5" />Edit</Button>
           </Link>
 
-          <Dialog open={sendOpen} onOpenChange={setSendOpen}>
+          <Dialog
+            open={sendOpen}
+            onOpenChange={(open) => {
+              setSendOpen(open);
+              if (!open) {
+                setReportShown(false);
+                setIncludeReport(false);
+                setReportSelection(null);
+              }
+            }}
+          >
             <DialogTrigger
               render={
                 <Button variant="outline" className="gap-2">
@@ -119,17 +152,20 @@ export function InvoiceDetail({ invoice, jobSite, xeroConnected, payments }: Pro
               }
             />
             <KeyboardSafeDialogContent
+              className={invoice.job_id ? "sm:max-w-xl" : undefined}
               header={
                 <DialogHeader>
                   <DialogTitle>Send Invoice {formatInvoiceNumber(invoice.invoice_number)}</DialogTitle>
-                  <DialogDescription>Emails a PDF copy of this invoice to the customer.</DialogDescription>
+                  <DialogDescription>
+                    Emails a PDF copy of this invoice to the customer{invoice.job_id ? ", optionally with a job report and photos" : ""}.
+                  </DialogDescription>
                 </DialogHeader>
               }
               footer={
                 <div className="flex justify-end">
                   <Button onClick={sendInvoice} disabled={sending} className="gap-2 bg-blue-600 hover:bg-blue-700">
                     <Send className="w-4 h-4" />
-                    {sending ? "Sending..." : "Send Email"}
+                    {sending ? (includeReport ? "Making report and sending..." : "Sending...") : "Send Email"}
                   </Button>
                 </div>
               }
@@ -143,6 +179,27 @@ export function InvoiceDetail({ invoice, jobSite, xeroConnected, payments }: Pro
                   <Label>Message (optional)</Label>
                   <Textarea value={sendMessage} onChange={(e) => setSendMessage(e.target.value)} rows={3} placeholder="Add a personal note..." />
                 </div>
+                {invoice.job_id && (
+                  <div className="space-y-3">
+                    <label className="flex items-center gap-2 text-sm font-medium">
+                      <input
+                        type="checkbox"
+                        className="h-4 w-4"
+                        checked={includeReport}
+                        onChange={(e) => {
+                          setIncludeReport(e.target.checked);
+                          if (e.target.checked) setReportShown(true);
+                        }}
+                      />
+                      Include job report and photos
+                    </label>
+                    {reportShown && (
+                      <div className={includeReport ? undefined : "hidden"}>
+                        <JobReportOptions invoiceId={invoice.id} onChange={onReportChange} />
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             </KeyboardSafeDialogContent>
           </Dialog>
