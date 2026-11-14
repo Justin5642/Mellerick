@@ -467,7 +467,7 @@ windows) — all 16 technician-visible streams are money-free:
   `tech_job_assignments`, `tech_job_photos`, `tech_job_notes`,
   `tech_job_stage_notes` — no monetary column in the selected sets
 - `tech_job_bookings` (added for build 16; 0079/0080 applied 2026-10-19,
-  stream not deployed yet) — 10 named columns: who, when, cost-centre **id**;
+  deployed as sync config v5 on 2026-11-14) — 10 named columns: who, when, cost-centre **id**;
   no money column exists on `job_bookings`
 
 Office/admin streams gate on the caller's own profile row:
@@ -679,7 +679,7 @@ Load-bearing properties:
   wedge the FIFO queue forever — but it logs a warning naming the table, so a
   vanished row is traceable.
 
-### Job bookings on the phone (build 16; 0079 + 0080 applied 2026-10-19 — the stream deploy is the last step)
+### Job bookings on the phone (build 16; 0079 + 0080 applied 2026-10-19; streams deployed as v5 2026-11-14)
 
 `job_bookings` (`0079`, applied 2026-10-19) holds each technician's own
 window and cost centre on a job; the job-level schedule and crew are derived
@@ -1254,7 +1254,6 @@ a shippable release.
 | **Sentry (error monitoring)** | Justin | Optional, and off until a DSN is set — see §12. Create a free Sentry org with a Next.js project (and a React Native project for the app), then set the DSNs in Vercel and EAS. Without it, failures like the weeks-long silent "Polish with AI" outage are still only discovered by accident. |
 | **Turn off public sign-up** | Justin | Dashboard → Authentication → Sign In / Providers → untick **"Allow new users to sign up"**. `supabase/config.toml` now has `[auth] enable_signup = false`, but that file only configures the local stack — the hosted project still lets anyone with the anon key call `/auth/v1/signup`. Invites keep working (GoTrue's admin invite does not check this switch). Leave the **Email provider** itself enabled. |
 | **`APP_URL`** (optional) | Justin | Origin for emailed reset links. Unset = `https://mellerick-app.vercel.app`, which is right for production. Set it only for a different domain, or `http://localhost:3000` in `.env.local` to test resets locally. |
-| **Deploy the job bookings sync streams** | Justin | `0079` and `0080` are applied (19 Oct 2026). Last step: paste `mobile/powersync/sync-streams.yaml` into the PowerSync dashboard → Validate → Deploy (`docs/powersync-deploy.md`). Build 16 works before it (reads bookings from the server instead of the device), so it is not urgent, but offline bookings need it. |
 | **Check `EMAIL_FROM` for supplier POs** | Justin | Supplier PO emails go from `EMAIL_FROM` — it must be on a domain verified in Resend, or suppliers never receive them. (0085 itself applied 2026-10-28.) |
 | **Maestro flow 02** | Avi | Needs `ADMIN_EMAIL` / `ADMIN_PASSWORD` in the environment. The login subflow deliberately skips when a session already exists, so a password never passes through a script — which is why flows 01/03/04 could be run and 02 could not. |
 

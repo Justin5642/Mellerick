@@ -14,7 +14,31 @@ dashboard. This page is that procedure.
 - **Dialect:** Sync Streams edition 3 (`config: edition: 3` at the top of the
   file). There is no legacy `sync-rules.yaml` any more; do not create one.
 - **History so far:** v2 (2026-07-27), v3, v4 (2026-10-12, new slot after the
-  password reset), redeployed 2026-10-14 for 0071.
+  password reset), redeployed 2026-10-14 for 0071; **v5 (2026-11-14)** —
+  job bookings streams + `geofence_radius_m`, after granting the tables to
+  the real PowerSync user (below).
+
+## The database user is NOT `powersync_role`
+
+PowerSync connects as **`powersync_c84bc55d132913589b4c2bea`** (shown as
+Username under the instance's Database Connection). Migration 0080 granted
+`job_bookings` to `powersync_role`, which this instance does not use, so the
+v5 deploy failed with `permission denied for table job_bookings` until the
+grant below was run (2026-11-14). A third role, `powersync_7dc56333…`, reads
+nothing — probably the second, unused instance.
+
+**Any migration that adds a table to the `powersync` publication must grant it
+to the user PowerSync actually connects as.** Check with:
+
+```sql
+select tablename from pg_publication_tables
+where pubname = 'powersync'
+  and not has_table_privilege('powersync_c84bc55d132913589b4c2bea',
+                              format('%I.%I', schemaname, tablename), 'select');
+```
+
+No rows = every published table is readable. To fix, grant `select` on each
+listed table to that user.
 
 ## Order — database first, always
 
@@ -75,4 +99,4 @@ node --js-explicit-resource-management -e '
 
 | Change | Needs first | Status |
 |---|---|---|
-| `tech_job_bookings`, `office_job_bookings` (job bookings on the phone, build 16) | `0079_job_bookings.sql` then `0080_job_bookings_sync.sql` applied (both drafts, not applied yet) | **not deployed** |
+| `tech_job_bookings`, `office_job_bookings` (job bookings on the phone, build 16) | `0079` and `0080` applied (2026-10-19) | **deployed as v5, 2026-11-14** |
