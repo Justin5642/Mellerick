@@ -1,4 +1,4 @@
-// Staff → "Import from Xero" (migration 0101 — draft, not applied yet).
+// Staff → "Import from Xero" (migration 0101).
 //
 //   preview  read Xero Payroll + the app, pair people up, and show each
 //            person's current value next to Xero's. Writes nothing.

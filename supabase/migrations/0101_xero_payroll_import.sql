@@ -1,8 +1,8 @@
 -- ============================================================================
 -- Import staff pay rates and leave from Xero Payroll.
 --
--- STATUS: DRAFT — NOT APPLIED. Gate test:
--- supabase/tests/0101_xero_payroll_import_test.sql
+-- STATUS: ✅ APPLIED IN PRODUCTION (2026-11-15, via SQL editor). Gate test
+-- supabase/tests/0101_xero_payroll_import_test.sql passed.
 --
 -- WHY (Justin, 15 Nov 2026): pay is run entirely through Xero Payroll, but
 -- the app's staff cost profiles were typed in by hand — 4 of 11 active staff

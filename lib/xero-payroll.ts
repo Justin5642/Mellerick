@@ -1,5 +1,5 @@
 // Turning Xero Payroll (AU) data into the app's staff cost profile and leave
-// (migration 0101 — draft, not applied yet).
+// (migration 0101).
 //
 // Pure: no network, no database. lib/xero-payroll-import.ts fetches from Xero
 // and writes; this decides what each value IS, so it can be tested against

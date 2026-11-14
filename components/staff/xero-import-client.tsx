@@ -28,7 +28,7 @@ function defaultPicks(rows: PreviewRow[]): Picks {
 }
 
 /**
- * Staff → Import from Xero (0101 — draft, not applied yet). Reads Xero Payroll,
+ * Staff → Import from Xero (0101). Reads Xero Payroll,
  * shows it beside the app's values, writes only what's ticked. On demand only.
  */
 export function XeroImportClient() {
