@@ -16,6 +16,7 @@ import {
   buildHourLines,
   defaultRates,
   groupHours,
+  isBilled,
   quoteHourlyRate,
   totalHours,
   type HoursEntry,
@@ -49,6 +50,13 @@ export async function loadJobHours(db: SupabaseClient, jobIds: string[]): Promis
       .order("clock_in"),
     "Time entries"
   ) as any[];
+  // Entries already priced by an auto "Labour" job item (pre-0086).
+  const labourRows = must(
+    await db.from("job_items").select("time_entry_id").in("job_id", jobIds).not("time_entry_id", "is", null),
+    "Job line items"
+  ) as Array<{ time_entry_id: string }>;
+  const hasLabourLine = new Set((labourRows ?? []).map((r) => r.time_entry_id));
+
   for (const r of rows ?? []) {
     const entry: HoursEntry = {
       id: r.id,
@@ -60,6 +68,7 @@ export async function loadJobHours(db: SupabaseClient, jobIds: string[]): Promis
       clock_in: r.clock_in,
       clock_out: r.clock_out,
       invoice_id: r.invoice_id ?? null,
+      labour_line: hasLabourLine.has(r.id),
     };
     const list = byJob.get(r.job_id) ?? [];
     list.push(entry);
@@ -70,7 +79,7 @@ export async function loadJobHours(db: SupabaseClient, jobIds: string[]): Promis
 
 /** Hours not on any invoice yet, grouped — what an approval carries to the invoice. */
 export function unbilledGroups(entries: HoursEntry[]): HoursGroup[] {
-  return groupHours(entries.filter((e) => e.invoice_id == null));
+  return groupHours(entries.filter((e) => !isBilled(e)));
 }
 
 export async function loadRateDefaults(admin: SupabaseClient, jobId: string, groups: HoursGroup[]): Promise<RateDefaults> {
@@ -115,7 +124,7 @@ export interface InvoiceHoursView {
   groups: Array<HoursGroup & { billedHere: boolean }>;
   unbilledHours: number;
   billedHereHours: number;
-  /** Hours on this job already billed on a different invoice. Shown, not re-billed. */
+  /** Hours on this job billed elsewhere (another invoice, or an auto Labour line). Shown, not re-billed. */
   billedElsewhereHours: number;
   defaults: RateDefaults | null;
   locked: boolean;
@@ -141,8 +150,8 @@ export async function loadInvoiceHours(db: SupabaseClient, admin: SupabaseClient
   if (!invoice.job_id) return empty;
 
   const entries = (await loadJobHours(db, [invoice.job_id])).get(invoice.job_id) ?? [];
-  const mine = entries.filter((e) => e.invoice_id == null || e.invoice_id === invoiceId);
-  const elsewhere = entries.filter((e) => e.invoice_id != null && e.invoice_id !== invoiceId);
+  const mine = entries.filter((e) => !e.labour_line && (e.invoice_id == null || e.invoice_id === invoiceId));
+  const elsewhere = entries.filter((e) => !mine.includes(e));
   const groups = groupHours(mine).map((g) => ({
     ...g,
     billedHere: g.entryIds.every((id) => mine.find((e) => e.id === id)?.invoice_id === invoiceId),

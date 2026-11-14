@@ -148,7 +148,7 @@ export function InvoiceHours({ invoiceId, onPricedChange }: { invoiceId: string;
         )}
 
         {view.billedElsewhereHours > 0 && (
-          <p className="text-xs text-slate-500">{view.billedElsewhereHours.toFixed(2)}h on this job are already billed on another invoice and are not shown here.</p>
+          <p className="text-xs text-slate-500">{view.billedElsewhereHours.toFixed(2)}h on this job are already billed (on another invoice, or as an existing Labour line) and are not shown here.</p>
         )}
 
         {view.groups.length > 0 && !view.locked && (

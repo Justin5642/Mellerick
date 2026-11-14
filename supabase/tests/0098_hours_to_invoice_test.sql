@@ -27,6 +27,7 @@ declare
   te2 uuid := gen_random_uuid();
   te_other uuid := gen_random_uuid();
   te_open uuid := gen_random_uuid();
+  te_labour uuid := gen_random_uuid(); -- already priced by a pre-0086 auto Labour line
   result jsonb;
   outcome text;
   state text;
@@ -57,6 +58,10 @@ begin
     insert into invoices (id, customer_id, job_id, title, status, subtotal, tax_amount, total)
       values (inv, cust, j_hours, '0098 invoice', 'draft', 0, 0, 0);
     insert into invoice_items (invoice_id, name, quantity, unit_price) values (inv, 'Materials', 1, 50);
+    insert into time_entries (id, job_id, staff_id, clock_in, clock_out, hours, entry_type)
+      values (te_labour, j_hours, tech, now() - interval '20 hours', now() - interval '19 hours', 1, 'work');
+    insert into job_items (job_id, name, quantity, unit_price, source, time_entry_id)
+      values (j_hours, 'Labour', 1, 130, 'auto_labour', te_labour);
 
     perform set_config('role', 'authenticated', true);
 
@@ -142,6 +147,15 @@ begin
     when others then outcome := 'OTHER ERROR: ' || sqlstate || ' ' || sqlerrm;
     end;
     res := res || format('billing an open entry|BLOCKED|%s', outcome);
+
+    begin
+      perform apply_invoice_hours(inv, jsonb_build_array(jsonb_build_object(
+        'name', 'Labour', 'quantity', 1, 'unit_price', 100, 'entry_ids', jsonb_build_array(te_labour))));
+      outcome := 'ALLOWED';
+    exception when sqlstate '22023' then outcome := 'BLOCKED';
+    when others then outcome := 'OTHER ERROR: ' || sqlstate || ' ' || sqlerrm;
+    end;
+    res := res || format('billing hours an auto Labour line already covers|BLOCKED|%s', outcome);
 
     -- 6. Office bills both closed entries: 3.5h + 1h at $130 = $585, + $50 materials.
     result := apply_invoice_hours(inv, jsonb_build_array(

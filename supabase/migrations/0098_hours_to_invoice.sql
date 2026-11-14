@@ -212,9 +212,12 @@ begin
       and job_id = inv.job_id
       and entry_type = 'work'
       and clock_out is not null
-      and invoice_id is null;
+      and invoice_id is null
+      -- Already priced by a pre-0086 auto Labour job item, which approval
+      -- copies onto the invoice: billing it again would charge it twice.
+      and not exists (select 1 from job_items ji where ji.time_entry_id = time_entries.id);
     if n <> cardinality(ids) then
-      raise exception 'some of these hours are not on this job, are still clocked on, or are already on another invoice — reload and try again'
+      raise exception 'some of these hours are not on this job, are still clocked on, or are already billed — reload and try again'
         using errcode = '22023';
     end if;
 

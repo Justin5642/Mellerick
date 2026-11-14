@@ -21,6 +21,18 @@ export interface HoursEntry {
   clock_out: string | null;
   /** The invoice these hours are already billed on (0098), or null. */
   invoice_id: string | null;
+  /**
+   * Billed by an auto "Labour" job item (job_items.time_entry_id, written by
+   * lib/labour-billing-sync.ts before 0086 switched it off). Approval copies
+   * that line onto the invoice, so these hours are already billed — pricing
+   * them again would charge them twice (#2538, #2522, #639 have such lines).
+   */
+  labour_line?: boolean;
+}
+
+/** Already billed: on an invoice, or covered by an auto Labour job item. */
+export function isBilled(e: Pick<HoursEntry, "invoice_id" | "labour_line">): boolean {
+  return e.invoice_id != null || !!e.labour_line;
 }
 
 export interface HoursGroup {

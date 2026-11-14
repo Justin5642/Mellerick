@@ -3,6 +3,7 @@ import {
   buildHourLines,
   defaultRates,
   groupHours,
+  isBilled,
   quoteHourlyRate,
   totalHours,
   NO_COST_CENTRE,
@@ -121,5 +122,16 @@ describe("buildHourLines", () => {
     expect(r).toEqual({ ok: false, error: "Enter an hourly rate for Blake." });
     expect(buildHourLines(groups, { mode: "all", all: Number.NaN }).ok).toBe(false);
     expect(buildHourLines([], { mode: "all", all: 130 }).ok).toBe(false);
+  });
+});
+
+describe("isBilled", () => {
+  it("counts hours on an invoice, or covered by a pre-0086 auto Labour line, as billed", () => {
+    expect(isBilled({ invoice_id: null, labour_line: false })).toBe(false);
+    expect(isBilled({ invoice_id: null })).toBe(false);
+    expect(isBilled({ invoice_id: "inv-1", labour_line: false })).toBe(true);
+    // #2538 / #2522: approval copies the Labour line onto the invoice, so
+    // pricing these hours again would bill them twice.
+    expect(isBilled({ invoice_id: null, labour_line: true })).toBe(true);
   });
 });
