@@ -1,7 +1,7 @@
 // Hours on a job, grouped and priced for its invoice.
 //
 // Pure: no database. lib/invoice-hours.ts loads the rows and writes the result
-// through apply_invoice_hours() (migration 0098, draft — not applied yet); the Approvals screen and the
+// through apply_invoice_hours() (migration 0098); the Approvals screen and the
 // invoice screen both display what groupHours() returns, so the office sees the
 // same figures before approving as the invoice is built from.
 //

@@ -1,4 +1,4 @@
-// Loading a job's hours for its invoice, and billing them (migration 0098 — draft, not applied yet).
+// Loading a job's hours for its invoice, and billing them (migration 0098).
 //
 // Two clients, deliberately:
 //   db    — the CALLER's session. Reads the job's hours and invoice under RLS,

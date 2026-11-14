@@ -1,8 +1,8 @@
 -- ============================================================================
 -- Approved hours reach the invoice; completed jobs always come back for approval.
 --
--- STATUS: DRAFT — NOT APPLIED. Gate test:
--- supabase/tests/0098_hours_to_invoice_test.sql
+-- STATUS: ✅ APPLIED IN PRODUCTION (2026-11-15, via SQL editor; #505 and #2542
+-- back in Approvals). Gate test supabase/tests/0098_hours_to_invoice_test.sql passed.
 --
 -- WHY (bug report, 14 Nov 2026 — Garden World, job #505, and #2542): a
 -- technician clocked hours, corrected them, and the job was approved, but the

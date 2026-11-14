@@ -6,7 +6,7 @@ import { applyInvoiceHours, loadInvoiceHours } from "@/lib/invoice-hours";
 import type { RateChoice, RateMode } from "@/lib/approved-hours";
 
 // The job's hours for an invoice (GET) and "Apply hourly rate" (POST).
-// See lib/invoice-hours.ts and migration 0098 (draft, not applied yet).
+// See lib/invoice-hours.ts and migration 0098.
 
 export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;

@@ -35,7 +35,7 @@ export type LineItemInput = {
   description: string | null;
   quantity: number;
   unit_price: number;
-  /** invoice_items only (0098, draft — not applied yet): 'hours' marks a line built from time entries. */
+  /** invoice_items only (0098): 'hours' marks a line built from time entries. */
   source?: string | null;
 };
 

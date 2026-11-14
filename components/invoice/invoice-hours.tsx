@@ -23,7 +23,7 @@ const MODES: { value: RateMode; label: string }[] = [
 ];
 
 /**
- * The job's clocked hours on its invoice, and "Apply hourly rate" (0098 — draft, not applied yet).
+ * The job's clocked hours on its invoice, and "Apply hourly rate" (0098).
  * Lines are built on the server (POST /api/invoices/[id]/hours) and the screen
  * reloads from what was saved — nothing here is reported as done until the
  * server says so.
