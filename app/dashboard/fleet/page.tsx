@@ -8,6 +8,7 @@ import { fetchAllRows } from "@/lib/fetch-all-rows";
 import { attachEffectiveRates } from "@/lib/fleet-rates";
 import { dateKeyInBusinessTZ } from "@/lib/date";
 import type { FleetExpense } from "@/lib/fleet-costs";
+import type { ServiceRecord } from "@/lib/service-due";
 
 export default async function FleetPage() {
   const supabase = await createClient();
@@ -19,12 +20,20 @@ export default async function FleetPage() {
   //
   // Every expense, paged: the yearly summary lets you pick any past financial
   // year, and a truncated read would understate a year's cost without saying so.
-  const [viewer, { data: equipment, error }, { data: staff }, expensesRes] = await Promise.all([
+  const [viewer, { data: equipment, error }, { data: staff }, expensesRes, servicesRes] = await Promise.all([
     getViewer(),
     supabase.from("equipment").select("*").order("name"),
     supabase.from("profiles").select("id, full_name, role").eq("is_active", true).order("full_name"),
     fetchAllRows<FleetExpense>((c) =>
       supabase.from("equipment_expenses").select("equipment_id, category, amount, gst_amount, expense_date", c).order("id") as never
+    ),
+    // For each item's next-service status. Needs 0099 (draft, not applied yet); without it the list
+    // simply shows no service status.
+    fetchAllRows<ServiceRecord>((c) =>
+      supabase
+        .from("equipment_service_records")
+        .select("id, equipment_id, service_date, service_type, odometer_km, engine_hours, next_due_date, next_due_km, next_due_hours, created_at", c)
+        .order("id") as never
     ),
   ]);
 
@@ -42,6 +51,7 @@ export default async function FleetPage() {
       expenses={expensesRes.ok ? expensesRes.rows : null}
       expensesError={expensesRes.ok ? null : expensesRes.error}
       today={today}
+      services={servicesRes.ok ? servicesRes.rows : null}
       fetchError={error?.message ?? null}
     />
   );
