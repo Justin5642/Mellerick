@@ -105,7 +105,7 @@ interface SupplierRow {
 }
 
 // The active supplier list, with each one's place in the Pinned group
-// (pin_order, from 0097 — drafted, not applied yet).
+// (pin_order, from 0097).
 // A database without pin_order (42703) gets the list unpinned.
 async function loadSuppliers(admin: Admin): Promise<SupplierRow[]> {
   const read = (cols: string) => admin.from("suppliers").select(cols).eq("is_active", true).order("name");

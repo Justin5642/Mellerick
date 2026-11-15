@@ -3,8 +3,8 @@
 -- so "where should the business head" can be answered from our own database.
 --
 -- STATUS: ✅ APPLIED IN PRODUCTION (2026-11-14, via SQL editor). Gate test
--- supabase/tests/0098_xero_analytics_test.sql passed.
--- Apply (SQL editor), run supabase/tests/0098_xero_analytics_test.sql, THEN merge.
+-- supabase/tests/0105_xero_analytics_test.sql passed.
+-- Apply (SQL editor), run supabase/tests/0105_xero_analytics_test.sql, THEN merge.
 -- The sync route reports "Xero analytics tables not found" until this is applied;
 -- nothing else in the app reads these tables.
 --
@@ -111,4 +111,4 @@ grant select on xero_invoices, xero_payments, xero_pl_monthly, xero_sync_state t
 grant select, insert, update, delete on xero_invoices, xero_payments, xero_pl_monthly, xero_sync_state to service_role;
 
 comment on table xero_invoices is
-  'Read-only mirror of Xero invoices and bills, last 24 months (0098). Written only by lib/xero-analytics.ts.';
+  'Read-only mirror of Xero invoices and bills, last 24 months (0105). Written only by lib/xero-analytics.ts.';

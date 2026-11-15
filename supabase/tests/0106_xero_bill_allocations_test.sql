@@ -1,7 +1,7 @@
 -- ============================================================================
--- REGRESSION TEST for 0099 — Xero bill allocations.
+-- REGRESSION TEST for 0106 — Xero bill allocations.
 --
---   psql "$SUPABASE_DB_URL" -f supabase/tests/0099_xero_bill_allocations_test.sql
+--   psql "$SUPABASE_DB_URL" -f supabase/tests/0106_xero_bill_allocations_test.sql
 --   or paste the whole file into the Supabase SQL editor.
 --
 -- ONE DO BLOCK, SELF-UNDOING — see the 0073 test's header. Asserts the end
@@ -57,6 +57,6 @@ begin
     if sqlerrm <> 'ZX001 undo' then failures := failures || 'unexpected: ' || sqlerrm || '; '; end if;
   end;
 
-  if failures <> '' then raise exception '0099 gate FAILED: %', failures; end if;
-  raise notice '0099 gate passed';
+  if failures <> '' then raise exception '0106 gate FAILED: %', failures; end if;
+  raise notice '0106 gate passed';
 end $$;

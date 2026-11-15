@@ -55,6 +55,12 @@ export interface TrackedSite {
   bookings?: BookingWindow[];
   /** This site's own arrival fence in metres; absent = the standard 150 m. */
   radiusM?: number;
+  /**
+   * Scheduled today, or already clocked into. When a reading is inside more
+   * than one site (two jobs on one estate, an old job next door), a preferred
+   * site wins over a nearer one that isn't. Absent = not preferred.
+   */
+  preferred?: boolean;
 }
 
 /** The cost centre an arrival at `site` at `atMs` clocks in against. */
@@ -114,6 +120,9 @@ export function nextGeofenceState(
   const fence = (s: TrackedSite) => (typeof s.radiusM === "number" && s.radiusM > 0 ? s.radiusM : radiusMeters);
   let nearestJobId: string | null = null;
   let nearestMargin = Infinity;
+  // The best site the reading is INSIDE: a preferred one (scheduled today /
+  // clocked in) beats a nearer one that isn't; otherwise the nearest wins.
+  let insideBest: { jobId: string; margin: number; preferred: boolean } | null = null;
 
   for (const site of sites) {
     // A site with no coordinates is not at (0, 0) — that is in the Atlantic, and
@@ -126,7 +135,16 @@ export function nextGeofenceState(
       nearestMargin = margin;
       nearestJobId = site.jobId;
     }
+    if (margin <= 0) {
+      const preferred = site.preferred === true;
+      if (!insideBest || (preferred && !insideBest.preferred) || (preferred === insideBest.preferred && margin < insideBest.margin)) {
+        insideBest = { jobId: site.jobId, margin, preferred };
+      }
+    }
   }
+  // Where an arrival would go. Outside every fence this is just the nearest.
+  const targetJobId = insideBest ? insideBest.jobId : nearestJobId;
+  const targetMargin = insideBest ? insideBest.margin : nearestMargin;
 
   // Too vague to decide anything: keep whatever we had.
   if (typeof coords.accuracy === "number" && Number.isFinite(coords.accuracy) && coords.accuracy > MAX_READING_ACCURACY_METERS) {
@@ -139,13 +157,18 @@ export function nextGeofenceState(
   const current = currentInsideJobId ? sites.find((s) => s.jobId === currentInsideJobId) : undefined;
   if (current && Number.isFinite(current.lat) && Number.isFinite(current.lng)) {
     const marginCurrent = haversineDistance(coords.latitude, coords.longitude, current.lat, current.lng) - fence(current);
-    const movedNext = nearestJobId !== currentInsideJobId && nearestMargin <= 0 && nearestMargin < marginCurrent;
+    // Moving to a preferred site from one that isn't counts even when the old
+    // site's fence still reaches; otherwise it must be nearer, as before.
+    const movedNext =
+      targetJobId !== currentInsideJobId &&
+      targetMargin <= 0 &&
+      ((insideBest?.preferred === true && current.preferred !== true) || targetMargin < marginCurrent);
     if (marginCurrent <= GEOFENCE_EXIT_BUFFER_METERS && !movedNext) {
       return { insideJobId: currentInsideJobId, previousJobId: currentInsideJobId, transition: "none" };
     }
   }
 
-  const insideJobId = nearestMargin <= 0 ? nearestJobId : null;
+  const insideJobId = targetMargin <= 0 ? targetJobId : null;
 
   if (insideJobId === currentInsideJobId) {
     return { insideJobId, previousJobId: currentInsideJobId, transition: "none" };

@@ -122,6 +122,10 @@ export type PhotoExclusion = "signature" | "docket" | "format" | "missing";
 export function photoExclusion(p: ReportPhotoRow): PhotoExclusion | null {
   if (p.photo_type === "signature") return "signature";
   if (p.vendor_order_id) return "docket";
+  // 0093's link is "on delete set null", so a docket whose PO was deleted
+  // loses it — but keeps the caption the phone gives every docket
+  // ("Docket PO-1008"). A docket can show prices; never let it through.
+  if (/^\s*docket\b/i.test(p.caption ?? "")) return "docket";
   if (!p.storage_path) return "missing";
   if (!RENDERABLE_EXT.has(photoExtension(p.storage_path))) return "format";
   return null;

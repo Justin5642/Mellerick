@@ -431,13 +431,13 @@ approved: the web **Send Invoice** dialog has "Include job report and photos"
   `components/invoice/job-report-options.tsx`; route behaviour in
   `tests/unit/invoice-send-job-report.test.ts`. Not yet on the phone.
 
-**Xero analytics mirror (14 Nov 2026; branch `feat/xero-analytics-sync`; migration `0098` applied 2026-11-14).**
+**Xero analytics mirror (14 Nov 2026; branch `feat/xero-analytics-sync`; migration `0105`, first numbered 0098, applied 2026-11-14).**
 Justin: pull Xero's data back so "where should the business head" can be answered
 from our own database. Read-only toward Xero; nothing is written back.
 - **Already existed, unchanged:** `pollXeroInvoicePayments` (`lib/xero.ts`, cron
   `/api/xero/poll-invoices` every 30 min) marks CRM-pushed invoices paid. It only
   sees invoices the CRM pushed. The mirror below covers everything else.
-- **Tables (`0098`, office/admin read by RLS, service-role write, in no PowerSync
+- **Tables (`0105`, office/admin read by RLS, service-role write, in no PowerSync
   stream):** `xero_invoices` (sales invoices AND bills, last 24 months, header
   totals only), `xero_payments`, `xero_pl_monthly` (one row per account line per
   month), `xero_sync_state` (resume point + last result per entity).
@@ -446,7 +446,7 @@ from our own database. Read-only toward Xero; nothing is written back.
   hits its 40 s budget or Xero's 429 just resumes next run — the first runs are the
   backfill. P&L: 24 months while the table is empty, then the latest 3 months
   (closed months can still change). Route `/api/xero/sync-analytics`: GET = cron
-  (secret, nightly 17:25 UTC), POST = admin manual run. Before `0098` was applied
+  (secret, nightly 17:25 UTC), POST = admin manual run. Before `0105` was applied
   the route answered `{skipped: true}`.
 - **Scopes:** `XERO_SCOPES` in `lib/xero.ts` gained `accounting.payments.read` and
   `accounting.reports.profitandloss.read` (granular names; the broad
@@ -460,7 +460,7 @@ from our own database. Read-only toward Xero; nothing is written back.
 - `lib/database.types.ts` got the four tables by hand (`gen:types` needs the linked
   CLI); regenerate after applying.
 
-**Unallocated bills + Monday office email (14 Nov 2026; branch `feat/unallocated-bills`, stacked on `feat/xero-analytics-sync`; migration `0099` applied 2026-11-14).**
+**Unallocated bills + Monday office email (14 Nov 2026; branch `feat/unallocated-bills`, stacked on `feat/xero-analytics-sync`; migration `0106`, first numbered 0099, applied 2026-11-14).**
 Justin: job profit has been inaccurate because a supplier bill reaches Xero by
 account, not by job. This finds the bills with no job and gets them assigned.
 - **Rules:** `lib/unallocated-bills.ts`. A Xero ACCPAY bill (AUTHORISED/PAID, ex-GST
@@ -470,15 +470,15 @@ account, not by job. This finds the bills with no job and gets them assigned.
   against the CRM), else `unallocated`. Precedence: what the app knows > what the
   office decided > what a reference suggests. "Traced %" = (crm+manual+referenced) /
   (everything except overhead), per month.
-- **`0099` `xero_bill_allocations`:** one row per bill the office has decided
+- **`0106` `xero_bill_allocations`:** one row per bill the office has decided
   (job or overhead; no amounts — they are read from `xero_invoices`). Office/admin
-  RLS, granted explicitly. Needs `0098`. Deleting a job deletes its allocations
+  RLS, granted explicitly. Needs `0105`. Deleting a job deletes its allocations
   (the bill shows as unallocated again).
 - **Page:** Reports → **Unallocated bills** (`app/dashboard/reports/unallocated-bills`,
   office/admin): traced-% by month and the oldest 100 bills with an assign control
   (job number, or Overhead) → `POST/DELETE /api/xero/bills/[id]/allocate`
   (office/admin guard; runs as the caller under RLS; job resolved by number
-  server-side). Without 0098/0099 the page says so.
+  server-side). Without 0105/0106 the page says so.
 - **Email:** `GET /api/reports/weekly-digest` (cron secret; Sunday 19:30 UTC = Monday
   06:30 Melbourne in daylight time) emails bills-with-no-job, traced-% for the last 3
   months, overdue debtors and supplier POs still waiting for an invoice, linking to the
@@ -1316,8 +1316,8 @@ a shippable release.
 | **Turn off public sign-up** | Justin | Dashboard → Authentication → Sign In / Providers → untick **"Allow new users to sign up"**. `supabase/config.toml` now has `[auth] enable_signup = false`, but that file only configures the local stack — the hosted project still lets anyone with the anon key call `/auth/v1/signup`. Invites keep working (GoTrue's admin invite does not check this switch). Leave the **Email provider** itself enabled. |
 | **`APP_URL`** (optional) | Justin | Origin for emailed reset links. Unset = `https://mellerick-app.vercel.app`, which is right for production. Set it only for a different domain, or `http://localhost:3000` in `.env.local` to test resets locally. |
 | **Check `EMAIL_FROM` for supplier POs** | Justin | Supplier PO emails go from `EMAIL_FROM` — it must be on a domain verified in Resend, or suppliers never receive them. (0085 itself applied 2026-10-28.) |
-| **Xero analytics: reconnect Xero** | Justin | `0098` is applied (2026-11-14). After deploy, click **Connect Xero** once so the new read scopes are granted, then `POST /api/xero/sync-analytics` as admin (or wait for the nightly cron) to start the 24-month backfill. |
-| **Unallocated bills: set `WEEKLY_DIGEST_TO`** | Justin | `0099` is applied (2026-11-14). Set `WEEKLY_DIGEST_TO` in Vercel (Production) to the office recipients' addresses. |
+| **Xero analytics: reconnect Xero** | Justin | `0105` is applied (2026-11-14). After deploy, click **Connect Xero** once so the new read scopes are granted, then `POST /api/xero/sync-analytics` as admin (or wait for the nightly cron) to start the 24-month backfill. |
+| **Unallocated bills: set `WEEKLY_DIGEST_TO`** | Justin | `0106` is applied (2026-11-14). Set `WEEKLY_DIGEST_TO` in Vercel (Production) to the office recipients' addresses. |
 | **Maestro flow 02** | Avi | Needs `ADMIN_EMAIL` / `ADMIN_PASSWORD` in the environment. The login subflow deliberately skips when a session already exists, so a password never passes through a script — which is why flows 01/03/04 could be run and 02 could not. |
 
 ### QA fixture — do not delete

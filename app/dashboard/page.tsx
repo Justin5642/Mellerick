@@ -4,7 +4,7 @@ import { getViewer } from "@/lib/auth/viewer";
 import { createClient } from "@/lib/supabase/server";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Briefcase, Users, Receipt, AlertCircle, CheckCircle2, Clock, DollarSign, Droplets } from "lucide-react";
+import { Briefcase, Users, Receipt, AlertCircle, CheckCircle2, Clock, DollarSign, Droplets, CalendarDays } from "lucide-react";
 import Link from "next/link";
 import { businessDateParts, dateKeyInBusinessTZ, formatDate, formatTime } from "@/lib/date";
 import { businessDayRange, type ScheduleDay } from "@/lib/scheduling";
@@ -117,7 +117,7 @@ export default async function DashboardPage() {
       .not("status", "in", '("completed","cancelled")')
       .order("scheduled_start"),
     supabase.from("time_entries")
-      .select("id, clock_in, job_id, jobs(job_number, title), profiles!time_entries_staff_id_fkey(full_name)")
+      .select("id, clock_in, job_id, jobs!time_entries_job_id_fkey(job_number, title), profiles!time_entries_staff_id_fkey(full_name)")
       .is("clock_out", null)
       .eq("entry_type", "work")
       .lt("clock_in", todayStart)
@@ -149,62 +149,21 @@ export default async function DashboardPage() {
 
   return (
     <div className="p-6 space-y-6">
-      {/* Header */}
-      <div>
-        <h1 className="text-2xl font-bold text-slate-900">{greeting}, {firstName}</h1>
-        <p className="text-slate-500 text-sm mt-1">{formatDate(new Date(), { weekday: "long", day: "numeric", month: "long", year: "numeric" })}</p>
+      {/* Header — the Schedule is one click from here (Justin, 15 Nov 2026:
+          quicker than going across to it in the sidebar). */}
+      <div className="flex items-start justify-between gap-4 flex-wrap">
+        <div>
+          <h1 className="text-2xl font-bold text-slate-900">{greeting}, {firstName}</h1>
+          <p className="text-slate-500 text-sm mt-1">{formatDate(new Date(), { weekday: "long", day: "numeric", month: "long", year: "numeric" })}</p>
+        </div>
+        <Link
+          href="/dashboard/schedule"
+          className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-medium text-white shadow-sm hover:bg-blue-700 transition-colors"
+        >
+          <CalendarDays className="w-4 h-4" />
+          Open schedule
+        </Link>
       </div>
-
-      {/* Stats */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
-        <StatCard title="Active Jobs" value={activeJobs ?? 0} icon={Briefcase} color="bg-blue-500" href="/dashboard/jobs" />
-        <StatCard title="Total Jobs" value={totalJobs ?? 0} icon={CheckCircle2} color="bg-green-500" href="/dashboard/jobs" />
-        <StatCard title="Customers" value={totalCustomers ?? 0} icon={Users} color="bg-violet-500" href="/dashboard/customers" />
-        <StatCard title="Overdue Invoices" value={overdueInvoices ?? 0} icon={AlertCircle} color="bg-red-500" href="/dashboard/invoices" />
-        <StatCard
-          title="Variations to Invoice"
-          value={(() => {
-            const real = ((unbilledVariations ?? []) as { total_amount: number | null; jobs: { title: string | null } | null }[]).filter(
-              (v) => !v.jobs?.title?.startsWith("QA FIXTURE")
-            );
-            const sum = real.reduce((acc, v) => acc + Number(v.total_amount ?? 0), 0);
-            return `${real.length} · $${sum.toLocaleString("en-AU", { maximumFractionDigits: 0 })}`;
-          })()}
-          icon={Receipt}
-          color="bg-emerald-600"
-          href="/dashboard/approvals#unbilled-variations"
-        />
-        <StatCard title="Backflow Tests Due" value={backflowDueCount} icon={Droplets} color="bg-cyan-600" href="/dashboard/backflow" />
-      </div>
-
-      {/* Morning list: yesterday's loose ends (Stage 5) */}
-      {(unfinishedYesterday.length > 0 || (runningClocks ?? []).length > 0) && (
-        <Card className="border-amber-200">
-          <CardHeader className="pb-3">
-            <CardTitle className="text-base font-semibold">Needs a look from yesterday</CardTitle>
-          </CardHeader>
-          <CardContent className="p-0 divide-y">
-            {unfinishedYesterday.map((job: any) => (
-              <Link prefetch={false} key={job.id} href={`/dashboard/jobs/${job.id}`} className="flex items-center justify-between gap-4 px-6 py-3 hover:bg-slate-50">
-                <span className="text-sm">
-                  <span className="font-medium text-slate-800">#{job.job_number} — {job.title}</span>
-                  <span className="text-slate-400"> · {job.profiles?.full_name ?? "Unassigned"}</span>
-                </span>
-                <span className="text-xs text-amber-700">Booked yesterday, not signed off</span>
-              </Link>
-            ))}
-            {(runningClocks ?? []).map((t: any) => (
-              <Link prefetch={false} key={t.id} href={`/dashboard/jobs/${t.job_id}?tab=time`} className="flex items-center justify-between gap-4 px-6 py-3 hover:bg-slate-50">
-                <span className="text-sm">
-                  <span className="font-medium text-slate-800">{t.profiles?.full_name ?? "Someone"}</span>
-                  <span className="text-slate-400"> · #{t.jobs?.job_number} — {t.jobs?.title}</span>
-                </span>
-                <span className="text-xs text-red-600">Still clocked on since {formatDate(t.clock_in, { weekday: "short", day: "numeric", month: "short" })} {formatTime(t.clock_in)}</span>
-              </Link>
-            ))}
-          </CardContent>
-        </Card>
-      )}
 
       {/* Today's Jobs */}
       <Card>
@@ -245,6 +204,57 @@ export default async function DashboardPage() {
           )}
         </CardContent>
       </Card>
+
+      {/* Morning list: yesterday's loose ends (Stage 5) */}
+      {(unfinishedYesterday.length > 0 || (runningClocks ?? []).length > 0) && (
+        <Card className="border-amber-200">
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base font-semibold">Needs a look from yesterday</CardTitle>
+          </CardHeader>
+          <CardContent className="p-0 divide-y">
+            {unfinishedYesterday.map((job: any) => (
+              <Link prefetch={false} key={job.id} href={`/dashboard/jobs/${job.id}`} className="flex items-center justify-between gap-4 px-6 py-3 hover:bg-slate-50">
+                <span className="text-sm">
+                  <span className="font-medium text-slate-800">#{job.job_number} — {job.title}</span>
+                  <span className="text-slate-400"> · {job.profiles?.full_name ?? "Unassigned"}</span>
+                </span>
+                <span className="text-xs text-amber-700">Booked yesterday, not signed off</span>
+              </Link>
+            ))}
+            {(runningClocks ?? []).map((t: any) => (
+              <Link prefetch={false} key={t.id} href={`/dashboard/jobs/${t.job_id}?tab=time`} className="flex items-center justify-between gap-4 px-6 py-3 hover:bg-slate-50">
+                <span className="text-sm">
+                  <span className="font-medium text-slate-800">{t.profiles?.full_name ?? "Someone"}</span>
+                  <span className="text-slate-400"> · #{t.jobs?.job_number} — {t.jobs?.title}</span>
+                </span>
+                <span className="text-xs text-red-600">Still clocked on since {formatDate(t.clock_in, { weekday: "short", day: "numeric", month: "short" })} {formatTime(t.clock_in)}</span>
+              </Link>
+            ))}
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Stats */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+        <StatCard title="Active Jobs" value={activeJobs ?? 0} icon={Briefcase} color="bg-blue-500" href="/dashboard/jobs" />
+        <StatCard title="Total Jobs" value={totalJobs ?? 0} icon={CheckCircle2} color="bg-green-500" href="/dashboard/jobs" />
+        <StatCard title="Customers" value={totalCustomers ?? 0} icon={Users} color="bg-violet-500" href="/dashboard/customers" />
+        <StatCard title="Overdue Invoices" value={overdueInvoices ?? 0} icon={AlertCircle} color="bg-red-500" href="/dashboard/invoices" />
+        <StatCard
+          title="Variations to Invoice"
+          value={(() => {
+            const real = ((unbilledVariations ?? []) as { total_amount: number | null; jobs: { title: string | null } | null }[]).filter(
+              (v) => !v.jobs?.title?.startsWith("QA FIXTURE")
+            );
+            const sum = real.reduce((acc, v) => acc + Number(v.total_amount ?? 0), 0);
+            return `${real.length} · $${sum.toLocaleString("en-AU", { maximumFractionDigits: 0 })}`;
+          })()}
+          icon={Receipt}
+          color="bg-emerald-600"
+          href="/dashboard/approvals#unbilled-variations"
+        />
+        <StatCard title="Backflow Tests Due" value={backflowDueCount} icon={Droplets} color="bg-cyan-600" href="/dashboard/backflow" />
+      </div>
 
       {/* Recent Jobs */}
       <Card>

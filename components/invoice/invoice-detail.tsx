@@ -26,6 +26,7 @@ import type { JobSite } from "@/lib/job-site";
 import { invoiceProgress } from "@/lib/progress-claim";
 import type { JobReportRequest } from "@/lib/job-report";
 import { JobReportOptions } from "./job-report-options";
+import { InvoiceHours } from "./invoice-hours";
 
 interface Props {
   invoice: any;
@@ -52,8 +53,10 @@ export function InvoiceDetail({ invoice, jobSite, xeroConnected, payments }: Pro
   const [reportShown, setReportShown] = useState(false);
   const [reportSelection, setReportSelection] = useState<JobReportRequest | null>(null);
   const onReportChange = useCallback((sel: JobReportRequest | null) => setReportSelection(sel), []);
+  // Hours on the job not yet priced on this invoice (InvoiceHours reports it).
+  const [unpricedHours, setUnpricedHours] = useState(0);
 
-  async function sendInvoice() {
+  async function sendInvoice(confirmUnpriced = false) {
     if (!sendTo.trim()) {
       toast.error("Enter an email address to send to");
       return;
@@ -71,9 +74,15 @@ export function InvoiceDetail({ invoice, jobSite, xeroConnected, payments }: Pro
           to: sendTo,
           message: sendMessage,
           ...(includeReport && reportSelection ? { jobReport: reportSelection } : {}),
+          confirmUnpriced,
         }),
       });
       const data = await res.json();
+      if (res.status === 409 && data?.code === "unpriced_hours" && !confirmUnpriced) {
+        setSending(false);
+        if (window.confirm(`${data.error}\n\nSend it without them?`)) await sendInvoice(true);
+        return;
+      }
       if (!res.ok) throw new Error(data.error);
       toast.success(
         data.jobReportAttached
@@ -91,12 +100,22 @@ export function InvoiceDetail({ invoice, jobSite, xeroConnected, payments }: Pro
   }
 
   async function pushToXero() {
+    if (
+      unpricedHours > 0 &&
+      !window.confirm(
+        `${unpricedHours.toFixed(2)}h on this job have not been priced on this invoice. ` +
+          `Push to Xero without them? (Use "Apply hourly rate" below to bill them.)`
+      )
+    ) {
+      return;
+    }
     setPushing(true);
     try {
       const res = await fetch("/api/xero/push-invoice", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ invoiceId: invoice.id }),
+        // Confirmed above when hours are unpriced; the server re-checks.
+        body: JSON.stringify({ invoiceId: invoice.id, confirmUnpriced: unpricedHours > 0 }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
@@ -163,7 +182,7 @@ export function InvoiceDetail({ invoice, jobSite, xeroConnected, payments }: Pro
               }
               footer={
                 <div className="flex justify-end">
-                  <Button onClick={sendInvoice} disabled={sending} className="gap-2 bg-blue-600 hover:bg-blue-700">
+                  <Button onClick={() => sendInvoice()} disabled={sending} className="gap-2 bg-blue-600 hover:bg-blue-700">
                     <Send className="w-4 h-4" />
                     {sending ? (includeReport ? "Making report and sending..." : "Sending...") : "Send Email"}
                   </Button>
@@ -320,6 +339,8 @@ export function InvoiceDetail({ invoice, jobSite, xeroConnected, payments }: Pro
         inXero={!!invoice.xero_invoice_id}
         payments={payments}
       />
+
+      {invoice.job_id && <InvoiceHours invoiceId={invoice.id} onPricedChange={setUnpricedHours} inXero={pushed} />}
 
       <Card>
         <CardContent className="p-0">

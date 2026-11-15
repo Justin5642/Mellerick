@@ -11,7 +11,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Trash2 } from "lucide-react";
 import { computeLoadedCost, LEAVE_TYPE_LABELS, type StaffCostInputs } from "@/lib/staff-cost";
-import { computeEquipmentCost } from "@/lib/equipment-cost";
+import { costPerHourOf } from "@/lib/fleet-costs";
 import { formatDate } from "@/lib/date";
 
 interface LeaveEntry {
@@ -25,7 +25,7 @@ interface LeaveEntry {
 
 const emptyCostForm: StaffCostInputs = {
   hourly_rate: 0,
-  super_rate: 11.5,
+  super_rate: 12, // Super Guarantee from 1 July 2025
   workers_comp_rate: 0,
   leave_loading_rate: 0,
   annual_fixed_oncosts: 0,
@@ -55,6 +55,21 @@ export function StaffCostDialog({ staffId, staffName, open, onOpenChange }: Prop
   const [leaveForm, setLeaveForm] = useState(emptyLeaveForm);
   const [addingLeave, setAddingLeave] = useState(false);
   const [assignedVehicles, setAssignedVehicles] = useState<{ name: string; costPerHour: number }[]>([]);
+  // Leave left, from the last Xero import (0104).
+  // Read on its own so a missing table (before 0104 is applied) never stops
+  // the rest of the dialog loading.
+  const [balances, setBalances] = useState<{ leave_name: string; hours: number; as_of: string }[] | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    supabase
+      .from("staff_leave_balances")
+      .select("leave_name, hours, as_of")
+      .eq("staff_id", staffId)
+      .order("leave_name")
+      .then(({ data, error }) => setBalances(error ? null : ((data ?? []) as any)));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, staffId]);
 
   useEffect(() => {
     if (!open) return;
@@ -66,7 +81,12 @@ export function StaffCostDialog({ staffId, staffName, open, onOpenChange }: Prop
         // Vehicle(s) assigned to this staff member (Fleet page) -- their
         // $/hour cost gets folded into the loaded rate below, so the
         // technician's true cost reflects the actual vehicle they use.
-        supabase.from("equipment").select("*").eq("assigned_to", staffId).eq("is_active", true),
+        // Through /api/fleet/rates so the vehicle is costed at its actual rate
+        // from logged Fleet costs (lib/fleet-costs.ts), like job costing.
+        fetch(`/api/fleet/rates?assigned_to=${encodeURIComponent(staffId)}`)
+          .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
+          .then((j) => ({ data: j.equipment as any[] }))
+          .catch(() => supabase.from("equipment").select("*").eq("assigned_to", staffId).eq("is_active", true)),
       ]);
       if (profile) {
         setCostForm({
@@ -84,7 +104,7 @@ export function StaffCostDialog({ staffId, staffName, open, onOpenChange }: Prop
       }
       setLeaveEntries((leave as any) ?? []);
       setAssignedVehicles(
-        (vehicles ?? []).map((v: any) => ({ name: v.name, costPerHour: computeEquipmentCost(v).costPerHour }))
+        (vehicles ?? []).map((v: any) => ({ name: v.name, costPerHour: costPerHourOf(v) }))
       );
       setLoading(false);
     }
@@ -258,6 +278,18 @@ export function StaffCostDialog({ staffId, staffName, open, onOpenChange }: Prop
             </TabsContent>
 
             <TabsContent value="leave" className="space-y-4 pt-3">
+              {balances && balances.length > 0 && (
+                <div className="rounded-md border bg-slate-50 px-3 py-2 text-sm">
+                  <p className="text-xs font-medium text-slate-500 mb-1">Leave left (from Xero, as of {new Date(`${balances[0].as_of}T00:00:00`).toLocaleDateString("en-AU")})</p>
+                  <div className="flex flex-wrap gap-x-4 gap-y-1">
+                    {balances.map((b) => (
+                      <span key={b.leave_name}>
+                        {b.leave_name}: <span className={Number(b.hours) < 0 ? "font-semibold text-red-600" : "font-semibold text-slate-900"}>{Number(b.hours).toFixed(2)}h</span>
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
               <div className="grid grid-cols-2 gap-3 items-end">
                 <div className="space-y-1.5">
                   <Label>Type</Label>

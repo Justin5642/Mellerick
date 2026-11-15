@@ -101,7 +101,7 @@ async function pinSitesFromClockOns(admin: ReturnType<typeof createAdminClient>)
   const since = new Date(Date.now() - CLOCK_ON_LOOKBACK_DAYS * 86_400_000).toISOString();
   const { data: entries, error } = await admin
     .from("time_entries")
-    .select("staff_id, clock_in, clock_in_lat, clock_in_lng, clock_in_accuracy, jobs!inner(status, site_id, sites!inner(id, site_lat, is_active, address_line1, address_line2, suburb, state, postcode))")
+    .select("staff_id, clock_in, clock_in_lat, clock_in_lng, clock_in_accuracy, jobs!time_entries_job_id_fkey!inner(status, site_id, sites!inner(id, site_lat, is_active, address_line1, address_line2, suburb, state, postcode))")
     .eq("entry_type", "work")
     .not("clock_in_lat", "is", null)
     .lte("clock_in_accuracy", MAX_READING_ACCURACY_M)

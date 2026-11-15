@@ -50,6 +50,16 @@ test.describe("office session", () => {
     await expect(page.getByRole("main")).toBeVisible();
   });
 
+  test("the dashboard opens the schedule in one click", async ({ page }) => {
+    // Justin, 15 Nov 2026: the Schedule should be reachable from the opening
+    // page, not only from the sidebar.
+    await page.goto("/dashboard");
+    const open = page.getByRole("main").getByRole("link", { name: "Open schedule" });
+    await expect(open).toBeVisible();
+    await open.click();
+    await expect(page).toHaveURL(/\/dashboard\/schedule$/);
+  });
+
   test("office is NOT redirected away from an office-only route", async ({ page }) => {
     // The control for the technician gating test below. Without it, that test
     // would also pass if middleware redirected EVERYONE, which is a broken app

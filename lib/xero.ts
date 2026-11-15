@@ -67,9 +67,11 @@ function safeParse(s: string): any {
 // Read scopes for the analytics mirror (lib/xero-analytics.ts) sit beside the
 // original contacts + invoices pair. They are the granular names Xero issues to
 // apps created after 2 Mar 2026 (the broad accounting.transactions /
-// accounting.reports.read are retired for those apps). A scope only takes effect
-// when Xero is RECONNECTED — the existing connection keeps the scopes it was
-// granted, so changing this list breaks nothing until someone clicks Connect.
+// accounting.reports.read are retired for those apps). payroll.*.read (0101):
+// Staff -> Import from Xero reads pay rates and leave; READ-ONLY, the app never
+// changes payroll. A scope only takes effect when Xero is RECONNECTED — the
+// existing connection keeps the scopes it was granted, so changing this list
+// breaks nothing until someone clicks Connect.
 export const XERO_SCOPES = [
   "openid",
   "profile",
@@ -78,11 +80,22 @@ export const XERO_SCOPES = [
   "accounting.invoices",
   "accounting.payments.read",
   "accounting.reports.profitandloss.read",
+  "payroll.employees.read",
+  "payroll.settings.read",
   "offline_access",
 ];
 
-export function getXeroClient() {
+/**
+ * `state` is the OAuth CSRF value for a connect flow: the auth route passes the
+ * one it just issued (so it goes in the consent URL), the callback passes the
+ * one it just verified against the cookie. xero-node checks the callback's
+ * state against config.state itself and throws "checks.state argument is
+ * missing" if it was never told — which is how every reconnect failed from
+ * October to 15 Nov 2026 while the old token quietly stayed in place.
+ */
+export function getXeroClient(state?: string) {
   return new XeroClient({
+    ...(state ? { state } : {}),
     clientId: process.env.XERO_CLIENT_ID!,
     clientSecret: process.env.XERO_CLIENT_SECRET!,
     redirectUris: [process.env.XERO_REDIRECT_URI!],

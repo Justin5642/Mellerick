@@ -8,11 +8,13 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Users, Plus, Mail, Phone, Shield, Wrench, Monitor, RotateCw, DollarSign, Pencil, Truck, KeyRound, MapPin } from "lucide-react";
+import { Users, Plus, Download, Mail, Phone, Shield, Wrench, Monitor, RotateCw, DollarSign, Pencil, Truck, KeyRound, MapPin } from "lucide-react";
+import Link from "next/link";
 import { StaffCostDialog } from "@/components/staff/staff-cost-dialog";
 import { StaffEditDialog } from "@/components/staff/staff-edit-dialog";
 import { staffRoleColors } from "@/lib/badge-colors";
 import { autoClockEnabled } from "@/lib/auto-clock";
+import { describeAutoClockStatus, type AutoClockStatusRow } from "@/lib/auto-clock-status";
 
 const roleIcons: Record<string, any> = {
   admin: Shield,
@@ -24,12 +26,21 @@ interface Props {
   role: string | null;
   staff: any[];
   vehicles: any[];
+  /** Each phone's auto clock status by staff id (0102); null = not available. */
+  autoClockStatus?: Record<string, AutoClockStatusRow> | null;
   fetchError: string | null;
 }
 
+const STATUS_TONE: Record<string, string> = {
+  ok: "text-green-700",
+  warn: "text-amber-700",
+  bad: "text-red-700",
+  idle: "text-slate-400",
+};
+
 // The roster and its actions. The page (app/dashboard/staff/page.tsx) loads the
 // rows and the viewer's role on the server and hands them in.
-export function StaffClient({ role, staff: initialStaff, vehicles, fetchError }: Props) {
+export function StaffClient({ role, staff: initialStaff, vehicles, autoClockStatus = null, fetchError }: Props) {
   const supabase = createClient();
   const [staff, setStaff] = useState(initialStaff);
   const [saving, setSaving] = useState(false);
@@ -172,15 +183,22 @@ export function StaffClient({ role, staff: initialStaff, vehicles, fetchError }:
   if (fetchError) return <div className="p-6 text-red-500 text-sm">Error loading staff: {fetchError}</div>;
 
   return (
-    <div className="p-6 space-y-6 max-w-3xl">
-      <div className="flex items-center justify-between">
+    <div className="p-6 space-y-6">
+      <div className="flex items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Staff</h1>
           <p className="text-slate-500 text-sm mt-1">{staff.filter(s => s.is_active).length} active team members</p>
         </div>
-        <Button className="gap-2" onClick={() => setShowForm(v => !v)}>
-          <Plus className="w-4 h-4" />Add Staff
-        </Button>
+        <div className="flex items-center gap-2">
+          {isAdmin && (
+            <Link prefetch={false} href="/dashboard/staff/xero-import">
+              <Button variant="outline" className="gap-2"><Download className="w-4 h-4" />Import from Xero</Button>
+            </Link>
+          )}
+          <Button className="gap-2" onClick={() => setShowForm(v => !v)}>
+            <Plus className="w-4 h-4" />Add Staff
+          </Button>
+        </div>
       </div>
 
       {/* Invite form */}
@@ -238,19 +256,19 @@ export function StaffClient({ role, staff: initialStaff, vehicles, fetchError }:
                 const RoleIcon = roleIcons[member.role] ?? Shield;
                 const vehicles = vehiclesByStaff.get(member.id) ?? [];
                 return (
-                  <div key={member.id} className="flex items-center justify-between px-6 py-4">
-                    <div className="flex items-center gap-4">
-                      <div className="w-10 h-10 rounded-full bg-slate-100 flex items-center justify-center text-slate-600 font-semibold text-sm">
+                  <div key={member.id} className="flex flex-col gap-3 px-4 py-4 sm:px-6 xl:flex-row xl:items-center xl:justify-between">
+                    <div className="flex min-w-0 items-center gap-4">
+                      <div className="w-10 h-10 shrink-0 rounded-full bg-slate-100 flex items-center justify-center text-slate-600 font-semibold text-sm">
                         {(member.full_name ?? "?").split(" ").map((n: string) => n[0]).join("").slice(0, 2).toUpperCase()}
                       </div>
-                      <div>
+                      <div className="min-w-0">
                         <div className="flex items-center gap-2">
                           <p className="font-medium text-sm text-slate-900">{member.full_name}</p>
                           {!member.is_active && <span className="text-xs text-slate-400">(inactive)</span>}
                         </div>
-                        <div className="flex items-center gap-3 mt-0.5">
-                          <span className="text-xs text-slate-500 flex items-center gap-1">
-                            <Mail className="w-3 h-3" />{member.email}
+                        <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 mt-0.5">
+                          <span className="text-xs text-slate-500 flex min-w-0 items-center gap-1">
+                            <Mail className="w-3 h-3 shrink-0" /><span className="truncate">{member.email}</span>
                           </span>
                           {member.phone && (
                             <span className="text-xs text-slate-500 flex items-center gap-1">
@@ -263,9 +281,23 @@ export function StaffClient({ role, staff: initialStaff, vehicles, fetchError }:
                             </span>
                           )}
                         </div>
+                        {autoClockStatus && autoClockEnabled(member) && (() => {
+                          const st = describeAutoClockStatus(autoClockStatus[member.id]);
+                          const row = autoClockStatus[member.id];
+                          return (
+                            <p
+                              className={`text-xs mt-0.5 flex items-center gap-1 ${STATUS_TONE[st.tone]}`}
+                              title={[st.fix, row?.app_version ? `App ${row.app_version}` : null].filter(Boolean).join(" · ") || undefined}
+                            >
+                              <MapPin className="w-3 h-3 shrink-0" />
+                              <span>Auto clock: {st.text}</span>
+                              {st.fix && <span className="text-slate-400 hidden md:inline">— {st.fix}</span>}
+                            </p>
+                          );
+                        })()}
                       </div>
                     </div>
-                    <div className="flex items-center gap-3">
+                    <div className="flex flex-wrap items-center gap-2 sm:pl-14 xl:shrink-0 xl:justify-end xl:pl-0">
                       <span className={`text-xs px-2 py-0.5 rounded-full font-medium flex items-center gap-1 ${staffRoleColors[member.role]}`}>
                         <RoleIcon className="w-3 h-3" />{member.role}
                       </span>

@@ -1,7 +1,7 @@
 -- ============================================================================
--- REGRESSION TEST for 0098 — the Xero analytics mirror.
+-- REGRESSION TEST for 0105 — the Xero analytics mirror.
 --
---   psql "$SUPABASE_DB_URL" -f supabase/tests/0098_xero_analytics_test.sql
+--   psql "$SUPABASE_DB_URL" -f supabase/tests/0105_xero_analytics_test.sql
 --   or paste the whole file into the Supabase SQL editor.
 --
 -- ONE DO BLOCK, SELF-UNDOING — see the 0073 test's header. It asserts the END
@@ -43,7 +43,7 @@ begin
   end loop;
 
   if failures <> '' then
-    raise exception '0098 gate FAILED: %', failures;
+    raise exception '0105 gate FAILED: %', failures;
   end if;
-  raise notice '0098 gate passed: 4 tables, RLS on, one office/admin read policy each, writes service-role only';
+  raise notice '0105 gate passed: 4 tables, RLS on, one office/admin read policy each, writes service-role only';
 end $$;

@@ -7,10 +7,12 @@
 const mockCreateUploadTask = jest.fn();
 const mockReadAsString = jest.fn();
 const mockInsert = jest.fn();
+const mockGetInfo = jest.fn();
 
 jest.mock("expo-file-system/legacy", () => ({
   createUploadTask: (...args: unknown[]) => mockCreateUploadTask(...args),
   readAsStringAsync: (...args: unknown[]) => mockReadAsString(...args),
+  getInfoAsync: (...args: unknown[]) => mockGetInfo(...args),
   FileSystemUploadType: { BINARY_CONTENT: 0, MULTIPART: 1 },
   EncodingType: { Base64: "base64" },
   documentDirectory: "file:///doc/",
@@ -53,6 +55,26 @@ beforeEach(() => {
   mockCreateUploadTask.mockReset();
   mockReadAsString.mockReset();
   mockInsert.mockReset();
+  mockGetInfo.mockReset();
+  mockGetInfo.mockResolvedValue({ exists: true });
+});
+
+describe("uploadObject — after an app update (15 Nov 2026)", () => {
+  it("finds a queued file whose stored path names an old app folder", async () => {
+    task({ status: 200, body: "{}" });
+    const { supabaseGateway } = loadGateway();
+    await supabaseGateway.uploadObject("job-photos", "job-1/a.jpg", "file:///OLD/Documents/outbox-attachments/a.jpg");
+    expect(mockCreateUploadTask.mock.calls[0][1]).toBe("file:///doc/outbox-attachments/a.jpg");
+  });
+
+  it("reports a file that is really gone as a counted failure, not a network blip", async () => {
+    mockGetInfo.mockResolvedValue({ exists: false });
+    const { supabaseGateway } = loadGateway();
+    const err = await supabaseGateway.uploadObject("job-photos", "job-1/a.jpg", "file:///doc/outbox-attachments/a.jpg").catch((e: unknown) => e);
+    expect((err as Error).message).toMatch(/missing from this phone/);
+    expect((err as { transient?: boolean }).transient).toBeUndefined();
+    expect(mockCreateUploadTask).not.toHaveBeenCalled();
+  });
 });
 
 describe("uploadObject — streamed from disk", () => {

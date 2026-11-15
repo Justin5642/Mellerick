@@ -2,9 +2,9 @@
 -- Which job (or overhead) each Xero supplier bill belongs to.
 --
 -- STATUS: ✅ APPLIED IN PRODUCTION (2026-11-14, via SQL editor). Gate test
--- supabase/tests/0099_xero_bill_allocations_test.sql passed.
--- Needs 0098 first (xero_invoices). Apply (SQL editor), run
--- supabase/tests/0099_xero_bill_allocations_test.sql, THEN merge.
+-- supabase/tests/0106_xero_bill_allocations_test.sql passed.
+-- Needs 0105 first (xero_invoices). Apply (SQL editor), run
+-- supabase/tests/0106_xero_bill_allocations_test.sql, THEN merge.
 --
 -- WHY (Justin, 14 Nov 2026): profit per job has never been accurate because
 -- supplier bills land in Xero by account ("Materials"), not by job. Bills the
@@ -54,4 +54,4 @@ grant select, insert, update, delete on xero_bill_allocations to authenticated;
 grant select, insert, update, delete on xero_bill_allocations to service_role;
 
 comment on table xero_bill_allocations is
-  'The office''s decision on which job (or overhead) a Xero supplier bill belongs to (0099). No amounts — read from xero_invoices.';
+  'The office''s decision on which job (or overhead) a Xero supplier bill belongs to (0106). No amounts — read from xero_invoices.';

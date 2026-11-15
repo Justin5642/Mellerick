@@ -94,6 +94,7 @@ const equipment = new Table({
   updated_by: column.text,
   assigned_to: column.text,
   cost_per_load: column.real,
+  day_rate: column.real,
 });
 
 const equipment_expenses = new Table({
@@ -127,6 +128,7 @@ const equipment_usage_log = new Table({
   sync_office: column.integer,
   cost_center_id: column.text,
   loads: column.integer,
+  days: column.integer,
 }, {
   indexes: {
     job: ['job_id'],
@@ -162,6 +164,7 @@ const invoice_items = new Table({
   total: column.real,
   created_at: column.text,
   sync_office: column.integer,
+  source: column.text,
 }, {
   indexes: {
     invoice: ['invoice_id'],
@@ -551,6 +554,7 @@ const time_entries = new Table({
   clock_out_lat: column.real,
   clock_out_lng: column.real,
   clock_out_accuracy: column.real,
+  invoice_id: column.text,
 }, {
   indexes: {
     job_staff: ['job_id', 'staff_id'],

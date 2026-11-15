@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { FileDropzone } from "@/components/ui/file-dropzone";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Plus, Trash2, ExternalLink } from "lucide-react";
@@ -54,7 +55,6 @@ export function EquipmentExpenses({ equipmentId, expenses: initialExpenses, onUp
   const [showForm, setShowForm] = useState(false);
   const [saving, setSaving] = useState(false);
   const [receiptFile, setReceiptFile] = useState<File | null>(null);
-  const [receiptDragActive, setReceiptDragActive] = useState(false);
   const [form, setForm] = useState({
     category: "service",
     supplier_name: "",
@@ -264,31 +264,7 @@ export function EquipmentExpenses({ equipmentId, expenses: initialExpenses, onUp
 
             <div className="space-y-1.5">
               <Label>Receipt / Invoice File</Label>
-              <div
-                className={`flex flex-col items-center justify-center gap-2 rounded-md border-2 border-dashed p-4 text-center transition-colors ${
-                  receiptDragActive ? "border-blue-400 bg-blue-50/40 text-blue-500" : "border-slate-200 text-slate-400"
-                }`}
-                onDragOver={(e) => { e.preventDefault(); setReceiptDragActive(true); }}
-                onDragLeave={(e) => { e.preventDefault(); setReceiptDragActive(false); }}
-                onDrop={(e) => {
-                  e.preventDefault();
-                  setReceiptDragActive(false);
-                  const file = e.dataTransfer.files?.[0];
-                  if (file) setReceiptFile(file);
-                }}
-              >
-                {receiptFile ? (
-                  <p className="text-sm text-slate-700">{receiptFile.name}</p>
-                ) : (
-                  <p className="text-xs">{receiptDragActive ? "Drop to attach" : "Drag and drop an invoice/receipt here, or"}</p>
-                )}
-                <input
-                  type="file"
-                  accept=".pdf,.png,.jpg,.jpeg"
-                  onChange={(e) => setReceiptFile(e.target.files?.[0] ?? null)}
-                  className="text-sm text-slate-500 file:mr-3 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:text-xs file:font-medium file:bg-slate-100 file:text-slate-700 hover:file:bg-slate-200"
-                />
-              </div>
+              <FileDropzone file={receiptFile} onFileChange={setReceiptFile} accept=".pdf,.png,.jpg,.jpeg" hint="PDF, PNG or JPG" />
             </div>
 
             <div className="flex justify-end gap-2 pt-2">

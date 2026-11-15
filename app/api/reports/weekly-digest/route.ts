@@ -30,7 +30,7 @@ export async function GET(request: NextRequest) {
 
     const loaded = await loadBills(admin, 12);
     if (!loaded.ok) {
-      if (loaded.tablesMissing) return NextResponse.json({ skipped: true, reason: "Xero tables not applied yet (migrations 0098/0099)" });
+      if (loaded.tablesMissing) return NextResponse.json({ skipped: true, reason: "Xero tables not applied yet (migrations 0105/0106)" });
       throw new Error(loaded.error);
     }
 

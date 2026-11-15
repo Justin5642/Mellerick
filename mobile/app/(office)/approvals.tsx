@@ -7,7 +7,7 @@ import { supabase } from "../../lib/supabase";
 import { colors } from "../../lib/theme";
 import { useIsAdmin } from "../../design/guards/useRole";
 import { useApprovals } from "../../lib/data/hooks/useApprovals";
-import { getApprovalPlan } from "../../lib/data/reads/approvals";
+import { approveJobOnServer, approvalMessage } from "../../lib/approveJob";
 import { ScreenError } from "../../design/components/ScreenError";
 import { unwrapRows } from "../../lib/data/reads/unwrap";
 
@@ -89,24 +89,14 @@ export default function ApprovalsScreen() {
   }, [load]);
 
   async function onApprove(jobId: string) {
-    if (!approvals.ready || savingId) return;
+    if (savingId) return;
     setSavingId(jobId);
     try {
-      const plan = await getApprovalPlan(jobId);
-      if (!plan) {
-        Alert.alert("Not found", "This job could not be loaded.");
-        return;
-      }
-      const { result } = await approvals.approveJob({ ...plan, adminNotes: notes[jobId]?.trim() || null });
+      // The server builds the invoice — hours, variations and line items — the
+      // same way the web does (lib/approveJob.ts says why).
+      const result = await approveJobOnServer(jobId, notes[jobId]?.trim() || null);
       setJobs((j) => j.filter((x) => x.id !== jobId));
-      Alert.alert(
-        "Job approved",
-        result.invoiceCreated
-          ? "A draft invoice was created from the job's line items. Send it / push to Xero from the web."
-          : result.invoiceId
-            ? "An invoice already existed for this job — marked approved."
-            : "Moved to the Ready-to-Invoice queue (no line items yet — build the invoice from the job)."
-      );
+      Alert.alert("Job approved", approvalMessage(result));
     } catch (e) {
       Alert.alert("Couldn't approve", e instanceof Error ? e.message : "Please try again.");
     } finally {

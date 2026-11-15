@@ -11,8 +11,8 @@ import { AllocateBill } from "@/components/reports/allocate-bill";
 // Supplier bills in Xero that cannot be traced to a job (Justin, 14 Nov 2026:
 // "profit and loss per job hasn't been accurate"). The Monday email links here;
 // this is where each bill is assigned to a job or marked overhead. Office/admin.
-// Reads the Xero mirror and the office's allocations (draft migrations 0098 and
-// 0099 — not applied until Justin applies them; this page says so until then).
+// Reads the Xero mirror and the office's allocations (migrations 0105 and
+// 0106; this page says so if they are missing).
 
 const money = (n: number) => `$${Math.round(n).toLocaleString("en-AU")}`;
 const SHOWN = 100;
@@ -40,7 +40,7 @@ export default async function UnallocatedBillsPage() {
         <h1 className="text-2xl font-bold text-slate-900">Unallocated bills</h1>
         <p className="text-sm text-slate-600">
           {loaded.tablesMissing
-            ? "The Xero data tables have not been set up yet, so there is nothing to show. They need the database changes 0098 and 0099 applied, then one Xero sync."
+            ? "The Xero data tables have not been set up yet, so there is nothing to show. They need the database changes 0105 and 0106 applied, then one Xero sync."
             : "Could not load the bills. Try again shortly."}
         </p>
       </div>

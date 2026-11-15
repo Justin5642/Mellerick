@@ -8,8 +8,8 @@ import { fetchAllRows } from "@/lib/fetch-all-rows";
 // an expense) already knows its job. The rest — keyed straight into Xero, a
 // statement, fuel — do not, and this finds them (Justin, 14 Nov 2026).
 //
-// Reads the Xero mirror (draft migration 0098, not applied yet) and the office's
-// own decisions (draft migration 0099, not applied yet). Amounts are
+// Reads the Xero mirror (migration 0105) and the office's
+// own decisions (migration 0106). Amounts are
 // ex-GST (`sub_total`), the figure costs are measured on.
 
 export type BillClass =

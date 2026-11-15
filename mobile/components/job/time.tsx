@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { View, Text, StyleSheet, TouchableOpacity, FlatList, Modal, Platform } from "react-native";
+import { View, Text, StyleSheet, TouchableOpacity, FlatList, Modal, Platform, Alert } from "react-native";
 import DateTimePicker, { DateTimePickerEvent } from "@react-native-community/datetimepicker";
 import { Ionicons } from "@expo/vector-icons";
 import { supabase } from "../../lib/supabase";
@@ -9,7 +9,7 @@ import { currentFix } from "../../lib/clockFix";
 import { getJobCostCentres, type JobCostCentre } from "../../lib/data/reads/jobBilling";
 import { ScreenError } from "../../design/components/ScreenError";
 import { unwrapRows } from "../../lib/data/reads/unwrap";
-import { hoursBetween } from "../../lib/data/repositories/timeEntries";
+import { closeProblem, hoursBetween } from "../../lib/data/repositories/timeEntries";
 import { netInfoConnectivity } from "../../lib/data/net/connectivity";
 import { useDataLayer } from "../../lib/data/DataProvider";
 import { useSyncSettled } from "../../lib/data/hooks/useSyncSettled";
@@ -222,7 +222,8 @@ function TimeEntryModal({
     editing.clockOut && editing.clockOut.getTime() > editing.clockIn.getTime()
       ? Math.round(((editing.clockOut.getTime() - editing.clockIn.getTime()) / 3600000) * 100) / 100
       : null;
-  const invalid = !!editing.clockOut && editing.clockOut.getTime() <= editing.clockIn.getTime();
+  const problem = editing.clockOut ? closeProblem(editing.clockIn.toISOString(), editing.clockOut.toISOString()) : null;
+  const invalid = problem !== null;
 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onCancel}>
@@ -248,7 +249,8 @@ function TimeEntryModal({
             </TouchableOpacity>
           )}
 
-          {invalid && <Text style={styles.errorText}>End time must be after start time</Text>}
+          {problem === "before_start" && <Text style={styles.errorText}>End time must be after start time</Text>}
+          {problem === "over_24h" && <Text style={styles.errorText}>One entry can&apos;t be longer than 24 hours — split it into a day each</Text>}
           {hoursPreview != null && !invalid && <Text style={styles.hoursPreview}>{hoursPreview.toFixed(2)}h</Text>}
 
           {editing.entryType !== "travel" && costCenters.length > 0 && (
@@ -387,7 +389,13 @@ export function JobTimeTab({
     const open = myOpenEntry;
     if (!open || loading || !timeClock.ready) return;
     setLoading(true);
-    await timeClock.clockOut({ entryId: open.id, clockInIso: open.clock_in, fix: await currentFix(3000) });
+    try {
+      await timeClock.clockOut({ entryId: open.id, clockInIso: open.clock_in, fix: await currentFix(3000) });
+    } catch (e) {
+      setLoading(false);
+      Alert.alert("Can't clock off like this", e instanceof Error ? e.message : "The clock-off couldn't be saved.");
+      return;
+    }
     const clockOutIso = new Date().toISOString();
     const hours = hoursBetween(open.clock_in, clockOutIso);
     setEntries((prev) => prev.map((e) => (e.id === open.id ? { ...e, clock_out: clockOutIso, hours } : e)));

@@ -48,6 +48,50 @@ export type Database = {
         }
         Relationships: []
       }
+      auto_clock_status: {
+        Row: {
+          app_version: string | null
+          approximate: boolean
+          background_off: boolean
+          platform: string | null
+          reason: string | null
+          site_count: number
+          staff_id: string
+          tracking: boolean
+          updated_at: string
+        }
+        Insert: {
+          app_version?: string | null
+          approximate?: boolean
+          background_off?: boolean
+          platform?: string | null
+          reason?: string | null
+          site_count?: number
+          staff_id: string
+          tracking?: boolean
+          updated_at?: string
+        }
+        Update: {
+          app_version?: string | null
+          approximate?: boolean
+          background_off?: boolean
+          platform?: string | null
+          reason?: string | null
+          site_count?: number
+          staff_id?: string
+          tracking?: boolean
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "auto_clock_status_staff_id_fkey"
+            columns: ["staff_id"]
+            isOneToOne: true
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       backflow_devices: {
         Row: {
           created_at: string | null
@@ -457,6 +501,7 @@ export type Database = {
       }
       equipment: {
         Row: {
+          day_rate: number
           assigned_to: string | null
           category: string
           cost_per_load: number
@@ -479,6 +524,7 @@ export type Database = {
           updated_by: string | null
         }
         Insert: {
+          day_rate?: number
           assigned_to?: string | null
           category?: string
           cost_per_load?: number
@@ -501,6 +547,7 @@ export type Database = {
           updated_by?: string | null
         }
         Update: {
+          day_rate?: number
           assigned_to?: string | null
           category?: string
           cost_per_load?: number
@@ -587,6 +634,75 @@ export type Database = {
           },
         ]
       }
+      equipment_service_records: {
+        Row: {
+          created_at: string
+          engine_hours: number | null
+          equipment_id: string
+          expense_id: string | null
+          id: string
+          logged_by: string | null
+          next_due_date: string | null
+          next_due_hours: number | null
+          next_due_km: number | null
+          odometer_km: number | null
+          provider: string | null
+          service_date: string
+          service_type: string
+          updated_at: string
+          work_done: string | null
+        }
+        Insert: {
+          created_at?: string
+          engine_hours?: number | null
+          equipment_id: string
+          expense_id?: string | null
+          id?: string
+          logged_by?: string | null
+          next_due_date?: string | null
+          next_due_hours?: number | null
+          next_due_km?: number | null
+          odometer_km?: number | null
+          provider?: string | null
+          service_date?: string
+          service_type?: string
+          updated_at?: string
+          work_done?: string | null
+        }
+        Update: {
+          created_at?: string
+          engine_hours?: number | null
+          equipment_id?: string
+          expense_id?: string | null
+          id?: string
+          logged_by?: string | null
+          next_due_date?: string | null
+          next_due_hours?: number | null
+          next_due_km?: number | null
+          odometer_km?: number | null
+          provider?: string | null
+          service_date?: string
+          service_type?: string
+          updated_at?: string
+          work_done?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "equipment_service_records_equipment_id_fkey"
+            columns: ["equipment_id"]
+            isOneToOne: false
+            referencedRelation: "equipment"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "equipment_service_records_expense_id_fkey"
+            columns: ["expense_id"]
+            isOneToOne: true
+            referencedRelation: "equipment_expenses"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       equipment_expenses: {
         Row: {
           amount: number
@@ -649,6 +765,7 @@ export type Database = {
       }
       equipment_usage_log: {
         Row: {
+          days: number
           cost_center_id: string | null
           created_at: string | null
           equipment_id: string
@@ -662,6 +779,7 @@ export type Database = {
           usage_date: string
         }
         Insert: {
+          days?: number
           cost_center_id?: string | null
           created_at?: string | null
           equipment_id: string
@@ -675,6 +793,7 @@ export type Database = {
           usage_date?: string
         }
         Update: {
+          days?: number
           cost_center_id?: string | null
           created_at?: string | null
           equipment_id?: string
@@ -807,6 +926,7 @@ export type Database = {
           name: string
           pricing_item_id: string | null
           quantity: number | null
+          source: string | null
           sync_office: boolean
           total: number | null
           unit_price: number
@@ -819,6 +939,7 @@ export type Database = {
           name: string
           pricing_item_id?: string | null
           quantity?: number | null
+          source?: string | null
           sync_office?: boolean
           total?: number | null
           unit_price: number
@@ -831,6 +952,7 @@ export type Database = {
           name?: string
           pricing_item_id?: string | null
           quantity?: number | null
+          source?: string | null
           sync_office?: boolean
           total?: number | null
           unit_price?: number
@@ -2264,6 +2386,7 @@ export type Database = {
       }
       staff_cost_profiles: {
         Row: {
+          xero_employee_id: string | null
           annual_fixed_oncosts: number
           charge_out_rate: number | null
           hourly_rate: number
@@ -2277,6 +2400,7 @@ export type Database = {
           workers_comp_rate: number
         }
         Insert: {
+          xero_employee_id?: string | null
           annual_fixed_oncosts?: number
           charge_out_rate?: number | null
           hourly_rate?: number
@@ -2290,6 +2414,7 @@ export type Database = {
           workers_comp_rate?: number
         }
         Update: {
+          xero_employee_id?: string | null
           annual_fixed_oncosts?: number
           charge_out_rate?: number | null
           hourly_rate?: number
@@ -2319,8 +2444,57 @@ export type Database = {
           },
         ]
       }
+      staff_leave_balances: {
+        Row: {
+          as_of: string
+          hours: number
+          imported_by: string | null
+          leave_name: string
+          leave_type: string
+          staff_id: string
+          updated_at: string
+          xero_leave_type_id: string
+        }
+        Insert: {
+          as_of?: string
+          hours: number
+          imported_by?: string | null
+          leave_name: string
+          leave_type?: string
+          staff_id: string
+          updated_at?: string
+          xero_leave_type_id: string
+        }
+        Update: {
+          as_of?: string
+          hours?: number
+          imported_by?: string | null
+          leave_name?: string
+          leave_type?: string
+          staff_id?: string
+          updated_at?: string
+          xero_leave_type_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "staff_leave_balances_imported_by_fkey"
+            columns: ["imported_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "staff_leave_balances_staff_id_fkey"
+            columns: ["staff_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       staff_leave: {
         Row: {
+          xero_leave_application_id: string | null
           created_at: string | null
           created_by: string | null
           end_date: string
@@ -2332,6 +2506,7 @@ export type Database = {
           start_date: string
         }
         Insert: {
+          xero_leave_application_id?: string | null
           created_at?: string | null
           created_by?: string | null
           end_date: string
@@ -2343,6 +2518,7 @@ export type Database = {
           start_date: string
         }
         Update: {
+          xero_leave_application_id?: string | null
           created_at?: string | null
           created_by?: string | null
           end_date?: string
@@ -2366,6 +2542,139 @@ export type Database = {
             columns: ["staff_id"]
             isOneToOne: false
             referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      supplier_invoices: {
+        Row: {
+          amount_ex_gst: number | null
+          costed_at: string | null
+          costed_by: string | null
+          created_at: string
+          doc_kind: string | null
+          duplicate_of: string | null
+          extracted: Json | null
+          file_name: string
+          file_sha256: string
+          gst_amount: number | null
+          id: string
+          index_in_file: number
+          invoice_date: string | null
+          invoice_number: string | null
+          job_expense_id: string | null
+          job_id: string | null
+          job_refs: string[]
+          po_refs: string[]
+          read_error: string | null
+          site_text: string | null
+          status: string
+          storage_path: string
+          supplier_abn: string | null
+          supplier_name: string | null
+          total: number | null
+          uploaded_by: string | null
+          vendor_order_id: string | null
+        }
+        Insert: {
+          amount_ex_gst?: number | null
+          costed_at?: string | null
+          costed_by?: string | null
+          created_at?: string
+          doc_kind?: string | null
+          duplicate_of?: string | null
+          extracted?: Json | null
+          file_name: string
+          file_sha256: string
+          gst_amount?: number | null
+          id?: string
+          index_in_file?: number
+          invoice_date?: string | null
+          invoice_number?: string | null
+          job_expense_id?: string | null
+          job_id?: string | null
+          job_refs?: string[]
+          po_refs?: string[]
+          read_error?: string | null
+          site_text?: string | null
+          status?: string
+          storage_path: string
+          supplier_abn?: string | null
+          supplier_name?: string | null
+          total?: number | null
+          uploaded_by?: string | null
+          vendor_order_id?: string | null
+        }
+        Update: {
+          amount_ex_gst?: number | null
+          costed_at?: string | null
+          costed_by?: string | null
+          created_at?: string
+          doc_kind?: string | null
+          duplicate_of?: string | null
+          extracted?: Json | null
+          file_name?: string
+          file_sha256?: string
+          gst_amount?: number | null
+          id?: string
+          index_in_file?: number
+          invoice_date?: string | null
+          invoice_number?: string | null
+          job_expense_id?: string | null
+          job_id?: string | null
+          job_refs?: string[]
+          po_refs?: string[]
+          read_error?: string | null
+          site_text?: string | null
+          status?: string
+          storage_path?: string
+          supplier_abn?: string | null
+          supplier_name?: string | null
+          total?: number | null
+          uploaded_by?: string | null
+          vendor_order_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "supplier_invoices_costed_by_fkey"
+            columns: ["costed_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "supplier_invoices_duplicate_of_fkey"
+            columns: ["duplicate_of"]
+            isOneToOne: false
+            referencedRelation: "supplier_invoices"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "supplier_invoices_job_expense_id_fkey"
+            columns: ["job_expense_id"]
+            isOneToOne: false
+            referencedRelation: "job_expenses"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "supplier_invoices_job_id_fkey"
+            columns: ["job_id"]
+            isOneToOne: false
+            referencedRelation: "jobs"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "supplier_invoices_uploaded_by_fkey"
+            columns: ["uploaded_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "supplier_invoices_vendor_order_id_fkey"
+            columns: ["vendor_order_id"]
+            isOneToOne: false
+            referencedRelation: "vendor_orders"
             referencedColumns: ["id"]
           },
         ]
@@ -2462,6 +2771,7 @@ export type Database = {
           entry_type: string
           hours: number | null
           id: string
+          invoice_id: string | null
           job_id: string
           notes: string | null
           rate_override: string | null
@@ -2486,6 +2796,7 @@ export type Database = {
           entry_type?: string
           hours?: number | null
           id?: string
+          invoice_id?: string | null
           job_id: string
           notes?: string | null
           rate_override?: string | null
@@ -2510,6 +2821,7 @@ export type Database = {
           entry_type?: string
           hours?: number | null
           id?: string
+          invoice_id?: string | null
           job_id?: string
           notes?: string | null
           rate_override?: string | null
@@ -2518,6 +2830,13 @@ export type Database = {
           travel_from_job_id?: string | null
         }
         Relationships: [
+          {
+            foreignKeyName: "time_entries_invoice_id_fkey"
+            columns: ["invoice_id"]
+            isOneToOne: false
+            referencedRelation: "invoices"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "time_entries_cost_center_id_fkey"
             columns: ["cost_center_id"]
@@ -3199,6 +3518,10 @@ export type Database = {
       }
     }
     Functions: {
+      apply_invoice_hours: {
+        Args: { p_invoice_id: string; p_lines: Json }
+        Returns: Json
+      }
       check_login_lockout: { Args: { p_user_id: string }; Returns: Json }
       clear_login_lockout: { Args: { p_user_id: string }; Returns: undefined }
       consume_rate_limit: {

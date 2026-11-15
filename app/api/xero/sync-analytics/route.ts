@@ -7,7 +7,7 @@ import { reportError } from "@/lib/monitoring";
 export const maxDuration = 60;
 
 // Mirrors Xero's invoices, bills, payments and monthly P&L into our own tables
-// (draft migration 0098 — not applied until Justin applies it) for business analysis. Read-only toward Xero. Resumable: a
+// (migration 0105) for business analysis. Read-only toward Xero. Resumable: a
 // run that runs out of time or hits Xero's rate limit continues next time, so
 // the first runs after connecting are the 24-month backfill.
 

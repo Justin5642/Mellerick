@@ -2,7 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { getRefreshedXero } from "@/lib/xero";
 
 // A read-only local mirror of Xero's invoices, bills, payments and monthly
-// profit & loss (draft migration 0098, not applied yet), so business questions run on our own database.
+// profit & loss (migration 0105), so business questions run on our own database.
 // Xero stays the record: nothing here writes back to Xero.
 //
 // RESUMABLE. Invoices and payments are read oldest-change-first
@@ -214,7 +214,7 @@ export interface AnalyticsSyncResult {
 
 export class AnalyticsTablesMissing extends Error {
   constructor() {
-    super("Xero analytics tables not found — apply migration 0098");
+    super("Xero analytics tables not found — apply migration 0105");
   }
 }
 
@@ -227,7 +227,7 @@ function wrap(label: string, e: { code?: string; message: string }): Error {
 
 /**
  * Pulls invoices, bills, payments and the monthly P&L from Xero into the (draft,
- * not yet applied) 0098 tables. `admin` is a service-role client — callers authorise first (cron
+ * not yet applied) 0105 tables. `admin` is a service-role client — callers authorise first (cron
  * secret or admin). Stops cleanly at `budgetMs` or at Xero's rate limit; the
  * saved resume point means the next run continues where this one stopped.
  */

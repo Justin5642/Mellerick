@@ -120,7 +120,8 @@ describe("createDataLayer (end-to-end offline → reconnect)", () => {
     layer.engine.start();
 
     const rowId = await layer.timeEntries.clockIn({ jobId: "j1", staffId: "s1" });
-    await layer.timeEntries.clockOut({ entryId: rowId, clockInIso: "2026-07-27T00:00:00.000Z" });
+    // A real recent clock-in: an entry open over 24 hours can't be closed (0051).
+    await layer.timeEntries.clockOut({ entryId: rowId, clockInIso: new Date(Date.now() - 2 * 3600_000).toISOString() });
 
     gw.insertRow.mockRejectedValueOnce(new Error("transient 500")); // insert fails first try
     net.reconnect();

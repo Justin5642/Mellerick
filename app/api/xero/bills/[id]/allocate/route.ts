@@ -4,7 +4,7 @@ import { callerClient } from "@/lib/api/caller-client";
 import { reportError } from "@/lib/monitoring";
 
 // The office's decision on which job (or overhead) a Xero supplier bill belongs
-// to (draft migration 0099, not applied yet). Runs as the CALLER, so RLS —
+// to (migration 0106). Runs as the CALLER, so RLS —
 // office/admin only — is the second lock behind the guard. The amount is never
 // taken from the request: it is read from the Xero mirror when needed.
 
