@@ -10,15 +10,15 @@ export async function GET(request: NextRequest) {
   const guard = await requireAdmin(request);
   if (!guard.ok) return guard.response;
 
-  const xero = getXeroClient();
   // Same reasoning as the Google flow: requireAdmin proves the CALLER is an
   // admin, which is exactly who a CSRF link targets. state proves the callback
-  // belongs to a flow WE started.
+  // belongs to a flow WE started. It goes in the client's config (not tacked
+  // onto the URL) because xero-node checks it again at the callback.
   const state = createOAuthState();
-  const consentUrl = new URL(await xero.buildConsentUrl());
-  consentUrl.searchParams.set("state", state);
+  const xero = getXeroClient(state);
+  const consentUrl = await xero.buildConsentUrl();
 
-  const res = NextResponse.redirect(consentUrl.toString());
+  const res = NextResponse.redirect(consentUrl);
   res.cookies.set(XERO_STATE_COOKIE, state, stateCookieOptions());
   return res;
 }
