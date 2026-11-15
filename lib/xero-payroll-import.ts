@@ -147,7 +147,7 @@ export interface PreviewRow {
   basis: string;
   notes: string[];
   leave: { newCount: number; newHours: number; alreadyImported: number };
-  /** Leave left, per Xero leave type (0104, drafted — not applied yet). `current` is what the app has from the last import. */
+  /** Leave left, per Xero leave type (0104). `current` is what the app has from the last import. */
   balances: { xeroLeaveTypeId: string; name: string; current: number | null; xero: number }[];
   /** True when any balance differs from the app's (or the app has none yet). */
   balancesChange: boolean;
