@@ -64,6 +64,27 @@ function safeParse(s: string): any {
   }
 }
 
+// Read scopes for the analytics mirror (lib/xero-analytics.ts) sit beside the
+// original contacts + invoices pair. They are the granular names Xero issues to
+// apps created after 2 Mar 2026 (the broad accounting.transactions /
+// accounting.reports.read are retired for those apps). payroll.*.read (0101):
+// Staff -> Import from Xero reads pay rates and leave; READ-ONLY, the app never
+// changes payroll. A scope only takes effect when Xero is RECONNECTED — the
+// existing connection keeps the scopes it was granted, so changing this list
+// breaks nothing until someone clicks Connect.
+export const XERO_SCOPES = [
+  "openid",
+  "profile",
+  "email",
+  "accounting.contacts",
+  "accounting.invoices",
+  "accounting.payments.read",
+  "accounting.reports.profitandloss.read",
+  "payroll.employees.read",
+  "payroll.settings.read",
+  "offline_access",
+];
+
 /**
  * `state` is the OAuth CSRF value for a connect flow: the auth route passes the
  * one it just issued (so it goes in the consent URL), the callback passes the
@@ -78,11 +99,7 @@ export function getXeroClient(state?: string) {
     clientId: process.env.XERO_CLIENT_ID!,
     clientSecret: process.env.XERO_CLIENT_SECRET!,
     redirectUris: [process.env.XERO_REDIRECT_URI!],
-    // payroll.*.read (0101): Staff → Import from Xero reads
-    // pay rates and leave. READ-ONLY — the app never changes payroll. A
-    // connection made before these were added lacks them until an admin
-    // reconnects; lib/xero-payroll-import.ts checks and says so.
-    scopes: ["openid", "profile", "email", "accounting.contacts", "accounting.invoices", "payroll.employees.read", "payroll.settings.read", "offline_access"],
+    scopes: XERO_SCOPES,
     httpTimeout: 30000,
   });
 }
