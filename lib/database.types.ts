@@ -2546,6 +2546,139 @@ export type Database = {
           },
         ]
       }
+      supplier_invoices: {
+        Row: {
+          amount_ex_gst: number | null
+          costed_at: string | null
+          costed_by: string | null
+          created_at: string
+          doc_kind: string | null
+          duplicate_of: string | null
+          extracted: Json | null
+          file_name: string
+          file_sha256: string
+          gst_amount: number | null
+          id: string
+          index_in_file: number
+          invoice_date: string | null
+          invoice_number: string | null
+          job_expense_id: string | null
+          job_id: string | null
+          job_refs: string[]
+          po_refs: string[]
+          read_error: string | null
+          site_text: string | null
+          status: string
+          storage_path: string
+          supplier_abn: string | null
+          supplier_name: string | null
+          total: number | null
+          uploaded_by: string | null
+          vendor_order_id: string | null
+        }
+        Insert: {
+          amount_ex_gst?: number | null
+          costed_at?: string | null
+          costed_by?: string | null
+          created_at?: string
+          doc_kind?: string | null
+          duplicate_of?: string | null
+          extracted?: Json | null
+          file_name: string
+          file_sha256: string
+          gst_amount?: number | null
+          id?: string
+          index_in_file?: number
+          invoice_date?: string | null
+          invoice_number?: string | null
+          job_expense_id?: string | null
+          job_id?: string | null
+          job_refs?: string[]
+          po_refs?: string[]
+          read_error?: string | null
+          site_text?: string | null
+          status?: string
+          storage_path: string
+          supplier_abn?: string | null
+          supplier_name?: string | null
+          total?: number | null
+          uploaded_by?: string | null
+          vendor_order_id?: string | null
+        }
+        Update: {
+          amount_ex_gst?: number | null
+          costed_at?: string | null
+          costed_by?: string | null
+          created_at?: string
+          doc_kind?: string | null
+          duplicate_of?: string | null
+          extracted?: Json | null
+          file_name?: string
+          file_sha256?: string
+          gst_amount?: number | null
+          id?: string
+          index_in_file?: number
+          invoice_date?: string | null
+          invoice_number?: string | null
+          job_expense_id?: string | null
+          job_id?: string | null
+          job_refs?: string[]
+          po_refs?: string[]
+          read_error?: string | null
+          site_text?: string | null
+          status?: string
+          storage_path?: string
+          supplier_abn?: string | null
+          supplier_name?: string | null
+          total?: number | null
+          uploaded_by?: string | null
+          vendor_order_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "supplier_invoices_costed_by_fkey"
+            columns: ["costed_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "supplier_invoices_duplicate_of_fkey"
+            columns: ["duplicate_of"]
+            isOneToOne: false
+            referencedRelation: "supplier_invoices"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "supplier_invoices_job_expense_id_fkey"
+            columns: ["job_expense_id"]
+            isOneToOne: false
+            referencedRelation: "job_expenses"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "supplier_invoices_job_id_fkey"
+            columns: ["job_id"]
+            isOneToOne: false
+            referencedRelation: "jobs"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "supplier_invoices_uploaded_by_fkey"
+            columns: ["uploaded_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "supplier_invoices_vendor_order_id_fkey"
+            columns: ["vendor_order_id"]
+            isOneToOne: false
+            referencedRelation: "vendor_orders"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       suppliers: {
         Row: {
           account_number: string | null
