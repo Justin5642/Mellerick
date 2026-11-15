@@ -432,6 +432,8 @@ approved: the web **Send Invoice** dialog has "Include job report and photos"
   `tests/unit/invoice-send-job-report.test.ts`. Not yet on the phone.
 
 **Xero analytics mirror (14 Nov 2026; branch `feat/xero-analytics-sync`; migration `0105`, first numbered 0098, applied 2026-11-14).**
+Renumbered 0098→0105 and 0099→0106 on merge (main already had its own 0098/0099).
+Record them in the ledger once: `insert into supabase_migrations.schema_migrations (version,name) values ('0105','xero_analytics'),('0106','xero_bill_allocations') on conflict do nothing;`
 Justin: pull Xero's data back so "where should the business head" can be answered
 from our own database. Read-only toward Xero; nothing is written back.
 - **Already existed, unchanged:** `pollXeroInvoicePayments` (`lib/xero.ts`, cron
