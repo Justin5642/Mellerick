@@ -49,16 +49,24 @@ jobs:
           eas-version: latest
       - name: Read the Expo token
         # A pasted secret can carry a stray line break or a label line, which
-        # Expo rejects as "not a legal HTTP header value". Keep the last
-        # non-empty line with surrounding spaces removed.
+        # Expo rejects as "not a legal HTTP header value". Try each non-empty
+        # line (trimmed) and keep the first one Expo accepts.
         env:
           RAW_EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
         run: |
-          token="$(printf '%s\n' "$RAW_EXPO_TOKEN" | tr -d '\r' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | grep -v '^$' | tail -n 1)"
-          if [ -z "$token" ]; then echo "::error::The EXPO_TOKEN repository secret is missing or empty."; exit 1; fi
-          echo "::add-mask::$token"
-          echo "EXPO_TOKEN=$token" >> "$GITHUB_ENV"
-          eas whoami
+          found=""
+          while IFS= read -r line; do
+            line="$(printf '%s' "$line" | tr -d '\r' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+            [ -z "$line" ] && continue
+            echo "::add-mask::$line"
+            if EXPO_TOKEN="$line" eas whoami >/dev/null 2>&1; then found="$line"; break; fi
+          done <<< "$RAW_EXPO_TOKEN"
+          if [ -z "$found" ]; then
+            echo "::error::Expo did not accept the EXPO_TOKEN repository secret. Create a new token on expo.dev and paste only the token."
+            exit 1
+          fi
+          echo "EXPO_TOKEN=$found" >> "$GITHUB_ENV"
+          EXPO_TOKEN="$found" eas whoami
       - run: npm ci
       - run: eas build --platform ios --profile production --auto-submit --non-interactive
 
@@ -81,15 +89,23 @@ jobs:
           eas-version: latest
       - name: Read the Expo token
         # A pasted secret can carry a stray line break or a label line, which
-        # Expo rejects as "not a legal HTTP header value". Keep the last
-        # non-empty line with surrounding spaces removed.
+        # Expo rejects as "not a legal HTTP header value". Try each non-empty
+        # line (trimmed) and keep the first one Expo accepts.
         env:
           RAW_EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
         run: |
-          token="$(printf '%s\n' "$RAW_EXPO_TOKEN" | tr -d '\r' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | grep -v '^$' | tail -n 1)"
-          if [ -z "$token" ]; then echo "::error::The EXPO_TOKEN repository secret is missing or empty."; exit 1; fi
-          echo "::add-mask::$token"
-          echo "EXPO_TOKEN=$token" >> "$GITHUB_ENV"
-          eas whoami
+          found=""
+          while IFS= read -r line; do
+            line="$(printf '%s' "$line" | tr -d '\r' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+            [ -z "$line" ] && continue
+            echo "::add-mask::$line"
+            if EXPO_TOKEN="$line" eas whoami >/dev/null 2>&1; then found="$line"; break; fi
+          done <<< "$RAW_EXPO_TOKEN"
+          if [ -z "$found" ]; then
+            echo "::error::Expo did not accept the EXPO_TOKEN repository secret. Create a new token on expo.dev and paste only the token."
+            exit 1
+          fi
+          echo "EXPO_TOKEN=$found" >> "$GITHUB_ENV"
+          EXPO_TOKEN="$found" eas whoami
       - run: npm ci
       - run: eas build --platform android --profile production --non-interactive
