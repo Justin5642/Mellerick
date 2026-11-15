@@ -2444,6 +2444,54 @@ export type Database = {
           },
         ]
       }
+      staff_leave_balances: {
+        Row: {
+          as_of: string
+          hours: number
+          imported_by: string | null
+          leave_name: string
+          leave_type: string
+          staff_id: string
+          updated_at: string
+          xero_leave_type_id: string
+        }
+        Insert: {
+          as_of?: string
+          hours: number
+          imported_by?: string | null
+          leave_name: string
+          leave_type?: string
+          staff_id: string
+          updated_at?: string
+          xero_leave_type_id: string
+        }
+        Update: {
+          as_of?: string
+          hours?: number
+          imported_by?: string | null
+          leave_name?: string
+          leave_type?: string
+          staff_id?: string
+          updated_at?: string
+          xero_leave_type_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "staff_leave_balances_imported_by_fkey"
+            columns: ["imported_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "staff_leave_balances_staff_id_fkey"
+            columns: ["staff_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       staff_leave: {
         Row: {
           xero_leave_application_id: string | null
