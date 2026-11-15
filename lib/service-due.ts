@@ -69,20 +69,24 @@ export function sortRecords(records: ServiceRecord[]): ServiceRecord[] {
 export function serviceDue(records: ServiceRecord[], today: string): ServiceDue {
   const sorted = sortRecords(records);
   const latest = sorted[0] ?? null;
+  // The due date/km/hours come from the newest record that SET one — not the
+  // newest record. Logging tyres or a repair (no "next due") used to hide the
+  // service schedule and its overdue warning (audit, 15 Nov 2026).
+  const planner = sorted.find((r) => r.next_due_date || r.next_due_km != null || r.next_due_hours != null) ?? null;
   const kms = records.map((r) => r.odometer_km).filter((v): v is number => v != null);
   const hrs = records.map((r) => (r.engine_hours == null ? null : Number(r.engine_hours))).filter((v): v is number => v != null);
   const base = {
     latest,
-    dueKm: latest?.next_due_km ?? null,
-    dueHours: latest?.next_due_hours == null ? null : Number(latest.next_due_hours),
+    dueKm: planner?.next_due_km ?? null,
+    dueHours: planner?.next_due_hours == null ? null : Number(planner.next_due_hours),
     lastKm: kms.length ? Math.max(...kms) : null,
     lastHours: hrs.length ? Math.max(...hrs) : null,
   };
   if (!latest) return { ...base, state: "none", dueDate: null, daysUntil: null };
-  if (!latest.next_due_date) return { ...base, state: "no_due_date", dueDate: null, daysUntil: null };
-  const daysUntil = Math.round(toDay(latest.next_due_date) - toDay(today));
+  if (!planner?.next_due_date) return { ...base, state: "no_due_date", dueDate: null, daysUntil: null };
+  const daysUntil = Math.round(toDay(planner.next_due_date) - toDay(today));
   const state: DueState = daysUntil < 0 ? "overdue" : daysUntil <= DUE_SOON_DAYS ? "due_soon" : "ok";
-  return { ...base, state, dueDate: latest.next_due_date, daysUntil };
+  return { ...base, state, dueDate: planner.next_due_date, daysUntil };
 }
 
 export function dueLabel(d: ServiceDue): string {

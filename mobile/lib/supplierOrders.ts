@@ -52,7 +52,7 @@ export interface Supplier {
   name: string;
   email: string | null;
   defaultCostCentreId?: string | null;
-  /** Position in the picker's Pinned group (0097, drafted — not applied yet). Null/absent = not pinned. */
+  /** Position in the picker's Pinned group (0097). Null/absent = not pinned. */
   pinOrder?: number | null;
 }
 

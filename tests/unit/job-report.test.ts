@@ -117,6 +117,11 @@ describe("which photos may go in a report", () => {
     expect(unsupportedPhotoCount(rows)).toBe(2);
   });
 
+  it("still excludes a docket whose PO was deleted (link set null, caption kept)", () => {
+    expect(photoExclusion(photo({ id: "orphan-docket", vendor_order_id: null, caption: "Docket PO-1008" }))).toBe("docket");
+    expect(photoExclusion(photo({ id: "ok", caption: "Docking station install" }))).toBeNull();
+  });
+
   it("never lets the client add a photo from elsewhere, a docket or a signature", () => {
     const chosen = selectRequestedPhotos(rows, ["late", "docket", "sig", "heic", "other-jobs-photo", "early"]);
     expect(chosen.map((p) => p.id)).toEqual(["early", "late"]);

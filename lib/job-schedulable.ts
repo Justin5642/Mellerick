@@ -3,7 +3,7 @@
 // A completed or cancelled job is left off the schedule board (web
 // /dashboard/schedule, the phone's Schedule tab) and its calendar events are
 // removed, so a booking on one is saved and then never seen again. The UI
-// stops offering it; migration 0096 (a draft, not applied yet) would make the
+// stops offering it; migration 0096 (applied 14 Nov 2026) makes the
 // database refuse it too, with SQLSTATE MJ001, from any route.
 //
 // Mirrored at mobile/lib/jobSchedulable.ts; tests/unit/job-schedulable.test.ts

@@ -245,6 +245,7 @@ export function XeroImportClient() {
                               <span className="text-slate-400">Nothing new</span>
                             )}
                             {r.leave.alreadyImported > 0 && <span className="block text-[11px] text-slate-400">{r.leave.alreadyImported} already imported</span>}
+                            {r.leave.alreadyEntered > 0 && <span className="block text-[11px] text-slate-400">{r.leave.alreadyEntered} already entered by hand — skipped</span>}
                           </td>
                           <td className="px-3 py-3 whitespace-nowrap">
                             {r.balances.length === 0 ? (

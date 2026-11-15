@@ -186,7 +186,8 @@ export interface PreviewRow {
   fields: { field: PayField; current: number | null; xero: number | null; changes: boolean }[];
   basis: string;
   notes: string[];
-  leave: { newCount: number; newHours: number; alreadyImported: number };
+  /** alreadyEntered: Xero leave skipped because the same leave was typed into the app by hand. */
+  leave: { newCount: number; newHours: number; alreadyImported: number; alreadyEntered: number };
   /** Leave left, per Xero leave type (0104). `current` is what the app has from the last import. */
   balances: { xeroLeaveTypeId: string; name: string; current: number | null; xero: number }[];
   /** True when any balance differs from the app's (or the app has none yet). */
@@ -201,18 +202,43 @@ export interface Preview {
   since: string;
 }
 
+/**
+ * Every staff_leave row, a page at a time: PostgREST caps a response (1000 rows
+ * by default), and a truncated list would let leave import twice.
+ */
+async function allLeaveRows(db: SupabaseClient): Promise<{ data: any[]; error: { message: string } | null }> {
+  const out: any[] = [];
+  for (let from = 0; ; from += 1000) {
+    const res = await db
+      .from("staff_leave")
+      .select("id, staff_id, leave_type, start_date, end_date, xero_leave_application_id")
+      .order("id")
+      .range(from, from + 999);
+    if (res.error) return { data: [], error: res.error };
+    out.push(...(res.data ?? []));
+    if ((res.data ?? []).length < 1000) return { data: out, error: null };
+  }
+}
+
 async function loadAppSide(db: SupabaseClient) {
   const [profilesRes, costRes, leaveRes, balRes] = await Promise.all([
     db.from("profiles").select("id, full_name, email").eq("is_active", true).order("full_name"),
     db.from("staff_cost_profiles").select("staff_id, hourly_rate, super_rate, target_hours_per_week, leave_loading_rate, xero_employee_id"),
-    db.from("staff_leave").select("xero_leave_application_id").not("xero_leave_application_id", "is", null),
+    allLeaveRows(db),
     db.from("staff_leave_balances").select("staff_id, xero_leave_type_id, hours"),
   ]);
   for (const [r, what] of [[profilesRes, "staff"], [costRes, "staff cost profiles"], [leaveRes, "staff leave"]] as const) {
     if (r.error) throw new Error(`Couldn't read ${what} (${r.error.message}).`);
   }
   const costByStaff = new Map(((costRes.data ?? []) as any[]).map((c) => [c.staff_id as string, c]));
-  const imported = new Set(((leaveRes.data ?? []) as any[]).map((l) => l.xero_leave_application_id as string));
+  const leaveRows = (leaveRes.data ?? []) as any[];
+  const imported = new Set(leaveRows.filter((l) => l.xero_leave_application_id).map((l) => l.xero_leave_application_id as string));
+  // Leave typed into the app by hand (no Xero id). Xero leave of the same type
+  // overlapping it is the same leave — importing it again doubled sick hours in
+  // Reports and true cost (audit, 15 Nov 2026).
+  const handEntered = leaveRows
+    .filter((l) => !l.xero_leave_application_id)
+    .map((l) => ({ staffId: l.staff_id as string, leaveType: l.leave_type as string, start: l.start_date as string, end: (l.end_date ?? l.start_date) as string }));
   const staff = ((profilesRes.data ?? []) as any[]).map((p) => ({
     id: p.id as string,
     full_name: p.full_name as string | null,
@@ -225,13 +251,22 @@ async function loadAppSide(db: SupabaseClient) {
   if (balRes.error) console.error("xero payroll: leave balances unavailable:", balRes.error.message);
   const balances = new Map<string, number>();
   for (const b of (balRes.data ?? []) as any[]) balances.set(`${b.staff_id}|${b.xero_leave_type_id}`, Number(b.hours));
-  return { staff, costByStaff, imported, balances, balancesAvailable };
+  return { staff, costByStaff, imported, handEntered, balances, balancesAvailable };
+}
+
+/** Already in the app by hand: same person, same type, overlapping dates. */
+export function enteredByHand(
+  l: Pick<ImportedLeave, "leaveType" | "start" | "end">,
+  staffId: string,
+  handEntered: readonly { staffId: string; leaveType: string; start: string; end: string }[]
+): boolean {
+  return handEntered.some((h) => h.staffId === staffId && h.leaveType === l.leaveType && h.start <= l.end && l.start <= h.end);
 }
 
 const sameNumber = (a: number | null, b: number | null) => a !== null && b !== null && Math.abs(a - b) < 0.005;
 
 export async function buildPreview(db: SupabaseClient, snap: PayrollSnapshot, since: string, manual: Record<string, string> = {}): Promise<Preview> {
-  const [{ staff, costByStaff, imported, balances, balancesAvailable }, existing] = await Promise.all([loadAppSide(db), loadExistingByEmail(db)]);
+  const [{ staff, costByStaff, imported, handEntered, balances, balancesAvailable }, existing] = await Promise.all([loadAppSide(db), loadExistingByEmail(db)]);
 
   // Admin-made pairings (xeroEmployeeId -> staffId) go first, then automatic matching on the rest.
   const manualPairs = Object.entries(manual).filter(
@@ -252,7 +287,8 @@ export async function buildPreview(db: SupabaseClient, snap: PayrollSnapshot, si
     const pay = payFromXero(employee, snap.earningsRates, snap.leaveTypes);
     const cur = costByStaff.get(s.id);
     const theirLeave = snap.leave.filter((l) => l.xeroEmployeeId === employee.employeeID);
-    const fresh = theirLeave.filter((l) => !imported.has(l.xeroLeaveApplicationId));
+    const notImported = theirLeave.filter((l) => !imported.has(l.xeroLeaveApplicationId));
+    const fresh = notImported.filter((l) => !enteredByHand(l, s.id, handEntered));
     const bal = balancesAvailable ? balancesFromXero(employee, snap.leaveTypes) : { balances: [], notes: [] };
     const balRows = bal.balances.map((b) => {
       const key = `${s.id}|${b.xeroLeaveTypeId}`;
@@ -276,7 +312,8 @@ export async function buildPreview(db: SupabaseClient, snap: PayrollSnapshot, si
       leave: {
         newCount: fresh.length,
         newHours: Math.round(fresh.reduce((t, l) => t + l.hours, 0) * 100) / 100,
-        alreadyImported: theirLeave.length - fresh.length,
+        alreadyImported: theirLeave.length - notImported.length,
+        alreadyEntered: notImported.length - fresh.length,
       },
     };
   });
@@ -316,7 +353,7 @@ export interface ApplyResult {
 }
 
 export async function applyImport(db: SupabaseClient, snap: PayrollSnapshot, selections: Selection[], adminId: string): Promise<ApplyResult> {
-  const { staff, imported, balancesAvailable } = await loadAppSide(db);
+  const { staff, imported, handEntered, balancesAvailable } = await loadAppSide(db);
   const result: ApplyResult = { people: 0, fieldsUpdated: 0, leaveAdded: 0, balancesUpdated: 0, failures: [] };
   const seenE = new Set<string>();
   const seenS = new Set<string>();
@@ -368,7 +405,9 @@ export async function applyImport(db: SupabaseClient, snap: PayrollSnapshot, sel
     result.fieldsUpdated += Object.keys(values).length;
 
     if (sel.leave) {
-      const fresh = snap.leave.filter((l) => l.xeroEmployeeId === sel.xeroEmployeeId && !imported.has(l.xeroLeaveApplicationId));
+      const fresh = snap.leave.filter(
+        (l) => l.xeroEmployeeId === sel.xeroEmployeeId && !imported.has(l.xeroLeaveApplicationId) && !enteredByHand(l, sel.staffId, handEntered)
+      );
       if (fresh.length) {
         const { error: leaveErr, count } = await db.from("staff_leave").insert(
           fresh.map((l) => ({

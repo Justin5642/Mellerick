@@ -75,3 +75,17 @@ describe("xeroErrorInfo", () => {
     expect(xeroErrorInfo("not json")).toEqual({ status: undefined, retryAfter: undefined });
   });
 });
+
+import { enteredByHand } from "@/lib/xero-payroll-import";
+
+describe("Xero leave already typed into the app", () => {
+  const hand = [{ staffId: "s1", leaveType: "sick", start: "2026-10-06", end: "2026-10-07" }];
+  it("skips the same person, type and overlapping days", () => {
+    expect(enteredByHand({ leaveType: "sick", start: "2026-10-07", end: "2026-10-07" }, "s1", hand)).toBe(true);
+  });
+  it("keeps different people, types or days", () => {
+    expect(enteredByHand({ leaveType: "sick", start: "2026-10-07", end: "2026-10-07" }, "s2", hand)).toBe(false);
+    expect(enteredByHand({ leaveType: "annual", start: "2026-10-07", end: "2026-10-07" }, "s1", hand)).toBe(false);
+    expect(enteredByHand({ leaveType: "sick", start: "2026-10-08", end: "2026-10-09" }, "s1", hand)).toBe(false);
+  });
+});
