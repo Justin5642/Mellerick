@@ -1,7 +1,7 @@
 -- ============================================================================
 -- Leave balances, imported from Xero Payroll.
 --
--- STATUS: DRAFT — NOT APPLIED. Gate test supabase/tests/0104_staff_leave_balances_test.sql.
+-- STATUS: ✅ APPLIED IN PRODUCTION (2026-11-15, via SQL editor). Gate test supabase/tests/0104_staff_leave_balances_test.sql.
 --
 -- WHY (Justin, 15 Nov 2026): the Xero import (0101) brought in pay rates and
 -- leave TAKEN, but not what each person has LEFT. Xero holds the balances —
