@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { unpricedHoursOn, unpricedRefusal } from "@/lib/invoice-hours";
 import { getRefreshedXero, describeXeroError } from "@/lib/xero";
 import { requireAdmin } from "@/lib/api/guards";
 import { callerClient } from "@/lib/api/caller-client";
@@ -13,7 +14,7 @@ export const maxDuration = 30;
 
 export async function POST(request: NextRequest) {
   try {
-    const { invoiceId } = await request.json();
+    const { invoiceId, confirmUnpriced } = await request.json();
 
     // Server-side enforcement (not just a UI hint): only admins may push invoices
     // to Xero, whether triggered from the Approvals auto-push or the manual button.
@@ -31,6 +32,11 @@ export async function POST(request: NextRequest) {
       .single();
 
     if (!invoice) return NextResponse.json({ error: "Invoice not found" }, { status: 404 });
+    // The "held until priced" rule, enforced here too (it was browser-only).
+    if (invoice.job_id && confirmUnpriced !== true) {
+      const unpriced = await unpricedHoursOn(supabase, invoiceId).catch(() => 0);
+      if (unpriced > 0) return NextResponse.json(unpricedRefusal(unpriced, "push"), { status: 409 });
+    }
     if (!invoice.invoice_items || invoice.invoice_items.length === 0) {
       return NextResponse.json({ error: "Invoice has no line items — add items before pushing to Xero" }, { status: 400 });
     }

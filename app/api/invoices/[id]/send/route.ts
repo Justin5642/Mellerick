@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { unpricedHoursOn, unpricedRefusal } from "@/lib/invoice-hours";
 import { requireOfficeOrAdmin } from "@/lib/api/guards";
 import { callerClient } from "@/lib/api/caller-client";
 import { renderDocumentPdf } from "@/lib/pdf/render";
@@ -37,6 +38,13 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       .select(`*, customers(name, email, phone), invoice_items(*), ${INVOICE_SITE_SELECT}`)
       .eq("id", id)
       .single();
+
+    // Work left off the invoice: checked here, not just in the browser, so
+    // the phone's send is held to it too. The office can confirm and send.
+    if (invoice?.job_id && body.confirmUnpriced !== true) {
+      const unpriced = await unpricedHoursOn(supabase, id).catch(() => 0);
+      if (unpriced > 0) return NextResponse.json(unpricedRefusal(unpriced, "send"), { status: 409 });
+    }
 
     if (!invoice) return NextResponse.json({ error: "Invoice not found" }, { status: 404 });
 

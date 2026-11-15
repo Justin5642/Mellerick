@@ -196,7 +196,7 @@ export function JobPO({ jobId, jobNumber, customerName, site, pos: initialPos, t
   }, []);
 
   // The supplier picker's list: each supplier's place in the Pinned group
-  // (0097, drafted — not applied yet; a database without pin_order (42703)
+  // (0097; a database without pin_order (42703)
   // shows none pinned), and the
   // Recent group from the newest POs on every job — this user's first, then
   // the company's (lib/supplier-picker.ts). A failed recent read just leaves

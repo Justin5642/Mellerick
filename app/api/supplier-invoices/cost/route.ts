@@ -19,6 +19,10 @@ import { matchInvoice, parseTarget, type JobCandidate, type PoCandidate } from "
 //
 // Office/admin only.
 
+// A download, an upload and a few writes — give it room so a slow storage
+// round trip can't time out after the claim.
+export const maxDuration = 60;
+
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const CATEGORIES = ["materials", "subcontractor", "equipment_hire", "other"] as const;
 const PO_COLUMNS = "id, po_number, job_id, vendor_name, amount, status, invoice_number, xero_bill_id";
@@ -59,28 +63,41 @@ export async function POST(request: NextRequest) {
   // Where it goes.
   let po: PoCandidate | null = null;
   let job: JobCandidate | null = null;
+  // Recomputed here, never trusted from the browser — and needed even when
+  // the office typed a destination (see below).
+  let cands;
+  try {
+    cands = await loadCandidates(admin, [inv]);
+  } catch (e) {
+    reportError(e, { route, step: "candidates" });
+    return fail("Could not match the invoice.", 500);
+  }
+  const m = matchInvoice(inv, cands.pos, cands.jobs);
+
   if (target) {
+    // A PO number wins when that PO exists: "1008" is PO-1008, not old job
+    // #1008 (audit, 15 Nov 2026 — the job was looked up first). "job 1008"
+    // reaches the job when that's really meant.
     const t = parseTarget(target);
-    if (t.job != null) {
-      const r = await admin.from("jobs").select(JOB_COLUMNS).eq("job_number", t.job).maybeSingle();
-      if (r.error) { reportError(r.error, { route, step: "job by number" }); return fail("Could not look up that job.", 500); }
-      if (r.data) job = toJobCandidate(r.data as JobRow);
-    }
-    if (!job && t.po) {
+    const sayJob = /^\s*job\b/i.test(target);
+    if (t.po && !sayJob) {
       const r = await admin.from("vendor_orders").select(PO_COLUMNS).ilike("po_number", t.po).maybeSingle();
       if (r.error) { reportError(r.error, { route, step: "po by number" }); return fail("Could not look up that PO.", 500); }
       po = (r.data as PoCandidate | null) ?? null;
     }
-    if (!job && !po) return fail(`No job or supplier PO "${target}".`, 404);
-  } else {
-    let cands;
-    try {
-      cands = await loadCandidates(admin, [inv]);
-    } catch (e) {
-      reportError(e, { route, step: "candidates" });
-      return fail("Could not match the invoice.", 500);
+    if (!po && t.job != null) {
+      const r = await admin.from("jobs").select(JOB_COLUMNS).eq("job_number", t.job).maybeSingle();
+      if (r.error) { reportError(r.error, { route, step: "job by number" }); return fail("Could not look up that job.", 500); }
+      if (r.data) job = toJobCandidate(r.data as JobRow);
     }
-    const m = matchInvoice(inv, cands.pos, cands.jobs);
+    if (!job && !po) return fail(`No job or supplier PO "${target}".`, 404);
+    // An invoice that quotes one of our POs belongs on that PO. Putting it on
+    // a job as an expense as well counts it twice in job margins once the PO
+    // gets its invoice.
+    if (job && m.kind === "po") {
+      return fail(`This invoice quotes ${m.po.po_number}. Save it on that PO (or fix the PO first) rather than as a job expense.`, 409);
+    }
+  } else {
     if (m.kind === "none") return fail("This invoice isn't matched. Type a PO or job number.", 400);
     if (m.blocked) return fail(m.blocked, 409);
     if (m.kind === "po") po = m.po;

@@ -273,10 +273,10 @@ function TargetInput({ busy, onCost, isCredit }: { busy: boolean; onCost: (o: { 
     >
       <input
         aria-label="PO or job number"
-        placeholder={isCredit ? "Job number" : "PO or job number"}
+        placeholder={isCredit ? "job 2542" : "PO-1008 or job 2542"}
         value={target}
         onChange={(e) => setTarget(e.target.value)}
-        className="h-8 w-36 rounded-md border border-slate-200 px-2 text-sm"
+        className="h-8 w-44 rounded-md border border-slate-200 px-2 text-sm"
       />
       <CategorySelect value={category} onChange={setCategory} />
       <Button size="sm" type="submit" disabled={busy || !target.trim()}>{busy ? <Loader2 className="w-4 h-4 animate-spin" /> : "Cost"}</Button>

@@ -128,14 +128,16 @@ export interface InvoiceHoursView {
   billedElsewhereHours: number;
   defaults: RateDefaults | null;
   locked: boolean;
+  /** Where a copy of this invoice already lives: Xero, the customer's inbox, or nowhere yet. */
+  outside: "xero" | "sent" | null;
 }
 
 /** `admin` null skips the rate defaults (the apply path recomputes groups only). */
 export async function loadInvoiceHours(db: SupabaseClient, admin: SupabaseClient | null, invoiceId: string): Promise<InvoiceHoursView | null> {
   const invoice = must(
-    await db.from("invoices").select("id, job_id, status").eq("id", invoiceId).maybeSingle(),
+    await db.from("invoices").select("id, job_id, status, xero_invoice_id, amount_paid").eq("id", invoiceId).maybeSingle(),
     "The invoice"
-  ) as { id: string; job_id: string | null; status: string } | null;
+  ) as { id: string; job_id: string | null; status: string; xero_invoice_id: string | null; amount_paid: number | null } | null;
   if (!invoice) return null;
   const empty: InvoiceHoursView = {
     invoiceId,
@@ -145,7 +147,12 @@ export async function loadInvoiceHours(db: SupabaseClient, admin: SupabaseClient
     billedHereHours: 0,
     billedElsewhereHours: 0,
     defaults: null,
-    locked: invoice.status === "paid" || invoice.status === "cancelled",
+    // Part-paid counts as locked: rewriting the lines under a payment leaves
+    // the customer's payment against a total that no longer exists.
+    locked: invoice.status === "paid" || invoice.status === "cancelled" || Number(invoice.amount_paid ?? 0) > 0,
+    // Already in Xero or already emailed: changing it is allowed (re-push
+    // updates Xero), but only as a deliberate step — see applyInvoiceHours.
+    outside: invoice.xero_invoice_id ? "xero" : invoice.status === "sent" || invoice.status === "overdue" ? "sent" : null,
   };
   if (!invoice.job_id) return empty;
 
@@ -169,7 +176,7 @@ export async function loadInvoiceHours(db: SupabaseClient, admin: SupabaseClient
 
 export type ApplyHoursResult =
   | { ok: true; lines: number; entries: number; hours: number; subtotal: number; tax: number; total: number }
-  | { ok: false; status: number; error: string };
+  | { ok: false; status: number; error: string; code?: "confirm_outside" };
 
 /**
  * Price the job's hours and write them onto the invoice, in one transaction.
@@ -179,13 +186,26 @@ export type ApplyHoursResult =
 export async function applyInvoiceHours(
   db: SupabaseClient,
   invoiceId: string,
-  choice: RateChoice
+  choice: RateChoice,
+  /** The office confirmed it will push to Xero again / resend (audit, 15 Nov 2026). */
+  confirmOutside = false
 ): Promise<ApplyHoursResult> {
   const view = await loadInvoiceHours(db, null, invoiceId).catch((e: Error) => ({ error: e.message }) as const);
   if (!view) return { ok: false, status: 404, error: "Invoice not found." };
   if ("error" in view) return { ok: false, status: 500, error: view.error };
   if (!view.jobId) return { ok: false, status: 400, error: "This invoice is not linked to a job, so it has no hours to bill." };
-  if (view.locked) return { ok: false, status: 400, error: "This invoice is paid or cancelled, so its lines can no longer change." };
+  if (view.locked) return { ok: false, status: 400, error: "This invoice is paid, part-paid or cancelled, so its lines can no longer change. Bill these hours on a new invoice." };
+  if (view.outside && !confirmOutside) {
+    return {
+      ok: false,
+      status: 409,
+      code: "confirm_outside",
+      error:
+        view.outside === "xero"
+          ? "This invoice is already in Xero. Adding hours changes its total here only — you'd need to push it to Xero again (and resend it if the customer has it)."
+          : "This invoice has already been emailed to the customer. Adding hours changes its total — you'd need to resend it.",
+    };
+  }
 
   const built = buildHourLines(view.groups, choice);
   if (!built.ok) return { ok: false, status: 400, error: built.error };
@@ -204,5 +224,24 @@ export async function applyInvoiceHours(
     subtotal: Number(r.subtotal ?? 0),
     tax: Number(r.tax ?? 0),
     total: Number(r.total ?? 0),
+  };
+}
+
+/**
+ * Hours on the invoice's job not yet billed anywhere — what "unpriced hours"
+ * means on the invoice screen. 0 for an invoice with no job. Used to stop an
+ * invoice reaching the customer or Xero with work left off it, unless the
+ * office says so (audit, 15 Nov 2026: that check lived only in the browser).
+ */
+export async function unpricedHoursOn(db: SupabaseClient, invoiceId: string): Promise<number> {
+  const view = await loadInvoiceHours(db, null, invoiceId);
+  return view?.jobId ? view.unbilledHours : 0;
+}
+
+export function unpricedRefusal(hours: number, action: "send" | "push") {
+  return {
+    error: `${hours.toFixed(2)}h on this job aren't on this invoice yet. Use "Apply hourly rate" to bill them, or confirm you want to ${action === "send" ? "send" : "push"} it without them.`,
+    code: "unpriced_hours" as const,
+    hours,
   };
 }

@@ -75,15 +75,20 @@ export function InvoiceHours({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [invoiceId]);
 
-  async function apply() {
+  async function apply(confirmOutside = false) {
     setApplying(true);
     try {
       const res = await fetch(`/api/invoices/${invoiceId}/hours`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ mode, all, byStaff, byCostCentre }),
+        body: JSON.stringify({ mode, all, byStaff, byCostCentre, confirmOutside }),
       });
       const data = await res.json().catch(() => null);
+      if (res.status === 409 && data?.code === "confirm_outside" && !confirmOutside) {
+        setApplying(false);
+        if (window.confirm(`${data.error}\n\nAdd the hours anyway?`)) await apply(true);
+        return;
+      }
       if (!res.ok) throw new Error(data?.error ?? `The server refused it (HTTP ${res.status}).`);
       toast.success(`${data.hours.toFixed(2)}h billed on ${data.lines} line${data.lines === 1 ? "" : "s"} — invoice total now $${Number(data.total).toFixed(2)} inc GST`);
       if (inXero) {
@@ -206,7 +211,7 @@ export function InvoiceHours({
               <p className="text-xs text-slate-500">
                 Adds one line per cost centre and technician (ex GST). {view.billedHereHours > 0 ? "Replaces the hours lines already on this invoice." : ""}
               </p>
-              <Button onClick={apply} disabled={applying} className="gap-2">
+              <Button onClick={() => apply()} disabled={applying} className="gap-2">
                 {applying ? <Loader2 className="w-4 h-4 animate-spin" /> : <Timer className="w-4 h-4" />}
                 {applying ? "Applying..." : view.billedHereHours > 0 ? "Re-apply hourly rate" : "Apply hourly rate"}
               </Button>

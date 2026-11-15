@@ -4,7 +4,7 @@
 //
 //   Pinned     the main suppliers (Reece, Plumbers Co-op, Northern Quarries,
 //              Boral), set in Settings → Suppliers (suppliers.pin_order,
-//              from 0097 — drafted, not applied yet)
+//              from 0097)
 //   Recent     the last suppliers used on POs, most recent first, pinned ones
 //              skipped so nothing shows twice
 //   All        everyone else, A–Z
