@@ -1378,6 +1378,13 @@ the App Store Connect API key lives on EAS's servers: build 14 (19 Oct 2026)
 built and auto-submitted to TestFlight with `eas build --platform ios
 --profile production --auto-submit`.
 
+**Builds from GitHub (15 Nov 2026).** Actions → **Build phone app**
+(`.github/workflows/phone-build.yml`, run by hand; pick both / ios / android)
+runs the same `eas build` on Expo's servers, so no Mac is needed. iPhone goes
+to TestFlight by itself; Android is built only (the org policy blocks Play
+service-account keys) — download the `.aab` from expo.dev and upload it in Play
+Console. Needs the repository secret `EXPO_TOKEN`.
+
 **Store assets** — screenshots (4 per platform, demo-safe data) and an Android
 feature graphic (1024×500). Listing copy, privacy answers and the privacy policy
 are written and live outside the repo at

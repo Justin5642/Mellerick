@@ -1,0 +1,73 @@
+name: Build phone app
+
+# Production phone builds on Expo (EAS), started by hand from the Actions tab
+# (or by Claude through the GitHub API) instead of from someone's Mac.
+#
+# Needs the repository secret EXPO_TOKEN (expo.dev → Account settings →
+# Access tokens). Builds run on Expo's servers; this job just starts them and
+# waits so a failure shows up red here, with Expo's build link in the log.
+#
+# iPhone: built and sent to TestFlight (`--auto-submit`; the App Store Connect
+# key lives on Expo's servers). Android: built only. Google's service-account
+# keys are blocked by the organisation policy, so the .aab is downloaded from
+# expo.dev and uploaded to Play Console by hand.
+# Build numbers come from Expo (`appVersionSource: remote`, `autoIncrement`).
+
+on:
+  workflow_dispatch:
+    inputs:
+      platform:
+        description: Which phones
+        type: choice
+        options: [both, ios, android]
+        default: both
+
+permissions:
+  contents: read
+
+concurrency:
+  group: phone-build
+  cancel-in-progress: false
+
+jobs:
+  ios:
+    if: inputs.platform == 'both' || inputs.platform == 'ios'
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    defaults:
+      run:
+        working-directory: mobile
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .node-version
+          cache: npm
+          cache-dependency-path: mobile/package-lock.json
+      - uses: expo/expo-github-action@v8
+        with:
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+      - run: npm ci
+      - run: eas build --platform ios --profile production --auto-submit --non-interactive
+
+  android:
+    if: inputs.platform == 'both' || inputs.platform == 'android'
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    defaults:
+      run:
+        working-directory: mobile
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .node-version
+          cache: npm
+          cache-dependency-path: mobile/package-lock.json
+      - uses: expo/expo-github-action@v8
+        with:
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+      - run: npm ci
+      - run: eas build --platform android --profile production --non-interactive
