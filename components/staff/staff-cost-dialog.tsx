@@ -55,7 +55,7 @@ export function StaffCostDialog({ staffId, staffName, open, onOpenChange }: Prop
   const [leaveForm, setLeaveForm] = useState(emptyLeaveForm);
   const [addingLeave, setAddingLeave] = useState(false);
   const [assignedVehicles, setAssignedVehicles] = useState<{ name: string; costPerHour: number }[]>([]);
-  // Leave left, from the last Xero import (0104, drafted — not applied yet).
+  // Leave left, from the last Xero import (0104).
   // Read on its own so a missing table (before 0104 is applied) never stops
   // the rest of the dialog loading.
   const [balances, setBalances] = useState<{ leave_name: string; hours: number; as_of: string }[] | null>(null);

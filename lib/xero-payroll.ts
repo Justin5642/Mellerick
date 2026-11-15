@@ -296,7 +296,7 @@ export function isCurrentEmployee(e: XeroEmployee, today: string): boolean {
 }
 
 // ---------------------------------------------------------------------------
-// Leave balances (0104, drafted — not applied yet)
+// Leave balances (0104)
 // ---------------------------------------------------------------------------
 
 export interface ImportedBalance {
