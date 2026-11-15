@@ -299,3 +299,31 @@ describe("TimeEntriesRepository clock notifications", () => {
     expect(seen).toEqual([1, 2, 3]);
   });
 });
+
+import { closeProblem, TimeEntryRefused } from "./timeEntries";
+
+describe("never queue a change the server will refuse (time_entries_duration_sane, 15 Nov 2026)", () => {
+  it("closeProblem matches the database rule", () => {
+    expect(closeProblem("2026-11-02T08:00:00Z", "2026-11-02T17:00:00Z")).toBeNull();
+    expect(closeProblem("2026-11-02T08:00:00Z", "2026-11-03T08:00:00Z")).toBeNull(); // exactly 24h is allowed
+    expect(closeProblem("2026-11-02T08:00:00Z", "2026-11-03T08:00:01Z")).toBe("over_24h");
+    expect(closeProblem("2026-11-02T08:00:00Z", "2026-11-02T08:00:00Z")).toBe("before_start");
+    expect(closeProblem("2026-11-02T08:00:00Z", "2026-11-02T07:00:00Z")).toBe("before_start");
+  });
+
+  it("clockOut on an entry open over 24 hours throws and queues nothing", async () => {
+    const { outbox, ops } = captureOutbox();
+    const repo = new TimeEntriesRepository(outbox, seqIds(), fixedTime("2026-11-02T17:58:00.000Z"));
+    await expect(repo.clockOut({ entryId: "te-1", clockInIso: "2026-10-31T07:00:00.000Z" })).rejects.toBeInstanceOf(TimeEntryRefused);
+    expect(ops).toHaveLength(0);
+  });
+
+  it("editEntry with the finish before the start throws and queues nothing", async () => {
+    const { outbox, ops } = captureOutbox();
+    const repo = new TimeEntriesRepository(outbox, seqIds(), fixedTime());
+    await expect(
+      repo.editEntry({ entryId: "te-1", clockInIso: "2026-11-02T17:00:00Z", clockOutIso: "2026-11-02T09:00:00Z", costCenterId: null, editorId: "s1" } as any)
+    ).rejects.toThrow(/at or before the start/);
+    expect(ops).toHaveLength(0);
+  });
+});

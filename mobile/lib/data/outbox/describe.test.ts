@@ -29,7 +29,8 @@ describe("explainError", () => {
     expect(explainError('new row violates row-level security policy for table "time_entries"')).toMatch(/isn't allowed/);
     expect(explainError("Job #505 is completed. A completed job can't be scheduled — reopen it first.")).toMatch(/completed or cancelled/);
     expect(explainError('duplicate key value violates unique constraint "x"')).toMatch(/saved twice/);
-    expect(explainError('new row for relation "time_entries" violates check constraint "time_entries_duration_sane"')).toMatch(/clock-off before/);
+    expect(explainError('new row for relation "time_entries" violates check constraint "time_entries_duration_sane"')).toMatch(/within 24 hours/);
+    expect(explainError('new row for relation "jobs" violates check constraint "x"')).toMatch(/clock-off before/);
     expect(explainError("dependency failed")).toMatch(/earlier change/);
   });
   it("never hides an unknown reason behind a guess", () => {

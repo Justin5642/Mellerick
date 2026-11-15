@@ -144,7 +144,19 @@ export async function applyGeofenceTransition(
 
   // Departure.
   if (lookup.status === "found") {
-    await deps.clockOut({ entryId: lookup.entryId, clockInIso: lookup.clockInIso });
+    try {
+      await deps.clockOut({ entryId: lookup.entryId, clockInIso: lookup.clockInIso });
+    } catch (e) {
+      // Open over 24 hours (a missed departure days ago): the server would
+      // refuse this clock-off for ever. Leave the entry open for the office —
+      // it shows on the dashboard's "still clocked on" list — and start no
+      // travel leg timed from an end that never happened.
+      if (e instanceof Error && e.name === "TimeEntryRefused") {
+        console.warn("[geofence] departure not recorded:", e.message);
+        return { handled: true, setPendingDeparture: null, clearPendingDeparture: true };
+      }
+      throw e;
+    }
   }
 
   // The technician is driving whether or not there was an entry to close, so

@@ -17,6 +17,46 @@ export function hoursBetween(startIso: string, endIso: string): number | null {
   return Math.round((ms / 3600000) * 100) / 100;
 }
 
+/** The database's time_entries_duration_sane rule (0051): a closed entry ends after it starts, within 24 hours. */
+export const MAX_ENTRY_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Why the database would refuse closing an entry at these times, or null.
+ *
+ * Checked BEFORE a change is queued. Queuing one the server will always
+ * refuse is how a clock-off sat in Justin's "not synced" list from 2 Nov to
+ * 15 Nov 2026 ("violates check constraint time_entries_duration_sane"): an
+ * entry left clocked on for over a day, then clocked off "now". The entry
+ * itself stayed open on the server the whole time.
+ */
+export function closeProblem(clockInIso: string, clockOutIso: string): "before_start" | "over_24h" | null {
+  const ms = Date.parse(clockOutIso) - Date.parse(clockInIso);
+  if (!(ms > 0)) return "before_start";
+  if (ms > MAX_ENTRY_MS) return "over_24h";
+  return null;
+}
+
+/** Thrown instead of queuing a time entry change the server will refuse. */
+export class TimeEntryRefused extends Error {
+  constructor(
+    readonly problem: "before_start" | "over_24h",
+    clockInIso: string
+  ) {
+    super(
+      problem === "over_24h"
+        ? `This entry has been clocked on since ${new Date(clockInIso).toLocaleString("en-AU", { weekday: "short", day: "numeric", month: "short", hour: "numeric", minute: "2-digit" })} — over 24 hours, which can't be saved. Edit the entry and set the real finish time (split it if it ran over two days).`
+        : "The finish time is at or before the start time. Edit the entry and set the real times."
+    );
+    this.name = "TimeEntryRefused";
+  }
+}
+
+function assertClosable(clockInIso: string, clockOutIso: string | null | undefined): void {
+  if (!clockOutIso) return;
+  const problem = closeProblem(clockInIso, clockOutIso);
+  if (problem) throw new TimeEntryRefused(problem, clockInIso);
+}
+
 export interface ManualEntryInput {
   jobId: string;
   staffId: string;
@@ -79,6 +119,7 @@ export class TimeEntriesRepository {
   /** Clock out an open entry now, computing hours from its clock-in. */
   async clockOut(input: { entryId: string; clockInIso: string; fix?: ClockFix | null }): Promise<void> {
     const clockOutIso = this.time.nowIso();
+    assertClosable(input.clockInIso, clockOutIso);
     const opId = await this.enqueueWrite(input.entryId, "update", {
       clock_out: clockOutIso,
       hours: hoursBetween(input.clockInIso, clockOutIso),
@@ -89,6 +130,7 @@ export class TimeEntriesRepository {
 
   /** Add a backdated manual entry (used when auto clock-in/out didn't fire). */
   async addManual(input: ManualEntryInput): Promise<string> {
+    assertClosable(input.clockInIso, input.clockOutIso);
     const rowId = this.ids.newId();
     const opId = await this.enqueueWrite(rowId, "insert", {
       job_id: input.jobId,
@@ -113,6 +155,7 @@ export class TimeEntriesRepository {
 
   /** Correct an existing entry's start/end/stage. */
   async editEntry(input: EditEntryInput): Promise<void> {
+    assertClosable(input.clockInIso, input.clockOutIso);
     const opId = await this.enqueueWrite(input.entryId, "update", {
       clock_in: input.clockInIso,
       clock_out: input.clockOutIso,
