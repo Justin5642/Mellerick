@@ -60,6 +60,7 @@ export function explainError(error: string | null | undefined): string {
   if (!e) return "The server refused it without saying why.";
   if (e.includes("dependency failed")) return "It needed an earlier change that also didn't sync.";
   if (e.includes("crashed repeatedly")) return "The app kept closing while sending it.";
+  if (e.includes("missing from this phone")) return "The photo or file it was sending is no longer on this phone, so it can't be sent. Take it again, then discard this.";
   if (e.includes("has been billed")) return "That time is already billed — only the office can change it now.";
   if (e.includes("can't be scheduled") || e.includes("can\u2019t be scheduled") || e.includes("mj001") || e.includes("closed job")) {
     return "The job was already completed or cancelled, so it can't be scheduled or changed like this.";

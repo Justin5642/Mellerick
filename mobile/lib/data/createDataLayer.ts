@@ -1,4 +1,5 @@
 import { Outbox, systemClock, type Clock } from "./outbox/outbox";
+import { attachmentKey } from "./outbox/orphanAttachments";
 import { Processor } from "./outbox/processor";
 import type { OutboxStore } from "./outbox/store";
 import type { Operation } from "./outbox/types";
@@ -105,8 +106,10 @@ export function createDataLayer(deps: DataLayerDeps): DataLayer {
     // these are job photos, receipts and signatures that must not outlive the
     // session. Another user's queued attachments are still referenced and kept.
     const [staged, referenced] = await Promise.all([deps.gateway.listStagedAttachments(), outbox.referencedAttachmentUris()]);
+    // By key, not full path: the app's folder can move on an update.
+    const referencedKeys = new Set([...referenced].map(attachmentKey));
     for (const file of staged) {
-      if (!referenced.has(file.uri)) await deps.gateway.cleanupAttachment(file.uri); // never throws
+      if (!referencedKeys.has(attachmentKey(file.uri))) await deps.gateway.cleanupAttachment(file.uri); // never throws
     }
   }
   return { clearLocalWorkFor, outbox, engine, timeEntries, photos, notes, stageNotes, signature, voiceReport, finance, customers, inventory, equipment, jobBilling, approvals, schedule, jobs, backflow, settings, variations };
