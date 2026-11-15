@@ -1,7 +1,7 @@
 -- ============================================================================
 -- Supplier invoices: drop the day's PDFs in, the app reads them.
 --
--- STATUS: DRAFT — NOT APPLIED. Gate test supabase/tests/0103_supplier_invoices_test.sql.
+-- STATUS: ✅ APPLIED IN PRODUCTION (2026-11-15, via SQL editor). Gate test supabase/tests/0103_supplier_invoices_test.sql.
 --
 -- WHY (Justin, 15 Nov 2026): supplier invoices arrive at admin@ in batches,
 -- one email with several PDFs. Instead of connecting the app to that inbox,

@@ -1,4 +1,4 @@
-// Pure helpers for supplier invoices (0103, drafted — not applied yet), safe to import in the browser —
+// Pure helpers for supplier invoices (0103), safe to import in the browser —
 // lib/supplier-invoice-read.ts carries the Anthropic SDK and stays server-side.
 
 /**

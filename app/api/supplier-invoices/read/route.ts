@@ -5,7 +5,7 @@ import { consumeRateLimit, rateLimitedResponse, SUPPLIER_INVOICE_READ_LIMIT } fr
 import { reportError, reportFailure } from "@/lib/monitoring";
 import { readSupplierInvoicePdf, SupplierInvoiceReadError, supplierKey } from "@/lib/supplier-invoice-read";
 
-// Read one uploaded supplier PDF (0103, drafted — not applied yet).
+// Read one uploaded supplier PDF (0103).
 //
 // The browser has already put the file in the private supplier-invoices
 // bucket (office/admin only). This reads it back with the service role, sends

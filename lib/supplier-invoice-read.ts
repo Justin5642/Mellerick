@@ -1,4 +1,4 @@
-// Reading a supplier's PDF into invoices (0103, drafted — not applied yet).
+// Reading a supplier's PDF into invoices (0103).
 //
 // The office drops the day's supplier PDFs on Supplier POs → Supplier invoices
 // (Justin, 15 Nov 2026: instead of connecting the app to the admin@ inbox).

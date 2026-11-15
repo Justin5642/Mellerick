@@ -6,7 +6,7 @@ import { createClient } from "@/lib/supabase/server";
 import { Button } from "@/components/ui/button";
 import { SupplierInvoiceUpload, type SupplierInvoiceRow } from "@/components/supplier-invoices/supplier-invoice-upload";
 
-// Supplier invoices dropped in by the office (0103, drafted — not applied yet).
+// Supplier invoices dropped in by the office (0103).
 // Under Supplier POs so it inherits that page's office-only rule
 // (lib/nav-items.ts) — RLS on supplier_invoices is the real boundary.
 export default async function SupplierInvoicesPage() {
