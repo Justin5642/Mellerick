@@ -218,14 +218,16 @@ export function FleetClient({ role, currentUserId, equipment: initialEquipment, 
                 const spent = spendByEquipment.get(item.id) ?? 0;
                 const assignedStaff = staff.find((s) => s.id === item.assigned_to);
                 return (
-                  <div key={item.id} className="flex items-center justify-between px-6 py-4 gap-4">
-                    <Link prefetch={false} href={`/dashboard/fleet/${item.id}`} className="flex items-center gap-4 group flex-1 min-w-0">
+                  // Stacks below lg: the actions need ~450px and don't shrink, so side by
+                  // side on a phone they crushed the details underneath them.
+                  <div key={item.id} className="flex flex-col gap-3 px-4 py-4 sm:px-6 lg:flex-row lg:items-center lg:justify-between lg:gap-4">
+                    <Link prefetch={false} href={`/dashboard/fleet/${item.id}`} className="flex items-center gap-4 group lg:flex-1 min-w-0">
                       <div className="w-10 h-10 rounded-full bg-slate-100 flex items-center justify-center text-slate-500 flex-shrink-0">
                         <Truck className="w-5 h-5" />
                       </div>
-                      <div className="min-w-0">
+                      <div className="min-w-0 flex-1">
                         <div className="flex items-center gap-2">
-                          <p className="font-medium text-sm text-slate-900 group-hover:text-blue-600 transition-colors">{item.name}</p>
+                          <p className="font-medium text-sm text-slate-900 group-hover:text-blue-600 transition-colors break-words">{item.name}</p>
                           {!item.is_active && <span className="text-xs text-slate-400">(inactive)</span>}
                         </div>
                         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-0.5">
@@ -255,20 +257,20 @@ export function FleetClient({ role, currentUserId, equipment: initialEquipment, 
                         </div>
                       </div>
                     </Link>
-                    <div className="flex items-center gap-3 flex-shrink-0">
+                    <div className="flex flex-wrap items-center gap-2 pl-14 lg:pl-0 lg:flex-nowrap lg:flex-shrink-0">
                       {isAdmin ? (
                         <Select
                           value={item.assigned_to || UNASSIGNED_VALUE}
                           onValueChange={(v) => assignTo(item.id, v as string)}
                         >
-                          <SelectTrigger className="h-6 text-xs w-[180px]"><SelectValue placeholder="Unassigned" /></SelectTrigger>
+                          <SelectTrigger className="h-7 text-xs w-[180px] max-w-full"><SelectValue placeholder="Unassigned" /></SelectTrigger>
                           <SelectContent>
                             <SelectItem value={UNASSIGNED_VALUE}>Unassigned</SelectItem>
                             {staff.map((s) => <SelectItem key={s.id} value={s.id}>{s.full_name}</SelectItem>)}
                           </SelectContent>
                         </Select>
                       ) : (
-                        <span className="text-xs text-slate-400 hidden sm:inline">
+                        <span className="text-xs text-slate-400">
                           {assignedStaff ? `Assigned to ${assignedStaff.full_name}` : "Unassigned"}
                         </span>
                       )}
@@ -288,7 +290,7 @@ export function FleetClient({ role, currentUserId, equipment: initialEquipment, 
                           {item.is_active ? "Deactivate" : "Reactivate"}
                         </Button>
                       )}
-                      <Link prefetch={false} href={`/dashboard/fleet/${item.id}`} className="text-slate-300 hover:text-blue-600 transition-colors">
+                      <Link prefetch={false} href={`/dashboard/fleet/${item.id}`} aria-label={`Open ${item.name}`} className="hidden lg:block text-slate-300 hover:text-blue-600 transition-colors">
                         <ChevronRight className="w-4 h-4" />
                       </Link>
                     </div>
