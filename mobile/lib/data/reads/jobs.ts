@@ -589,7 +589,7 @@ export async function listMyJobSites(userId: string): Promise<MyJobSite[]> {
           .order("id", { ascending: true }),
         supabase
           .from("time_entries")
-          .select("job_id, jobs(id, scheduled_cost_center_id, scheduled_start, scheduled_end, sites(site_lat, site_lng, geofence_radius_m))")
+          .select("job_id, jobs!time_entries_job_id_fkey(id, scheduled_cost_center_id, scheduled_start, scheduled_end, sites(site_lat, site_lng, geofence_radius_m))")
           .eq("staff_id", userId)
           .eq("entry_type", "work")
           .is("clock_out", null),

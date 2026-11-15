@@ -117,7 +117,7 @@ export default async function DashboardPage() {
       .not("status", "in", '("completed","cancelled")')
       .order("scheduled_start"),
     supabase.from("time_entries")
-      .select("id, clock_in, job_id, jobs(job_number, title), profiles!time_entries_staff_id_fkey(full_name)")
+      .select("id, clock_in, job_id, jobs!time_entries_job_id_fkey(job_number, title), profiles!time_entries_staff_id_fkey(full_name)")
       .is("clock_out", null)
       .eq("entry_type", "work")
       .lt("clock_in", todayStart)
