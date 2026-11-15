@@ -333,7 +333,7 @@ export function InvoiceDetail({ invoice, jobSite, xeroConnected, payments }: Pro
         payments={payments}
       />
 
-      {invoice.job_id && <InvoiceHours invoiceId={invoice.id} onPricedChange={setUnpricedHours} />}
+      {invoice.job_id && <InvoiceHours invoiceId={invoice.id} onPricedChange={setUnpricedHours} inXero={pushed} />}
 
       <Card>
         <CardContent className="p-0">

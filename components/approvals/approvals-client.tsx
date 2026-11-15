@@ -83,8 +83,8 @@ export function ApprovalsClient({ role, jobs: initialJobs, hoursByJob, pendingVa
     setJobs((j) => j.filter((job) => job.id !== jobId));
     for (const w of data.warnings ?? []) toast.warning(w);
 
-    const { invoiceId, invoiceCreated, alreadyPushed, unpricedHours } = data as {
-      invoiceId: string | null; invoiceCreated: boolean; alreadyPushed: boolean; unpricedHours: number;
+    const { invoiceId, invoiceCreated, alreadyPushed, unpricedHours, progressClaim } = data as {
+      invoiceId: string | null; invoiceCreated: boolean; alreadyPushed: boolean; unpricedHours: number; progressClaim?: boolean;
     };
     const openInvoice = invoiceId
       ? { label: "Open invoice", onClick: () => router.push(`/dashboard/invoices/${invoiceId}`) }
@@ -93,10 +93,16 @@ export function ApprovalsClient({ role, jobs: initialJobs, hoursByJob, pendingVa
     if (invoiceId && unpricedHours > 0) {
       // Held, not pushed: an invoice with unpriced hours would reach Xero
       // under-billed. "Apply hourly rate" on the invoice prices them.
+      // An existing invoice is NOT changed by approval: the hours are still
+      // off it until someone applies a rate there. It used to say "added to the
+      // existing invoice", which was not true (audit, 15 Nov 2026).
+      const where = progressClaim ? "progress claim" : "invoice";
       toast.success(
-        `Job approved — ${invoiceCreated ? "draft invoice created" : "added to the existing invoice"} with ${unpricedHours.toFixed(2)}h to price. ` +
-          "Apply an hourly rate on the invoice, then push it to Xero.",
-        { action: openInvoice, duration: 12000 }
+        invoiceCreated
+          ? `Job approved — draft invoice created with ${unpricedHours.toFixed(2)}h to price. Apply an hourly rate on the invoice, then push it to Xero.`
+          : `Job approved — ${unpricedHours.toFixed(2)}h are NOT on the existing ${where} yet. Open it and apply an hourly rate` +
+              (alreadyPushed ? ", then push it to Xero again so Xero has the new total." : ", then push it to Xero."),
+        { action: openInvoice, duration: 15000 }
       );
     } else if (invoiceId && !alreadyPushed) {
       try {

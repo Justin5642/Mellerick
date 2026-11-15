@@ -34,6 +34,8 @@ export default function EditInvoicePage() {
   const [lineItems, setLineItems] = useState<LineItem[]>([]);
   const [claim, setClaim] = useState<ClaimDraft>(emptyClaimDraft);
   const [jobId, setJobId] = useState<string | null>(null);
+  // Hours lines as loaded, to notice one being removed (see handleSubmit).
+  const [originalHoursLines, setOriginalHoursLines] = useState(0);
   const [errors, setErrors] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
@@ -54,6 +56,7 @@ export default function EditInvoicePage() {
         });
         setClaim(claimDraftFromInvoice(invoice));
         setJobId(invoice.job_id ?? null);
+        setOriginalHoursLines((invoice.invoice_items ?? []).filter((i: any) => i.source === "hours").length);
         setLineItems((invoice.invoice_items ?? []).map((i: any) => ({
           id: i.id,
           name: i.name,
@@ -129,9 +132,30 @@ export default function EditInvoicePage() {
       return;
     }
 
+    // Hours lines are tied to the time entries they bill (0098). Removing one
+    // here used to leave those entries marked billed on this invoice — never
+    // charged, yet counted as billed everywhere and locked against edits
+    // (audit, 15 Nov 2026). If any hours line was removed, un-bill all of
+    // this invoice's hours: apply_invoice_hours with no lines does exactly
+    // that, and the office re-applies the rate on the invoice page.
+    const hoursBefore = originalHoursLines;
+    const hoursAfter = validItems.filter(i => i.source === "hours").length;
+    let hoursUnbilled = false;
+    if (hoursAfter < hoursBefore) {
+      const { error: unbillError } = await supabase.rpc("apply_invoice_hours", { p_invoice_id: id, p_lines: [] });
+      if (unbillError) {
+        toast.error(`Line items saved, but the removed hours are still marked as billed on this invoice (${unbillError.message}). Open the invoice and re-apply the hourly rate.`);
+        setLoading(false);
+        return;
+      }
+      hoursUnbilled = true;
+    }
+
     // Totals second, derived from the items that actually landed and rounded to
     // cents so subtotal + GST equals total on the printed invoice.
-    const totals = moneyTotals(validItems);
+    // Un-billing removed EVERY hours line (the RPC replaces them as a set), so
+    // the totals must leave out any that were kept on screen.
+    const totals = moneyTotals(hoursUnbilled ? validItems.filter(i => i.source !== "hours") : validItems);
     const { error: headerError } = await supabase.from("invoices").update({
       title: form.title,
       due_date: form.due_date || null,
@@ -151,6 +175,9 @@ export default function EditInvoicePage() {
     }
 
     toast.success("Invoice updated");
+    if (hoursUnbilled) {
+      toast.warning("The job's hours are no longer on this invoice. Use Apply hourly rate on the invoice to bill them again.", { duration: 12000 });
+    }
     router.push(`/dashboard/invoices/${id}`);
   }
 

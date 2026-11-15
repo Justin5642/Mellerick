@@ -28,7 +28,20 @@ const MODES: { value: RateMode; label: string }[] = [
  * reloads from what was saved — nothing here is reported as done until the
  * server says so.
  */
-export function InvoiceHours({ invoiceId, onPricedChange }: { invoiceId: string; onPricedChange?: (unpricedHours: number) => void }) {
+export function InvoiceHours({
+  invoiceId,
+  onPricedChange,
+  inXero = false,
+}: {
+  invoiceId: string;
+  onPricedChange?: (unpricedHours: number) => void;
+  /**
+   * Already pushed to Xero. Applying hours changes this copy only, and the
+   * Xero poll could then mark it paid against Xero's smaller total (audit,
+   * 15 Nov 2026) — so say so every time hours are applied.
+   */
+  inXero?: boolean;
+}) {
   const router = useRouter();
   const [view, setView] = useState<InvoiceHoursView | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -73,6 +86,9 @@ export function InvoiceHours({ invoiceId, onPricedChange }: { invoiceId: string;
       const data = await res.json().catch(() => null);
       if (!res.ok) throw new Error(data?.error ?? `The server refused it (HTTP ${res.status}).`);
       toast.success(`${data.hours.toFixed(2)}h billed on ${data.lines} line${data.lines === 1 ? "" : "s"} — invoice total now $${Number(data.total).toFixed(2)} inc GST`);
+      if (inXero) {
+        toast.warning("This invoice is already in Xero. Push it to Xero again so Xero has the new total.", { duration: 12000 });
+      }
       await load();
       router.refresh();
     } catch (e: any) {
@@ -181,6 +197,10 @@ export function InvoiceHours({ invoiceId, onPricedChange }: { invoiceId: string;
                   <RateInput key={key} label={key === NO_COST_CENTRE ? "No cost centre" : (name ?? "Cost centre")} value={byCostCentre[key] ?? ""} onChange={(v) => setByCostCentre((p) => ({ ...p, [key]: v }))} hint={sourceOf(view.defaults?.byCostCentre[key]?.source)} />
                 ))}
             </div>
+
+            {inXero && (
+              <p className="text-xs text-amber-700">This invoice is already in Xero. After applying the rate, push it to Xero again so Xero has the new total.</p>
+            )}
 
             <div className="flex items-center justify-between gap-3 flex-wrap">
               <p className="text-xs text-slate-500">

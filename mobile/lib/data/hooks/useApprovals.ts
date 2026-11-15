@@ -1,7 +1,6 @@
 import { useCallback } from "react";
 import { useDataLayer } from "../DataProvider";
 import { useFlush } from "./useFlush";
-import type { ApproveJobInput } from "../repositories/approvals";
 
 export function useApprovals() {
   const layer = useDataLayer();
@@ -18,7 +17,6 @@ export function useApprovals() {
 
   return {
     ready: !!layer,
-    approveJob: useCallback((i: ApproveJobInput) => run((r) => r.approveJob(i)), [run]),
     sendBackJob: useCallback((i: { jobId: string; note: string }) => run((r) => r.sendBackJob(i)), [run]),
   };
 }
