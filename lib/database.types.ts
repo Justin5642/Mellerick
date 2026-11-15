@@ -48,6 +48,50 @@ export type Database = {
         }
         Relationships: []
       }
+      auto_clock_status: {
+        Row: {
+          app_version: string | null
+          approximate: boolean
+          background_off: boolean
+          platform: string | null
+          reason: string | null
+          site_count: number
+          staff_id: string
+          tracking: boolean
+          updated_at: string
+        }
+        Insert: {
+          app_version?: string | null
+          approximate?: boolean
+          background_off?: boolean
+          platform?: string | null
+          reason?: string | null
+          site_count?: number
+          staff_id: string
+          tracking?: boolean
+          updated_at?: string
+        }
+        Update: {
+          app_version?: string | null
+          approximate?: boolean
+          background_off?: boolean
+          platform?: string | null
+          reason?: string | null
+          site_count?: number
+          staff_id?: string
+          tracking?: boolean
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "auto_clock_status_staff_id_fkey"
+            columns: ["staff_id"]
+            isOneToOne: true
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       backflow_devices: {
         Row: {
           created_at: string | null
