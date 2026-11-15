@@ -20,19 +20,34 @@
 // A duplicate invoice is not a UI glitch. It reaches a customer, it reaches
 // Xero, and someone has to credit it.
 
+// PROGRESS CLAIMS (audit, 15 Nov 2026). A claim-billed job legitimately has
+// several invoices — Claim 1, Claim 2, … — so "more than one invoice" is not a
+// duplicate there. The guard used to read the job's invoices with
+// .maybeSingle(), so a job with two claims was refused forever ("Resolve the
+// duplicates") once 0098 sent it back to Approvals, and its unbilled hours
+// could never be carried. The guard now reads the LIST and only refuses when
+// more than one ORDINARY invoice exists. With claims and no ordinary invoice,
+// the latest claim is the job's invoice: approval never builds a fresh invoice
+// from the job's items, which the claims have already billed.
+
 export interface InvoiceGuardRow {
   id: string;
   xero_invoice_id?: string | null;
+  is_progress_claim?: boolean | null;
+  claim_number?: number | null;
 }
 
 export interface InvoiceGuardResult {
-  data: InvoiceGuardRow | null;
+  data: InvoiceGuardRow[] | null;
   error: { message: string; code?: string } | null;
 }
 
 export type InvoiceGuardVerdict =
-  | { proceed: true; invoiceId: string | null; alreadyPushed: boolean }
+  | { proceed: true; invoiceId: string | null; alreadyPushed: boolean; progressClaim: boolean }
   | { proceed: false; reason: string };
+
+/** The guard query. Kept here so the route and the tests agree on the columns. */
+export const INVOICE_GUARD_COLUMNS = "id, xero_invoice_id, is_progress_claim, claim_number" as const;
 
 /**
  * FAILS CLOSED. When the guard cannot establish whether an invoice exists, the
@@ -42,21 +57,30 @@ export type InvoiceGuardVerdict =
  */
 export function resolveExistingInvoice(result: InvoiceGuardResult): InvoiceGuardVerdict {
   if (result.error) {
-    // PGRST116 from .maybeSingle() means MULTIPLE rows matched — the job already
-    // has more than one invoice. That is the strongest possible reason not to
-    // create another, and it used to be the case that created one.
-    const multiple = result.error.code === "PGRST116";
     return {
       proceed: false,
-      reason: multiple
-        ? "This job already has more than one invoice. Resolve the duplicates before approving."
-        : `Could not check for an existing invoice (${result.error.message}). Approval stopped so a duplicate is not created.`,
+      reason: `Could not check for an existing invoice (${result.error.message}). Approval stopped so a duplicate is not created.`,
     };
   }
 
+  const rows = result.data ?? [];
+  const ordinary = rows.filter((r) => !r.is_progress_claim);
+  if (ordinary.length > 1) {
+    return {
+      proceed: false,
+      reason: "This job already has more than one invoice. Resolve the duplicates before approving.",
+    };
+  }
+
+  const chosen =
+    ordinary[0] ??
+    [...rows].sort((a, b) => Number(b.claim_number ?? 0) - Number(a.claim_number ?? 0))[0] ??
+    null;
+
   return {
     proceed: true,
-    invoiceId: result.data?.id ?? null,
-    alreadyPushed: !!result.data?.xero_invoice_id,
+    invoiceId: chosen?.id ?? null,
+    alreadyPushed: !!chosen?.xero_invoice_id,
+    progressClaim: !!chosen?.is_progress_claim,
   };
 }

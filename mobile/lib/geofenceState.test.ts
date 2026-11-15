@@ -151,3 +151,35 @@ describe("nextGeofenceState with a bigger site", () => {
   });
 });
 
+
+// Auto clock bug (15 Nov 2026): every open job is now watched, so overlaps with
+// old jobs next door are more likely. A PREFERRED site (scheduled today, or
+// clocked into) must win an overlap over a nearer one that isn't.
+describe("nextGeofenceState: preferred sites win an overlap", () => {
+  // Two sites ~55m apart: a reading between them, nearer OLD, is inside both 150m fences.
+  const OLD: TrackedSite = { jobId: "old", lat: -37.8136, lng: 144.9631, scheduledCostCenterId: null };
+  const TODAY: TrackedSite = { jobId: "today", lat: -37.8141, lng: 144.9631, scheduledCostCenterId: null, preferred: true };
+  const NEARER_OLD = { latitude: -37.8137, longitude: 144.9631 }; // ~11m from OLD, ~44m from TODAY
+
+  it("arrives at the preferred site even when a non-preferred one is nearer", () => {
+    expect(nextGeofenceState(NEARER_OLD, [OLD, TODAY], null)).toEqual({ insideJobId: "today", previousJobId: null, transition: "arrival" });
+  });
+
+  it("with nothing preferred, the nearest still wins (unchanged behaviour)", () => {
+    const plain = { ...TODAY, preferred: undefined };
+    expect(nextGeofenceState(NEARER_OLD, [OLD, plain], null).insideJobId).toBe("old");
+  });
+
+  it("moves off a non-preferred site onto a preferred one it is also inside", () => {
+    expect(nextGeofenceState(NEARER_OLD, [OLD, TODAY], "old")).toEqual({ insideJobId: "today", previousJobId: "old", transition: "arrival" });
+  });
+
+  it("stays on the preferred site when a nearer non-preferred one overlaps", () => {
+    expect(nextGeofenceState(NEARER_OLD, [OLD, TODAY], "today")).toEqual({ insideJobId: "today", previousJobId: "today", transition: "none" });
+  });
+
+  it("a far-away preferred site never pulls an arrival away from the site you're actually at", () => {
+    const farToday = { ...TODAY, lat: -37.9136 };
+    expect(nextGeofenceState(NEARER_OLD, [OLD, farToday], null).insideJobId).toBe("old");
+  });
+});
