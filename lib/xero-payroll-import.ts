@@ -14,6 +14,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { getRefreshedXero } from "@/lib/xero";
 import {
+  balancesFromXero,
   isCurrentEmployee,
   leaveFromXero,
   matchStaff,
@@ -146,6 +147,10 @@ export interface PreviewRow {
   basis: string;
   notes: string[];
   leave: { newCount: number; newHours: number; alreadyImported: number };
+  /** Leave left, per Xero leave type (0104, drafted — not applied yet). `current` is what the app has from the last import. */
+  balances: { xeroLeaveTypeId: string; name: string; current: number | null; xero: number }[];
+  /** True when any balance differs from the app's (or the app has none yet). */
+  balancesChange: boolean;
 }
 
 export interface Preview {
@@ -156,10 +161,11 @@ export interface Preview {
 }
 
 async function loadAppSide(db: SupabaseClient) {
-  const [profilesRes, costRes, leaveRes] = await Promise.all([
+  const [profilesRes, costRes, leaveRes, balRes] = await Promise.all([
     db.from("profiles").select("id, full_name, email").eq("is_active", true).order("full_name"),
     db.from("staff_cost_profiles").select("staff_id, hourly_rate, super_rate, target_hours_per_week, leave_loading_rate, xero_employee_id"),
     db.from("staff_leave").select("xero_leave_application_id").not("xero_leave_application_id", "is", null),
+    db.from("staff_leave_balances").select("staff_id, xero_leave_type_id, hours"),
   ]);
   for (const [r, what] of [[profilesRes, "staff"], [costRes, "staff cost profiles"], [leaveRes, "staff leave"]] as const) {
     if (r.error) throw new Error(`Couldn't read ${what} (${r.error.message}).`);
@@ -172,13 +178,19 @@ async function loadAppSide(db: SupabaseClient) {
     email: p.email as string | null,
     xero_employee_id: (costByStaff.get(p.id)?.xero_employee_id ?? null) as string | null,
   }));
-  return { staff, costByStaff, imported };
+  // Leave balances are optional: before 0104 is applied the table does not
+  // exist, and pay and leave must still import. Balances are then left out.
+  const balancesAvailable = !balRes.error;
+  if (balRes.error) console.error("xero payroll: leave balances unavailable:", balRes.error.message);
+  const balances = new Map<string, number>();
+  for (const b of (balRes.data ?? []) as any[]) balances.set(`${b.staff_id}|${b.xero_leave_type_id}`, Number(b.hours));
+  return { staff, costByStaff, imported, balances, balancesAvailable };
 }
 
 const sameNumber = (a: number | null, b: number | null) => a !== null && b !== null && Math.abs(a - b) < 0.005;
 
 export async function buildPreview(db: SupabaseClient, snap: PayrollSnapshot, since: string, manual: Record<string, string> = {}): Promise<Preview> {
-  const { staff, costByStaff, imported } = await loadAppSide(db);
+  const { staff, costByStaff, imported, balances, balancesAvailable } = await loadAppSide(db);
 
   // Admin-made pairings (xeroEmployeeId -> staffId) go first, then automatic matching on the rest.
   const manualPairs = Object.entries(manual).filter(
@@ -200,6 +212,11 @@ export async function buildPreview(db: SupabaseClient, snap: PayrollSnapshot, si
     const cur = costByStaff.get(s.id);
     const theirLeave = snap.leave.filter((l) => l.xeroEmployeeId === employee.employeeID);
     const fresh = theirLeave.filter((l) => !imported.has(l.xeroLeaveApplicationId));
+    const bal = balancesAvailable ? balancesFromXero(employee, snap.leaveTypes) : { balances: [], notes: [] };
+    const balRows = bal.balances.map((b) => {
+      const key = `${s.id}|${b.xeroLeaveTypeId}`;
+      return { xeroLeaveTypeId: b.xeroLeaveTypeId, name: b.name, current: balances.has(key) ? balances.get(key)! : null, xero: b.hours };
+    });
     return {
       staffId: s.id,
       staffName: s.full_name ?? "Unnamed",
@@ -212,7 +229,9 @@ export async function buildPreview(db: SupabaseClient, snap: PayrollSnapshot, si
         return { field: f, current, xero, changes: xero !== null && !sameNumber(current, xero) };
       }),
       basis: pay.basis,
-      notes: pay.notes,
+      notes: [...pay.notes, ...bal.notes],
+      balances: balRows,
+      balancesChange: balRows.some((b) => !sameNumber(b.current, b.xero)),
       leave: {
         newCount: fresh.length,
         newHours: Math.round(fresh.reduce((t, l) => t + l.hours, 0) * 100) / 100,
@@ -238,18 +257,21 @@ export interface Selection {
   xeroEmployeeId: string;
   fields: PayField[];
   leave: boolean;
+  /** Replace their leave balances with Xero's (0104). */
+  balances?: boolean;
 }
 
 export interface ApplyResult {
   people: number;
   fieldsUpdated: number;
   leaveAdded: number;
+  balancesUpdated: number;
   failures: { staffName: string; error: string }[];
 }
 
 export async function applyImport(db: SupabaseClient, snap: PayrollSnapshot, selections: Selection[], adminId: string): Promise<ApplyResult> {
-  const { staff, imported } = await loadAppSide(db);
-  const result: ApplyResult = { people: 0, fieldsUpdated: 0, leaveAdded: 0, failures: [] };
+  const { staff, imported, balancesAvailable } = await loadAppSide(db);
+  const result: ApplyResult = { people: 0, fieldsUpdated: 0, leaveAdded: 0, balancesUpdated: 0, failures: [] };
   const seenE = new Set<string>();
   const seenS = new Set<string>();
 
@@ -329,6 +351,37 @@ export async function applyImport(db: SupabaseClient, snap: PayrollSnapshot, sel
         }
       }
     }
+    if (sel.balances && balancesAvailable) {
+      // A balance is a snapshot: replace the person's set with Xero's, so a
+      // leave type removed in Xero doesn't linger here.
+      const { balances } = balancesFromXero(employee, snap.leaveTypes);
+      const today = new Date().toISOString().slice(0, 10);
+      const up = balances.length
+        ? await db.from("staff_leave_balances").upsert(
+            balances.map((b) => ({
+              staff_id: sel.staffId,
+              xero_leave_type_id: b.xeroLeaveTypeId,
+              leave_name: b.name,
+              leave_type: b.leaveType,
+              hours: b.hours,
+              as_of: today,
+              imported_by: adminId,
+              updated_at: new Date().toISOString(),
+            })),
+            { onConflict: "staff_id,xero_leave_type_id" }
+          )
+        : { error: null };
+      const keep = balances.map((b) => b.xeroLeaveTypeId);
+      let stale = db.from("staff_leave_balances").delete().eq("staff_id", sel.staffId);
+      if (keep.length) stale = stale.not("xero_leave_type_id", "in", `(${keep.map((k) => `"${k.replace(/"/g, "")}"`).join(",")})`);
+      const del = up.error ? { error: null } : await stale;
+      if (up.error || del.error) {
+        result.failures.push({ staffName: name, error: `Their leave balances weren't saved (${(up.error ?? del.error)!.message}).` });
+      } else {
+        result.balancesUpdated += balances.length;
+      }
+    }
+
     result.people += 1;
   }
   return result;

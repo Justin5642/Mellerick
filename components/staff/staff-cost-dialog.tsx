@@ -55,6 +55,21 @@ export function StaffCostDialog({ staffId, staffName, open, onOpenChange }: Prop
   const [leaveForm, setLeaveForm] = useState(emptyLeaveForm);
   const [addingLeave, setAddingLeave] = useState(false);
   const [assignedVehicles, setAssignedVehicles] = useState<{ name: string; costPerHour: number }[]>([]);
+  // Leave left, from the last Xero import (0104, drafted — not applied yet).
+  // Read on its own so a missing table (before 0104 is applied) never stops
+  // the rest of the dialog loading.
+  const [balances, setBalances] = useState<{ leave_name: string; hours: number; as_of: string }[] | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    supabase
+      .from("staff_leave_balances")
+      .select("leave_name, hours, as_of")
+      .eq("staff_id", staffId)
+      .order("leave_name")
+      .then(({ data, error }) => setBalances(error ? null : ((data ?? []) as any)));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, staffId]);
 
   useEffect(() => {
     if (!open) return;
@@ -263,6 +278,18 @@ export function StaffCostDialog({ staffId, staffName, open, onOpenChange }: Prop
             </TabsContent>
 
             <TabsContent value="leave" className="space-y-4 pt-3">
+              {balances && balances.length > 0 && (
+                <div className="rounded-md border bg-slate-50 px-3 py-2 text-sm">
+                  <p className="text-xs font-medium text-slate-500 mb-1">Leave left (from Xero, as of {new Date(`${balances[0].as_of}T00:00:00`).toLocaleDateString("en-AU")})</p>
+                  <div className="flex flex-wrap gap-x-4 gap-y-1">
+                    {balances.map((b) => (
+                      <span key={b.leave_name}>
+                        {b.leave_name}: <span className={Number(b.hours) < 0 ? "font-semibold text-red-600" : "font-semibold text-slate-900"}>{Number(b.hours).toFixed(2)}h</span>
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
               <div className="grid grid-cols-2 gap-3 items-end">
                 <div className="space-y-1.5">
                   <Label>Type</Label>

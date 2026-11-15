@@ -19,11 +19,11 @@ const fmt = (f: PayField, v: number | null) =>
   v === null ? "—" : f === "hourly_rate" ? `$${v.toFixed(2)}` : f === "target_hours_per_week" ? `${v}h` : `${v}%`;
 const HOW_LABEL = { linked: "linked", email: "matched by email", name: "matched by name", manual: "paired by you" } as const;
 
-type Picks = Record<string, { fields: Set<PayField>; leave: boolean }>;
+type Picks = Record<string, { fields: Set<PayField>; leave: boolean; balances: boolean }>;
 
 function defaultPicks(rows: PreviewRow[]): Picks {
   return Object.fromEntries(
-    rows.map((r) => [r.staffId, { fields: new Set(r.fields.filter((f) => f.changes).map((f) => f.field)), leave: r.leave.newCount > 0 }])
+    rows.map((r) => [r.staffId, { fields: new Set(r.fields.filter((f) => f.changes).map((f) => f.field)), leave: r.leave.newCount > 0, balances: r.balancesChange }])
   );
 }
 
@@ -71,14 +71,14 @@ export function XeroImportClient() {
     () =>
       (preview?.rows ?? [])
         .map((r) => ({ r, p: picks[r.staffId] }))
-        .filter(({ p }) => p && (p.fields.size > 0 || p.leave))
-        .map(({ r, p }) => ({ staffId: r.staffId, xeroEmployeeId: r.xeroEmployeeId, fields: [...p.fields], leave: p.leave })),
+        .filter(({ p }) => p && (p.fields.size > 0 || p.leave || p.balances))
+        .map(({ r, p }) => ({ staffId: r.staffId, xeroEmployeeId: r.xeroEmployeeId, fields: [...p.fields], leave: p.leave, balances: p.balances })),
     [preview, picks]
   );
 
   function toggleField(staffId: string, f: PayField) {
     setPicks((all) => {
-      const cur = all[staffId] ?? { fields: new Set<PayField>(), leave: false };
+      const cur = all[staffId] ?? { fields: new Set<PayField>(), leave: false, balances: false };
       const fields = new Set(cur.fields);
       if (fields.has(f)) fields.delete(f);
       else fields.add(f);
@@ -106,7 +106,7 @@ export function XeroImportClient() {
       const data = await res.json().catch(() => null);
       if (!res.ok) throw new Error(data?.error ?? `HTTP ${res.status}`);
       if (data.people > 0) {
-        toast.success(`Imported for ${data.people} ${data.people === 1 ? "person" : "people"}: ${data.fieldsUpdated} pay value${data.fieldsUpdated === 1 ? "" : "s"}, ${data.leaveAdded} leave record${data.leaveAdded === 1 ? "" : "s"}`);
+        toast.success(`Imported for ${data.people} ${data.people === 1 ? "person" : "people"}: ${data.fieldsUpdated} pay value${data.fieldsUpdated === 1 ? "" : "s"}, ${data.leaveAdded} leave record${data.leaveAdded === 1 ? "" : "s"}, ${data.balancesUpdated ?? 0} leave balance${data.balancesUpdated === 1 ? "" : "s"}`);
       }
       for (const f of data.failures ?? []) toast.error(`${f.staffName}: ${f.error}`, { duration: 12000 });
       await load(since, pairs);
@@ -172,6 +172,7 @@ export function XeroImportClient() {
                         <th key={f} className="text-left font-medium px-3 py-2 whitespace-nowrap">{FIELD_LABEL[f]}<span className="block font-normal text-slate-400">app → Xero</span></th>
                       ))}
                       <th className="text-left font-medium px-3 py-2">Leave</th>
+                      <th className="text-left font-medium px-3 py-2">Leave left<span className="block font-normal text-slate-400">app → Xero</span></th>
                     </tr>
                   </thead>
                   <tbody className="divide-y">
@@ -204,7 +205,7 @@ export function XeroImportClient() {
                                   type="checkbox"
                                   className="h-4 w-4"
                                   checked={!!p?.leave}
-                                  onChange={() => setPicks((all) => ({ ...all, [r.staffId]: { ...(all[r.staffId] ?? { fields: new Set() }), leave: !all[r.staffId]?.leave } }))}
+                                  onChange={() => setPicks((all) => ({ ...all, [r.staffId]: { ...(all[r.staffId] ?? { fields: new Set(), balances: false }), leave: !all[r.staffId]?.leave } }))}
                                 />
                                 <span>{r.leave.newCount} new ({r.leave.newHours}h)</span>
                               </label>
@@ -212,6 +213,27 @@ export function XeroImportClient() {
                               <span className="text-slate-400">Nothing new</span>
                             )}
                             {r.leave.alreadyImported > 0 && <span className="block text-[11px] text-slate-400">{r.leave.alreadyImported} already imported</span>}
+                          </td>
+                          <td className="px-3 py-3 whitespace-nowrap">
+                            {r.balances.length === 0 ? (
+                              <span className="text-slate-400">None in Xero</span>
+                            ) : (
+                              <label className={`flex items-start gap-2 ${r.balancesChange ? "" : "text-slate-400"}`}>
+                                <input
+                                  type="checkbox"
+                                  className="h-4 w-4 mt-0.5"
+                                  checked={!!p?.balances}
+                                  onChange={() => setPicks((all) => ({ ...all, [r.staffId]: { ...(all[r.staffId] ?? { fields: new Set(), leave: false }), balances: !all[r.staffId]?.balances } }))}
+                                />
+                                <span className="space-y-0.5">
+                                  {r.balances.map((b) => (
+                                    <span key={b.xeroLeaveTypeId} className="block text-xs">
+                                      {b.name}: {b.current === null ? "—" : `${b.current}h`} → <span className={r.balancesChange ? "font-semibold text-slate-900" : ""}>{b.xero}h</span>
+                                    </span>
+                                  ))}
+                                </span>
+                              </label>
+                            )}
                           </td>
                         </tr>
                       );
