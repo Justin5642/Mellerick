@@ -299,6 +299,18 @@ that cost centre's budget. Cartage comes out of the drainage PO.
   on the same PO number (`ProgressClaimFields builderPo`). A job with one PO
   behaves as before. Edit Invoice is unchanged.
 
+**Migration pastes: trust only a final "PASSED" row (2 Nov 2026).** The
+Supabase SQL editor runs a whole paste as one transaction. If any statement or
+the gate test raises, EVERYTHING is rolled back — but the earlier pastes ended
+in `raise notice` (shown on a tab most people never open), so 0089, 0090 and
+0092 were reported "passed" on 31 Oct–1 Nov and were not in production. The
+phone then showed "Couldn't load purchase orders" (0089) and stuck "Syncing"
+(0092 columns missing). All of 0086–0092 were re-run one by one on 2 Nov, each
+ending `select '00xx PASSED' as result;`, and passed. 0090 needed a fix (its
+clean-up broke 0051's duration rule); 0087's test was relaxed (it asserted on
+office-editable data). **Every future paste ends with that select**, so a
+rolled-back run shows a red error, never a quiet notice.
+
 **New tables need explicit grants (migration `0088` applied 2026-10-31).**
 After 0087 the cost centre drop-down came up empty: the new tables had RLS but
 the `authenticated` role had no table privileges, so reads returned nothing
