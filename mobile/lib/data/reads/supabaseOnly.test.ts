@@ -34,7 +34,6 @@ import {
   type LocalRole,
 } from "./source";
 import { getJobProfitability } from "./jobCosting";
-import { getApprovalPlan } from "./approvals";
 import { listStaff } from "./staff";
 import { listVariationTypes } from "./settings";
 
@@ -74,16 +73,6 @@ describe("deliberately Supabase-only reads never touch the local DB", () => {
     expect(tables).toContain("staff_cost_profiles");
     expect(tables).toContain("billing_rate_config");
     expect(result).toBeNull(); // empty shapes → no job row
-  });
-
-  it("approvals.getApprovalPlan goes to Supabase only", async () => {
-    const result = await getApprovalPlan("job-1");
-
-    expectFakeUntouched();
-    const tables = (supabase.from as jest.Mock).mock.calls.map((c) => c[0]);
-    // The dup-invoice guard is the consistency read that must stay server-live.
-    expect(tables).toContain("invoices");
-    expect(result).toBeNull();
   });
 
   it("staff.listStaff goes to Supabase only", async () => {

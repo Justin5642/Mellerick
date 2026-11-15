@@ -19,7 +19,7 @@
 // they did when this ran in the browser. The route checks the admin role first.
 
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { resolveExistingInvoice } from "@/lib/approval-invoice-guard";
+import { resolveExistingInvoice, INVOICE_GUARD_COLUMNS } from "@/lib/approval-invoice-guard";
 import { moneyTotals } from "@/lib/replace-line-items";
 import { variationLineDescription } from "@/lib/variation-qty";
 import { loadJobHours, unbilledGroups } from "@/lib/invoice-hours";
@@ -37,6 +37,14 @@ export type ApproveJobResult =
       invoiceId: string | null;
       invoiceCreated: boolean;
       alreadyPushed: boolean;
+      /** The invoice used is the job's latest progress claim (no ordinary invoice). */
+      progressClaim: boolean;
+      /**
+       * Approved variations still unbilled. Only possible when the job already
+       * had an invoice: approval does not add lines to an existing invoice
+       * (it may already be with the customer or in Xero), so it says so instead.
+       */
+      unbilledVariations: number;
       /** Hours on the job not yet priced on any invoice. Xero push is held while > 0. */
       unpricedHours: number;
       hoursGroups: HoursGroup[];
@@ -65,7 +73,7 @@ export async function approveJob(db: SupabaseClient, input: ApproveJobInput): Pr
 
   // FAILS CLOSED — see lib/approval-invoice-guard.ts.
   const guard = resolveExistingInvoice(
-    await db.from("invoices").select("id, xero_invoice_id").eq("job_id", jobId).maybeSingle()
+    await db.from("invoices").select(INVOICE_GUARD_COLUMNS).eq("job_id", jobId)
   );
   if (!guard.proceed) return fail(409, guard.reason);
 
@@ -157,6 +165,26 @@ export async function approveJob(db: SupabaseClient, input: ApproveJobInput): Pr
     }
   }
 
+  // An existing invoice gets no new lines here (see unbilledVariations), so
+  // count what is left over and say so — the screen used to claim the work had
+  // been "added to the existing invoice" when nothing had (audit, 15 Nov 2026).
+  let unbilledVariations = 0;
+  if (guard.invoiceId) {
+    const { count: varCount, error: varErr } = await db
+      .from("job_variations")
+      .select("id", { count: "exact", head: true })
+      .eq("job_id", jobId)
+      .in("status", ["approved", "auto_approved"])
+      .is("invoice_id", null);
+    if (varErr) warnings.push(`Could not check for unbilled variations (${varErr.message}). Check the job before invoicing.`);
+    unbilledVariations = varCount ?? 0;
+    if (unbilledVariations > 0) {
+      warnings.push(
+        `${unbilledVariations} approved variation${unbilledVariations === 1 ? " is" : "s are"} not on the existing ${guard.progressClaim ? "progress claim" : "invoice"}. Add ${unbilledVariations === 1 ? "it" : "them"} to the invoice by hand.`
+      );
+    }
+  }
+
   // This write is the approval.
   const { error: approveErr, count } = await db
     .from("jobs")
@@ -179,6 +207,8 @@ export async function approveJob(db: SupabaseClient, input: ApproveJobInput): Pr
     invoiceId,
     invoiceCreated,
     alreadyPushed: guard.alreadyPushed,
+    progressClaim: guard.progressClaim,
+    unbilledVariations,
     unpricedHours: totalHours(hoursGroups),
     hoursGroups,
     warnings,
