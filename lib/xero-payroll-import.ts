@@ -27,6 +27,7 @@ import {
   type XeroLeaveType,
   type XeroPay,
 } from "@/lib/xero-payroll";
+import { cannotAddReason, loadExistingByEmail } from "@/lib/xero-staff-create";
 
 /** Default leave window: 1 July of LAST financial year, so true-cost figures get a full year. */
 export function defaultSince(today: string): string {
@@ -61,6 +62,29 @@ export interface PayrollSnapshot {
   leave: ImportedLeave[];
 }
 
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/**
+ * xero-node throws either an object with `response` or, for some failures, a
+ * JSON string of one. Pull out the HTTP status and Retry-After (seconds).
+ */
+export function xeroErrorInfo(e: unknown): { status: number | undefined; retryAfter: number | undefined } {
+  let err: any = e;
+  if (typeof e === "string") {
+    try {
+      err = JSON.parse(e);
+    } catch {
+      return { status: undefined, retryAfter: undefined };
+    }
+  }
+  const res = err?.response ?? {};
+  const raw = res.statusCode ?? res.status ?? err?.statusCode ?? err?.status;
+  const status = typeof raw === "number" ? raw : Number.isFinite(Number(raw)) && raw !== null && raw !== undefined && raw !== "" ? Number(raw) : undefined;
+  const headers = res.headers ?? {};
+  const ra = Number(headers["retry-after"] ?? headers["Retry-After"]);
+  return { status, retryAfter: Number.isFinite(ra) && ra > 0 ? ra : undefined };
+}
+
 const PAGE = 100;
 const MAX_PAGES = 20;
 
@@ -75,15 +99,31 @@ export async function fetchPayroll(since: string, today: string): Promise<Payrol
     );
   }
 
+  // Xero allows 60 calls a minute per organisation, and a preview is one call
+  // per employee plus a few. Running it a few times in a row (preview, import,
+  // preview again) hit that on 15 Nov 2026 ("Couldn't read leave from
+  // Xero."), so a 429 — or a hiccup with no status — waits and tries again.
   const call = async <T,>(what: string, fn: () => Promise<{ body: T }>): Promise<T> => {
-    try {
-      return (await fn()).body;
-    } catch (e: any) {
-      const status = e?.response?.statusCode ?? e?.response?.status;
-      if (status === 401 || status === 403) {
-        throw new PayrollAccessError(`Xero refused access to ${what}. Reconnect Xero in Settings and approve the payroll access.`);
+    for (let attempt = 1; ; attempt++) {
+      try {
+        return (await fn()).body;
+      } catch (e: any) {
+        const { status, retryAfter } = xeroErrorInfo(e);
+        if (status === 401 || status === 403) {
+          throw new PayrollAccessError(`Xero refused access to ${what}. Reconnect Xero in Settings and approve the payroll access.`);
+        }
+        const retryable = status === 429 || status === undefined || status >= 500;
+        if (retryable && attempt < 4) {
+          await sleep(Math.min(20, retryAfter ?? 2 ** attempt) * 1000);
+          continue;
+        }
+        console.error(`xero payroll: reading ${what} failed`, { status, attempt, detail: String(e?.message ?? e?.body?.Message ?? e).slice(0, 300) });
+        throw new Error(
+          status === 429
+            ? `Xero is busy (too many requests in the last minute). Wait a minute, then reload.`
+            : `Couldn't read ${what} from Xero${status ? ` (HTTP ${status})` : ""}.`
+        );
       }
-      throw new Error(`Couldn't read ${what} from Xero${status ? ` (HTTP ${status})` : ""}.`);
     }
   };
 
@@ -155,7 +195,8 @@ export interface PreviewRow {
 
 export interface Preview {
   rows: PreviewRow[];
-  unmatchedEmployees: { xeroEmployeeId: string; name: string; email: string | null }[];
+  /** `cannotAdd` says why "Add to app" isn't offered (no email, already in the app…); null when it is. */
+  unmatchedEmployees: { xeroEmployeeId: string; name: string; email: string | null; cannotAdd: string | null }[];
   unmatchedStaff: { staffId: string; name: string }[];
   since: string;
 }
@@ -190,7 +231,7 @@ async function loadAppSide(db: SupabaseClient) {
 const sameNumber = (a: number | null, b: number | null) => a !== null && b !== null && Math.abs(a - b) < 0.005;
 
 export async function buildPreview(db: SupabaseClient, snap: PayrollSnapshot, since: string, manual: Record<string, string> = {}): Promise<Preview> {
-  const { staff, costByStaff, imported, balances, balancesAvailable } = await loadAppSide(db);
+  const [{ staff, costByStaff, imported, balances, balancesAvailable }, existing] = await Promise.all([loadAppSide(db), loadExistingByEmail(db)]);
 
   // Admin-made pairings (xeroEmployeeId -> staffId) go first, then automatic matching on the rest.
   const manualPairs = Object.entries(manual).filter(
@@ -242,7 +283,12 @@ export async function buildPreview(db: SupabaseClient, snap: PayrollSnapshot, si
 
   return {
     rows: rows.sort((a, b) => a.staffName.localeCompare(b.staffName)),
-    unmatchedEmployees: auto.unmatchedEmployees.map((e) => ({ xeroEmployeeId: e.employeeID!, name: `${e.firstName} ${e.lastName}`.trim(), email: e.email ?? null })),
+    unmatchedEmployees: auto.unmatchedEmployees.map((e) => ({
+      xeroEmployeeId: e.employeeID!,
+      name: `${e.firstName} ${e.lastName}`.trim(),
+      email: e.email ?? null,
+      cannotAdd: cannotAddReason(e, existing),
+    })),
     unmatchedStaff: auto.unmatchedStaff.map((s) => ({ staffId: s.id, name: s.full_name ?? "Unnamed" })),
     since,
   };

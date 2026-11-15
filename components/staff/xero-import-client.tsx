@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { toast } from "sonner";
-import { ArrowLeft, Loader2, RefreshCw, Download, AlertTriangle, Link2 } from "lucide-react";
+import { ArrowLeft, Loader2, RefreshCw, Download, AlertTriangle, Link2, UserPlus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -17,6 +17,9 @@ const FIELD_LABEL: Record<PayField, string> = {
 };
 const fmt = (f: PayField, v: number | null) =>
   v === null ? "—" : f === "hourly_rate" ? `$${v.toFixed(2)}` : f === "target_hours_per_week" ? `${v}h` : `${v}%`;
+const ROLE_LABEL = { technician: "Technician", office: "Office", admin: "Admin" } as const;
+type NewRole = keyof typeof ROLE_LABEL;
+
 const HOW_LABEL = { linked: "linked", email: "matched by email", name: "matched by name", manual: "paired by you" } as const;
 
 type Picks = Record<string, { fields: Set<PayField>; leave: boolean; balances: boolean }>;
@@ -37,6 +40,8 @@ export function XeroImportClient() {
   const [loading, setLoading] = useState(true);
   const [since, setSince] = useState("");
   const [pairs, setPairs] = useState<Record<string, string>>({});
+  // Xero employees to add to the app, with the role picked for each.
+  const [adds, setAdds] = useState<Record<string, NewRole>>({});
   const [picks, setPicks] = useState<Picks>({});
   const [applying, setApplying] = useState(false);
 
@@ -56,6 +61,12 @@ export function XeroImportClient() {
         setPreview(data);
         setSince(data.since);
         setPicks(defaultPicks(data.rows));
+        // Keep only adds for people still unmatched and still addable.
+        setAdds((cur) =>
+          Object.fromEntries(
+            Object.entries(cur).filter(([id]) => (data as Preview).unmatchedEmployees.some((e) => e.xeroEmployeeId === id && !e.cannotAdd))
+          )
+        );
       }
     } catch {
       setError({ message: "No connection to the server. Try again.", reconnect: false });
@@ -86,6 +97,23 @@ export function XeroImportClient() {
     });
   }
 
+  function choose(xeroEmployeeId: string, value: string) {
+    if (value.startsWith("new:")) {
+      setAdds((a) => ({ ...a, [xeroEmployeeId]: value.slice(4) as NewRole }));
+      if (pairs[xeroEmployeeId]) pair(xeroEmployeeId, "");
+      return;
+    }
+    setAdds((a) => {
+      const next = { ...a };
+      delete next[xeroEmployeeId];
+      return next;
+    });
+    if (value || pairs[xeroEmployeeId]) pair(xeroEmployeeId, value);
+  }
+
+  const creates = Object.entries(adds).map(([xeroEmployeeId, role]) => ({ xeroEmployeeId, role }));
+  const total = selections.length + creates.length;
+
   function pair(xeroEmployeeId: string, staffId: string) {
     const next = { ...pairs };
     if (staffId) next[xeroEmployeeId] = staffId;
@@ -95,16 +123,20 @@ export function XeroImportClient() {
   }
 
   async function apply() {
-    if (!selections.length) return;
+    if (!total) return;
     setApplying(true);
     try {
       const res = await fetch("/api/xero/payroll/apply", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ since, selections }),
+        body: JSON.stringify({ since, selections, creates }),
       });
       const data = await res.json().catch(() => null);
       if (!res.ok) throw new Error(data?.error ?? `HTTP ${res.status}`);
+      if (data.added?.length) {
+        toast.success(`Added to the app: ${data.added.join(", ")}. No invite sent yet — use "Resend Invite" on the Staff page when they should get the app.`, { duration: 12000 });
+        setAdds({});
+      }
       if (data.people > 0) {
         toast.success(`Imported for ${data.people} ${data.people === 1 ? "person" : "people"}: ${data.fieldsUpdated} pay value${data.fieldsUpdated === 1 ? "" : "s"}, ${data.leaveAdded} leave record${data.leaveAdded === 1 ? "" : "s"}, ${data.balancesUpdated ?? 0} leave balance${data.balancesUpdated === 1 ? "" : "s"}`);
       }
@@ -250,19 +282,49 @@ export function XeroImportClient() {
               <CardContent className="space-y-2">
                 {preview.unmatchedEmployees.map((e) => (
                   <div key={e.xeroEmployeeId} className="flex items-center justify-between gap-3 flex-wrap text-sm">
-                    <span>{e.name}{e.email ? <span className="text-slate-400"> · {e.email}</span> : null}</span>
+                    <span className="min-w-0">
+                      {e.name}{e.email ? <span className="text-slate-400"> · {e.email}</span> : null}
+                      {adds[e.xeroEmployeeId] && (
+                        <span className="ml-2 inline-flex items-center gap-1 text-xs text-green-700"><UserPlus className="w-3 h-3" />Will be added as {ROLE_LABEL[adds[e.xeroEmployeeId]]}, with their pay and leave</span>
+                      )}
+                      {e.cannotAdd && <span className="block text-[11px] text-slate-400">Can&apos;t add: {e.cannotAdd}</span>}
+                    </span>
                     <select
-                      aria-label={`Pair ${e.name} with a staff member`}
-                      value={pairs[e.xeroEmployeeId] ?? ""}
-                      onChange={(ev) => pair(e.xeroEmployeeId, ev.target.value)}
+                      aria-label={`Pair ${e.name} with a staff member, or add them to the app`}
+                      value={adds[e.xeroEmployeeId] ? `new:${adds[e.xeroEmployeeId]}` : pairs[e.xeroEmployeeId] ?? ""}
+                      onChange={(ev) => choose(e.xeroEmployeeId, ev.target.value)}
                       className="h-8 rounded-md border border-slate-200 bg-white px-2 text-sm"
                     >
-                      <option value="">Not in the app / skip</option>
-                      {preview.unmatchedStaff.map((s) => <option key={s.staffId} value={s.staffId}>{s.name}</option>)}
+                      <option value="">Skip</option>
+                      {!e.cannotAdd && (
+                        <optgroup label="Add to the app as">
+                          {(Object.keys(ROLE_LABEL) as NewRole[]).map((r) => <option key={r} value={`new:${r}`}>Add as {ROLE_LABEL[r]}</option>)}
+                        </optgroup>
+                      )}
+                      {preview.unmatchedStaff.length > 0 && (
+                        <optgroup label="Already in the app — pair with">
+                          {preview.unmatchedStaff.map((s) => <option key={s.staffId} value={s.staffId}>{s.name}</option>)}
+                        </optgroup>
+                      )}
                     </select>
                   </div>
                 ))}
                 <p className="text-xs text-slate-400">Pairing someone reloads the comparison. Once imported, the pairing is remembered.</p>
+                {preview.unmatchedEmployees.some((e) => !e.cannotAdd) && (
+                  <div className="flex items-center justify-between gap-2 flex-wrap">
+                    <p className="text-xs text-slate-500">
+                      &ldquo;Add&rdquo; creates their login quietly — no email is sent. They can&apos;t sign in until you press &ldquo;Resend Invite&rdquo; on the Staff page.
+                    </p>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="gap-1"
+                      onClick={() => setAdds(Object.fromEntries(preview.unmatchedEmployees.filter((e) => !e.cannotAdd && !pairs[e.xeroEmployeeId]).map((e) => [e.xeroEmployeeId, adds[e.xeroEmployeeId] ?? "technician"])))}
+                    >
+                      <UserPlus className="w-3.5 h-3.5" />Add everyone not in the app
+                    </Button>
+                  </div>
+                )}
               </CardContent>
             </Card>
           )}
@@ -277,9 +339,11 @@ export function XeroImportClient() {
             <p className="text-xs text-slate-500">
               Workers comp, fixed yearly costs, trade level and charge-out rate aren&apos;t in Xero and are never changed by this. Leave includes approved leave ending on or after {since}.
             </p>
-            <Button onClick={apply} disabled={applying || loading || selections.length === 0} className="gap-2">
+            <Button onClick={apply} disabled={applying || loading || total === 0} className="gap-2">
               {applying ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
-              {applying ? "Importing…" : `Import for ${selections.length} ${selections.length === 1 ? "person" : "people"}`}
+              {applying
+                ? "Importing…"
+                : `Import for ${total} ${total === 1 ? "person" : "people"}${creates.length ? ` (${creates.length} new)` : ""}`}
             </Button>
           </div>
         </>
