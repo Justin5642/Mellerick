@@ -112,12 +112,17 @@ export default async function SupplierPosPage({ searchParams }: { searchParams: 
 
   return (
     <div className="p-6 space-y-6 max-w-5xl">
-      <div>
-        <h1 className="text-2xl font-bold text-slate-900">Supplier POs</h1>
-        <p className="text-slate-500 text-sm mt-0.5">
-          Got a supplier invoice? Type the PO number on it, open the job, and enter the invoice against that PO. It then
-          goes to Xero as a bill from there.
-        </p>
+      <div className="flex items-start justify-between gap-4 flex-wrap">
+        <div>
+          <h1 className="text-2xl font-bold text-slate-900">Supplier POs</h1>
+          <p className="text-slate-500 text-sm mt-0.5">
+            Got a supplier invoice? Type the PO number on it, open the job, and enter the invoice against that PO. It then
+            goes to Xero as a bill from there.
+          </p>
+        </div>
+        <Link href="/dashboard/supplier-pos/invoices">
+          <Button variant="outline" size="sm">Upload supplier invoices</Button>
+        </Link>
       </div>
 
       <form className="flex gap-2 max-w-md" action="/dashboard/supplier-pos">
