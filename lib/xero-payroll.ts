@@ -35,6 +35,8 @@ export interface XeroEmployee {
   firstName: string;
   lastName: string;
   email?: string;
+  phone?: string;
+  mobile?: string;
   status?: string; // ACTIVE | TERMINATED
   terminationDate?: string;
   ordinaryEarningsRateID?: string;

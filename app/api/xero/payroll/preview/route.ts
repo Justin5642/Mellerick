@@ -15,6 +15,9 @@ import { PayrollAccessError, buildPreview, defaultSince, fetchPayroll } from "@/
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+// Xero reads may wait and retry when Xero says "slow down" (lib/xero-payroll-import.ts).
+export const maxDuration = 120;
+
 export async function GET(request: NextRequest) {
   const guard = await requireAdmin(request);
   if (!guard.ok) return guard.response;
