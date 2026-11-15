@@ -15,8 +15,17 @@
 // NOT decided here — they come from lib/scheduling.ts through bookingWindow(),
 // the one place both web and mobile ask. This file only arranges its answers
 // on a grid.
-import { moveSchedule, scheduledHoursOnDay, scheduleDays, type ScheduleDay } from "@/lib/scheduling";
-import { bookingWindow, sameBookingWindow, type BookingInsert, type JobBooking } from "@/lib/bookings";
+import { moveSchedule, scheduledHoursOnDay, scheduleDays, validateScheduleInput, type ScheduleDay } from "@/lib/scheduling";
+import {
+  bookingScheduleInput,
+  bookingWindow,
+  buildBookingWindow,
+  sameBookingWindow,
+  type BookingInsert,
+  type BookingWindowColumns,
+  type JobBooking,
+} from "@/lib/bookings";
+import { dateKeyInBusinessTZ, shiftDateKey } from "@/lib/date";
 
 export type BoardJob = {
   id: string;
@@ -325,4 +334,224 @@ export function formatHours(hours: number): string {
 /** "Day 2 of 3" for a booking on several days; null for a one-day booking. */
 export function dayOfLabel(entry: Pick<BoardEntry, "dayNumber" | "dayCount">): string | null {
   return entry.dayCount > 1 ? `Day ${entry.dayNumber} of ${entry.dayCount}` : null;
+}
+
+// ---------------------------------------------------------------------------
+// Resizing — dragging a booking's left or right edge across day columns
+// ---------------------------------------------------------------------------
+// Week view only: its columns are days, so a horizontal drag means "more or
+// fewer days". The gesture works in whole days (deltaDays); what the
+// stretched booking then MEANS is lib/scheduling.ts's, reached the way the
+// Schedule dialog reaches it — the booking as dialog input
+// (bookingScheduleInput), new start/end dates, validateScheduleInput, then
+// buildBookingWindow. So:
+//
+//   - The booking keeps its daily hours. A 7:00–15:30 booking stretched from
+//     Tuesday to Thursday is 7:00–15:30 on Tue, Wed and Thu.
+//   - One day → several: `daily` becomes true (0071's "same hours on each
+//     booked day"): starts_at on the first day at the start time, ends_at on
+//     the last day at the end time. Several → one: `daily` goes back to
+//     false — exactly what the dialog writes for a single day.
+//   - Weekends inside the new range are skipped and the endpoints are booked
+//     (workdayKeysBetween), so the preview shows the days the save will.
+//   - all_day is carried over as it was; the times come from the stored
+//     window rather than being re-derived from "All day", so nothing else
+//     moves.
+
+export type ResizeEdge = "start" | "end";
+
+/** Bookings on these jobs can't be resized. The board leaves such jobs out anyway; this is the belt to that. */
+const CLOSED_STATUSES = new Set(["completed", "cancelled"]);
+
+export function isClosedJob(job: Pick<BoardJob, "status">): boolean {
+  return CLOSED_STATUSES.has(job.status);
+}
+
+/**
+ * Why this booking can't be resized from the board, or null when it can.
+ * Shown as the error when someone tries; the board hides the handles for a
+ * closed job.
+ */
+export function resizeBlockedReason(job: Pick<BoardJob, "status">, booking: BoardBooking): string | null {
+  if (isClosedJob(job)) return `This job is ${job.status} — its schedule can't be changed.`;
+  if (booking.id.startsWith("pending:") || booking.id.startsWith("legacy:")) return "This booking hasn't finished saving yet.";
+  // A start with no end is a one-hour placeholder: no daily hours to repeat.
+  if (booking.ends_at === null) return "This booking has no end time — set its hours from the job's Schedule dialog first.";
+  // A continuous block that crosses midnight (an old-style overnight booking)
+  // has no "same hours each day" form.
+  if (!booking.daily && dateKeyInBusinessTZ(booking.starts_at) !== dateKeyInBusinessTZ(booking.ends_at)) {
+    return "This booking runs past midnight — change it from the job's Schedule dialog.";
+  }
+  return null;
+}
+
+export type ResizePlan =
+  | {
+      ok: true;
+      /** The window columns to write — all four, so they always agree. */
+      window: BookingWindowColumns;
+      startKey: string;
+      endKey: string;
+      /** False when the drag came back to the same dates. */
+      changed: boolean;
+    }
+  | { ok: false; error: string };
+
+/**
+ * Move one edge of a booking by whole days. Dragging an edge past the other
+ * one stops at a single day rather than flipping the booking round.
+ */
+export function planBookingResize(booking: BoardBooking, edge: ResizeEdge, deltaDays: number): ResizePlan {
+  const input = bookingScheduleInput(booking);
+  let { startDateKey, endDateKey } = input;
+  if (edge === "start") {
+    startDateKey = shiftDateKey(startDateKey, deltaDays);
+    if (startDateKey > endDateKey) startDateKey = endDateKey;
+  } else {
+    endDateKey = shiftDateKey(endDateKey, deltaDays);
+    if (endDateKey < startDateKey) endDateKey = startDateKey;
+  }
+  // allDay off so the stored times are used as they are (see above).
+  const next = { ...input, startDateKey, endDateKey, allDay: false };
+  const error = validateScheduleInput(next);
+  if (error) return { ok: false, error };
+  const window = { ...buildBookingWindow(next), all_day: booking.all_day };
+  return { ok: true, window, startKey: startDateKey, endKey: endDateKey, changed: !sameBookingWindow(window, booking) };
+}
+
+/**
+ * The board while a booking's edge is being dragged: the booking drawn on its
+ * PREVIEW days (hours included), and — so the chip under the pointer is never
+ * unmounted mid-gesture — still drawn on any ORIGINAL day the preview drops,
+ * as the same booking (same React key in the same cell). Those dropped days
+ * are returned so the board can fade them as "being removed"; they carry no
+ * hours.
+ */
+export function buildResizePreviewIndex(
+  bookings: readonly BoardBooking[],
+  jobsById: ReadonlyMap<string, BoardJob>,
+  dayKeys: readonly string[],
+  bookingDays: ReadonlyMap<string, ScheduleDay[]>,
+  original: BoardBooking,
+  window: BookingWindowColumns,
+): { index: BoardIndex; previewDays: ScheduleDay[]; droppedDayKeys: Set<string> } {
+  const previewDays = scheduleDays(bookingWindow(window));
+  const shownDays = new Map(bookingDays).set(original.id, previewDays);
+  const shown = bookings.map((b) => (b.id === original.id ? { ...b, ...window } : b));
+  const index = buildBoardIndex(shown, jobsById, dayKeys, shownDays);
+  const kept = new Set(previewDays.map((d) => d.dateKey));
+  const visible = new Set(dayKeys);
+  const job = jobsById.get(original.job_id);
+  const originalDays = bookingDays.get(original.id) ?? scheduleDays(bookingWindow(original));
+  const droppedDayKeys = new Set<string>();
+  originalDays.forEach((day, i) => {
+    if (kept.has(day.dateKey)) return;
+    droppedDayKeys.add(day.dateKey);
+    if (!job || !visible.has(day.dateKey)) return;
+    const entry: BoardEntry = { job, booking: original, day, dayNumber: i + 1, dayCount: originalDays.length };
+    let cellMap: Map<string, BoardEntry[]>;
+    if (original.staff_id) {
+      cellMap = index.byStaff.get(original.staff_id) ?? new Map();
+      index.byStaff.set(original.staff_id, cellMap);
+    } else {
+      cellMap = index.unassigned;
+    }
+    const list = cellMap.get(day.dateKey) ?? [];
+    list.push(entry);
+    list.sort((a, b) => Date.parse(a.day.startIso) - Date.parse(b.day.startIso));
+    cellMap.set(day.dateKey, list);
+  });
+  return { index, previewDays, droppedDayKeys };
+}
+
+/** Another booking of the same technician that a resize would run into. */
+export type ResizeConflict = {
+  booking: BoardBooking;
+  job: BoardJob;
+  /** The clashing days, each with the OTHER booking's hours that day. */
+  days: ScheduleDay[];
+};
+
+/** Whether two day blocks share any time. A start-only block (no end) is an instant: it clashes when it falls inside the other. */
+function blocksOverlap(a: ScheduleDay, b: ScheduleDay): boolean {
+  const [as, ae, bs, be] = [a.startIso, a.endIso, b.startIso, b.endIso].map(Date.parse);
+  if (ae <= as) return as >= bs && as < Math.max(be, bs + 1);
+  if (be <= bs) return bs >= as && bs < ae;
+  return as < be && bs < ae;
+}
+
+/**
+ * The technician's other bookings whose hours overlap the resized booking on
+ * a day it GAINS. Days it already had are not re-checked — a clash there was
+ * on the board before the drag, and repeating it on every resize would teach
+ * people to click through the warning. Two bookings on one day that don't
+ * overlap in time (a morning and an afternoon) are not a clash. Unassigned
+ * bookings never clash; only jobs on the board count.
+ */
+export function resizeConflicts(
+  original: BoardBooking,
+  window: BookingWindowColumns,
+  bookings: readonly BoardBooking[],
+  jobsById: ReadonlyMap<string, BoardJob>,
+): ResizeConflict[] {
+  if (!original.staff_id) return [];
+  const had = new Set(scheduleDays(bookingWindow(original)).map((d) => d.dateKey));
+  const gained = scheduleDays(bookingWindow(window)).filter((d) => !had.has(d.dateKey));
+  if (gained.length === 0) return [];
+  const conflicts: ResizeConflict[] = [];
+  for (const other of bookings) {
+    if (other.id === original.id || other.staff_id !== original.staff_id) continue;
+    const job = jobsById.get(other.job_id);
+    if (!job) continue;
+    const otherDays = new Map(scheduleDays(bookingWindow(other)).map((d) => [d.dateKey, d]));
+    const days: ScheduleDay[] = [];
+    for (const g of gained) {
+      const o = otherDays.get(g.dateKey);
+      if (!o) continue;
+      if (blocksOverlap(g, o)) days.push(o);
+    }
+    if (days.length > 0) conflicts.push({ booking: other, job, days });
+  }
+  return conflicts.sort((a, b) => Date.parse(a.days[0].startIso) - Date.parse(b.days[0].startIso));
+}
+
+// ---------------------------------------------------------------------------
+// Who's on a tile
+// ---------------------------------------------------------------------------
+
+/**
+ * The OTHER technicians booked on the same job on the same day as this
+ * entry, in booking order, once each — the "+1" on a tile. The tile's own
+ * technician is its row's (null in Unassigned) and is never included.
+ */
+export function otherStaffOnJobDay(
+  entry: Pick<BoardEntry, "booking" | "day">,
+  jobBookings: readonly BoardBooking[],
+  bookingDays: ReadonlyMap<string, ScheduleDay[]>,
+): string[] {
+  const others: string[] = [];
+  for (const b of jobBookings) {
+    if (!b.staff_id || b.staff_id === entry.booking.staff_id || others.includes(b.staff_id)) continue;
+    const days = bookingDays.get(b.id) ?? scheduleDays(bookingWindow(b));
+    if (days.some((d) => d.dateKey === entry.day.dateKey)) others.push(b.staff_id);
+  }
+  return others;
+}
+
+/** "Dave" from "Dave Smith" (or "Dave Smith (inactive)"). */
+export function firstName(fullName: string): string {
+  return fullName.trim().split(/\s+/)[0] || fullName;
+}
+
+/** "DS" from "Dave Smith" — the narrowest form of a name on a tile. */
+export function nameInitials(fullName: string): string {
+  return fullName
+    .replace(/\(.*?\)/g, "")
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((n) => n[0])
+    .join("")
+    .toUpperCase()
+    .slice(0, 2);
 }

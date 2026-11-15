@@ -172,7 +172,7 @@ export const SQL_LIST_MY_JOBS = `
 // Soonest first: the off-hours wake regions keep only the first 20
 // (lib/trackingGate.ts).
 export const SQL_LIST_MY_JOB_SITES = `
-  SELECT j.id, j.scheduled_cost_center_id, j.scheduled_start, j.scheduled_end, s.site_lat, s.site_lng,
+  SELECT j.id, j.scheduled_cost_center_id, j.scheduled_start, j.scheduled_end, s.site_lat, s.site_lng, s.geofence_radius_m,
          CASE WHEN j.id IN (SELECT te.job_id FROM time_entries te
                             WHERE te.staff_id = ?1 AND te.clock_out IS NULL AND te.entry_type = 'work')
               THEN 1 ELSE 0 END AS clocked_in
@@ -493,6 +493,10 @@ export interface MyJobSite {
   lat: number;
   lng: number;
   scheduledCostCenterId: string | null;
+  /** The site's own fence (0094); absent = the standard 150 m. */
+  radiusM?: number;
+  /** Scheduled today or clocked into — wins an overlap (geofenceState). */
+  preferred?: boolean;
 }
 
 export interface RawJobSiteRow {
@@ -502,19 +506,29 @@ export interface RawJobSiteRow {
   scheduled_end?: string | null;
   site_lat: number | string | null;
   site_lng: number | string | null;
+  geofence_radius_m?: number | string | null;
   /** 1 when I have an open work entry on the job. */
   clocked_in?: number | boolean | null;
 }
 
 /**
- * Today's sites only (Stage 5, 31 Oct 2026). The list used to be every open
- * job assigned to the tech, nearest wins — so an old on-hold job next door, or
- * a second job on the same estate, could take the clock-in and its cost centre.
- * Now: jobs whose schedule touches today, plus any job I'm clocked into. On a
- * day with nothing scheduled it falls back to every open job, as before, so an
- * unscheduled call-out still clocks.
+ * Every open job site, PREFERRED ones first: those scheduled today and any I'm
+ * clocked into (auto clock bug, 15 Nov 2026).
+ *
+ * Stage 5 (31 Oct) narrowed the list to today's jobs so an old on-hold job next
+ * door couldn't take the clock-in. But it narrowed BEFORE dropping sites with
+ * no location, and dropped every unscheduled job whenever anything was
+ * scheduled: a day whose scheduled job had no map pin watched nothing at all,
+ * and a visit to an open job not scheduled that day (Brodie, #583, 11 Nov)
+ * never clocked. Now nothing is dropped for its date; the old-job-next-door
+ * case is handled where it happens — nextGeofenceState prefers a preferred site
+ * over a nearer one that isn't — and preferred sites come first, so they are
+ * the ones kept within iOS's background region limit (MAX_WAKE_REGIONS).
  */
-export function todaysJobSites(rows: RawJobSiteRow[], now: Date = new Date()): RawJobSiteRow[] {
+export function rankJobSites(
+  rows: RawJobSiteRow[],
+  now: Date = new Date()
+): (RawJobSiteRow & { preferred: boolean })[] {
   const dayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
   const dayEnd = dayStart + 24 * 60 * 60 * 1000;
   const touchesToday = (r: RawJobSiteRow) => {
@@ -523,19 +537,30 @@ export function todaysJobSites(rows: RawJobSiteRow[], now: Date = new Date()): R
     const end = r.scheduled_end ? Date.parse(r.scheduled_end) : start;
     return Number.isFinite(start) && start < dayEnd && (Number.isFinite(end) ? end : start) >= dayStart;
   };
-  const today = rows.filter((r) => touchesToday(r) || !!r.clocked_in);
-  return today.some(touchesToday) ? today : rows;
+  const rank = (r: RawJobSiteRow) => (r.clocked_in ? 0 : touchesToday(r) ? 1 : 2);
+  return rows
+    .map((r, i) => ({ r, i, k: rank(r) }))
+    .sort((a, b) => a.k - b.k || a.i - b.i)
+    .map(({ r, k }) => ({ ...r, preferred: k < 2 }));
 }
 
 // Shared by both paths. Truthiness, not `!= null`, is the rule the geofence has
 // always applied: a 0/0 coordinate is an unset pin, not a site in the Atlantic.
 function mapJobSites(all: RawJobSiteRow[]): MyJobSite[] {
   const out: MyJobSite[] = [];
-  for (const r of todaysJobSites(all)) {
+  for (const r of rankJobSites(all)) {
     const lat = numOrNull(r.site_lat);
     const lng = numOrNull(r.site_lng);
     if (!lat || !lng) continue;
-    out.push({ jobId: r.id, lat, lng, scheduledCostCenterId: r.scheduled_cost_center_id ?? null });
+    const radius = numOrNull(r.geofence_radius_m ?? null);
+    out.push({
+      jobId: r.id,
+      lat,
+      lng,
+      scheduledCostCenterId: r.scheduled_cost_center_id ?? null,
+      ...(radius ? { radiusM: radius } : {}),
+      ...(r.preferred ? { preferred: true } : {}),
+    });
   }
   return out;
 }
@@ -557,14 +582,14 @@ export async function listMyJobSites(userId: string): Promise<MyJobSite[]> {
       const [res, openRes] = await Promise.all([
         supabase
           .from("jobs")
-          .select("id, scheduled_cost_center_id, scheduled_start, scheduled_end, sites(site_lat, site_lng)")
+          .select("id, scheduled_cost_center_id, scheduled_start, scheduled_end, sites(site_lat, site_lng, geofence_radius_m)")
           .or(assignedOrCrewFilter(userId, crew))
           .not("status", "in", '("completed","cancelled")')
           .order("scheduled_start", { ascending: true, nullsFirst: false })
           .order("id", { ascending: true }),
         supabase
           .from("time_entries")
-          .select("job_id, jobs(id, scheduled_cost_center_id, scheduled_start, scheduled_end, sites(site_lat, site_lng))")
+          .select("job_id, jobs!time_entries_job_id_fkey(id, scheduled_cost_center_id, scheduled_start, scheduled_end, sites(site_lat, site_lng, geofence_radius_m))")
           .eq("staff_id", userId)
           .eq("entry_type", "work")
           .is("clock_out", null),
@@ -574,7 +599,7 @@ export async function listMyJobSites(userId: string): Promise<MyJobSite[]> {
         scheduled_cost_center_id: string | null;
         scheduled_start: string | null;
         scheduled_end: string | null;
-        sites: { site_lat: number | null; site_lng: number | null } | null;
+        sites: { site_lat: number | null; site_lng: number | null; geofence_radius_m?: number | null } | null;
       };
       const rows = unwrapRows(res as never, "listMyJobSites") as unknown as Remote[];
       const open = (unwrapRows(openRes as never, "listMyJobSites open") as unknown as { jobs: Remote | null }[])
@@ -588,6 +613,7 @@ export async function listMyJobSites(userId: string): Promise<MyJobSite[]> {
         scheduled_end: r.scheduled_end,
         site_lat: r.sites?.site_lat ?? null,
         site_lng: r.sites?.site_lng ?? null,
+        geofence_radius_m: r.sites?.geofence_radius_m ?? null,
         clocked_in: openIds.has(r.id),
       });
       const listed = new Set(rows.map((r) => r.id));

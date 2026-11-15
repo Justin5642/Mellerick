@@ -18,11 +18,43 @@ export interface Signoff {
     signatureBase64: string;
     signedOffDate: string;
   }): Promise<{ photoId: string; storagePath: string; clockedOut: boolean; synced: boolean }>;
+  /** End of a day on a multi-day job: a note, finished stages, clock off. Job stays open. */
+  finishForToday(input: {
+    jobId: string;
+    staffId: string;
+    note: string;
+    stages: { id: string; name: string }[];
+  }): Promise<{ clockedOut: boolean; synced: boolean }>;
+  /** Customer not on site: the technician completes the job, no signature. */
+  completeAsTechnician(input: {
+    jobId: string;
+    staffId: string;
+    technicianName: string | null;
+    signedOffDate: string;
+  }): Promise<{ clockedOut: boolean; synced: boolean }>;
 }
 
 export function useSignoff(): Signoff {
   const layer = useDataLayer();
   const flush = useFlush();
+
+  // The job is finished, so the clock stops with it (31 Oct 2026). Before
+  // this, a sign-off left the entry running; on the day's last job tracking
+  // also switched off, so nothing ever closed it. Only the signer's own
+  // entry: the rest of the crew clock off themselves (or leave site). A
+  // failed lookup must not undo a sign-off that is already queued.
+  const clockOutOfJob = useCallback(async (staffId: string, jobId: string): Promise<boolean> => {
+    if (!layer) return false;
+    try {
+      const open = await getOpenWorkEntryOnJob(staffId, jobId);
+      if (!open) return false;
+      await layer.timeEntries.clockOut({ entryId: open.id, clockInIso: open.clockInIso, fix: await currentFix(3000) });
+      return true;
+    } catch (e) {
+      console.warn("[signoff] could not clock out after sign-off:", e);
+      return false;
+    }
+  }, [layer]);
 
   const signOff = useCallback<Signoff["signOff"]>(async (input) => {
     if (!layer) throw new Error("Data layer not ready");
@@ -34,23 +66,33 @@ export function useSignoff(): Signoff {
       localUri,
       signedOffDate: input.signedOffDate,
     });
-    // The job is finished, so the clock stops with it (31 Oct 2026). Before
-    // this, a sign-off left the entry running; on the day's last job tracking
-    // also switched off, so nothing ever closed it. Only the signer's own
-    // entry: the rest of the crew clock off themselves (or leave site). A
-    // failed lookup must not undo a sign-off that is already queued.
-    let clockedOut = false;
-    try {
-      const open = await getOpenWorkEntryOnJob(input.uploadedBy, input.jobId);
-      if (open) {
-        await layer.timeEntries.clockOut({ entryId: open.id, clockInIso: open.clockInIso, fix: await currentFix(3000) });
-        clockedOut = true;
-      }
-    } catch (e) {
-      console.warn("[signoff] could not clock out after sign-off:", e);
-    }
+    const clockedOut = await clockOutOfJob(input.uploadedBy, input.jobId);
     return { photoId, storagePath, clockedOut, synced: await flush() };
-  }, [layer, flush]);
+  }, [layer, flush, clockOutOfJob]);
 
-  return { ready: !!layer, signOff };
+  const completeAsTechnician = useCallback<Signoff["completeAsTechnician"]>(async (input) => {
+    if (!layer) throw new Error("Data layer not ready");
+    await layer.signature.completeAsTechnician({
+      jobId: input.jobId,
+      technicianName: input.technicianName,
+      signedOffDate: input.signedOffDate,
+    });
+    const clockedOut = await clockOutOfJob(input.staffId, input.jobId);
+    return { clockedOut, synced: await flush() };
+  }, [layer, flush, clockOutOfJob]);
+
+  const finishForToday = useCallback<Signoff["finishForToday"]>(async (input) => {
+    if (!layer) throw new Error("Data layer not ready");
+    await layer.signature.finishForToday({
+      jobId: input.jobId,
+      authorId: input.staffId,
+      date: new Date().toLocaleDateString("en-AU"),
+      note: input.note,
+      stages: input.stages,
+    });
+    const clockedOut = await clockOutOfJob(input.staffId, input.jobId);
+    return { clockedOut, synced: await flush() };
+  }, [layer, flush, clockOutOfJob]);
+
+  return { ready: !!layer, signOff, completeAsTechnician, finishForToday };
 }

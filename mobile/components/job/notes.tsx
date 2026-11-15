@@ -434,6 +434,11 @@ export function JobNotesTab({ jobId, currentUserId, readOnly = false }: { jobId:
                 <Text style={styles.scheduleTagText}>Scheduling note — also shown on Overview</Text>
               </View>
             )}
+            {item.source === "day_finish" && (
+              <View style={styles.scheduleTag}>
+                <Text style={styles.scheduleTagText}>End of day</Text>
+              </View>
+            )}
             <Text style={styles.noteContent}>{item.content}</Text>
           </View>
         )}

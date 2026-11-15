@@ -26,6 +26,8 @@ export interface SupplierOrder {
   emailedAt: string | null;
   /** Set when the crew tapped Delivered (0089). Absent from older servers. */
   deliveredAt?: string | null;
+  /** Docket photos taken against this PO (0093). Absent from older servers. */
+  docketPhotos?: number;
   raisedBy: string | null;
   items: { description: string; quantity: number }[];
 }
@@ -39,6 +41,10 @@ export interface SupplierOrdersState {
   suppliers: Supplier[];
   /** Which company cost centre each of the job's budget lines belongs to. Absent from servers before 0087. */
   costCentreLines?: { id: string; costCentreId: string | null }[];
+  /** The job's cost centres, read fresh by the server on every load. Absent from older servers. */
+  costCentres?: { id: string; name: string; code: string | null; po_number: string }[];
+  /** Supplier ids for the picker's Recent group, most recent first (this user's POs, then the company's). Absent from older servers. */
+  recentSupplierIds?: string[];
 }
 
 export interface Supplier {
@@ -46,6 +52,8 @@ export interface Supplier {
   name: string;
   email: string | null;
   defaultCostCentreId?: string | null;
+  /** Position in the picker's Pinned group (0097). Null/absent = not pinned. */
+  pinOrder?: number | null;
 }
 
 export interface NewSupplierOrder {
@@ -67,7 +75,8 @@ export interface RaisedSupplierOrder {
   warning?: string;
 }
 
-async function call<T>(path: string, init: RequestInit = {}): Promise<T> {
+/** A call to the office server with the signed-in user's token. Also used by lib/jobStages.ts. */
+export async function call<T>(path: string, init: RequestInit = {}): Promise<T> {
   if (!API_BASE_URL) throw new Error("App isn't configured to reach the office server.");
   const { data: sessionData } = await supabase.auth.getSession();
   const accessToken = sessionData.session?.access_token;
@@ -115,23 +124,11 @@ export function supplierOrderProblem(
   if (!o.supplierName.trim()) return "Enter the supplier's name.";
   if (o.supplierEmail && !EMAIL.test(o.supplierEmail.trim())) return "That supplier email address doesn't look right.";
   const filled = o.items.filter((i) => i.description.trim());
-  if (filled.length === 0) return "Add at least one item.";
+  // A phone or counter order needs no items — the docket photo shows what came.
+  if (filled.length === 0 && o.supplierEmail) return "Add at least one item to email the supplier.";
   const bad = filled.find((i) => !Number.isFinite(i.quantity) || i.quantity <= 0);
   if (bad) return `Check the quantity for "${bad.description.trim()}".`;
   return null;
-}
-
-/**
- * Up to `limit` suppliers whose name (or any word in it) starts with what was
- * typed — "epp" finds "Reece Epping". Empty search = the first few.
- */
-export function matchSuppliers(all: Supplier[], query: string, limit = 8): Supplier[] {
-  const q = query.trim().toLowerCase();
-  if (!q) return all.slice(0, limit);
-  const starts = all.filter((s) => s.name.toLowerCase().startsWith(q));
-  const words = all.filter((s) => !starts.includes(s) && s.name.toLowerCase().split(/[\s\-&/()]+/).some((w) => w.startsWith(q)));
-  const anywhere = all.filter((s) => !starts.includes(s) && !words.includes(s) && s.name.toLowerCase().includes(q));
-  return [...starts, ...words, ...anywhere].slice(0, limit);
 }
 
 /**

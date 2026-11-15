@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
-import { Alert, AppState } from "react-native";
+import { Alert, AppState, Platform } from "react-native";
 import * as Location from "expo-location";
 import { supabase } from "./supabase";
 import { listMyJobSites } from "./data/reads/jobs";
@@ -20,6 +20,7 @@ import { useDataLayer } from "./data/DataProvider";
 import type { DataLayer } from "./data/createDataLayer";
 
 import { arrivalCostCentre, nextGeofenceState, type TrackedSite } from "./geofenceState";
+import { sendAutoClockReport, shouldReport, type AutoClockReport } from "./autoClockStatusReport";
 import {
   applyGeofenceTransition,
   type GeofenceTransitionDeps,
@@ -398,6 +399,10 @@ export function LocationTrackingProvider({ children }: { children: ReactNode }) 
         // in a basement, so the one available surface gets used instead.
         if (disposed) return;
         console.warn("[geofence] foreground watcher failed to start:", e);
+        // Report it, so the office's Staff page shows "couldn't start" rather
+        // than whatever the last status was (audit, 15 Nov 2026).
+        setTracking(false);
+        setStatus({ reason: "failed", backgroundOff: false, approximate: false });
         if (autoClockAlertedRef.current) return;
         autoClockAlertedRef.current = true;
         Alert.alert(
@@ -421,11 +426,19 @@ export function LocationTrackingProvider({ children }: { children: ReactNode }) 
         return false;
       });
       if (!disposed) {
-        const approximate = await Location.getForegroundPermissionsAsync()
-          // Android says so; iOS doesn't report it, so handlePosition infers it from km-level fixes.
+        const androidCoarse = await Location.getForegroundPermissionsAsync()
           .then((p) => p.android?.accuracy === "coarse")
           .catch(() => false);
-        setStatus({ reason: null, backgroundOff: !started, approximate });
+        // Android reports Approximate; iOS doesn't, so on an iPhone it is only
+        // ever inferred (handlePosition, from fixes kilometres wide). This runs
+        // every few minutes and used to reset it to false, so the Staff page
+        // flipped back to "Working" and hid the problem (audit, 15 Nov 2026).
+        // Keep the inference; a sharp fix clears it.
+        setStatus((prev) => ({
+          reason: null,
+          backgroundOff: !started,
+          approximate: Platform.OS === "android" ? androidCoarse : prev.approximate,
+        }));
       }
       if (!started && !backgroundOffLoggedRef.current) {
         backgroundOffLoggedRef.current = true;
@@ -488,6 +501,9 @@ export function LocationTrackingProvider({ children }: { children: ReactNode }) 
     // iOS "Approximate Location" gives fixes kilometres wide; say so on screen.
     if (typeof position.coords.accuracy === "number" && position.coords.accuracy > 1000) {
       setStatus((s) => (s.approximate ? s : { ...s, approximate: true }));
+    } else if (Platform.OS !== "android" && typeof position.coords.accuracy === "number" && position.coords.accuracy <= 200) {
+      // Precise again (the setting was turned back on): stop saying it's approximate.
+      setStatus((s) => (s.approximate ? { ...s, approximate: false } : s));
     }
     if (busyRef.current) return;
     const sites = sitesRef.current;
@@ -638,6 +654,36 @@ export function LocationTrackingProvider({ children }: { children: ReactNode }) 
     };
   }
 
+
+  // Tell the office whether auto clock can work on this phone (0102). On every change, and every few hours otherwise; best-effort,
+  // never in the way of clocking — see lib/autoClockStatusReport.ts.
+  const lastReportRef = useRef<{ report: AutoClockReport; atMs: number } | null>(null);
+  useEffect(() => {
+    if (!userId) {
+      lastReportRef.current = null;
+      return;
+    }
+    // Before the first site load the status is just the idle default.
+    if (!sitesLoadedRef.current && !tracking && status.reason === null) return;
+    const report: AutoClockReport = {
+      tracking,
+      reason: status.reason,
+      backgroundOff: status.backgroundOff,
+      approximate: status.approximate,
+      siteCount: sitesRef.current.length,
+    };
+    const now = Date.now();
+    if (!shouldReport(lastReportRef.current, report, now)) return;
+    lastReportRef.current = { report, atMs: now };
+    sendAutoClockReport(userId, report)
+      .then((ok) => {
+        // Not sent: forget it, so the next change (or tick) tries again.
+        if (!ok) lastReportRef.current = null;
+      })
+      .catch(() => {
+        lastReportRef.current = null;
+      });
+  }, [userId, tracking, status]);
 
   return (
     <LocationTrackingContext.Provider value={{ enabled: tracking, ...status }}>

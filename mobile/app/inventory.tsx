@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { View, Text, SectionList, StyleSheet, RefreshControl, TouchableOpacity, Modal, TextInput, Alert, ScrollView } from "react-native";
+import { View, Text, SectionList, StyleSheet, RefreshControl, TouchableOpacity, TextInput, Alert } from "react-native";
+import { KeyboardSheet, KEYBOARD_SHEET_INPUT_FONT_SIZE } from "../components/KeyboardSheet";
 import { Stack } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { colors } from "../lib/theme";
@@ -194,38 +195,37 @@ export default function InventoryScreen() {
         }}
       />
 
-      <Modal visible={!!draft} transparent animationType="slide" onRequestClose={() => !saving && setDraft(null)}>
-        <View style={styles.overlay}>
-          <View style={styles.sheet}>
-            <Text style={styles.sheetTitle}>{draft?.id ? "Edit item" : "New inventory item"}</Text>
-            <ScrollView automaticallyAdjustKeyboardInsets keyboardDismissMode="interactive" keyboardShouldPersistTaps="handled">
-              <Field label="Name" value={draft?.name ?? ""} onChange={set("name")} />
-              <View style={styles.twoCol}>
-                <View style={{ flex: 1 }}><Field label="SKU" value={draft?.sku ?? ""} onChange={set("sku")} /></View>
-                <View style={{ flex: 1 }}><Field label="Category" value={draft?.category ?? ""} onChange={set("category")} /></View>
-              </View>
-              <View style={styles.twoCol}>
-                <View style={{ flex: 1 }}><Field label="Qty on hand" value={draft?.quantity_on_hand ?? ""} onChange={set("quantity_on_hand")} keyboardType="decimal-pad" /></View>
-                <View style={{ flex: 1 }}><Field label="Reorder level" value={draft?.reorder_level ?? ""} onChange={set("reorder_level")} keyboardType="decimal-pad" /></View>
-              </View>
-              <View style={styles.twoCol}>
-                <View style={{ flex: 1 }}><Field label="Unit cost" value={draft?.unit_cost ?? ""} onChange={set("unit_cost")} keyboardType="decimal-pad" /></View>
-                <View style={{ flex: 1 }}><Field label="Unit sell" value={draft?.unit_sell ?? ""} onChange={set("unit_sell")} keyboardType="decimal-pad" /></View>
-              </View>
-              <View style={styles.twoCol}>
-                <View style={{ flex: 1 }}><Field label="Unit" value={draft?.unit ?? ""} onChange={set("unit")} /></View>
-                <View style={{ flex: 1 }}><Field label="Supplier" value={draft?.supplier ?? ""} onChange={set("supplier")} /></View>
-              </View>
-              <Field label="Description" value={draft?.description ?? ""} onChange={set("description")} multiline />
-            </ScrollView>
-            <View style={styles.actions}>
-              {draft?.id ? <TouchableOpacity style={styles.deactivate} onPress={deactivate} disabled={saving}><Text style={styles.deactivateText}>Deactivate</Text></TouchableOpacity> : null}
-              <TouchableOpacity style={styles.cancel} onPress={() => setDraft(null)} disabled={saving}><Text style={styles.cancelText}>Cancel</Text></TouchableOpacity>
-              <TouchableOpacity style={styles.saveBtn} onPress={save} disabled={saving}><Text style={styles.saveText}>{saving ? "…" : "Save"}</Text></TouchableOpacity>
-            </View>
+      <KeyboardSheet
+        visible={!!draft}
+        onRequestClose={() => !saving && setDraft(null)}
+        title={<Text style={styles.sheetTitle}>{draft?.id ? "Edit item" : "New inventory item"}</Text>}
+        footer={
+          <View style={styles.actions}>
+            {draft?.id ? <TouchableOpacity style={styles.deactivate} onPress={deactivate} disabled={saving}><Text style={styles.deactivateText}>Deactivate</Text></TouchableOpacity> : null}
+            <TouchableOpacity style={styles.cancel} onPress={() => setDraft(null)} disabled={saving}><Text style={styles.cancelText}>Cancel</Text></TouchableOpacity>
+            <TouchableOpacity style={styles.saveBtn} onPress={save} disabled={saving}><Text style={styles.saveText}>{saving ? "…" : "Save"}</Text></TouchableOpacity>
           </View>
+        }
+      >
+        <Field label="Name" value={draft?.name ?? ""} onChange={set("name")} />
+        <View style={styles.twoCol}>
+          <View style={{ flex: 1 }}><Field label="SKU" value={draft?.sku ?? ""} onChange={set("sku")} /></View>
+          <View style={{ flex: 1 }}><Field label="Category" value={draft?.category ?? ""} onChange={set("category")} /></View>
         </View>
-      </Modal>
+        <View style={styles.twoCol}>
+          <View style={{ flex: 1 }}><Field label="Qty on hand" value={draft?.quantity_on_hand ?? ""} onChange={set("quantity_on_hand")} keyboardType="decimal-pad" /></View>
+          <View style={{ flex: 1 }}><Field label="Reorder level" value={draft?.reorder_level ?? ""} onChange={set("reorder_level")} keyboardType="decimal-pad" /></View>
+        </View>
+        <View style={styles.twoCol}>
+          <View style={{ flex: 1 }}><Field label="Unit cost" value={draft?.unit_cost ?? ""} onChange={set("unit_cost")} keyboardType="decimal-pad" /></View>
+          <View style={{ flex: 1 }}><Field label="Unit sell" value={draft?.unit_sell ?? ""} onChange={set("unit_sell")} keyboardType="decimal-pad" /></View>
+        </View>
+        <View style={styles.twoCol}>
+          <View style={{ flex: 1 }}><Field label="Unit" value={draft?.unit ?? ""} onChange={set("unit")} /></View>
+          <View style={{ flex: 1 }}><Field label="Supplier" value={draft?.supplier ?? ""} onChange={set("supplier")} /></View>
+        </View>
+        <Field label="Description" value={draft?.description ?? ""} onChange={set("description")} multiline />
+      </KeyboardSheet>
     </View>
   );
 }
@@ -256,12 +256,10 @@ const styles = StyleSheet.create({
   sell: { fontSize: 13, fontWeight: "700", color: colors.slate900 },
   margin: { fontSize: 11, color: colors.slate400 },
   empty: { textAlign: "center", color: colors.slate400, marginTop: 40, fontSize: 13 },
-  overlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.4)", justifyContent: "flex-end" },
-  sheet: { backgroundColor: colors.card, borderTopLeftRadius: 16, borderTopRightRadius: 16, padding: 16, paddingBottom: 28, maxHeight: "88%" },
   sheetTitle: { fontSize: 16, fontWeight: "800", color: colors.slate900, marginBottom: 12 },
   field: { marginBottom: 12 },
   fieldLabel: { fontSize: 12, fontWeight: "700", color: colors.slate500, textTransform: "uppercase", marginBottom: 6 },
-  input: { borderWidth: 1, borderColor: colors.border, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10, fontSize: 14, backgroundColor: colors.bg, color: colors.slate900 },
+  input: { borderWidth: 1, borderColor: colors.border, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10, fontSize: KEYBOARD_SHEET_INPUT_FONT_SIZE, backgroundColor: colors.bg, color: colors.slate900 },
   multiline: { minHeight: 60, textAlignVertical: "top" },
   twoCol: { flexDirection: "row", gap: 12 },
   actions: { flexDirection: "row", gap: 10, marginTop: 12, alignItems: "center" },

@@ -6,12 +6,15 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { FileDropzone } from "@/components/ui/file-dropzone";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Plus, Trash2, Navigation, MapPin, Loader2, ShoppingCart, X } from "lucide-react";
 import { nextJobPoNumber } from "@/lib/job-po-number";
 import { siteOneLine, type JobSiteParts } from "@/lib/job-site";
 import { planBuilderPo, planBuilderPoLines, type BuilderPoLineInput, type CostCentreOption } from "@/lib/builder-po";
 import { BuilderPoLines, blankLine, type StageOption } from "@/components/job/builder-po-lines";
+import { SupplierPicker, OTHER_SUPPLIER } from "@/components/job/supplier-picker";
+import { recentSupplierIds } from "@/lib/supplier-picker";
 
 interface CostCenter {
   id: string;
@@ -20,6 +23,8 @@ interface CostCenter {
   code: string | null;
   allocated_amount: number;
   allocated_hours: number;
+  /** Marked complete from site or here (0095). */
+  completed_at?: string | null;
 }
 
 interface PurchaseOrder {
@@ -106,6 +111,8 @@ const VENDOR_ORDER_STATUS_COLORS: Record<VendorOrder["status"], string> = {
   cancelled: "bg-slate-100 text-slate-400 line-through",
 };
 
+const BLANK_VO_FORM = { supplier_id: "", other_name: "", order_date: "", notes: "" };
+
 function progressColor(pct: number) {
   if (pct >= 95) return "bg-red-500";
   if (pct >= 75) return "bg-orange-400";
@@ -118,7 +125,10 @@ export function JobPO({ jobId, jobNumber, customerName, site, pos: initialPos, t
   const [vendorOrders, setVendorOrders] = useState<VendorOrder[]>(initialVendorOrders);
   const [voFormOpenFor, setVoFormOpenFor] = useState<string | null>(null);
   const [voSaving, setVoSaving] = useState(false);
-  const [voForm, setVoForm] = useState({ vendor_name: "", order_number: "", amount: "", order_date: "", notes: "" });
+  // Supplier picked from our list (0087), or OTHER_SUPPLIER plus a typed name.
+  // No amount and no order number: the price comes from the supplier's invoice
+  // and the PO number is assigned by the database (0085).
+  const [voForm, setVoForm] = useState(BLANK_VO_FORM);
   const [showForm, setShowForm] = useState(false);
   const [geocoding, setGeocoding] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -139,7 +149,30 @@ export function JobPO({ jobId, jobNumber, customerName, site, pos: initialPos, t
   const [invoiceFile, setInvoiceFile] = useState<File | null>(null);
   const [invoiceBusy, setInvoiceBusy] = useState(false);
   const [addLines, setAddLines] = useState<BuilderPoLineInput[]>([blankLine()]);
-  const [suppliers, setSuppliers] = useState<{ id: string; name: string }[]>([]);
+  const [suppliers, setSuppliers] = useState<{ id: string; name: string; pinOrder: number | null }[]>([]);
+  const [recentSuppliers, setRecentSupplierIds] = useState<string[]>([]);
+  const [myId, setMyId] = useState<string | null>(null);
+  // Docket photos the crew took against each order (0093). A failed read just
+  // shows no docket links.
+  const [dockets, setDockets] = useState<Record<string, string[]>>({});
+
+  useEffect(() => {
+    supabase
+      .from("job_photos")
+      .select("vendor_order_id, storage_path")
+      .eq("job_id", jobId)
+      .not("vendor_order_id", "is", null)
+      .order("created_at")
+      .then(({ data, error }) => {
+        if (error) return;
+        const byOrder: Record<string, string[]> = {};
+        for (const p of (data ?? []) as { vendor_order_id: string; storage_path: string }[]) {
+          (byOrder[p.vendor_order_id] ??= []).push(p.storage_path);
+        }
+        setDockets(byOrder);
+      });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [jobId]);
 
   useEffect(() => {
     supabase
@@ -158,14 +191,45 @@ export function JobPO({ jobId, jobNumber, customerName, site, pos: initialPos, t
         setCostCentresFailed(!!error);
         setCostCentreOptions((data as CostCentreOption[]) ?? []);
       });
-    supabase
-      .from("suppliers")
-      .select("id, name")
-      .eq("is_active", true)
-      .order("name")
-      .then(({ data }) => setSuppliers((data as { id: string; name: string }[]) ?? []));
+    loadSupplierPicker();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // The supplier picker's list: each supplier's place in the Pinned group
+  // (0097; a database without pin_order (42703)
+  // shows none pinned), and the
+  // Recent group from the newest POs on every job — this user's first, then
+  // the company's (lib/supplier-picker.ts). A failed recent read just leaves
+  // Recent out.
+  async function loadSupplierPicker() {
+    const [{ data: auth }, recent] = await Promise.all([
+      supabase.auth.getUser(),
+      supabase
+        .from("vendor_orders")
+        .select("supplier_id, vendor_name, entered_by, created_at")
+        .order("created_at", { ascending: false })
+        .limit(300),
+    ]);
+    const userId = auth.user?.id ?? null;
+    setMyId(userId);
+    const read = (cols: string) => supabase.from("suppliers").select(cols).eq("is_active", true).order("name");
+    let { data, error } = await read("id, name, pin_order");
+    if (error?.code === "42703") ({ data, error } = await read("id, name"));
+    const list = ((data ?? []) as unknown as { id: string; name: string; pin_order?: number | null }[]).map((s) => ({
+      id: s.id,
+      name: s.name,
+      pinOrder: s.pin_order ?? null,
+    }));
+    setSuppliers(list);
+    if (recent.error) return;
+    const uses = (recent.data ?? []).map((o) => ({
+      supplierId: o.supplier_id,
+      vendorName: o.vendor_name,
+      enteredBy: o.entered_by,
+      createdAt: o.created_at,
+    }));
+    setRecentSupplierIds(recentSupplierIds(uses, list, userId));
+  }
 
   function fieldErr(field: string) {
     return errors[field] ? "border-red-500 focus-visible:ring-red-500" : "";
@@ -331,30 +395,34 @@ export function JobPO({ jobId, jobNumber, customerName, site, pos: initialPos, t
   }
 
   async function saveVendorOrder(costCenterId: string) {
-    if (!voForm.vendor_name.trim()) { toast.error("Vendor name is required"); return; }
+    // A supplier from the list links the order to that account (0087); "Other"
+    // is a one-off, kept by name only.
+    const picked = voForm.supplier_id === OTHER_SUPPLIER ? null : suppliers.find((s) => s.id === voForm.supplier_id) ?? null;
+    const name = picked?.name ?? (voForm.supplier_id === OTHER_SUPPLIER ? voForm.other_name.trim() : "");
+    if (!name) { toast.error(voForm.supplier_id === OTHER_SUPPLIER ? "Type the supplier's name" : "Choose a supplier"); return; }
     setVoSaving(true);
-    // A name picked from the supplier list links the order to that supplier
-    // (0087); anything else is a one-off, kept by name only.
-    const picked = suppliers.find((s) => s.name.toLowerCase() === voForm.vendor_name.trim().toLowerCase());
     const { data, error } = await supabase.from("vendor_orders").insert({
       cost_center_id: costCenterId,
       job_id: jobId,
-      vendor_name: picked?.name ?? voForm.vendor_name.trim(),
+      vendor_name: name,
       supplier_id: picked?.id ?? null,
-      order_number: voForm.order_number || null,
-      amount: parseFloat(voForm.amount) || 0,
+      // Who raised it — the picker's Recent group is worked out from this.
+      entered_by: myId ?? undefined,
+      amount: 0,
       order_date: voForm.order_date || null,
-      notes: voForm.notes || null,
+      notes: voForm.notes.trim() || null,
     }).select("*, vendor_order_items(description, quantity, sort_order), profiles!vendor_orders_entered_by_fkey(full_name)").single();
 
-    if (error || !data) { toast.error("Failed to save vendor order"); setVoSaving(false); return; }
+    if (error || !data) { toast.error("Failed to raise the PO"); setVoSaving(false); return; }
 
-    const updated = [data as VendorOrder, ...vendorOrders];
+    const order = data as VendorOrder;
+    const updated = [order, ...vendorOrders];
     setVendorOrders(updated);
     onVendorOrdersUpdate(updated);
+    if (picked) setRecentSupplierIds(prev => [picked.id, ...prev.filter(id => id !== picked.id)]);
     setVoFormOpenFor(null);
-    setVoForm({ vendor_name: "", order_number: "", amount: "", order_date: "", notes: "" });
-    toast.success("Vendor order raised");
+    setVoForm(BLANK_VO_FORM);
+    toast.success(`${order.po_number} raised for ${order.vendor_name} — give the supplier this number`);
     setVoSaving(false);
   }
 
@@ -445,6 +513,37 @@ export function JobPO({ jobId, jobNumber, customerName, site, pos: initialPos, t
     else toast.error("Couldn't open the invoice file");
   }
 
+  async function openDocket(path: string) {
+    const { data } = await supabase.storage.from("job-photos").createSignedUrl(path, 60);
+    if (data?.signedUrl) window.open(data.signedUrl, "_blank");
+    else toast.error("Couldn't open the docket photo");
+  }
+
+  // A stage done, so it can be claimed (0095; Justin, 4 Nov 2026). Through the
+  // same route the phone uses; the office can also reopen one.
+  async function setStageComplete(cc: CostCenter, reopen: boolean) {
+    try {
+      const res = await fetch(`/api/jobs/${jobId}/stages/${cc.id}/complete`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(reopen ? { reopen: true } : {}),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        toast.error(body.error ?? "Couldn't change the stage.");
+        return;
+      }
+      setPos((prev) =>
+        prev.map((p) => ({
+          ...p,
+          po_cost_centers: (p.po_cost_centers ?? []).map((l) => (l.id === cc.id ? { ...l, completed_at: body.completedAt ?? null } : l)),
+        }))
+      );
+    } catch {
+      toast.error("Couldn't reach the server. Check your connection.");
+    }
+  }
+
   async function deleteVendorOrder(id: string) {
     const { error, count } = await supabase.from("vendor_orders").delete({ count: "exact" }).eq("id", id);
     if (error || count === 0) { toast.error(error?.message ?? "Could not remove this vendor order."); return; }
@@ -533,8 +632,8 @@ export function JobPO({ jobId, jobNumber, customerName, site, pos: initialPos, t
               <Input inputMode="decimal" value={invoiceForm.amount} onChange={e => setInvoiceForm(f => ({ ...f, amount: e.target.value }))} placeholder="$ ex GST" className="h-7 text-xs text-right" />
             </div>
             <div className="flex items-center justify-between gap-2">
-              <input type="file" accept="application/pdf,image/*" onChange={e => setInvoiceFile(e.target.files?.[0] ?? null)} className="text-[11px] text-slate-500" />
-              <div className="flex gap-1">
+              <FileDropzone compact file={invoiceFile} onFileChange={setInvoiceFile} accept="application/pdf,image/*" hint="PDF or image" className="min-w-0 flex-1" />
+              <div className="flex shrink-0 gap-1">
                 <Button type="button" variant="ghost" size="sm" className="h-7 text-xs" onClick={() => setInvoiceFor(null)}>Cancel</Button>
                 <Button type="button" size="sm" className="h-7 text-xs" onClick={() => saveInvoice(vo)} disabled={invoiceBusy}>{invoiceBusy ? "Saving..." : "Save invoice"}</Button>
               </div>
@@ -561,6 +660,15 @@ export function JobPO({ jobId, jobNumber, customerName, site, pos: initialPos, t
         ) : vo.status !== "cancelled" ? (
           <button onClick={() => openInvoice(vo)} className="text-blue-600 hover:underline">+ Enter supplier invoice</button>
         ) : null}
+        {(dockets[vo.id] ?? []).length > 0 && (
+          <div className="flex items-center gap-2">
+            {(dockets[vo.id] ?? []).map((path, n) => (
+              <button key={path} onClick={() => openDocket(path)} className="text-blue-600 hover:underline">
+                {n === 0 ? "View docket photo" : `Docket photo ${n + 1}`}
+              </button>
+            ))}
+          </div>
+        )}
         <p className="text-slate-400">
           {[
             vo.profiles?.full_name ? `Raised by ${vo.profiles.full_name}` : null,
@@ -677,6 +785,14 @@ export function JobPO({ jobId, jobNumber, customerName, site, pos: initialPos, t
                       <p className="text-sm font-semibold text-slate-800">
                         {cc.name}
                         {cc.code && <span className="ml-2 text-xs text-slate-400 font-mono font-normal">{cc.code}</span>}
+                        {cc.completed_at ? (
+                          <span className="ml-2 text-xs font-medium text-green-700 bg-green-50 px-1.5 py-0.5 rounded">
+                            ✓ Stage complete {new Date(cc.completed_at).toLocaleDateString("en-AU")}
+                            <button onClick={() => setStageComplete(cc, true)} className="ml-1.5 text-slate-400 hover:text-slate-600 underline font-normal">reopen</button>
+                          </span>
+                        ) : (
+                          <button onClick={() => setStageComplete(cc, false)} className="ml-2 text-xs font-normal text-blue-600 hover:underline">Mark stage complete</button>
+                        )}
                       </p>
                       <select
                         value={cc.cost_centre_id ?? ""}
@@ -726,43 +842,48 @@ export function JobPO({ jobId, jobNumber, customerName, site, pos: initialPos, t
 
                       {voFormOpenFor === cc.id ? (
                         <div className="rounded border border-slate-200 p-2 space-y-2">
-                          <datalist id="po-supplier-list">
-                            {suppliers.map((s) => <option key={s.id} value={s.name} />)}
-                          </datalist>
                           <div className="grid grid-cols-2 gap-2">
-                            <Input
-                              value={voForm.vendor_name}
-                              onChange={e => setVoForm(p => ({ ...p, vendor_name: e.target.value }))}
-                              placeholder="Supplier *"
-                              className="text-xs h-7"
-                              list="po-supplier-list"
+                            <SupplierPicker
+                              className="col-span-2"
+                              suppliers={suppliers}
+                              recentIds={recentSuppliers}
+                              value={voForm.supplier_id}
+                              onChange={(id, typed) =>
+                                setVoForm(p => ({ ...p, supplier_id: id, other_name: id === OTHER_SUPPLIER ? typed || p.other_name : p.other_name }))
+                              }
                             />
-                            <Input
-                              value={voForm.order_number}
-                              onChange={e => setVoForm(p => ({ ...p, order_number: e.target.value }))}
-                              placeholder="Order #"
-                              className="text-xs h-7 font-mono"
-                            />
-                            <Input
-                              type="number" step="0.01"
-                              value={voForm.amount}
-                              onChange={e => setVoForm(p => ({ ...p, amount: e.target.value }))}
-                              placeholder="$ Amount"
-                              className="text-xs h-7"
-                            />
+                            {voForm.supplier_id === OTHER_SUPPLIER && (
+                              <Input
+                                autoFocus
+                                value={voForm.other_name}
+                                onChange={e => setVoForm(p => ({ ...p, other_name: e.target.value }))}
+                                placeholder="Supplier name *"
+                                className="col-span-2 text-base sm:text-xs h-7"
+                              />
+                            )}
                             <Input
                               type="date"
+                              aria-label="Order date"
                               value={voForm.order_date}
                               onChange={e => setVoForm(p => ({ ...p, order_date: e.target.value }))}
                               className="text-xs h-7"
                             />
+                            <Input
+                              value={voForm.notes}
+                              onChange={e => setVoForm(p => ({ ...p, notes: e.target.value }))}
+                              placeholder="Notes (optional)"
+                              className="text-xs h-7"
+                            />
                           </div>
+                          <p className="text-[11px] text-slate-400">
+                            A PO number is given when you save. The price comes later, from the supplier&apos;s invoice.
+                          </p>
                           <div className="flex justify-end gap-2">
-                            <Button type="button" variant="ghost" size="sm" className="h-7 text-xs" onClick={() => { setVoFormOpenFor(null); setVoForm({ vendor_name: "", order_number: "", amount: "", order_date: "", notes: "" }); }}>
+                            <Button type="button" variant="ghost" size="sm" className="h-7 text-xs" onClick={() => { setVoFormOpenFor(null); setVoForm(BLANK_VO_FORM); }}>
                               <X className="w-3 h-3" />
                             </Button>
                             <Button type="button" size="sm" className="h-7 text-xs" onClick={() => saveVendorOrder(cc.id)} disabled={voSaving}>
-                              {voSaving ? "Saving..." : "Save"}
+                              {voSaving ? "Raising..." : "Raise PO"}
                             </Button>
                           </div>
                         </div>
@@ -771,7 +892,7 @@ export function JobPO({ jobId, jobNumber, customerName, site, pos: initialPos, t
                           onClick={() => setVoFormOpenFor(cc.id)}
                           className="flex items-center gap-1 text-xs text-slate-400 hover:text-slate-600 transition-colors"
                         >
-                          <ShoppingCart className="w-3 h-3" />Raise Vendor Order
+                          <ShoppingCart className="w-3 h-3" />Raise supplier PO
                         </button>
                       )}
                     </div>

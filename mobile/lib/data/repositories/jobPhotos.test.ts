@@ -50,6 +50,16 @@ describe("JobPhotosRepository", () => {
     expect(w.payload).not.toHaveProperty("created_at");
   });
 
+  it("a docket photo names its PO and caption; an ordinary photo names neither", async () => {
+    const { outbox, ops } = captureOutbox();
+    const repo = new JobPhotosRepository(outbox, seqIds(), fixedTime());
+    await repo.add({ jobId: "j1", uploadedBy: "u1", photoType: "general", localUri: "file:///d.jpg", vendorOrderId: "vo-1", caption: "Docket PO-1001" });
+    expect(writes(ops)[0].payload).toMatchObject({ vendor_order_id: "vo-1", caption: "Docket PO-1001" });
+    await repo.add({ jobId: "j1", uploadedBy: "u1", photoType: "general", localUri: "file:///e.jpg" });
+    expect(writes(ops)[1].payload).not.toHaveProperty("vendor_order_id");
+    expect(writes(ops)[1].payload).not.toHaveProperty("caption");
+  });
+
   it("add honours a non-default extension in the object key", async () => {
     const { outbox, ops } = captureOutbox();
     const repo = new JobPhotosRepository(outbox, seqIds(), fixedTime());

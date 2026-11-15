@@ -24,6 +24,8 @@ export interface TodayInputs {
   /** This job's supplier orders; null when they couldn't be loaded (no signal). */
   orders: { status: string; deliveredAt?: string | null }[] | null;
   signedOff: boolean;
+  /** Not the job's last day (lib/jobStages.ts isMultiDay): finish the day, not the job. */
+  multiDay?: boolean;
   /** Formats a clock-in time for display ("7:02 am"). */
   formatTime: (iso: string) => string;
 }
@@ -71,12 +73,19 @@ export function todaySteps(i: TodayInputs): TodayStep[] {
       detail: "Photos, notes and variations",
       state: "optional",
     },
-    {
-      key: "finish",
-      title: "Complete the job",
-      detail: i.signedOff ? "Signed off" : finishDetail(waiting),
-      state: i.signedOff ? "done" : "todo",
-    },
+    i.multiDay && !i.signedOff
+      ? {
+          key: "finish",
+          title: "Finish for today",
+          detail: "Note what got done, tick any stage that's finished, and clock off",
+          state: "todo",
+        }
+      : {
+          key: "finish",
+          title: "Complete the job",
+          detail: i.signedOff ? "Signed off" : finishDetail(waiting),
+          state: i.signedOff ? "done" : "todo",
+        },
   ];
 
   // The first step still to do is the one the card points at.
@@ -87,5 +96,5 @@ export function todaySteps(i: TodayInputs): TodayStep[] {
 
 function finishDetail(waiting: number): string {
   const outstanding = waiting > 0 ? `${waiting} deliver${waiting === 1 ? "y" : "ies"} not confirmed. ` : "";
-  return `${outstanding}Customer signs, and you're clocked off`;
+  return `${outstanding}Sign off (you or the customer), and you're clocked off`;
 }

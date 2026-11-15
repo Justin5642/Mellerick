@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { View, Text, ScrollView, StyleSheet, TextInput, TouchableOpacity, Alert, Platform, Modal } from "react-native";
 import { Stack, useRouter, useLocalSearchParams } from "expo-router";
 import DateTimePicker, { type DateTimePickerEvent } from "@react-native-community/datetimepicker";
@@ -9,6 +9,8 @@ import { useWriteOutcome } from "../../lib/data/hooks/useWriteOutcome";
 import { CustomerPicker } from "../../components/finance/customer-picker";
 import { getCustomer, type Site, type CustomerListRow } from "../../lib/data/reads/customers";
 import { listAssignableStaff, type AssignableStaff } from "../../lib/data/reads/schedule";
+import { SiteFormSheet, type SiteSaveStatus } from "../../components/customer/site-form";
+import { CustomerFormSheet } from "../../components/customer/customer-form";
 
 const JOB_TYPES = ["service", "installation", "maintenance", "emergency", "quote"] as const;
 const PRIORITIES = ["low", "normal", "high", "urgent"] as const;
@@ -34,14 +36,36 @@ export default function NewJobScreen() {
   const [showTime, setShowTime] = useState(false);
   const [description, setDescription] = useState("");
   const [saving, setSaving] = useState(false);
+  // "+ New customer" and "+ Add new site" open sheets over this screen, so
+  // everything already entered here stays as it is.
+  const [creatingCustomer, setCreatingCustomer] = useState(false);
+  const [addingSite, setAddingSite] = useState(false);
+  // Sites added from this screen → where their save stands (SiteSaveStatus).
+  const [siteStatus, setSiteStatus] = useState<Record<string, SiteSaveStatus>>({});
+  // The customer whose sites are on screen; a slower load for a previous
+  // pick must not replace them.
+  const currentCustomerId = useRef<string | null>(null);
+  // Sites added here, by customer: a queued site is not in the mirror or on the
+  // server yet, so a reload of the list must keep it.
+  const addedSites = useRef(new Map<string, Site[]>());
+
+  async function loadSites(id: string) {
+    currentCustomerId.current = id;
+    // A customer just created on this phone may not be readable yet: no sites.
+    const detail = await getCustomer(id).catch(() => null);
+    if (currentCustomerId.current !== id) return;
+    // Archived sites stay on old jobs but aren't offered for new ones.
+    const loaded = (detail?.sites ?? []).filter((s) => s.is_active);
+    const added = (addedSites.current.get(id) ?? []).filter((a) => !loaded.some((l) => l.id === a.id));
+    setSites([...loaded, ...added]);
+  }
 
   async function onSelectCustomer(c: CustomerListRow) {
     setCustomer(c);
     setPickCustomer(false);
     setSite(null);
-    const detail = await getCustomer(c.id);
-    // Archived sites stay on old jobs but aren't offered for new ones.
-    setSites((detail?.sites ?? []).filter((s) => s.is_active));
+    setSites([]);
+    await loadSites(c.id);
   }
 
   // Pre-select the customer when launched from a customer's "New Job" shortcut.
@@ -50,11 +74,34 @@ export default function NewJobScreen() {
     let cancelled = false;
     getCustomer(customerId).then((detail) => {
       if (cancelled || !detail) return;
+      currentCustomerId.current = detail.id;
       setCustomer({ id: detail.id, name: detail.name } as CustomerListRow);
       setSites((detail.sites ?? []).filter((s) => s.is_active));
     }).catch(() => {});
     return () => { cancelled = true; };
   }, [customerId]);
+
+  function onCustomerCreated(id: string, name: string) {
+    setCreatingCustomer(false);
+    currentCustomerId.current = id;
+    setCustomer({ id, name } as CustomerListRow);
+    setSite(null);
+    setSites([]);
+  }
+
+  function onSiteAdded(created: Site | undefined, status: SiteSaveStatus | undefined) {
+    setAddingSite(false);
+    if (!created || !customer) return;
+    addedSites.current.set(customer.id, [...(addedSites.current.get(customer.id) ?? []), created]);
+    setSites((prev) => (prev.some((s) => s.id === created.id) ? prev : [...prev, created]));
+    setSiteStatus((prev) => ({ ...prev, [created.id]: status ?? "pending" }));
+    setSite(created);
+  }
+
+  function pickExistingSite(existing: Site) {
+    setAddingSite(false);
+    setSite(existing);
+  }
 
   function openAssignee() {
     if (staff.length === 0) listAssignableStaff().then(setStaff).catch(() => {});
@@ -105,13 +152,19 @@ export default function NewJobScreen() {
         scheduledStartIso,
         description: description.trim() || null,
       });
+      const outcome = synced ? await writeOutcome(id) : "pending";
       if (!synced) {
         Alert.alert("Saved offline", "The new job is queued and will sync when you're back online.");
         router.back();
-      } else if ((await writeOutcome(id)) === "failed") {
+      } else if (outcome === "failed") {
         // Online but the server rejected the insert — don't navigate to a job
         // detail that would 404; it's queued and will retry.
         Alert.alert("Couldn't create the job", "The server rejected it — it's queued and will retry. Check the sync status for details.");
+        router.back();
+      } else if (outcome === "pending") {
+        // Online, but still waiting on a new site or customer from this
+        // screen that the server hasn't accepted yet: the job follows it.
+        Alert.alert("Saved on this phone", "The job will sync right after the new site or customer it uses.");
         router.back();
       } else {
         router.replace(`/job/${id}`);
@@ -135,16 +188,27 @@ export default function NewJobScreen() {
         <Text style={[styles.selectorText, !customer && styles.placeholder]}>{customer ? customer.name : "Select customer…"}</Text>
         <Ionicons name="chevron-forward" size={16} color={colors.slate400} />
       </TouchableOpacity>
+      <TouchableOpacity onPress={() => setCreatingCustomer(true)} style={styles.inlineAction} accessibilityRole="button">
+        <Ionicons name="add" size={16} color={colors.blue600} />
+        <Text style={styles.inlineActionText}>New customer</Text>
+      </TouchableOpacity>
 
       {customer && (
         <>
           <Text style={styles.label}>Site (optional)</Text>
-          <TouchableOpacity style={styles.selector} onPress={() => setPickSite(true)} disabled={sites.length === 0}>
+          <TouchableOpacity style={styles.selector} onPress={() => setPickSite(true)}>
             <Text style={[styles.selectorText, !site && styles.placeholder]}>
-              {site ? `${site.name}${site.suburb ? ` · ${site.suburb}` : ""}` : sites.length ? "Select site…" : "No sites for this customer"}
+              {site ? `${site.name}${site.suburb ? ` · ${site.suburb}` : ""}` : sites.length ? "Select site…" : "No sites yet — tap to add one"}
             </Text>
             <Ionicons name="chevron-forward" size={16} color={colors.slate400} />
           </TouchableOpacity>
+          {site && siteStatus[site.id] === "settled" ? (
+            <Text style={styles.siteOk}>New site saved.</Text>
+          ) : site && siteStatus[site.id] === "pending" ? (
+            <Text style={styles.siteNote}>New site saved on this phone — it syncs before the job.</Text>
+          ) : site && siteStatus[site.id] === "failed" ? (
+            <Text style={styles.siteWarn}>New site not accepted by the server yet — it keeps retrying. Check Sync status.</Text>
+          ) : null}
         </>
       )}
 
@@ -199,7 +263,36 @@ export default function NewJobScreen() {
             {s.suburb ? <Text style={styles.rowSub}>{s.suburb}</Text> : null}
           </TouchableOpacity>
         ))}
+        <TouchableOpacity
+          style={[styles.row, styles.addRow]}
+          onPress={() => {
+            setPickSite(false);
+            // iOS won't present a modal while another is still sliding away;
+            // wait out the picker's dismissal before opening the site sheet.
+            setTimeout(() => setAddingSite(true), Platform.OS === "ios" ? 400 : 0);
+          }}
+          accessibilityRole="button"
+        >
+          <Ionicons name="add-circle-outline" size={18} color={colors.blue600} />
+          <Text style={styles.addRowText}>Add new site</Text>
+        </TouchableOpacity>
       </PickerModal>
+
+      {customer && (
+        <SiteFormSheet
+          visible={addingSite}
+          customerId={customer.id}
+          existingSites={sites}
+          onClose={() => setAddingSite(false)}
+          onSaved={onSiteAdded}
+          onUseExisting={pickExistingSite}
+        />
+      )}
+      <CustomerFormSheet
+        visible={creatingCustomer}
+        onClose={() => setCreatingCustomer(false)}
+        onSaved={(id, _synced, name) => onCustomerCreated(id, name)}
+      />
 
       <PickerModal visible={pickAssignee} title="Assign to" onClose={() => setPickAssignee(false)}>
         <TouchableOpacity style={styles.row} onPress={() => { setAssignee(null); setPickAssignee(false); }}>
@@ -264,4 +357,11 @@ const styles = StyleSheet.create({
   rowSub: { fontSize: 12, color: colors.slate400, textTransform: "capitalize", marginTop: 1 },
   cancelBtn: { marginTop: 12, paddingVertical: 12, borderRadius: 10, backgroundColor: colors.bg, alignItems: "center", borderWidth: 1, borderColor: colors.border },
   cancelText: { fontSize: 14, fontWeight: "600", color: colors.slate700 },
+  inlineAction: { flexDirection: "row", alignItems: "center", gap: 4, alignSelf: "flex-start", paddingVertical: 8 },
+  inlineActionText: { fontSize: 13, fontWeight: "600", color: colors.blue600 },
+  addRow: { flexDirection: "row", alignItems: "center", gap: 6 },
+  addRowText: { fontSize: 15, fontWeight: "600", color: colors.blue600 },
+  siteOk: { fontSize: 12, color: colors.green600, marginTop: 6 },
+  siteNote: { fontSize: 12, color: colors.slate500, marginTop: 6 },
+  siteWarn: { fontSize: 12, color: colors.orange700, marginTop: 6 },
 });

@@ -50,7 +50,7 @@ interface Props {
   currentUserId: string;
   timeEntries: TimeEntry[];
   /** The job site's pin, to show how far from it each clock-on/off was (0092). */
-  site?: { site_lat: number | null; site_lng: number | null } | null;
+  site?: { site_lat: number | null; site_lng: number | null; geofence_radius_m?: number | null } | null;
   costCenters: CostCenterOption[];
   isAdmin?: boolean;
   // Active staff for the admin "log on behalf of" picker in the edit dialog.
@@ -252,7 +252,7 @@ export function JobTime({ jobId, currentUserId, timeEntries: initial, site, cost
                     </div>
                   </button>
                   {!isTravel && (() => {
-                    const pin = site ? { lat: site.site_lat, lng: site.site_lng } : null;
+                    const pin = site ? { lat: site.site_lat, lng: site.site_lng, fenceM: site.geofence_radius_m } : null;
                     const on = clockPlace({ lat: entry.clock_in_lat, lng: entry.clock_in_lng, accuracy: entry.clock_in_accuracy }, pin);
                     const off = clockPlace({ lat: entry.clock_out_lat, lng: entry.clock_out_lng, accuracy: entry.clock_out_accuracy }, pin);
                     if (!on && !off) return null;

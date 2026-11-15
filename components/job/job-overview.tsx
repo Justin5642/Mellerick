@@ -13,6 +13,7 @@ import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { CUSTOMER_PO_MAX, normalizeCustomerPo } from "@/lib/customer-po";
 import { SiteLocationDialog } from "@/components/site-location-dialog";
+import { SITE_FENCE_CHOICES, fenceLabel } from "@/lib/clock-location";
 import { Phone, Mail, MapPin, User, Save, Navigation, CalendarClock } from "lucide-react";
 import { formatDate } from "@/lib/date";
 import { formatDateKeyRange } from "@/lib/schedule-form";
@@ -47,6 +48,22 @@ export function JobOverview({ job, readOnly = false, bookings, bookingsError, on
   const [pinOpen, setPinOpen] = useState(false);
   const router = useRouter();
   const supabase = createClient();
+  const [savingFence, setSavingFence] = useState(false);
+
+  async function setFence(metres: number | null) {
+    setSavingFence(true);
+    const { error, count } = await supabase
+      .from("sites")
+      .update({ geofence_radius_m: metres }, { count: "exact" })
+      .eq("id", job.site_id);
+    setSavingFence(false);
+    if (error || count === 0) {
+      toast.error("Couldn't change the clock-on area.");
+      return;
+    }
+    toast.success(`Auto clock-on area is now ${fenceLabel(metres)}. Phones pick it up on their next sync.`);
+    router.refresh();
+  }
   const [saving, setSaving] = useState(false);
   const [sites, setSites] = useState<any[]>([]);
   const [addSiteOpen, setAddSiteOpen] = useState(false);
@@ -167,8 +184,8 @@ export function JobOverview({ job, readOnly = false, bookings, bookingsError, on
                   <SelectTrigger><SelectValue placeholder={form.customer_id ? "Select site" : "Select customer first"} /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value={NO_SITE_VALUE}>No site</SelectItem>
+                    {sites.map((s) => <SelectItem key={s.id} value={s.id}>{s.name}{s.suburb ? ` — ${s.suburb}` : ""}</SelectItem>)}
                     <SelectItem value={ADD_NEW_SITE_VALUE}>+ Add new site</SelectItem>
-                    {sites.map((s) => <SelectItem key={s.id} value={s.id}>{s.name} — {s.suburb}</SelectItem>)}
                   </SelectContent>
                 </Select>
               </div>
@@ -363,6 +380,31 @@ export function JobOverview({ job, readOnly = false, bookings, bookingsError, on
                   {job.sites.site_lat == null ? "Set location on map" : "Adjust map pin"}
                 </Button>
               )}
+              {/* A big site (subdivision, long civil job) needs a bigger
+                  auto clock-on fence than the standard 150 m (Justin, 2 Nov
+                  2026). */}
+              {job.site_id && job.sites.site_lat != null && (
+                <div className="flex items-center gap-2 text-xs text-slate-600">
+                  <span>Auto clock-on area</span>
+                  {canEditSite ? (
+                    <Select
+                      value={String(job.sites.geofence_radius_m ?? "standard")}
+                      onValueChange={(v) => setFence(v === "standard" ? null : Number(v))}
+                      disabled={savingFence}
+                    >
+                      <SelectTrigger className="h-7 w-[170px] text-xs"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="standard">{fenceLabel(null)} (standard)</SelectItem>
+                        {SITE_FENCE_CHOICES.map((m) => (
+                          <SelectItem key={m} value={String(m)}>{fenceLabel(m)} — big site</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  ) : (
+                    <span className="font-medium">{fenceLabel(job.sites.geofence_radius_m)}</span>
+                  )}
+                </div>
+              )}
               {canEditSite && job.site_id && pinOpen && (
                 <SiteLocationDialog
                   site={{ id: job.site_id, ...job.sites }}
@@ -408,7 +450,7 @@ export function JobOverview({ job, readOnly = false, bookings, bookingsError, on
         open={addSiteOpen}
         onOpenChange={setAddSiteOpen}
         onCreated={(site) => {
-          setSites((prev) => [...prev, site]);
+          setSites((prev) => (prev.some((s) => s.id === site.id) ? prev : [...prev, site]));
           set("site_id", site.id);
         }}
       />

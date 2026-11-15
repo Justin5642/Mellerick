@@ -1,4 +1,5 @@
 import * as FileSystem from "expo-file-system/legacy";
+import { resolveAttachmentUri } from "./outbox/orphanAttachments";
 import { supabase } from "../supabase";
 import { STORAGE_TIMEOUT_MS, fetchWithTimeout } from "../fetchWithTimeout";
 import { TransientSyncError, isTransientStatus, syncError } from "./outbox/errors";
@@ -99,7 +100,7 @@ export const supabaseGateway: SupabaseGateway = {
     );
   },
   async uploadObject(bucket, path, localUri) {
-    await uploadFileToStorage(bucket, path, localUri);
+    await uploadFileToStorage(bucket, path, resolveAttachmentUri(localUri, OUTBOX_ATTACHMENT_DIR));
   },
   async removeObject(bucket, path) {
     // Best-effort, never throws — correct because the ROW delete is the gate.
@@ -123,7 +124,7 @@ export const supabaseGateway: SupabaseGateway = {
   async cleanupAttachment(localUri) {
     // Best-effort: a leftover local file must never fail or block a synced write.
     try {
-      await FileSystem.deleteAsync(localUri, { idempotent: true });
+      await FileSystem.deleteAsync(resolveAttachmentUri(localUri, OUTBOX_ATTACHMENT_DIR), { idempotent: true });
     } catch {
       // ignore — orphaned temp file at worst
     }
@@ -224,6 +225,14 @@ async function uploadFileToStorage(bucket: string, path: string, localUri: strin
   const encoded = cleanPath.split("/").map(encodeURIComponent).join("/");
   const url = `${process.env.EXPO_PUBLIC_SUPABASE_URL}/storage/v1/object/${encodeURIComponent(bucket)}/${encoded}`;
 
+  // A file that isn't on the phone will never upload. Say so — as a counted
+  // failure, so it reaches the "not synced" list with a reason — instead of
+  // the native upload throwing and being retried as "no signal" for ever.
+  const info = await FileSystem.getInfoAsync(localUri).catch(() => null);
+  if (info && !info.exists) {
+    throw new Error(`storage ${bucket}/${path}: the file is missing from this phone`);
+  }
+
   const task = FileSystem.createUploadTask(url, localUri, {
     httpMethod: "POST",
     uploadType: FileSystem.FileSystemUploadType.BINARY_CONTENT,
@@ -278,6 +287,7 @@ const sideEffectPath: Record<SideEffectKind, (p: Record<string, unknown>) => str
   "transcribe-voice-report": (p) => `/api/jobs/${p.jobId}/transcribe-voice-report`,
   "backflow-submit": (p) => `/api/backflow/tests/${p.testId}/submit`,
   "assign-technicians": (p) => `/api/jobs/${p.jobId}/set-assignments`,
+  "stage-complete": (p) => `/api/jobs/${p.jobId}/stages/${p.stageId}/complete`,
 };
 
 /**

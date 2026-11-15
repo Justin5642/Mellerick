@@ -11,6 +11,7 @@ import {
   type ScheduleColumns,
 } from "@/lib/scheduling";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { isJobClosedError } from "@/lib/job-schedulable";
 // The OAuth token tables are read and written ONLY through the service role.
 // Migration 0075 revokes the token columns from every signed-in user, so an
 // office account or an XSS on the dashboard cannot lift the refresh token.
@@ -602,6 +603,13 @@ export async function pollGoogleCalendarChanges(supabase: any) {
           target.kind === "booking"
             ? await supabase.from("job_bookings").update(bookingColumns(fromEvent)).eq("id", target.id)
             : await supabase.from("jobs").update(fromEvent).eq("id", target.id);
+        // A completed/cancelled job takes no schedule (lib/job-schedulable.ts):
+        // an event moved in Google after sign-off is not copied back. Not a
+        // failure — nothing is wrong with the sync.
+        if (applied.error && isJobClosedError(applied.error)) {
+          skipped++;
+          continue;
+        }
         if (applied.error) {
           console.error(`Calendar poll: could not apply event to ${target.kind} ${target.id}:`, applied.error.message);
           writeFailed++;

@@ -51,9 +51,13 @@ export class CustomersRepository {
     await this.write("customer", "update", "customers", id, { is_favorite: isFavorite });
   }
 
+  // A site for a customer that is itself still queued (just created on this
+  // phone, possibly offline) waits for that customer's insert, so it can never
+  // reach the server first and fail the customer_id foreign key.
   async createSite(input: SiteInput): Promise<string> {
     const id = this.ids.newId();
-    await this.write("site", "insert", "sites", id, this.sitePayload(input));
+    const after = await this.outbox.pendingInsertOpId("customers", input.customerId);
+    await this.write("site", "insert", "sites", id, this.sitePayload(input), after);
     return id;
   }
 
@@ -97,7 +101,7 @@ export class CustomersRepository {
     };
   }
 
-  private async write(aggregate: Aggregate, op: WriteOp, table: string, rowId: string, payload: Record<string, unknown>): Promise<string> {
+  private async write(aggregate: Aggregate, op: WriteOp, table: string, rowId: string, payload: Record<string, unknown>, dependsOn?: string | null): Promise<string> {
     const id = this.ids.newId();
     const write: WriteOperation = {
       kind: "write",
@@ -107,6 +111,7 @@ export class CustomersRepository {
       op,
       table,
       payload,
+      ...(dependsOn ? { dependsOn } : {}),
       status: "pending",
       attempts: 0,
       nextAttemptAt: 0,

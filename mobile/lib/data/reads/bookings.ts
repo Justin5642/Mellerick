@@ -231,3 +231,22 @@ export async function listOpenJobBookingsRemote(): Promise<JobBooking[] | null> 
   })[];
   return rows.map((r) => ({ ...mapBooking(r), staff_name: r.staff?.full_name ?? null }));
 }
+
+/**
+ * The bookings of the given jobs — the schedule grid's COMPLETED jobs in the
+ * period on screen, drawn greyed out beside the open ones. Same shape and
+ * missing-table rule as listOpenJobBookingsRemote. [] for no ids (no request).
+ */
+export async function listJobBookingsForJobsRemote(jobIds: readonly string[]): Promise<JobBooking[] | null> {
+  if (jobIds.length === 0) return [];
+  const res = await supabase
+    .from("job_bookings")
+    .select(`${COLUMNS}, staff:profiles!job_bookings_staff_id_fkey(full_name)`)
+    .in("job_id", [...jobIds])
+    .order("starts_at");
+  if (isMissingTable(res.error)) return null;
+  const rows = unwrapRows(res as never, "listJobBookingsForJobsRemote") as unknown as (RawBookingRow & {
+    staff: { full_name: string } | null;
+  })[];
+  return rows.map((r) => ({ ...mapBooking(r), staff_name: r.staff?.full_name ?? null }));
+}

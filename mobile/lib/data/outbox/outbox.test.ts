@@ -404,6 +404,31 @@ describe("Outbox — offline delete/insert ordering + recovery", () => {
     expect(ids.has("R1")).toBe(false); // done → not pending
   });
 
+  it("pendingInsertOpId finds a row's outstanding insert, and nothing once it is done", async () => {
+    const box = new Outbox(new InMemoryOutboxStore(), mockClock());
+    await box.enqueue(write("cust-op", { rowId: "C1", table: "customers", aggregate: "customer" }));
+    await box.enqueue(write("upd-op", { rowId: "C2", table: "customers", aggregate: "customer", op: "update" }));
+    expect(await box.pendingInsertOpId("customers", "C1")).toBe("cust-op");
+    expect(await box.pendingInsertOpId("sites", "C1")).toBeNull(); // other table
+    expect(await box.pendingInsertOpId("customers", "C2")).toBeNull(); // update, not insert
+    await box.markDone("cust-op");
+    expect(await box.pendingInsertOpId("customers", "C1")).toBeNull();
+  });
+
+  it("a site queued after its customer's backed-off insert does not overtake it", async () => {
+    const clock = mockClock();
+    const store = new InMemoryOutboxStore();
+    const box = new Outbox(store, clock);
+    await box.enqueue(write("cust-op", { rowId: "C1", table: "customers", aggregate: "customer", createdAt: 1 }));
+    const after = await box.pendingInsertOpId("customers", "C1");
+    await box.enqueue(write("site-op", { rowId: "S1", table: "sites", aggregate: "site", createdAt: 2, dependsOn: after }));
+    // The customer insert fails (backs off); the site must still wait.
+    await box.markFailed((await store.all()).find((o) => o.id === "cust-op")!, "network");
+    expect((await box.nextReady())?.id).not.toBe("site-op");
+    await box.markDone("cust-op");
+    expect((await box.nextReady())?.id).toBe("site-op");
+  });
+
   it("writeStatus reports a row's sync outcome (settled / pending / failed)", async () => {
     const store = new InMemoryOutboxStore();
     const box = new Outbox(store, mockClock());
@@ -527,5 +552,37 @@ describe("Outbox — per-row ordering", () => {
     await box.enqueue(write("b", { rowId: "job-1", op: "update", createdAt: 2 }));
 
     expect((await box.nextReady())?.id).toBe("b");
+  });
+});
+
+describe("the not-synced sheet: deadOperations / discardDead", () => {
+  it("lists only dead operations, oldest first", async () => {
+    const store = new InMemoryOutboxStore();
+    const box = new Outbox(store, mockClock());
+    await store.insert(write("b", { status: "dead", createdAt: 20, error: "this time entry has been billed" }));
+    await store.insert(write("a", { status: "dead", createdAt: 10, error: "duplicate key" }));
+    await store.insert(write("c", { status: "pending", createdAt: 5 }));
+    expect((await box.deadOperations()).map((o) => o.id)).toEqual(["a", "b"]);
+  });
+
+  it("discarding closes the op as done, keeps the reason, and drops it from the count", async () => {
+    const store = new InMemoryOutboxStore();
+    const box = new Outbox(store, mockClock());
+    await store.insert(write("x", { status: "dead", error: "permission denied" }));
+    expect(await box.deadCount()).toBe(1);
+    expect(await box.discardDead("x")).toBe(true);
+    expect(await box.deadCount()).toBe(0);
+    const [op] = await store.all();
+    expect(op.status).toBe("done");
+    expect(op.error).toBe("discarded by user: permission denied");
+  });
+
+  it("refuses to discard anything that isn't dead (it may still sync)", async () => {
+    const store = new InMemoryOutboxStore();
+    const box = new Outbox(store, mockClock());
+    await store.insert(write("p", { status: "pending" }));
+    expect(await box.discardDead("p")).toBe(false);
+    expect((await store.all())[0].status).toBe("pending");
+    expect(await box.discardDead("missing")).toBe(false);
   });
 });

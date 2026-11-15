@@ -185,6 +185,34 @@ export function JobSignature({ jobId, currentUserId, existingSignature, voiceRep
     setSaving(false);
   }
 
+  // Customer not on site (Justin, 2 Nov 2026: "9 times out of 10, the
+  // customer is not there"): the technician completes the job in their own
+  // name, with no signature. Same completion and clock-off as a signature.
+  async function handleTechnicianComplete() {
+    if (!window.confirm("Complete this job in your name, without the customer's signature?")) return;
+    setSaving(true);
+    const { data: me } = await supabase.from("profiles").select("full_name").eq("id", currentUserId).maybeSingle();
+    const name = me?.full_name?.trim();
+    const { error: jobError } = await supabase.from("jobs").update({
+      completion_notes: `Signed off by ${name ? `technician ${name}` : "the technician"} on ${new Date().toLocaleDateString("en-AU")} (customer not on site)`,
+      status: "completed",
+      actual_end: new Date().toISOString(),
+      ready_to_invoice: true,
+    }).eq("id", jobId);
+    if (jobError) {
+      toast.error(`This job was not marked complete: ${jobError.message}`);
+      setSaving(false);
+      return;
+    }
+    const clockOutError = await clockOutOfJob();
+    if (clockOutError) toast.error("Job complete, but you're still clocked in — clock out on the Time tab.");
+    const calendarSynced = await pushJobToCalendar(jobId);
+    if (calendarSynced) toast.success("Job complete — flagged for office review");
+    else toast.warning("Job complete — flagged for office review, but Google Calendar was not updated");
+    setSaved(true);
+    setSaving(false);
+  }
+
   const supabase = createClient();
 
   return (
@@ -214,6 +242,20 @@ export function JobSignature({ jobId, currentUserId, existingSignature, voiceRep
               <p className="text-sm font-semibold">Voice Report (transcribed)</p>
             </div>
             <p className="text-sm text-slate-600 whitespace-pre-wrap">{voiceReportTranscript}</p>
+          </CardContent>
+        </Card>
+      )}
+
+      {!(saved || existingSignature) && (
+        <Card className="border-slate-200">
+          <CardContent className="flex items-center justify-between gap-4 p-4">
+            <div>
+              <p className="text-sm font-semibold text-slate-900">Customer not on site?</p>
+              <p className="text-xs text-slate-500">Complete the job in your name. No customer name or signature needed.</p>
+            </div>
+            <Button variant="outline" onClick={handleTechnicianComplete} disabled={saving} className="gap-2 shrink-0">
+              <CheckCircle2 className="w-4 h-4" />Complete as technician
+            </Button>
           </CardContent>
         </Card>
       )}

@@ -275,6 +275,13 @@ values ('b1b1b1b1-0000-0000-0000-000000000001', 'cccccccc-0000-0000-0000-0000000
         'CI Supplier', 550.00, 50.00)
 on conflict (id) do nothing;
 
+-- A supplier invoice read from an uploaded PDF (0103). Office/admin only.
+insert into supplier_invoices (id, storage_path, file_name, file_sha256, status, doc_kind,
+                               supplier_name, invoice_number, amount_ex_gst, gst_amount, total)
+values ('b2b2b2b2-0000-0000-0000-000000000001', 'ci/0103.pdf', 'ci.pdf', 'ci-sha-0103', 'read', 'invoice',
+        'CI Supplier', 'CI-INV-1', 550.00, 55.00, 605.00)
+on conflict (id) do nothing;
+
 insert into inventory (id, name, sku, unit_cost, unit_sell)
 values ('c1c1c1c1-0000-0000-0000-000000000001', 'CI Part', 'CI-SKU-1', 12.50, 25.00)
 on conflict (id) do nothing;

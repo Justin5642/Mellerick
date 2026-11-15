@@ -126,3 +126,60 @@ describe("nextGeofenceState — accuracy and the exit buffer", () => {
     expect(s).toEqual({ insideJobId: "job-c", previousJobId: "job-a", transition: "arrival" });
   });
 });
+
+// A site's own fence size (0094; Justin, 2 Nov 2026).
+describe("nextGeofenceState with a bigger site", () => {
+  const BIG: TrackedSite = { ...SITE_A, jobId: "job-big", radiusM: 400 };
+  const at = (metresNorth: number) => ({ latitude: -37.8136 + metresNorth / 111_000, longitude: 144.9631, accuracy: 10 });
+
+  it("arrives 300 m from the pin, outside the standard fence", () => {
+    expect(nextGeofenceState(at(300), [SITE_A], null).insideJobId).toBeNull();
+    expect(nextGeofenceState(at(300), [BIG], null)).toMatchObject({ insideJobId: "job-big", transition: "arrival" });
+  });
+
+  it("stays clocked on until 100 m past its own fence", () => {
+    expect(nextGeofenceState(at(480), [BIG], "job-big").transition).toBe("none");
+    expect(nextGeofenceState(at(520), [BIG], "job-big").transition).toBe("departure");
+  });
+
+  it("a small site next door wins only when the reading is deeper inside it", () => {
+    const HOUSE: TrackedSite = { jobId: "job-house", lat: -37.8136 + 350 / 111_000, lng: 144.9631, scheduledCostCenterId: null };
+    // 340 m from the big pin (60 m inside), 10 m from the house (140 m inside).
+    expect(nextGeofenceState(at(340), [BIG, HOUSE], null).insideJobId).toBe("job-house");
+    // 200 m from the big pin (200 m inside), 150 m from the house (0 m inside).
+    expect(nextGeofenceState(at(200), [BIG, HOUSE], null).insideJobId).toBe("job-big");
+  });
+});
+
+
+// Auto clock bug (15 Nov 2026): every open job is now watched, so overlaps with
+// old jobs next door are more likely. A PREFERRED site (scheduled today, or
+// clocked into) must win an overlap over a nearer one that isn't.
+describe("nextGeofenceState: preferred sites win an overlap", () => {
+  // Two sites ~55m apart: a reading between them, nearer OLD, is inside both 150m fences.
+  const OLD: TrackedSite = { jobId: "old", lat: -37.8136, lng: 144.9631, scheduledCostCenterId: null };
+  const TODAY: TrackedSite = { jobId: "today", lat: -37.8141, lng: 144.9631, scheduledCostCenterId: null, preferred: true };
+  const NEARER_OLD = { latitude: -37.8137, longitude: 144.9631 }; // ~11m from OLD, ~44m from TODAY
+
+  it("arrives at the preferred site even when a non-preferred one is nearer", () => {
+    expect(nextGeofenceState(NEARER_OLD, [OLD, TODAY], null)).toEqual({ insideJobId: "today", previousJobId: null, transition: "arrival" });
+  });
+
+  it("with nothing preferred, the nearest still wins (unchanged behaviour)", () => {
+    const plain = { ...TODAY, preferred: undefined };
+    expect(nextGeofenceState(NEARER_OLD, [OLD, plain], null).insideJobId).toBe("old");
+  });
+
+  it("moves off a non-preferred site onto a preferred one it is also inside", () => {
+    expect(nextGeofenceState(NEARER_OLD, [OLD, TODAY], "old")).toEqual({ insideJobId: "today", previousJobId: "old", transition: "arrival" });
+  });
+
+  it("stays on the preferred site when a nearer non-preferred one overlaps", () => {
+    expect(nextGeofenceState(NEARER_OLD, [OLD, TODAY], "today")).toEqual({ insideJobId: "today", previousJobId: "today", transition: "none" });
+  });
+
+  it("a far-away preferred site never pulls an arrival away from the site you're actually at", () => {
+    const farToday = { ...TODAY, lat: -37.9136 };
+    expect(nextGeofenceState(NEARER_OLD, [OLD, farToday], null).insideJobId).toBe("old");
+  });
+});

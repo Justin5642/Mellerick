@@ -2,8 +2,20 @@
 // phone records where it was; this is how the web Time tab reads it for the
 // office. Nothing is blocked by it — it is a flag.
 
-/** The site fence, as the phone's auto-clock uses it (mobile/lib/geofenceState.ts). */
+/** The standard site fence, as the phone's auto-clock uses it (mobile/lib/geofenceState.ts). */
 export const SITE_FENCE_METRES = 150;
+
+/**
+ * The fence sizes the office can pick for a big site (sites.geofence_radius_m,
+ * 0094). Null = the standard 150 m. The phone clocks
+ * off 100 m past whichever it is.
+ */
+export const SITE_FENCE_CHOICES = [250, 400, 600, 1000] as const;
+
+export function fenceLabel(metres: number | null | undefined): string {
+  const m = metres ?? SITE_FENCE_METRES;
+  return m >= 1000 ? `${m / 1000} km` : `${m} m`;
+}
 
 export function metresBetween(lat1: number, lng1: number, lat2: number, lng2: number): number {
   const R = 6371000;
@@ -28,13 +40,13 @@ export interface ClockPlace {
  */
 export function clockPlace(
   at: { lat: number | null | undefined; lng: number | null | undefined; accuracy?: number | null },
-  site: { lat: number | null | undefined; lng: number | null | undefined } | null | undefined
+  site: { lat: number | null | undefined; lng: number | null | undefined; fenceM?: number | null } | null | undefined
 ): ClockPlace | null {
   if (at.lat == null || at.lng == null || !site || site.lat == null || site.lng == null) return null;
   if (!site.lat || !site.lng) return null; // 0/0 is an unset pin, not a place
   const metres = Math.round(metresBetween(Number(at.lat), Number(at.lng), Number(site.lat), Number(site.lng)));
   const slack = typeof at.accuracy === "number" ? at.accuracy : 0;
-  const outside = metres - slack > SITE_FENCE_METRES;
+  const outside = metres - slack > (site.fenceM ?? SITE_FENCE_METRES);
   const distance = metres < 1000 ? `${metres} m` : `${(metres / 1000).toFixed(1)} km`;
   return { metres, outside, label: outside ? `${distance} from site` : metres <= 50 ? "on site" : `${distance} from site` };
 }

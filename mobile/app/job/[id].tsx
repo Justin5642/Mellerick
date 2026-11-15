@@ -1,5 +1,5 @@
-import { useCallback, useState } from "react";
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, Modal, Alert, TextInput } from "react-native";
+import { useCallback, useEffect, useState } from "react";
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, Alert, TextInput } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
@@ -17,10 +17,13 @@ import { JobTodayCard } from "../../components/job/today-card";
 import { AutoClockStatus } from "../../components/job/auto-clock-status";
 import { JobPlantUsage } from "../../components/job/plant-usage";
 import { JobSignatureTab } from "../../components/job/signature";
+import { isMultiDay } from "../../lib/jobStages";
 import { JobDocumentsTab } from "../../components/job/documents";
 import { JobVariationsTab } from "../../components/job/variations";
 import { JobSupplierOrdersTab } from "../../components/job/supplier-orders";
 import { ScheduleJobModal } from "../../components/job/schedule-job-modal";
+import { isJobClosedForScheduling } from "../../lib/jobSchedulable";
+import { KeyboardSheet, KEYBOARD_SHEET_INPUT_FONT_SIZE } from "../../components/KeyboardSheet";
 import { getJobStageLabel } from "../../lib/job-stages";
 import { formatScheduleSummary } from "../../lib/scheduleDisplay";
 import { getJobCostCentres, type JobCostCentre } from "../../lib/data/reads/jobBilling";
@@ -127,6 +130,16 @@ export default function JobDetailScreen() {
   // Both awaits can throw — the session lookup and the row read. Uncaught, the
   // throw skipped setLoading(false) and the technician sat on a spinner that
   // never resolved, on the one screen they spend the whole day in.
+  // Re-read the job's cost centres whenever a tab that uses them opens: they
+  // were read once with the job, so one the office added since never showed
+  // (2 Nov 2026). A local read, so it costs nothing to repeat.
+  useEffect(() => {
+    if (tab !== "time" && tab !== "orders") return;
+    getJobCostCentres(id)
+      .then(setCostCenters)
+      .catch(() => {});
+  }, [tab, id]);
+
   const loadJob = useCallback(async () => {
     try {
       setError(null);
@@ -269,7 +282,14 @@ export default function JobDetailScreen() {
           #{job.job_number} — {job.title}
         </Text>
         {isOfficeOrAdmin && (
-          <TouchableOpacity style={styles.scheduleBtn} onPress={() => setScheduleOpen(true)} accessibilityLabel="Schedule job">
+          // A completed/cancelled job is off the Schedule tab, so it is not
+          // offered as schedulable: the button is greyed and opens the sheet
+          // that explains why, with a way to change the status first.
+          <TouchableOpacity
+            style={[styles.scheduleBtn, isJobClosedForScheduling(job.status) && styles.scheduleBtnClosed]}
+            onPress={() => setScheduleOpen(true)}
+            accessibilityLabel={isJobClosedForScheduling(job.status) ? `Schedule job — not available, the job is ${job.status}` : "Schedule job"}
+          >
             <Ionicons name="calendar-outline" size={14} color="#fff" />
             <Text style={styles.scheduleText}>Schedule</Text>
           </TouchableOpacity>
@@ -357,6 +377,7 @@ export default function JobDetailScreen() {
             jobId={job.id}
             currentUserId={userId}
             signedOff={job.status === "completed"}
+            multiDay={isMultiDay(job)}
             scheduledCostCenterId={job.scheduled_cost_center_id}
             myBookings={bookings ? bookings.filter((b) => b.staff_id === userId) : null}
             onGo={setTab}
@@ -375,7 +396,7 @@ export default function JobDetailScreen() {
         {/* Truck & plant (Stage 7): the driver logs cartage against the job's cost centre. */}
         {activeTab === "time" && userId && <JobPlantUsage jobId={job.id} />}
         {activeTab === "variations" && userId && <JobVariationsTab jobId={job.id} currentUserId={userId} />}
-        {activeTab === "orders" && <JobSupplierOrdersTab jobId={job.id} costCentres={costCenters} />}
+        {activeTab === "orders" && <JobSupplierOrdersTab jobId={job.id} currentUserId={userId ?? null} costCentres={costCenters} />}
         {activeTab === "photos" && userId && (
           <JobPhotosTab
             jobId={job.id}
@@ -393,16 +414,27 @@ export default function JobDetailScreen() {
             currentUserId={userId}
             existingSignature={job.status === "completed" ? job.completion_notes : null}
             existingVoiceTranscript={job.voice_report_transcript}
+            multiDay={isMultiDay(job)}
             onCompleted={loadJob}
           />
         )}
       </ScrollView>
 
-      <Modal visible={editing} transparent animationType="slide" onRequestClose={() => !savingEdit && setEditing(false)}>
-        <View style={styles.overlay}>
-          <ScrollView automaticallyAdjustKeyboardInsets keyboardDismissMode="interactive" style={styles.sheetScroll} contentContainerStyle={styles.sheet} keyboardShouldPersistTaps="handled">
-            <Text style={styles.sheetTitle}>Update job</Text>
-
+      <KeyboardSheet
+        visible={editing}
+        onRequestClose={() => !savingEdit && setEditing(false)}
+        title={<Text style={styles.sheetTitle}>Update job</Text>}
+        footer={
+          <View style={styles.editActions}>
+            <TouchableOpacity style={styles.cancelBtn} onPress={() => setEditing(false)} disabled={savingEdit}>
+              <Text style={styles.cancelText}>Close</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.doneBtn} onPress={saveDetails} disabled={savingEdit}>
+              <Text style={styles.doneText}>{savingEdit ? "…" : "Save details"}</Text>
+            </TouchableOpacity>
+          </View>
+        }
+      >
             <Text style={styles.sheetLabel}>Title</Text>
             <TextInput
               style={styles.input}
@@ -460,18 +492,7 @@ export default function JobDetailScreen() {
             />
 
             <Text style={styles.editHint}>Status, priority and type save instantly. Customer and site are edited on the web.</Text>
-
-            <View style={styles.editActions}>
-              <TouchableOpacity style={styles.cancelBtn} onPress={() => setEditing(false)} disabled={savingEdit}>
-                <Text style={styles.cancelText}>Close</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.doneBtn} onPress={saveDetails} disabled={savingEdit}>
-                <Text style={styles.doneText}>{savingEdit ? "…" : "Save details"}</Text>
-              </TouchableOpacity>
-            </View>
-          </ScrollView>
-        </View>
-      </Modal>
+      </KeyboardSheet>
 
       <ScheduleJobModal
         visible={scheduleOpen}
@@ -492,6 +513,9 @@ export default function JobDetailScreen() {
           // The crew follows the bookings server-side; re-read it once synced.
           void refreshAssignedStaff();
         }}
+        // After the schedule sheet has slid away: iOS will not present one
+        // modal while another is still dismissing.
+        onReopen={() => setTimeout(openEdit, 450)}
         onScheduled={(patch) => {
           setJob((j: any) => ({ ...j, ...patch }));
           void refreshAssignedStaff();
@@ -522,16 +546,14 @@ const styles = StyleSheet.create({
   billingBtn: { flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 999, borderWidth: 1, borderColor: colors.blue100, backgroundColor: colors.blue100 },
   billingText: { fontSize: 12, fontWeight: "700", color: colors.blue600 },
   scheduleBtn: { flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 999, backgroundColor: colors.blue600 },
+  scheduleBtnClosed: { backgroundColor: colors.slate400 },
   scheduleText: { fontSize: 12, fontWeight: "700", color: "#fff" },
   badge: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 999 },
   badgeEditable: { flexDirection: "row", alignItems: "center", gap: 3 },
   badgeText: { fontSize: 11, fontWeight: "600", textTransform: "capitalize" },
-  overlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.4)", justifyContent: "flex-end" },
-  sheetScroll: { maxHeight: "88%", flexGrow: 0 },
-  sheet: { backgroundColor: colors.card, borderTopLeftRadius: 16, borderTopRightRadius: 16, padding: 16, paddingBottom: 28 },
   sheetTitle: { fontSize: 16, fontWeight: "800", color: colors.slate900, marginBottom: 8 },
   sheetLabel: { fontSize: 12, fontWeight: "700", color: colors.slate500, textTransform: "uppercase", marginTop: 12, marginBottom: 8 },
-  input: { borderWidth: 1, borderColor: colors.border, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10, fontSize: 14, backgroundColor: colors.bg, color: colors.slate900 },
+  input: { borderWidth: 1, borderColor: colors.border, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10, fontSize: KEYBOARD_SHEET_INPUT_FONT_SIZE, backgroundColor: colors.bg, color: colors.slate900 },
   inputMultiline: { minHeight: 72, textAlignVertical: "top" },
   chipWrap: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
   chip: { paddingHorizontal: 12, paddingVertical: 8, borderRadius: 999, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.bg },
@@ -539,7 +561,7 @@ const styles = StyleSheet.create({
   chipText: { fontSize: 13, fontWeight: "600", color: colors.slate700, textTransform: "capitalize" },
   chipTextActive: { color: "#fff" },
   editHint: { fontSize: 11, color: colors.slate400, marginTop: 14 },
-  editActions: { flexDirection: "row", gap: 10, marginTop: 14 },
+  editActions: { flexDirection: "row", gap: 10 },
   cancelBtn: { flex: 1, paddingVertical: 12, borderRadius: 10, backgroundColor: colors.bg, alignItems: "center", borderWidth: 1, borderColor: colors.border },
   cancelText: { color: colors.slate700, fontWeight: "600", fontSize: 14 },
   doneBtn: { flex: 1, paddingVertical: 12, borderRadius: 10, backgroundColor: colors.blue600, alignItems: "center" },

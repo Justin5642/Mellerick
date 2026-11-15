@@ -25,6 +25,8 @@ export const POLISH_NOTE_LIMIT: RateLimit = { bucket: "polish-note", max: 60, wi
 // Each supplier PO sends an email from our domain. A busy day is a handful;
 // this stops a looping client or a stolen session from spamming suppliers.
 export const SUPPLIER_ORDER_LIMIT: RateLimit = { bucket: "supplier-order", max: 20, windowSeconds: 600 };
+// Each supplier PDF is one paid read. A day's batch is a few dozen.
+export const SUPPLIER_INVOICE_READ_LIMIT: RateLimit = { bucket: "supplier-invoice-read", max: 60, windowSeconds: 600 };
 
 let reportedUnavailable = false;
 

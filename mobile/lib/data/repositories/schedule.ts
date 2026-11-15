@@ -3,7 +3,7 @@ import type { IdGen } from "../ids";
 import type { WriteOperation, SideEffectOperation } from "../outbox/types";
 import { systemTime, type TimeSource } from "../time";
 import type { ScheduleColumns } from "../../scheduling";
-import { bookingColumns, type BookingWindowColumns } from "../../bookings";
+import { bookingColumns, type ScheduleWindowColumns } from "../../bookings";
 
 /**
  * How a moved schedule's two flags change (migration 0071). Omitted fields are
@@ -14,7 +14,7 @@ export interface BookingPatch {
   staffId?: string | null;
   costCenterId?: string | null;
   /** The window and both 0071 flags, always together (buildScheduleColumns, or a moved window). */
-  columns?: BookingWindowColumns;
+  columns?: ScheduleWindowColumns;
 }
 
 export interface RescheduleFlags {

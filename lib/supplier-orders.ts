@@ -66,9 +66,12 @@ export function parseSupplierOrder(body: unknown): { ok: true; order: SupplierOr
   const requiredBy = text(b.requiredBy, 10);
   if (requiredBy && !DATE.test(requiredBy)) return { ok: false, error: "Required-by date is invalid." };
 
-  if (!Array.isArray(b.items)) return { ok: false, error: "Add at least one item." };
+  // Items are only needed when the PO is emailed — the email is the order. A
+  // phone or counter order (no email) can be just a PO number to quote; the
+  // docket photo shows what came (Justin, 2 Nov 2026).
+  if (b.items != null && !Array.isArray(b.items)) return { ok: false, error: "Add at least one item." };
   const items: SupplierOrderItemInput[] = [];
-  for (const raw of b.items) {
+  for (const raw of (b.items as unknown[] | undefined) ?? []) {
     const r = (raw ?? {}) as Record<string, unknown>;
     const description = text(r.description, 300);
     if (!description) continue; // a blank row left on the form
@@ -78,7 +81,7 @@ export function parseSupplierOrder(body: unknown): { ok: true; order: SupplierOr
     }
     items.push({ description, quantity: Math.round(quantity * 100) / 100 });
   }
-  if (items.length === 0) return { ok: false, error: "Add at least one item." };
+  if (items.length === 0 && supplierEmail) return { ok: false, error: "Add at least one item to email the supplier." };
   if (items.length > MAX_ITEMS) return { ok: false, error: `A PO can have at most ${MAX_ITEMS} items.` };
 
   return {

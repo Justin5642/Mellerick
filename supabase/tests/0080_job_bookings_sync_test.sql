@@ -45,10 +45,13 @@ begin
     -- Unassigned (staff_id null): no crew row, so no assignment push fires.
     insert into job_bookings (job_id, staff_id, starts_at, ends_at)
     values (j, null, mon, mon + interval '4 hours') returning id into b;
-    -- A closed job last touched three years ago, with its booking.
-    insert into jobs (id, customer_id, title, status) values (j_old, cust, '0080 old job', 'completed');
+    -- A closed job last touched three years ago, with its booking. Booked
+    -- while open, then completed: since 0096 a completed job takes no new
+    -- booking, which is how such a row arises for real anyway.
+    insert into jobs (id, customer_id, title) values (j_old, cust, '0080 old job');
     insert into job_bookings (job_id, staff_id, starts_at, ends_at, created_at)
     values (j_old, null, long_ago, long_ago + interval '4 hours', long_ago) returning id into b_old;
+    update jobs set status = 'completed' where id = j_old;
 
     -- now() is constant inside this one transaction, so "updated_at was not
     -- bumped" can only be observed against a value that is NOT now(). Backdate

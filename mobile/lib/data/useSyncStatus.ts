@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useDataLayer } from "./DataProvider";
 import { reportSyncError } from "../monitoring";
 import { nextPollDelay, type OutboxCounts } from "./syncStatusCadence";
+import type { Operation } from "./outbox/types";
 
 export interface SyncStatus {
   /** Operations still outstanding and being retried (pending + failed + inflight). */
@@ -12,6 +13,10 @@ export interface SyncStatus {
   synced: boolean;
   /** Re-queue every terminally-failed op and kick a drain (the badge's Retry). */
   retry: () => void;
+  /** The terminally-failed operations, for the "not synced" sheet. */
+  listFailed: () => Promise<Operation[]>;
+  /** Give up on one refused change (kept as "discarded", not erased). */
+  discard: (id: string) => Promise<boolean>;
 }
 
 // Drives the sync badge's pending/failed counts. Event-driven, with an adaptive
@@ -98,5 +103,8 @@ export function useSyncStatus(): SyncStatus {
     })();
   }, [layer]);
 
-  return { pending: counts.pending, failed: counts.failed, synced: counts.pending === 0 && counts.failed === 0, retry };
+  const listFailed = useCallback(async () => (layer ? layer.outbox.deadOperations() : []), [layer]);
+  const discard = useCallback(async (id: string) => (layer ? layer.outbox.discardDead(id) : false), [layer]);
+
+  return { pending: counts.pending, failed: counts.failed, synced: counts.pending === 0 && counts.failed === 0, retry, listFailed, discard };
 }

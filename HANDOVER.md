@@ -359,6 +359,90 @@ one once, against its PO, and the app makes the Xero bill.
   counted twice in the ledger.
 - 0089 was applied before this merged (the supplier-orders route selects `delivered_at`).
 
+**Scheduling and PO batch (13 Nov 2026; migrations `0096`, `0097` applied 2026-11-14).**
+- **Closed jobs can't be scheduled.** The board and the phone's Schedule tab
+  hide completed/cancelled jobs, so a booking on one used to "save" and never
+  appear. Web "Schedule Job" is disabled for them with a link to change the
+  status; the phone sheet explains and offers "Change status". Rule in
+  `lib/job-schedulable.ts`, mirrored at `mobile/lib/jobSchedulable.ts`
+  (`tests/unit/job-schedulable.test.ts`). `0096` makes the database refuse new
+  or moved bookings and job-level schedule writes on closed jobs (ERRCODE
+  MJ001, HTTP 400); status changes, deletes, unassigning, calendar links,
+  flag-only refreshes and 0079's own follow-on writes still pass. The calendar
+  poll counts a refusal as skipped. Gate test
+  `supabase/tests/0096_refuse_scheduling_closed_jobs_test.sql`.
+- **Keyboard-safe forms.** Phone sheets with text fields use
+  `mobile/components/KeyboardSheet.tsx` (buttons outside the scroll, Done bar,
+  dismiss on tap/drag, 16pt); web dialogs use
+  `components/ui/keyboard-safe-dialog.tsx`, sized to the *visual* viewport —
+  iPhone Safari does not shrink `vh`/`dvh` for the keyboard. Use these for any
+  new form with a text area.
+- **Add a site while creating a job** (web New Job and job Overview, phone New
+  Job). Address rules and duplicate check in `lib/site-address.ts`, mirrored at
+  `mobile/lib/siteAddress.ts` (`tests/unit/site-address.test.ts`). Contact and
+  access notes go into `sites.notes`, labelled (no columns for them). On the
+  phone a site waits for its still-queued customer, and a job for its
+  still-queued site (`Outbox.pendingInsertOpId`). No database duplicate guard
+  yet.
+- **Web board: resize and name tags.** Week view: drag a booking's first/last
+  day edge (mouse or touch) to change its days — `planBookingResize` in
+  `components/schedule/board-model.ts`, through the dialog's own
+  `buildBookingWindow`; clashes on added days ask first (`resizeConflicts`);
+  success only after the server confirms, snap-back on refusal. Every tile
+  names its technician (initials when narrow, "+N" others on the job that day).
+- **Phone schedule grid.** Office Schedule tab is Day / Week / List
+  (`mobile/components/schedule/ScheduleGrid.tsx`, layout in
+  `mobile/lib/scheduleGrid.ts`), placement from `mobile/lib/boardModel.ts` —
+  a copy of the web board model pinned by `tests/unit/board-model-mirror.test.ts`
+  (change the web file first, then copy its body). Long-press drag moves; the
+  Week-view grip resizes; both go through `ScheduleRepository.updateBooking`.
+  `GestureHandlerRootView` now wraps the app root. The phone's
+  `lib/bookings.ts` `BookingWindowColumns` now has the web's booking shape; the
+  old schedule-shaped type is `ScheduleWindowColumns`.
+- **Supplier picker: Pinned / Recent / A–Z** on every PO supplier picker (web
+  `components/job/supplier-picker.tsx`, phone
+  `mobile/components/job/supplier-picker.tsx`), rules in
+  `lib/supplier-picker.ts` mirrored at `mobile/lib/supplierPicker.ts`. Pins are
+  `suppliers.pin_order` (0097; Settings → Suppliers); Recent comes from
+  `vendor_orders` (user's own first, then the company's). 0097 also defaults
+  `vendor_orders.entered_by` to the signed-in user and seeds the four pins by
+  name (applied: Reece, Plumbers Co-op, Northern Quarries, Boral pinned).
+- **Allowed hours per cost centre already existed** — PO tab, Hours on each
+  cost-centre line (`po_cost_centers.allocated_hours`); not rebuilt.
+
+**Customer job report with the invoice (14 Nov 2026; no migration).** Justin
+approved: the web **Send Invoice** dialog has "Include job report and photos"
+(only when the invoice has a job). Ticked, it loads a draft
+(`GET /api/invoices/[id]/job-report`) and the email gets a second PDF,
+`job-report-<invoice no>.pdf`, with a line in the body saying so.
+- **Content:** header as on the invoice; job number/title, customer, site,
+  invoice number; **dates attended** with each day's technicians (work
+  `time_entries`, Melbourne days, names from `profiles` — **no hours, no
+  money**: fixed-price builders must not see hours); **work carried out** —
+  defaulted from `job_stage_notes`, the voice report and `completion_notes`
+  (never `job_notes`, which can be internal), edited by the office, sent
+  exactly as left (plain text, ≤20,000 chars); **photos**, all ticked by
+  default, two per row with caption and date; the latest **signature** row as
+  the customer sign-off (tickbox). Excluded always: `photo_type='signature'`
+  from the photo grid, **docket photos** (`vendor_order_id` set — they can show
+  prices), and files that are not JPEG/PNG/WebP (HEIC etc.; the dialog says how
+  many).
+- **Server:** photos are downloaded through the caller's client (4 at a time)
+  and re-encoded with `sharp` (now a direct dependency) to ≤1200px JPEG q70;
+  at most 40 photos / ~14 MB of images — the first N go in and the office is
+  told the rest did not fit. The requested photo ids are intersected with the
+  job's eligible photos; the client list is never trusted. **If a requested
+  report can't be made, nothing is sent** (500 with a fixed sentence; reported
+  to Sentry by tag). `maxDuration` 60 on send and preview. A send without
+  `jobReport` (the phone's) is unchanged.
+- "Preview report" posts the same selection to
+  `/api/invoices/[id]/job-report/preview` and opens the PDF in a new tab.
+- Files: rules `lib/job-report.ts` (tested in `tests/unit/job-report.test.ts`),
+  loading/rendering `lib/job-report-data.ts`, PDF
+  `lib/pdf/job-report-template.tsx` + `render-job-report.ts`, dialog panel
+  `components/invoice/job-report-options.tsx`; route behaviour in
+  `tests/unit/invoice-send-job-report.test.ts`. Not yet on the phone.
+
 ---
 
 ## 2. The one rule that must never break
@@ -395,7 +479,7 @@ windows) — all 16 technician-visible streams are money-free:
   `tech_job_assignments`, `tech_job_photos`, `tech_job_notes`,
   `tech_job_stage_notes` — no monetary column in the selected sets
 - `tech_job_bookings` (added for build 16; 0079/0080 applied 2026-10-19,
-  stream not deployed yet) — 10 named columns: who, when, cost-centre **id**;
+  deployed as sync config v5 on 2026-11-14) — 10 named columns: who, when, cost-centre **id**;
   no money column exists on `job_bookings`
 
 Office/admin streams gate on the caller's own profile row:
@@ -607,7 +691,7 @@ Load-bearing properties:
   wedge the FIFO queue forever — but it logs a warning naming the table, so a
   vanished row is traceable.
 
-### Job bookings on the phone (build 16; 0079 + 0080 applied 2026-10-19 — the stream deploy is the last step)
+### Job bookings on the phone (build 16; 0079 + 0080 applied 2026-10-19; streams deployed as v5 2026-11-14)
 
 `job_bookings` (`0079`, applied 2026-10-19) holds each technician's own
 window and cost centre on a job; the job-level schedule and crew are derived
@@ -1125,9 +1209,12 @@ not referenced anywhere in the code) has its own active slot; the likeliest
 story is that `powersync_role`'s password was reset while setting that one up,
 locking the app's instance out. Fixed by setting a new password, entering it in
 the app instance's connection settings, and redeploying (v4, new slot
-`…_4_fc97`, active, 0 bytes behind). **Open:** find out what the second
-instance is — if unused, delete it and drop its slot; if used, it needs the new
-password too. Lesson repeated from August: **read the PowerSync dashboard log
+`…_4_fc97`, active, 0 bytes behind). **Resolved 2026-11-14:** the second
+instance (`…73ab…`, labelled "Production" in the dashboard but never used by
+the app — 0 clients in 30 days, sample template config) was deleted and its
+slot `…_1_db25` went with it; only `…496c5e_4_fc97` remains. Note the app's
+instance is the one labelled **"Development"**. The unused role
+`powersync_7dc56333…` (reads nothing) is still in the database, harmless. Lesson repeated from August: **read the PowerSync dashboard log
 first** — it says exactly why, and `npm run check:sync` (or the slot query) only
 says that something is wrong.
 
@@ -1182,7 +1269,6 @@ a shippable release.
 | **Sentry (error monitoring)** | Justin | Optional, and off until a DSN is set — see §12. Create a free Sentry org with a Next.js project (and a React Native project for the app), then set the DSNs in Vercel and EAS. Without it, failures like the weeks-long silent "Polish with AI" outage are still only discovered by accident. |
 | **Turn off public sign-up** | Justin | Dashboard → Authentication → Sign In / Providers → untick **"Allow new users to sign up"**. `supabase/config.toml` now has `[auth] enable_signup = false`, but that file only configures the local stack — the hosted project still lets anyone with the anon key call `/auth/v1/signup`. Invites keep working (GoTrue's admin invite does not check this switch). Leave the **Email provider** itself enabled. |
 | **`APP_URL`** (optional) | Justin | Origin for emailed reset links. Unset = `https://mellerick-app.vercel.app`, which is right for production. Set it only for a different domain, or `http://localhost:3000` in `.env.local` to test resets locally. |
-| **Deploy the job bookings sync streams** | Justin | `0079` and `0080` are applied (19 Oct 2026). Last step: paste `mobile/powersync/sync-streams.yaml` into the PowerSync dashboard → Validate → Deploy (`docs/powersync-deploy.md`). Build 16 works before it (reads bookings from the server instead of the device), so it is not urgent, but offline bookings need it. |
 | **Check `EMAIL_FROM` for supplier POs** | Justin | Supplier PO emails go from `EMAIL_FROM` — it must be on a domain verified in Resend, or suppliers never receive them. (0085 itself applied 2026-10-28.) |
 | **Maestro flow 02** | Avi | Needs `ADMIN_EMAIL` / `ADMIN_PASSWORD` in the environment. The login subflow deliberately skips when a session already exists, so a password never passes through a script — which is why flows 01/03/04 could be run and 02 could not. |
 
@@ -1235,6 +1321,13 @@ feature graphic (1024×500). Listing copy, privacy answers and the privacy polic
 are written and live outside the repo at
 `OneDrive - BAS & More/DevOps/Mellerick Plumbing/{Android,Apple}/`, as PDFs and
 markdown.
+
+**Distribution is private (Justin, 13 Nov 2026).** Staff-only app: Apple
+**Unlisted** distribution (request form after review approval) and Google
+**Managed Google Play** private app for the Mellerick organisation — no public
+listing on either store. iPhone only: `ios.supportsTablet` is `false`, so no
+iPad screenshots are needed. Apple refuses dropping iPad support on an app that
+has ever been *released* with it; this was turned off before the first release.
 
 **Signing key** — nothing to prepare. Let **EAS manage credentials**; the upload
 keystore is created on the first production build. The alternative, a local

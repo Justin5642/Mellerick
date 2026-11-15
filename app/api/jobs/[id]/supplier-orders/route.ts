@@ -7,6 +7,7 @@ import { getResend, getFromAddress } from "@/lib/resend";
 import { siteOneLine } from "@/lib/job-site";
 import { parseSupplierOrder, supplierOrderEmail } from "@/lib/supplier-orders";
 import { reportError } from "@/lib/monitoring";
+import { recentSupplierIds, RECENT_SUPPLIER_CANDIDATES } from "@/lib/supplier-picker";
 
 // Supplier POs raised from the phone (migration 0085). Justin, 28 Oct 2026:
 // any technician, any job, any supplier, straight to the supplier.
@@ -63,6 +64,16 @@ async function listOrders(admin: Admin, jobId: string) {
     .eq("job_id", jobId)
     .order("created_at", { ascending: false });
   if (error) throw error;
+  // Docket photos taken against each order (0093). Read on their own and
+  // never fatal: a docket count is not worth failing the order list over.
+  const dockets = new Map<string, number>();
+  const { data: photos, error: photosError } = await admin
+    .from("job_photos")
+    .select("vendor_order_id")
+    .eq("job_id", jobId)
+    .not("vendor_order_id", "is", null);
+  if (photosError) console.error("supplier orders: docket photos not read:", photosError.message);
+  for (const p of (photos ?? []) as { vendor_order_id: string }[]) dockets.set(p.vendor_order_id, (dockets.get(p.vendor_order_id) ?? 0) + 1);
   // Field by field, never a spread: whatever else a row carries stays here.
   return ((data ?? []) as unknown as OrderRow[]).map((o) => ({
     id: o.id,
@@ -77,11 +88,54 @@ async function listOrders(admin: Admin, jobId: string) {
     createdAt: o.created_at,
     emailedAt: o.emailed_at,
     deliveredAt: o.delivered_at,
+    docketPhotos: dockets.get(o.id) ?? 0,
     raisedBy: o.profiles?.full_name ?? null,
     items: [...(o.vendor_order_items ?? [])]
       .sort((a, b) => a.sort_order - b.sort_order)
       .map((i) => ({ description: i.description, quantity: Number(i.quantity) })),
   }));
+}
+
+interface SupplierRow {
+  id: string;
+  name: string;
+  email: string | null;
+  default_cost_centre_id: string | null;
+  pin_order?: number | null;
+}
+
+// The active supplier list, with each one's place in the Pinned group
+// (pin_order, from 0097).
+// A database without pin_order (42703) gets the list unpinned.
+async function loadSuppliers(admin: Admin): Promise<SupplierRow[]> {
+  const read = (cols: string) => admin.from("suppliers").select(cols).eq("is_active", true).order("name");
+  let { data, error } = await read("id, name, email, default_cost_centre_id, pin_order");
+  if (error?.code === "42703") ({ data, error } = await read("id, name, email, default_cost_centre_id"));
+  if (error) throw error;
+  return (data ?? []) as unknown as SupplierRow[];
+}
+
+// How many of the newest POs (every job) "recent" is worked out from.
+const RECENT_ORDERS_READ = 300;
+
+// The suppliers the caller used most recently on POs, then the company's
+// (lib/supplier-picker.ts). Only supplier ids from the list go back — no
+// order, job or amount. Never fatal: without it the picker just has no
+// Recent group.
+async function loadRecentSupplierIds(admin: Admin, userId: string, suppliers: SupplierRow[]): Promise<string[]> {
+  const { data, error } = await admin
+    .from("vendor_orders")
+    .select("supplier_id, vendor_name, entered_by, created_at")
+    .order("created_at", { ascending: false })
+    .limit(RECENT_ORDERS_READ);
+  if (error) {
+    console.error("supplier orders: recent suppliers not read:", error.message);
+    return [];
+  }
+  const uses = (
+    (data ?? []) as { supplier_id: string | null; vendor_name: string | null; entered_by: string | null; created_at: string | null }[]
+  ).map((o) => ({ supplierId: o.supplier_id, vendorName: o.vendor_name, enteredBy: o.entered_by, createdAt: o.created_at }));
+  return recentSupplierIds(uses, suppliers, userId, RECENT_SUPPLIER_CANDIDATES);
 }
 
 // What the Raise PO form starts with: the orders already on the job, the cost
@@ -99,7 +153,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     const job = await loadJob(admin, id);
     if (!job) return NextResponse.json({ error: "Job not found" }, { status: 404 });
 
-    const [orders, { data: openEntry }, { data: supplierRows, error: suppliersError }, { data: lines, error: linesError }] = await Promise.all([
+    const [orders, { data: openEntry }, supplierRows, { data: lines, error: linesError }] = await Promise.all([
       listOrders(admin, id),
       admin
         .from("time_entries")
@@ -111,26 +165,23 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
         .order("clock_in", { ascending: false })
         .limit(1)
         .maybeSingle(),
-      admin
-        .from("suppliers")
-        .select("id, name, email, default_cost_centre_id")
-        .eq("is_active", true)
-        .order("name"),
+      loadSuppliers(admin),
       admin
         .from("po_cost_centers")
-        .select("id, cost_centre_id, purchase_orders!inner(job_id)")
+        .select("id, name, cost_centre_id, sort_order, cost_centres(name), purchase_orders!inner(job_id, po_number)")
         .eq("purchase_orders.job_id", id),
     ]);
-    if (suppliersError) throw suppliersError;
     if (linesError) throw linesError;
 
     // Field by field: a supplier's account number and phone stay office-side.
-    const suppliers = (supplierRows ?? []).map((s) => ({
-      id: s.id as string,
-      name: s.name as string,
-      email: (s.email as string | null) ?? null,
-      defaultCostCentreId: (s.default_cost_centre_id as string | null) ?? null,
+    const suppliers = supplierRows.map((s) => ({
+      id: s.id,
+      name: s.name,
+      email: s.email ?? null,
+      defaultCostCentreId: s.default_cost_centre_id ?? null,
+      pinOrder: s.pin_order ?? null,
     }));
+    const recentIds = await loadRecentSupplierIds(admin, guard.userId, supplierRows);
 
     return NextResponse.json({
       orders,
@@ -138,7 +189,24 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       clockedIn: !!openEntry,
       deliveryAddress: siteOneLine(job.sites) || null,
       suppliers,
+      // Supplier ids for the picker's Recent group, most recent first: the
+      // caller's own POs, then the company's. Older phone builds ignore it.
+      recentSupplierIds: recentIds,
       costCentreLines: (lines ?? []).map((l) => ({ id: l.id as string, costCentreId: (l.cost_centre_id as string | null) ?? null })),
+      // The job's cost centres, read fresh with every load (2 Nov 2026): the
+      // phone's own copy is read once when the job opens, so one added on the
+      // web while the job was open never appeared on the Orders tab. Names
+      // only — no budgets.
+      costCentres: ((lines ?? []) as unknown as {
+        id: string;
+        name: string;
+        sort_order: number | null;
+        cost_centres: { name: string } | null;
+        purchase_orders: { po_number: string } | null;
+      }[])
+        .slice()
+        .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
+        .map((l) => ({ id: l.id, name: l.name, code: null, po_number: l.purchase_orders?.po_number ?? "", costCentre: l.cost_centres?.name ?? null })),
     });
   } catch (err) {
     console.error("supplier orders list error:", err);
@@ -215,7 +283,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
         delivery_address: order.deliveryAddress,
         required_by: order.requiredBy,
         notes: order.notes,
-        description: order.items.map((i) => i.description).join(", ").slice(0, 300),
+        description: (order.items.length ? order.items.map((i) => i.description).join(", ") : order.notes ?? "Phone order").slice(0, 300),
         order_date: today,
         status: "ordered",
         entered_by: guard.userId,
@@ -224,9 +292,11 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       .single();
     if (insertError || !created) throw insertError ?? new Error("vendor order insert returned no row");
 
-    const { error: itemsError } = await admin.from("vendor_order_items").insert(
-      order.items.map((i, n) => ({ vendor_order_id: order.id, description: i.description, quantity: i.quantity, sort_order: n }))
-    );
+    const { error: itemsError } = order.items.length
+      ? await admin.from("vendor_order_items").insert(
+          order.items.map((i, n) => ({ vendor_order_id: order.id, description: i.description, quantity: i.quantity, sort_order: n }))
+        )
+      : { error: null };
     if (itemsError) {
       // An order with no lines is useless to the supplier and the office.
       // Remove it so the tech's retry starts clean.

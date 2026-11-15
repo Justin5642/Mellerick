@@ -228,7 +228,8 @@ export function wakeRegions(sites: TrackedSite[]): WakeRegion[] {
     identifier: s.jobId,
     latitude: s.lat,
     longitude: s.lng,
-    radius: WAKE_REGION_RADIUS_M,
+    // Twice the site's own fence, so a big site wakes tracking early enough too.
+    radius: typeof s.radiusM === "number" && s.radiusM > 0 ? s.radiusM * 2 : WAKE_REGION_RADIUS_M,
     notifyOnEnter: true,
     notifyOnExit: false,
   }));

@@ -190,3 +190,29 @@ describe("applyGeofenceTransition — departure", () => {
     expect(result.setPendingDeparture).toBeNull();
   });
 });
+
+describe("applyGeofenceTransition — departure from an entry open over 24 hours (15 Nov 2026)", () => {
+  it("leaves the entry open and starts no travel leg when the clock-off is refused", async () => {
+    const { deps } = makeDeps({ status: "found", entryId: "e1", clockInIso: "2026-08-03T07:00:00.000Z" });
+    deps.clockOut = async () => {
+      const e = new Error("over 24 hours");
+      e.name = "TimeEntryRefused";
+      throw e;
+    };
+    const result = await applyGeofenceTransition(
+      { kind: "departure", jobId: "job-a", staffId: "tech-1", pendingDeparture: null },
+      deps
+    );
+    expect(result).toEqual({ handled: true, setPendingDeparture: null, clearPendingDeparture: true });
+  });
+
+  it("still lets any other failure through, so the departure is retried", async () => {
+    const { deps } = makeDeps({ status: "found", entryId: "e1", clockInIso: "2026-08-05T09:00:00.000Z" });
+    deps.clockOut = async () => {
+      throw new Error("disk full");
+    };
+    await expect(
+      applyGeofenceTransition({ kind: "departure", jobId: "job-a", staffId: "tech-1", pendingDeparture: null }, deps)
+    ).rejects.toThrow("disk full");
+  });
+});

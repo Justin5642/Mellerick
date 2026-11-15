@@ -328,6 +328,20 @@ export class Outbox {
     );
   }
 
+  // The id of the still-outstanding insert of `table`/`rowId`, if there is one.
+  // A write that references a row created moments ago on this phone (a site for
+  // a customer just added offline, a job at that site) sets this as its
+  // dependsOn, so it cannot reach the server before its parent: the FIFO alone
+  // does not guarantee that once the parent's insert has backed off after a
+  // transient failure. A dead parent cascades to the dependent
+  // (cascadeDeadDependencies), so neither is lost silently. Null once the
+  // insert is done (or was never queued here) — nothing to wait for.
+  async pendingInsertOpId(table: string, rowId: string): Promise<string | null> {
+    const all = await this.store.all();
+    const op = all.find((o) => o.kind === "write" && o.op === "insert" && o.table === table && o.rowId === rowId && o.status !== "done");
+    return op ? op.id : null;
+  }
+
   // The sync outcome for a specific row's write ops, so a screen can tell whether
   // a mutation was actually ACCEPTED by the server (not merely that we were
   // online). "failed" if any of the row's writes has failed/dead (the drain tried
@@ -552,6 +566,35 @@ export class Outbox {
   // Terminally-failed writes that gave up retrying — surfaced as needs-attention.
   async deadCount(): Promise<number> {
     return this.countOwned(["dead"]);
+  }
+
+  /**
+   * The terminally-failed operations the "not synced" sheet lists, oldest
+   * first — same ownership rule as deadCount(), so the list and the pill's
+   * number always agree.
+   */
+  async deadOperations(): Promise<Operation[]> {
+    const current = this.currentOwner();
+    const all = await this.store.all();
+    return all
+      .filter((o) => o.status === "dead" && (current === undefined || this.isOwned(o, current)))
+      .sort((a, b) => a.createdAt - b.createdAt);
+  }
+
+  /**
+   * The person chose to give up on one refused change. It is NOT erased: it is
+   * closed as done with the reason kept ("discarded: …"), so support can still
+   * see what was dropped, and pruneCompleted() tidies it (and any photo file it
+   * held) on its normal schedule. Operations waiting on it are already dead
+   * ("dependency failed") and are listed separately, so nothing else is
+   * silently thrown away.
+   */
+  async discardDead(id: string): Promise<boolean> {
+    const op = (await this.store.all()).find((o) => o.id === id);
+    if (!op || op.status !== "dead") return false;
+    await this.store.update(id, { status: "done", error: `discarded by user: ${op.error ?? "no reason recorded"}` });
+    this.notifyChange();
+    return true;
   }
 }
 

@@ -24,7 +24,8 @@ export async function GET(request: NextRequest) {
     return NextResponse.redirect(new URL("/dashboard/settings?xero=state_mismatch", request.url));
   }
 
-  const xero = getXeroClient();
+  // The verified state, so xero-node's own check of it passes.
+  const xero = getXeroClient(state!);
 
   try {
     const tokenSet = await xero.apiCallback(request.url);

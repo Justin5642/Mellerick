@@ -180,6 +180,10 @@ describe("wakeRegions", () => {
     expect(WAKE_REGION_RADIUS_M).toBeGreaterThan(150);
   });
 
+  it("is twice a bigger site's own fence", () => {
+    expect(wakeRegions([{ ...site(1), radiusM: 400 }])[0].radius).toBe(800);
+  });
+
   it("keeps the first 20 in the order given (soonest first) — the iOS per-app cap", () => {
     const regions = wakeRegions(Array.from({ length: 25 }, (_, i) => site(i)));
     expect(regions).toHaveLength(MAX_WAKE_REGIONS);

@@ -1,5 +1,18 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { View, Text, SectionList, StyleSheet, RefreshControl, Modal, TouchableOpacity, ActivityIndicator, Alert, Platform, ScrollView } from "react-native";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  View,
+  Text,
+  SectionList,
+  StyleSheet,
+  RefreshControl,
+  Modal,
+  TouchableOpacity,
+  ActivityIndicator,
+  Alert,
+  Platform,
+  ScrollView,
+  useWindowDimensions,
+} from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
@@ -9,13 +22,38 @@ import { colors } from "../../lib/theme";
 import { JobListRow } from "../../design/components/JobListRow";
 import { ScreenError } from "../../design/components/ScreenError";
 import { businessDayLabel, formatBusinessTime, computeRescheduleWithTime, dateKeyInBusinessTZ, localDateKey, toBusinessInputValue } from "../../lib/date";
-import { moveSchedule, scheduleDays, type ScheduleDay } from "../../lib/scheduling";
-import { businessTodayKey, formatScheduleSummary } from "../../lib/scheduleDisplay";
+import { businessDayRange, moveSchedule, scheduleDays, type ScheduleDay } from "../../lib/scheduling";
+import { businessTodayKey, dateRangeLabel, formatScheduleSummary, shortDayLabel } from "../../lib/scheduleDisplay";
 import { useSchedule } from "../../lib/data/hooks/useSchedule";
+import { useWriteOutcome } from "../../lib/data/hooks/useWriteOutcome";
 import { listAssignableStaff, type AssignableStaff } from "../../lib/data/reads/schedule";
 import { unwrapRows } from "../../lib/data/reads/unwrap";
-import { listOpenJobBookingsRemote, type JobBooking } from "../../lib/data/reads/bookings";
+import { listJobBookingsForJobsRemote, listOpenJobBookingsRemote, type JobBooking } from "../../lib/data/reads/bookings";
 import { bookingWindow } from "../../lib/bookings";
+import {
+  applyBoardMove,
+  buildBoardIndex,
+  daysByBooking,
+  planBoardMove,
+  totalHours,
+  type BoardBooking,
+  type BoardCell,
+  type BoardEntry,
+  type BoardJob,
+} from "../../lib/boardModel";
+import {
+  bookingClashes,
+  defaultGridView,
+  gridRows,
+  legacyBookingsFor,
+  moveBlockedReason,
+  othersOnJobDay,
+  planResize,
+  stepDateKey,
+  visibleDayKeys,
+  type GridView,
+} from "../../lib/scheduleGrid";
+import { ScheduleGrid, type SaveState } from "../../components/schedule/ScheduleGrid";
 
 interface SchedJob {
   id: string;
@@ -82,6 +120,35 @@ function scheduleItems(jobs: SchedJob[], bookings: JobBooking[] | null): SchedIt
   });
 }
 
+function toBoardJob(j: SchedJob): BoardJob {
+  return {
+    id: j.id,
+    job_number: j.job_number,
+    title: j.title,
+    status: j.status,
+    scheduled_start: j.scheduled_start,
+    scheduled_end: j.scheduled_end,
+    schedule_daily: j.schedule_daily ?? null,
+    schedule_all_day: j.schedule_all_day ?? null,
+    assigned_to: j.assigned_to,
+    crew: j.assigned_to ? [j.assigned_to] : [],
+    customers: j.customers,
+  };
+}
+
+/** The menu's item for a grid block: its real booking, or the job-level row for a stand-in. */
+function itemForEntry(job: SchedJob, booking: JobBooking | null): SchedItem {
+  if (!booking) return scheduleItems([job], null)[0];
+  return { job, booking, window: bookingWindow(booking), who: booking.staff_name ?? (booking.staff_id ? null : "Unassigned") };
+}
+
+/** ISO without milliseconds, for a PostgREST or() filter value. */
+function filterIso(iso: string): string {
+  return iso.replace(/\.\d{3}Z$/, "Z");
+}
+
+type Notice = { tone: "ok" | "wait" | "bad"; text: string };
+
 export default function ScheduleScreen() {
   const router = useRouter();
   const schedule = useSchedule();
@@ -101,6 +168,25 @@ export default function ScheduleScreen() {
   // The crew being edited in the technician picker (ids), seeded from the
   // job's current job_assignments when the sheet opens.
   const [crew, setCrew] = useState<string[]>([]);
+
+  // ---- grid (Day / Week) -----------------------------------------------------
+  // Day on a phone, Week on a tablet: the view that is readable without
+  // squinting. List is the original day-by-day list, kept for "Earlier — not
+  // finished" and for anyone who prefers it.
+  const { width } = useWindowDimensions();
+  const [view, setView] = useState<GridView>(() => defaultGridView(width));
+  const [selectedKey, setSelectedKey] = useState(() => businessTodayKey());
+  const todayKey = businessTodayKey();
+  // Completed jobs in the period on screen, greyed out on the grid. Open jobs
+  // come from `jobs` above (every open scheduled job, any date).
+  const [doneJobs, setDoneJobs] = useState<SchedJob[]>([]);
+  const [doneBookings, setDoneBookings] = useState<JobBooking[] | null>([]);
+  const [menuNames, setMenuNames] = useState<string | null>(null);
+  // Per booking: a move/resize on its way to the server, and what became of it.
+  const [saveStates, setSaveStates] = useState<Map<string, SaveState>>(new Map());
+  const [notice, setNotice] = useState<Notice | null>(null);
+  const noticeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const writeOutcome = useWriteOutcome();
 
   // Unwrapped rather than defaulted to []: this list's empty state is "Nothing
   // scheduled.", which an office user reads as the day being clear. A failed
@@ -149,6 +235,275 @@ export default function ScheduleScreen() {
     await load();
     setRefreshing(false);
   }, [load]);
+
+  const gridView: "day" | "week" = view === "week" ? "week" : "day";
+  const dayKeys = useMemo(() => visibleDayKeys(gridView, selectedKey), [gridView, selectedKey]);
+  const rangeFirst = dayKeys[0];
+  const rangeLast = dayKeys[dayKeys.length - 1];
+
+  // Completed jobs whose schedule touches the days on screen. Best-effort: a
+  // failure leaves them off (the open jobs are what the office acts on)
+  // rather than taking the grid down.
+  const loadDone = useCallback(async () => {
+    if (view === "list") return;
+    const from = filterIso(businessDayRange(rangeFirst).dayStartIso);
+    const to = filterIso(businessDayRange(rangeLast).dayEndIso);
+    try {
+      const res = await supabase
+        .from("jobs")
+        .select("*, customers(name), profiles!jobs_assigned_to_fkey(full_name)")
+        .eq("status", "completed")
+        .lt("scheduled_start", to)
+        .or(`scheduled_end.gte.${from},and(scheduled_end.is.null,scheduled_start.gte.${from})`)
+        .order("scheduled_start");
+      const rows = unwrapRows(res as never, "ScheduleScreen.loadDone") as unknown as SchedJob[];
+      setDoneJobs(rows);
+      setDoneBookings(await listJobBookingsForJobsRemote(rows.map((j) => j.id)));
+    } catch (e) {
+      console.warn("[schedule] completed jobs unavailable:", e);
+      setDoneJobs([]);
+      setDoneBookings([]);
+    }
+  }, [view, rangeFirst, rangeLast]);
+
+  useEffect(() => {
+    void loadDone();
+  }, [loadDone]);
+
+  const onGridRefresh = useCallback(async () => {
+    setRefreshing(true);
+    await Promise.all([load(), loadDone()]);
+    setRefreshing(false);
+  }, [load, loadDone]);
+
+  const allJobs = useMemo(() => {
+    const byId = new Map<string, SchedJob>();
+    for (const j of doneJobs) byId.set(j.id, j);
+    for (const j of jobs) byId.set(j.id, j); // the open read wins if both have it
+    return byId;
+  }, [jobs, doneJobs]);
+  const jobsById = useMemo(() => new Map([...allJobs.values()].map((j) => [j.id, toBoardJob(j)])), [allJobs]);
+
+  // Every booking on the grid: the real ones, plus a read-only stand-in for
+  // any job without bookings (job_bookings missing, or a read that failed).
+  const realBookings = useMemo<JobBooking[]>(() => {
+    const seen = new Set<string>();
+    const out: JobBooking[] = [];
+    for (const b of [...(bookings ?? []), ...(doneBookings ?? [])]) {
+      if (seen.has(b.id)) continue;
+      seen.add(b.id);
+      out.push(b);
+    }
+    return out;
+  }, [bookings, doneBookings]);
+  const boardBookings = useMemo<BoardBooking[]>(() => {
+    const openIds = new Set(jobs.map((j) => j.id));
+    const open = jobs.map(toBoardJob);
+    const done = doneJobs.filter((j) => !openIds.has(j.id)).map(toBoardJob);
+    return [
+      ...realBookings,
+      ...legacyBookingsFor(open, bookings ? realBookings : []),
+      ...legacyBookingsFor(done, doneBookings ? realBookings : []),
+    ];
+  }, [jobs, doneJobs, bookings, doneBookings, realBookings]);
+  const bookingDays = useMemo(() => daysByBooking(boardBookings), [boardBookings]);
+  const bookingsByJob = useMemo(() => {
+    const map = new Map<string, BoardBooking[]>();
+    for (const b of boardBookings) {
+      const list = map.get(b.job_id);
+      if (list) list.push(b);
+      else map.set(b.job_id, [b]);
+    }
+    return map;
+  }, [boardBookings]);
+  const board = useMemo(() => buildBoardIndex(boardBookings, jobsById, dayKeys, bookingDays), [boardBookings, jobsById, dayKeys, bookingDays]);
+  const staffNames = useMemo(() => {
+    const names = new Map<string, string>();
+    for (const b of realBookings) if (b.staff_id && b.staff_name) names.set(b.staff_id, b.staff_name);
+    for (const j of allJobs.values()) if (j.assigned_to && j.profiles?.full_name) names.set(j.assigned_to, j.profiles.full_name);
+    for (const s of staff) names.set(s.id, s.full_name);
+    return names;
+  }, [staff, realBookings, allJobs]);
+  const rows = useMemo(() => {
+    const periodHours = new Map<string, number>();
+    for (const [id, byDay] of board.hours) periodHours.set(id, totalHours(byDay));
+    // Technicians always get a row (who is free shows at a glance); office
+    // and admin profiles only when they hold a booking in the period.
+    const techs = staff.filter((s) => s.role === "technician");
+    return gridRows(techs, board.byStaff.keys(), periodHours, staffNames);
+  }, [board, staff, staffNames]);
+
+  const showNotice = useCallback((n: Notice) => {
+    if (noticeTimer.current) clearTimeout(noticeTimer.current);
+    setNotice(n);
+    // A confirmed save fades; anything still owed stays until the next notice.
+    if (n.tone === "ok") noticeTimer.current = setTimeout(() => setNotice(null), 3500);
+  }, []);
+
+  useEffect(
+    () => () => {
+      if (noticeTimer.current) clearTimeout(noticeTimer.current);
+    },
+    []
+  );
+
+  const setSaveState = useCallback((id: string, state: SaveState | null) => {
+    setSaveStates((cur) => {
+      const next = new Map(cur);
+      if (state) next.set(id, state);
+      else next.delete(id);
+      return next;
+    });
+  }, []);
+
+  // Moves still waiting for the server (offline, or being retried): look
+  // again every few seconds, and say "Saved" only once the server has them.
+  useEffect(() => {
+    const waiting = [...saveStates].filter(([, st]) => st === "queued" || st === "failed").map(([id]) => id);
+    if (waiting.length === 0) return;
+    const timer = setInterval(async () => {
+      let settled = 0;
+      for (const id of waiting) {
+        const outcome = await writeOutcome(id);
+        if (outcome === "settled") {
+          settled++;
+          setSaveState(id, null);
+        } else if (outcome === "failed") setSaveState(id, "failed");
+      }
+      if (settled > 0) {
+        showNotice({ tone: "ok", text: settled === 1 ? "Saved — the server has the change." : `Saved — the server has ${settled} changes.` });
+        void load();
+      }
+    }, 5000);
+    return () => clearInterval(timer);
+  }, [saveStates, writeOutcome, setSaveState, showNotice, load]);
+
+  /**
+   * Queue a booking change through the outbox — the same
+   * ScheduleRepository.updateBooking path as "Reschedule this booking" — then
+   * report what the SERVER did. "Saved" only once the write has settled
+   * there; otherwise the block keeps a "Not synced yet" / "Not saved" tag and
+   * the notice says why.
+   */
+  const commitBookingChange = useCallback(
+    async (before: BoardBooking, after: BoardBooking, what: string) => {
+      if (!schedule.ready) {
+        Alert.alert("Not ready yet", "The app is still starting up. Try again in a moment.");
+        return;
+      }
+      const id = before.id;
+      setSaveState(id, "saving");
+      showNotice({ tone: "wait", text: `Saving: ${what}…` });
+      // Drawn where it is going, tagged "Saving…" until the server answers.
+      const place = (b: JobBooking): JobBooking =>
+        b.id === id
+          ? { ...b, staff_id: after.staff_id, starts_at: after.starts_at, ends_at: after.ends_at, daily: after.daily, all_day: after.all_day, staff_name: after.staff_id ? staffNames.get(after.staff_id) ?? null : null }
+          : b;
+      const restore = (b: JobBooking): JobBooking =>
+        b.id === id ? { ...b, staff_id: before.staff_id, starts_at: before.starts_at, ends_at: before.ends_at, daily: before.daily, all_day: before.all_day } : b;
+      setBookings((cur) => (cur ? cur.map(place) : cur));
+      try {
+        const windowChanged = after.starts_at !== before.starts_at || after.ends_at !== before.ends_at || after.daily !== before.daily;
+        await schedule.updateBooking(before.job_id, id, {
+          ...(after.staff_id !== before.staff_id ? { staffId: after.staff_id } : {}),
+          ...(windowChanged
+            ? { columns: { scheduled_start: after.starts_at, scheduled_end: after.ends_at, schedule_daily: after.daily, schedule_all_day: after.all_day } }
+            : {}),
+        });
+        const outcome = await writeOutcome(id);
+        if (outcome === "settled") {
+          setSaveState(id, null);
+          showNotice({ tone: "ok", text: `Saved: ${what}.` });
+          void load();
+        } else if (outcome === "pending") {
+          setSaveState(id, "queued");
+          showNotice({ tone: "wait", text: `Not on the server yet: ${what}. It is kept on this phone and sends when you're back online.` });
+        } else {
+          setSaveState(id, "failed");
+          showNotice({ tone: "bad", text: `The server hasn't accepted: ${what}. It will retry — check the sync badge.` });
+        }
+      } catch (e) {
+        // Never queued: put the block back where it was.
+        setSaveState(id, null);
+        setBookings((cur) => (cur ? cur.map(restore) : cur));
+        showNotice({ tone: "bad", text: `Couldn't save: ${e instanceof Error ? e.message : "please try again."}` });
+      }
+    },
+    [schedule, setSaveState, showNotice, staffNames, writeOutcome, load]
+  );
+
+  const nameOf = useCallback((staffId: string | null) => (staffId ? staffNames.get(staffId) ?? "Technician" : "Unassigned"), [staffNames]);
+
+  /** Confirm a change, warning when the technician is already booked then. A clash warns; it never blocks. */
+  const confirmChange = useCallback(
+    (job: BoardJob, before: BoardBooking, after: BoardBooking, what: string) => {
+      const clashes = bookingClashes(after, boardBookings);
+      const clashText =
+        clashes.length > 0
+          ? `\n\n⚠ ${nameOf(after.staff_id)} is already booked then: ${clashes
+              .slice(0, 3)
+              .map((c) => `#${jobsById.get(c.booking.job_id)?.job_number ?? "?"} on ${shortDayLabel(c.dateKey)}`)
+              .join(", ")}${clashes.length > 3 ? ` and ${clashes.length - 3} more` : ""}.`
+          : "";
+      Alert.alert(`#${job.job_number} — ${job.title}`, `${what.charAt(0).toUpperCase()}${what.slice(1)}?${clashText}`, [
+        { text: "Cancel", style: "cancel" },
+        { text: clashes.length > 0 ? "Book anyway" : "Save", onPress: () => void commitBookingChange(before, after, what) },
+      ]);
+    },
+    [boardBookings, nameOf, jobsById, commitBookingChange]
+  );
+
+  const onGridMove = useCallback(
+    (entry: BoardEntry, source: BoardCell, target: BoardCell) => {
+      const blocked = moveBlockedReason(entry.job, entry.booking);
+      if (blocked) {
+        Alert.alert("Can't move this", blocked);
+        return;
+      }
+      const patch = planBoardMove(entry.booking, source, target);
+      if (!patch) return;
+      const after = applyBoardMove(entry.booking, patch);
+      const parts: string[] = [];
+      if (patch.staff_id !== undefined) {
+        parts.push(target.staffId ? `give ${nameOf(source.staffId)}'s booking to ${nameOf(target.staffId)}` : `unassign ${nameOf(source.staffId)}'s booking`);
+      }
+      if (patch.starts_at) parts.push(`start it on ${shortDayLabel(target.dateKey)}`);
+      confirmChange(entry.job, entry.booking, after, parts.join(" and "));
+    },
+    [confirmChange, nameOf]
+  );
+
+  const onGridResize = useCallback(
+    (entry: BoardEntry, newEndKey: string) => {
+      const blocked = moveBlockedReason(entry.job, entry.booking);
+      if (blocked) {
+        Alert.alert("Can't change this", blocked);
+        return;
+      }
+      const patch = planResize(entry.booking, newEndKey);
+      if (!patch) return;
+      const after: BoardBooking = { ...entry.booking, ends_at: patch.ends_at ?? entry.booking.ends_at, daily: patch.daily ?? entry.booking.daily };
+      const days = scheduleDays(bookingWindow(after));
+      const span = days.length ? dateRangeLabel(days[0].dateKey, days[days.length - 1].dateKey) : shortDayLabel(newEndKey);
+      confirmChange(entry.job, entry.booking, after, `book ${nameOf(entry.booking.staff_id)} ${span} (${days.length} day${days.length === 1 ? "" : "s"})`);
+    },
+    [confirmChange, nameOf]
+  );
+
+  const onGridOpen = useCallback(
+    (entry: BoardEntry) => {
+      const job = allJobs.get(entry.job.id);
+      if (!job) return;
+      const real = realBookings.find((b) => b.id === entry.booking.id) ?? null;
+      const others = othersOnJobDay(entry, bookingsByJob.get(entry.job.id) ?? [], bookingDays);
+      const names = [nameOf(entry.booking.staff_id), ...others.map(nameOf)];
+      setMenuNames(`${shortDayLabel(entry.day.dateKey)}: ${names.join(", ")}`);
+      setMenuItem(itemForEntry(job, real));
+    },
+    [allJobs, realBookings, bookingsByJob, bookingDays, nameOf]
+  );
+
+  const onGridBlocked = useCallback((message: string) => Alert.alert("Can't move this", message), []);
 
   // One row per booked DAY, not per job (migration 0071): a Mon–Wed daily job
   // appears under Monday, Tuesday and Wednesday with that day's hours, and
@@ -334,36 +689,117 @@ export default function ScheduleScreen() {
   return (
     <SafeAreaView style={styles.safe} edges={["top"]}>
       <View style={styles.header}>
-        <Text style={styles.h1}>Schedule</Text>
-        <Text style={styles.sub}>Tap a job to reassign, reschedule or open it</Text>
-      </View>
-      <SectionList
-        sections={sections}
-        keyExtractor={(r) => `${r.item.job.id}:${r.item.booking?.id ?? "job"}:${r.day.dateKey}`}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.blue600} />}
-        stickySectionHeadersEnabled={false}
-        ListEmptyComponent={<Text style={styles.empty}>Nothing scheduled.</Text>}
-        renderSectionHeader={({ section }) => <Text style={styles.dayHead}>{section.title}</Text>}
-        renderItem={({ item: { item, day, index, count }, section }) => (
-          <View style={styles.card}>
-            <JobListRow
-              jobNumber={item.job.job_number}
-              title={item.job.title}
-              // Rows under "Earlier" have no day heading above them, so they
-              // carry their own date.
-              subtitle={`${section.earlier ? `${businessDayLabel(day.startIso)} · ` : ""}${item.job.customers?.name ?? "—"} · ${item.who ?? "Unassigned"}${count > 1 ? ` · Day ${index + 1} of ${count}` : ""}`}
-              status={item.job.status}
-              leading={
-                <View style={styles.timeCol}>
-                  <Text style={styles.timeStart}>{formatBusinessTime(day.startIso)}</Text>
-                  {item.window.scheduled_end ? <Text style={styles.timeEnd}>{formatBusinessTime(day.endIso)}</Text> : null}
-                </View>
-              }
-              onPress={() => setMenuItem(item)}
-            />
+        <View style={styles.titleRow}>
+          <Text style={styles.h1}>Schedule</Text>
+          <View style={styles.segment} accessibilityRole="tablist">
+            {(["day", "week", "list"] as const).map((v) => (
+              <TouchableOpacity
+                key={v}
+                style={[styles.segBtn, view === v && styles.segBtnOn]}
+                onPress={() => setView(v)}
+                accessibilityRole="tab"
+                accessibilityState={{ selected: view === v }}
+              >
+                <Text style={[styles.segText, view === v && styles.segTextOn]}>{v === "day" ? "Day" : v === "week" ? "Week" : "List"}</Text>
+              </TouchableOpacity>
+            ))}
           </View>
+        </View>
+        {view === "list" ? (
+          <Text style={styles.sub}>Tap a job to reassign, reschedule or open it</Text>
+        ) : (
+          <>
+            <View style={styles.navRow}>
+              <TouchableOpacity style={styles.navBtn} onPress={() => setSelectedKey((k) => stepDateKey(gridView, k, -1))} accessibilityLabel={view === "week" ? "Previous week" : "Previous day"}>
+                <Ionicons name="chevron-back" size={20} color={colors.slate700} />
+              </TouchableOpacity>
+              <Text style={styles.navLabel} numberOfLines={1}>
+                {view === "week" ? dateRangeLabel(rangeFirst, rangeLast) : shortDayLabel(selectedKey)}
+              </Text>
+              <TouchableOpacity style={styles.navBtn} onPress={() => setSelectedKey((k) => stepDateKey(gridView, k, 1))} accessibilityLabel={view === "week" ? "Next week" : "Next day"}>
+                <Ionicons name="chevron-forward" size={20} color={colors.slate700} />
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.todayBtn, dayKeys.includes(todayKey) && styles.todayBtnOff]}
+                onPress={() => setSelectedKey(todayKey)}
+                disabled={dayKeys.includes(todayKey)}
+              >
+                <Text style={styles.todayText}>Today</Text>
+              </TouchableOpacity>
+            </View>
+            <Text style={styles.sub}>Tap a job for its menu · hold and drag to move it{view === "week" ? " · hold the grip to change its days" : ""}</Text>
+          </>
         )}
-      />
+      </View>
+      {notice ? (
+        <View style={[styles.notice, notice.tone === "ok" ? styles.noticeOk : notice.tone === "bad" ? styles.noticeBad : styles.noticeWait]} accessibilityLiveRegion="polite">
+          <Ionicons
+            name={notice.tone === "ok" ? "checkmark-circle" : notice.tone === "bad" ? "alert-circle" : "time-outline"}
+            size={16}
+            color={notice.tone === "ok" ? colors.green600 : notice.tone === "bad" ? colors.red600 : colors.yellow700}
+          />
+          <Text style={styles.noticeText}>{notice.text}</Text>
+          <TouchableOpacity onPress={() => setNotice(null)} hitSlop={12} accessibilityLabel="Dismiss">
+            <Ionicons name="close" size={16} color={colors.slate500} />
+          </TouchableOpacity>
+        </View>
+      ) : null}
+      {staffError && view !== "list" ? (
+        <TouchableOpacity style={[styles.staffErrorRow, { marginHorizontal: 12, marginBottom: 6 }]} onPress={loadStaff}>
+          <Ionicons name="alert-circle-outline" size={18} color={colors.orange700} />
+          <Text style={styles.staffErrorText}>Couldn&apos;t load the technician list — only technicians with bookings are shown. Tap to retry.</Text>
+        </TouchableOpacity>
+      ) : null}
+      {view !== "list" ? (
+        <ScheduleGrid
+          view={gridView}
+          dayKeys={dayKeys}
+          todayKey={todayKey}
+          rows={rows}
+          board={board}
+          bookingsByJob={bookingsByJob}
+          bookingDays={bookingDays}
+          staffNames={staffNames}
+          saveStates={saveStates}
+          refreshing={refreshing}
+          onRefresh={onGridRefresh}
+          onOpen={onGridOpen}
+          onBlocked={onGridBlocked}
+          onMove={onGridMove}
+          onResize={onGridResize}
+        />
+      ) : (
+        <SectionList
+          sections={sections}
+          keyExtractor={(r) => `${r.item.job.id}:${r.item.booking?.id ?? "job"}:${r.day.dateKey}`}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.blue600} />}
+          stickySectionHeadersEnabled={false}
+          ListEmptyComponent={<Text style={styles.empty}>Nothing scheduled.</Text>}
+          renderSectionHeader={({ section }) => <Text style={styles.dayHead}>{section.title}</Text>}
+          renderItem={({ item: { item, day, index, count }, section }) => (
+            <View style={styles.card}>
+              <JobListRow
+                jobNumber={item.job.job_number}
+                title={item.job.title}
+                // Rows under "Earlier" have no day heading above them, so they
+                // carry their own date.
+                subtitle={`${section.earlier ? `${businessDayLabel(day.startIso)} · ` : ""}${item.job.customers?.name ?? "—"} · ${item.who ?? "Unassigned"}${count > 1 ? ` · Day ${index + 1} of ${count}` : ""}`}
+                status={item.job.status}
+                leading={
+                  <View style={styles.timeCol}>
+                    <Text style={styles.timeStart}>{formatBusinessTime(day.startIso)}</Text>
+                    {item.window.scheduled_end ? <Text style={styles.timeEnd}>{formatBusinessTime(day.endIso)}</Text> : null}
+                  </View>
+                }
+                onPress={() => {
+                  setMenuNames(null);
+                  setMenuItem(item);
+                }}
+              />
+            </View>
+          )}
+        />
+      )}
 
       {/* Action menu */}
       <Modal visible={!!menuItem} transparent animationType="fade" onRequestClose={() => setMenuItem(null)}>
@@ -376,12 +812,20 @@ export default function ScheduleScreen() {
                 ? ` · ${menuItem.window.schedule_daily ? (formatScheduleSummary(menuItem.window) ?? "") : formatBusinessTime(menuItem.window.scheduled_start)}`
                 : ""}
             </Text>
-            <Action icon="person-outline" label="Reassign technician" onPress={() => { if (menuItem) openReassign(menuItem.job); setMenuItem(null); }} />
-            <Action
-              icon="calendar-outline"
-              label={menuItem?.booking ? "Reschedule this booking" : "Reschedule"}
-              onPress={() => { setDatePickerFor(menuItem); setMenuItem(null); }}
-            />
+            {/* Everyone on this job that day, full names (the tile shows initials / first names). */}
+            {menuNames ? <Text style={styles.sheetNames}>{menuNames}</Text> : null}
+            {menuItem && menuItem.job.status === "completed" ? (
+              <Text style={styles.sheetDone}>Completed — its schedule can no longer be changed.</Text>
+            ) : (
+              <>
+                <Action icon="person-outline" label="Reassign technician" onPress={() => { if (menuItem) openReassign(menuItem.job); setMenuItem(null); }} />
+                <Action
+                  icon="calendar-outline"
+                  label={menuItem?.booking ? "Reschedule this booking" : "Reschedule"}
+                  onPress={() => { setDatePickerFor(menuItem); setMenuItem(null); }}
+                />
+              </>
+            )}
             <Action icon="open-outline" label="Open job details" onPress={() => { const id = menuItem?.job.id; setMenuItem(null); if (id) router.push(`/job/${id}`); }} />
           </View>
         </TouchableOpacity>
@@ -462,6 +906,25 @@ function Action({ icon, label, onPress }: { icon: keyof typeof Ionicons.glyphMap
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.bg },
   header: { paddingHorizontal: 16, paddingTop: 8, paddingBottom: 6 },
+  titleRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8 },
+  segment: { flexDirection: "row", backgroundColor: colors.slate100, borderRadius: 10, padding: 2 },
+  segBtn: { minHeight: 36, minWidth: 52, paddingHorizontal: 10, alignItems: "center", justifyContent: "center", borderRadius: 8 },
+  segBtnOn: { backgroundColor: colors.card, shadowColor: colors.black, shadowOpacity: 0.08, shadowRadius: 2, shadowOffset: { width: 0, height: 1 }, elevation: 1 },
+  segText: { fontSize: 13, fontWeight: "600", color: colors.slate500 },
+  segTextOn: { color: colors.slate900 },
+  navRow: { flexDirection: "row", alignItems: "center", gap: 4, marginTop: 6 },
+  navBtn: { width: 44, height: 44, alignItems: "center", justifyContent: "center", borderRadius: 10, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.card },
+  navLabel: { flex: 1, textAlign: "center", fontSize: 15, fontWeight: "700", color: colors.slate900 },
+  todayBtn: { height: 44, paddingHorizontal: 12, justifyContent: "center", borderRadius: 10, backgroundColor: colors.blue600, marginLeft: 4 },
+  todayBtnOff: { backgroundColor: colors.slate400 },
+  todayText: { color: "#fff", fontWeight: "700", fontSize: 13 },
+  notice: { flexDirection: "row", alignItems: "center", gap: 8, marginHorizontal: 12, marginBottom: 6, padding: 10, borderRadius: 10 },
+  noticeOk: { backgroundColor: colors.green100 },
+  noticeWait: { backgroundColor: colors.yellow100 },
+  noticeBad: { backgroundColor: colors.red100 },
+  noticeText: { flex: 1, fontSize: 12, color: colors.slate900, lineHeight: 16 },
+  sheetNames: { fontSize: 13, color: colors.slate700, marginBottom: 6 },
+  sheetDone: { fontSize: 13, color: colors.slate500, paddingVertical: 10 },
   h1: { fontSize: 22, fontWeight: "800", color: colors.slate900 },
   sub: { fontSize: 13, color: colors.slate500, marginTop: 2 },
   dayHead: { fontSize: 13, fontWeight: "700", color: colors.slate500, paddingHorizontal: 16, paddingTop: 16, paddingBottom: 4, textTransform: "uppercase" },

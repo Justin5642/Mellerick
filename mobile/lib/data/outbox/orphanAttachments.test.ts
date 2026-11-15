@@ -68,3 +68,25 @@ describe("selectOrphanAttachments", () => {
     expect(selectOrphanAttachments([file("a.jpg", NOW + 60_000)], new Set(), NOW)).toEqual([]);
   });
 });
+
+import { attachmentKey, resolveAttachmentUri } from "./orphanAttachments";
+
+describe("after an app update moves the data folder (15 Nov 2026)", () => {
+  const oldDir = "file:///var/mobile/Containers/Data/Application/OLD-UUID/Documents/outbox-attachments/";
+  const newDir = "file:///var/mobile/Containers/Data/Application/NEW-UUID/Documents/outbox-attachments/";
+
+  it("finds a queued file under today's folder", () => {
+    expect(resolveAttachmentUri(`${oldDir}abc.jpg`, newDir)).toBe(`${newDir}abc.jpg`);
+    expect(resolveAttachmentUri("file:///tmp/other.jpg", newDir)).toBe("file:///tmp/other.jpg");
+    expect(attachmentKey(`${oldDir}abc.jpg`)).toBe("abc.jpg");
+  });
+
+  it("does not delete a file still referenced by its old full path", () => {
+    const now = Date.now();
+    const staged = [
+      { uri: `${newDir}queued.jpg`, modifiedAt: now - 5 * 60 * 60 * 1000 },
+      { uri: `${newDir}orphan.jpg`, modifiedAt: now - 5 * 60 * 60 * 1000 },
+    ];
+    expect(selectOrphanAttachments(staged, new Set([`${oldDir}queued.jpg`]), now)).toEqual([`${newDir}orphan.jpg`]);
+  });
+});

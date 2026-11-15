@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
@@ -25,9 +25,10 @@ import { planBuilderPo, type BuilderPoLineInput, type CostCentreOption } from "@
 // option needs a sentinel value that gets translated back to "" (-> null on
 // save) instead of colliding with a real staff id.
 const UNASSIGNED_VALUE = "__unassigned__";
-// Sentinel picked from the Site dropdown itself to open the "Add New Site"
-// dialog inline, instead of making staff go create the site somewhere else
-// first (there was previously nowhere else to create one at all).
+// Sentinel picked from the Site dropdown itself (its last item) to open the
+// "Add New Site" dialog over the form, instead of making staff go create the
+// site somewhere else first. Works for a customer just made with the picker's
+// "+ Add customer" too: that dialog saves the customer before selecting it.
 const ADD_NEW_SITE_VALUE = "__add_new_site__";
 
 export default function NewJobPage() {
@@ -37,6 +38,9 @@ export default function NewJobPage() {
   const [staff, setStaff] = useState<any[]>([]);
   const [sites, setSites] = useState<any[]>([]);
   const [addSiteOpen, setAddSiteOpen] = useState(false);
+  // Sites saved from the dialog → their customer, so a site list still
+  // loading for that customer cannot drop the one just added.
+  const addedSites = useRef(new Map<string, string>());
 
   // Lets links like the Customer detail page's "+ Add Job" button
   // (/dashboard/jobs/new?customer_id=...) preselect the customer instead of
@@ -77,12 +81,23 @@ export default function NewJobPage() {
   }, []);
 
   useEffect(() => {
+    // A slow answer for the previous customer must not replace this one's list.
+    let cancelled = false;
     async function loadSites() {
       if (!form.customer_id) { setSites([]); return; }
       const { data } = await supabase.from("sites").select("id, name, suburb").eq("customer_id", form.customer_id).eq("is_active", true);
-      setSites(data ?? []);
+      if (cancelled) return;
+      // Keep a site added in the dialog while this load was in flight.
+      setSites((prev) => {
+        const loaded = data ?? [];
+        const added = prev.filter(
+          (p) => addedSites.current.get(p.id) === form.customer_id && !loaded.some((l) => l.id === p.id)
+        );
+        return [...loaded, ...added];
+      });
     }
     loadSites();
+    return () => { cancelled = true; };
   }, [form.customer_id]);
 
   function set(field: string, value: string | null) {
@@ -193,8 +208,8 @@ export default function NewJobPage() {
                 >
                   <SelectTrigger><SelectValue placeholder={form.customer_id ? "Select site" : "Select customer first"} /></SelectTrigger>
                   <SelectContent>
+                    {sites.map((s) => <SelectItem key={s.id} value={s.id}>{s.name}{s.suburb ? ` — ${s.suburb}` : ""}</SelectItem>)}
                     <SelectItem value={ADD_NEW_SITE_VALUE}>+ Add new site</SelectItem>
-                    {sites.map((s) => <SelectItem key={s.id} value={s.id}>{s.name} — {s.suburb}</SelectItem>)}
                   </SelectContent>
                 </Select>
               </div>
@@ -316,7 +331,10 @@ export default function NewJobPage() {
         open={addSiteOpen}
         onOpenChange={setAddSiteOpen}
         onCreated={(site) => {
-          setSites((prev) => [...prev, site]);
+          // The new (or matching existing) site joins the list and is
+          // selected; everything else typed on the form is untouched.
+          addedSites.current.set(site.id, form.customer_id);
+          setSites((prev) => (prev.some((s) => s.id === site.id) ? prev : [...prev, site]));
           set("site_id", site.id);
         }}
       />

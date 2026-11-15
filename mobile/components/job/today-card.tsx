@@ -41,6 +41,7 @@ export function JobTodayCard({
   jobId,
   currentUserId,
   signedOff,
+  multiDay = false,
   scheduledCostCenterId,
   myBookings,
   onGo,
@@ -48,6 +49,8 @@ export function JobTodayCard({
   jobId: string;
   currentUserId: string;
   signedOff: boolean;
+  /** Not the job's last day: the last step is Finish for today, not Sign off. */
+  multiDay?: boolean;
   scheduledCostCenterId: string | null;
   myBookings: BookingWindow[] | null;
   onGo: (tab: Tab) => void;
@@ -91,7 +94,7 @@ export function JobTodayCard({
     }
   }
 
-  const steps = todaySteps({ clockedInSince, orders, signedOff, formatTime });
+  const steps = todaySteps({ clockedInSince, orders, signedOff, multiDay, formatTime });
 
   function press(step: TodayStep) {
     if (step.key === "clock") void clockOn();
@@ -130,7 +133,7 @@ export function JobTodayCard({
                 accessibilityLabel={BUTTON[step.key]}
               >
                 <Text style={[styles.buttonText, next && { color: "#fff" }]}>
-                  {step.key === "clock" && clocking ? "…" : BUTTON[step.key]}
+                  {step.key === "clock" && clocking ? "…" : step.key === "finish" && multiDay ? "Finish day" : BUTTON[step.key]}
                 </Text>
               </TouchableOpacity>
             )}

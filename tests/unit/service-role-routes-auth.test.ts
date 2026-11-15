@@ -20,6 +20,8 @@ const canManageTimeEntryBilling = vi.fn();
 const syncJobBilling = vi.fn();
 const syncTimeEntryBilling = vi.fn();
 const adminConstructed = vi.fn();
+// What billing_rate_config reads back (null = no row, as before 0086).
+let rateConfig: unknown = null;
 
 vi.mock("@/lib/api/guards", () => ({
   requireUser: (...a: unknown[]) => requireUser(...a),
@@ -48,7 +50,7 @@ vi.mock("@/lib/supabase/admin", () => ({
       chain[m] = vi.fn(() => chain);
     }
     chain.single = vi.fn(async () => ({ data: null, error: null }));
-    chain.maybeSingle = vi.fn(async () => ({ data: null, error: null }));
+    chain.maybeSingle = vi.fn(async () => ({ data: rateConfig, error: null }));
     chain.then = (r: (v: { data: never[]; error: null }) => unknown) => r({ data: [], error: null });
     return { from: vi.fn(() => chain), storage: { from: vi.fn(() => ({ download: vi.fn() })) } };
   }),
@@ -70,6 +72,7 @@ const allowed = (userId = "user-1") => ({ ok: true as const, userId });
 
 beforeEach(() => {
   vi.clearAllMocks();
+  rateConfig = null;
   process.env.NEXT_PUBLIC_SUPABASE_URL = "https://unit-test.supabase.co";
   process.env.SUPABASE_SERVICE_ROLE_KEY = "svc";
 });
@@ -135,6 +138,18 @@ describe("POST /api/time-entries/[id]/sync-billing", () => {
     canManageTimeEntryBilling.mockResolvedValue({ allowed: false, jobId: null });
     const res = await entrySyncBilling(req(), params("missing"));
     expect(res.status).toBe(404);
+    expect(syncJobBilling).not.toHaveBeenCalled();
+  });
+
+  // Automatic labour lines are off (0086): nothing to sync, so answer done
+  // without looking — a phone retrying a clock-on that 0090 refused as a
+  // duplicate would otherwise get 404 ("not there yet") forever.
+  it("answers done without looking for the entry when automatic labour lines are off", async () => {
+    requireUser.mockResolvedValue(allowed());
+    rateConfig = { auto_labour_lines: false };
+    const res = await entrySyncBilling(req(), params("never-saved"));
+    expect(res.status).toBe(200);
+    expect(canManageTimeEntryBilling).not.toHaveBeenCalled();
     expect(syncJobBilling).not.toHaveBeenCalled();
   });
 

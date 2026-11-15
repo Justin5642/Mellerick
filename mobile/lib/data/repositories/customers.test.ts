@@ -12,7 +12,11 @@ const fixedTime = (ms = 1_000): TimeSource => ({ nowMs: () => ms, nowIso: () => 
 
 function captureOutbox(): { outbox: Outbox; ops: WriteOperation[] } {
   const ops: WriteOperation[] = [];
-  const outbox = { enqueue: jest.fn(async (op: Operation) => void ops.push(op as WriteOperation)) } as unknown as Outbox;
+  const outbox = {
+    enqueue: jest.fn(async (op: Operation) => void ops.push(op as WriteOperation)),
+    // Every captured op is still queued (nothing drains here).
+    pendingInsertOpId: jest.fn(async (table: string, rowId: string) => ops.find((o) => o.op === "insert" && o.table === table && o.rowId === rowId)?.id ?? null),
+  } as unknown as Outbox;
   return { outbox, ops };
 }
 
@@ -65,6 +69,23 @@ describe("CustomersRepository", () => {
     expect(id).toBe("id-1");
     expect(ops[0]).toMatchObject({ table: "sites", op: "insert", rowId: "id-1" });
     expect(ops[0].payload).toEqual({ customer_id: "c1", name: "HQ", address_line1: "1 Main St", address_line2: null, suburb: "Richmond", state: "VIC", postcode: "3121", notes: null });
+  });
+
+  it("createSite for a synced customer has no dependency", async () => {
+    const { outbox, ops } = captureOutbox();
+    await new CustomersRepository(outbox, seqIds(), fixedTime()).createSite({ customerId: "c1", name: "HQ", addressLine1: "1 Main St", suburb: "Richmond", state: "VIC", postcode: "3121" });
+    expect(ops[0].dependsOn).toBeUndefined();
+  });
+
+  it("createSite for a customer still queued on the phone waits for that customer's insert", async () => {
+    const { outbox, ops } = captureOutbox();
+    const repo = new CustomersRepository(outbox, seqIds(), fixedTime());
+    const customerId = await repo.createCustomer({ name: "New builder" });
+    await repo.createSite({ customerId, name: "Lot 1", addressLine1: "1 Main St", suburb: "Richmond", state: "VIC", postcode: "3121" });
+    const [customerOp, siteOp] = ops;
+    expect(customerOp).toMatchObject({ table: "customers", op: "insert", rowId: customerId });
+    expect(siteOp).toMatchObject({ table: "sites", op: "insert", dependsOn: customerOp.id });
+    expect(siteOp.payload.customer_id).toBe(customerId);
   });
 
   it("setSiteActive(false) archives with an update, never a delete", async () => {

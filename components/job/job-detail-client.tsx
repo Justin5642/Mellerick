@@ -16,6 +16,7 @@ import { JobHoursScoreboard } from "./job-hours-scoreboard";
 import { JobTodoControl } from "./job-todo-control";
 import { sumAllocatedHours } from "@/lib/hours-scoreboard";
 import { bookingsFromJobWindow, nameBookings, summariseBookings, type JobBookingWithNames } from "@/lib/bookings";
+import { closedJobScheduleMessage, isJobClosedForScheduling } from "@/lib/job-schedulable";
 
 // Overview is the default tab, so it ships in the page bundle. Every other
 // tab is its own chunk, fetched the first time it is shown — Base UI only
@@ -129,7 +130,11 @@ export function JobDetailClient({ job, currentUserId, photos: initialPhotos, doc
   // Bookings are written by office/admin only (RLS on job_bookings), so the
   // Schedule button is theirs too: a technician sees the bookings on the
   // Overview but cannot change them.
-  const autoOpenSchedule = isOffice && searchParams.get("schedule") === "1";
+  //
+  // A completed or cancelled job is not on the schedule board, so a booking
+  // on it would be saved and never seen: the button is disabled and says so.
+  const jobClosed = isJobClosedForScheduling(job.status);
+  const autoOpenSchedule = isOffice && !jobClosed && searchParams.get("schedule") === "1";
   const [scheduleOpen, setScheduleOpen] = useState(autoOpenSchedule);
   const [scheduleMounted, setScheduleMounted] = useState(autoOpenSchedule);
   // Drop the param once honoured, so a reload or Back doesn't reopen the wizard.
@@ -170,9 +175,20 @@ export function JobDetailClient({ job, currentUserId, photos: initialPhotos, doc
   // Equipment names and $/hour are part of what the Equipment and Costing
   // tabs draw (not just a picker), so those two tabs wait for it rather than
   // briefly showing "Unknown equipment" or an understated cost.
-  const equipmentOptions = useCatalogOnFirstUse<any>(activeTab === "equipment" || (isAdmin && activeTab === "costing"), () =>
-    createClient().from("equipment").select("*").eq("is_active", true).order("name")
-  );
+  //
+  // Loaded through /api/fleet/rates so plant is costed at its ACTUAL rate from
+  // logged Fleet costs (lib/fleet-costs.ts) — the same rate the job-margins
+  // report uses. If that route fails, the plain table read still works and
+  // costs at the estimate, as before.
+  const equipmentOptions = useCatalogOnFirstUse<any>(activeTab === "equipment" || (isAdmin && activeTab === "costing"), async () => {
+    try {
+      const res = await fetch("/api/fleet/rates");
+      if (res.ok) return { data: (await res.json()).equipment ?? [] };
+    } catch {
+      // fall through to the direct read
+    }
+    return createClient().from("equipment").select("*").eq("is_active", true).order("name");
+  });
   // Only "work" entries count against the allocated-hours budget — travel
   // time between jobs is tracked separately and shouldn't eat into it.
   const totalHoursLogged = timeEntries
@@ -257,6 +273,14 @@ export function JobDetailClient({ job, currentUserId, photos: initialPhotos, doc
                     Overview lists each booking. */}
                 {scheduleSummary ?? "Not scheduled"}
               </p>
+              {isOffice && jobClosed && (
+                <p className="text-xs text-amber-700 mt-1 max-w-xl" role="note">
+                  {closedJobScheduleMessage(job.status)}{" "}
+                  <button type="button" className="underline font-medium" onClick={() => setActiveTab("overview")}>
+                    Change the status on Overview
+                  </button>
+                </p>
+              )}
             </div>
           </div>
           <div className="flex items-center gap-2 shrink-0">
@@ -274,7 +298,13 @@ export function JobDetailClient({ job, currentUserId, photos: initialPhotos, doc
               />
             )}
             {isOffice && (
-              <Button size="sm" className="gap-1.5" onClick={openSchedule}>
+              <Button
+                size="sm"
+                className="gap-1.5"
+                onClick={openSchedule}
+                disabled={jobClosed}
+                title={jobClosed ? closedJobScheduleMessage(job.status) : undefined}
+              >
                 <CalendarClock className="w-4 h-4" />
                 Schedule Job
               </Button>
@@ -481,6 +511,7 @@ export function JobDetailClient({ job, currentUserId, photos: initialPhotos, doc
           costCenters={costCenters}
           bookings={bookings}
           bookingsReady={bookingsReady}
+          onReopen={() => setActiveTab("overview")}
         />
       )}
     </div>

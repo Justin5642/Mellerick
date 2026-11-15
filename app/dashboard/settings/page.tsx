@@ -19,7 +19,7 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
 
   const isConnected = !!xeroToken;
   const justConnected = params.xero === "connected";
-  const hasError = params.xero === "error";
+  const hasError = params.xero === "error" || params.xero === "state_mismatch";
 
   const isGoogleConnected = !!googleToken;
   const googleJustConnected = params.google === "connected";
@@ -46,7 +46,11 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
       {hasError && (
         <div className="flex items-center gap-3 bg-red-50 border border-red-200 text-red-800 rounded-lg px-4 py-3 text-sm">
           <XCircle className="w-4 h-4 flex-shrink-0" />
-          Xero connection failed. Please try again.
+          {params.xero === "state_mismatch"
+            ? "Xero connection didn't finish — the sign-in link expired or was opened in a different browser. Click Reconnect and finish in the same window."
+            : isConnected
+              ? "Reconnecting Xero failed, so the earlier connection is still the one in use (invoices keep working, but it may not have payroll access). Please try again."
+              : "Xero connection failed. Please try again."}
         </div>
       )}
 
@@ -227,7 +231,7 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
               Suppliers
             </CardTitle>
             <CardDescription className="mt-1">
-              The supplier accounts the crew pick from when they raise a purchase order, copied from Xero every night
+              The supplier accounts the crew pick from when they raise a purchase order, copied from Xero every night. Pin the main ones to the top of the list
             </CardDescription>
           </div>
         </CardHeader>

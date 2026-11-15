@@ -12,15 +12,16 @@ import { resolveExistingInvoice } from "../../lib/approval-invoice-guard";
 
 describe("resolveExistingInvoice", () => {
   it("proceeds with no invoice when the job genuinely has none", () => {
-    expect(resolveExistingInvoice({ data: null, error: null })).toEqual({
+    expect(resolveExistingInvoice({ data: [], error: null })).toEqual({
       proceed: true,
       invoiceId: null,
       alreadyPushed: false,
+      progressClaim: false,
     });
   });
 
   it("proceeds and reuses the existing invoice", () => {
-    expect(resolveExistingInvoice({ data: { id: "inv-1" }, error: null })).toEqual({
+    expect(resolveExistingInvoice({ data: [{ id: "inv-1" }], error: null })).toMatchObject({
       proceed: true,
       invoiceId: "inv-1",
       alreadyPushed: false,
@@ -28,7 +29,7 @@ describe("resolveExistingInvoice", () => {
   });
 
   it("reports an invoice already pushed to Xero", () => {
-    const v = resolveExistingInvoice({ data: { id: "inv-1", xero_invoice_id: "XERO-9" }, error: null });
+    const v = resolveExistingInvoice({ data: [{ id: "inv-1", xero_invoice_id: "XERO-9" }], error: null });
     expect(v).toMatchObject({ proceed: true, invoiceId: "inv-1", alreadyPushed: true });
   });
 
@@ -47,24 +48,50 @@ describe("resolveExistingInvoice", () => {
     }
   });
 
-  // The case the guard exists for, which used to defeat it.
-  it("STOPS when the job ALREADY has multiple invoices (PGRST116)", () => {
-    // .maybeSingle() raises when more than one row matches. That is the
-    // strongest possible reason not to create another — and discarding it is
-    // what created a third.
-    const v = resolveExistingInvoice({
-      data: null,
-      error: { message: "JSON object requested, multiple rows returned", code: "PGRST116" },
-    });
+  // The case the guard exists for.
+  it("STOPS when the job ALREADY has two ordinary invoices", () => {
+    const v = resolveExistingInvoice({ data: [{ id: "a" }, { id: "b" }], error: null });
     expect(v.proceed).toBe(false);
     if (!v.proceed) expect(v.reason).toContain("more than one invoice");
   });
 
   it("distinguishes 'already duplicated' from an ordinary failure in its message", () => {
-    const dup = resolveExistingInvoice({ data: null, error: { message: "x", code: "PGRST116" } });
+    const dup = resolveExistingInvoice({ data: [{ id: "a" }, { id: "b" }], error: null });
     const net = resolveExistingInvoice({ data: null, error: { message: "timeout" } });
     expect(dup.proceed).toBe(false);
     expect(net.proceed).toBe(false);
     if (!dup.proceed && !net.proceed) expect(dup.reason).not.toBe(net.reason);
+  });
+
+  // Audit, 15 Nov 2026: claim-billed jobs were refused forever once requeued.
+  it("PROCEEDS for a job billed by several progress claims, using the latest claim", () => {
+    const v = resolveExistingInvoice({
+      data: [
+        { id: "c1", is_progress_claim: true, claim_number: 1, xero_invoice_id: "X1" },
+        { id: "c3", is_progress_claim: true, claim_number: 3, xero_invoice_id: null },
+        { id: "c2", is_progress_claim: true, claim_number: 2, xero_invoice_id: "X2" },
+      ],
+      error: null,
+    });
+    expect(v).toEqual({ proceed: true, invoiceId: "c3", alreadyPushed: false, progressClaim: true });
+  });
+
+  it("prefers the one ordinary invoice over claims", () => {
+    const v = resolveExistingInvoice({
+      data: [
+        { id: "c1", is_progress_claim: true, claim_number: 1 },
+        { id: "final", is_progress_claim: false },
+      ],
+      error: null,
+    });
+    expect(v).toMatchObject({ proceed: true, invoiceId: "final", progressClaim: false });
+  });
+
+  it("still STOPS on two ordinary invoices even when claims exist too", () => {
+    const v = resolveExistingInvoice({
+      data: [{ id: "c1", is_progress_claim: true, claim_number: 1 }, { id: "a" }, { id: "b" }],
+      error: null,
+    });
+    expect(v.proceed).toBe(false);
   });
 });

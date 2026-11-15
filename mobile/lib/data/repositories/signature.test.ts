@@ -1,4 +1,4 @@
-import { SignatureRepository } from "./signature";
+import { SignatureRepository, dayFinishNote, technicianSignOffNote } from "./signature";
 import type { Outbox } from "../outbox/outbox";
 import type { IdGen } from "../ids";
 import type { Operation, WriteOperation, SideEffectOperation } from "../outbox/types";
@@ -71,4 +71,55 @@ describe("SignatureRepository", () => {
     expect(photo.payload.caption).toBe("Customer signature");
     expect(jobUpdate.payload.completion_notes).toBe("Signed off by: Customer on 22/07/2026");
   });
+
+  it("completeAsTechnician completes the job with no signature to wait for, then resyncs the calendar", async () => {
+    const { outbox, ops } = captureOutbox();
+    const repo = new SignatureRepository(outbox, seqIds(), fixedTime());
+    await repo.completeAsTechnician({ jobId: "j1", technicianName: "Brodie Unwin", signedOffDate: "03/11/2026" });
+    const [jobUpdate] = writes(ops);
+    expect(writes(ops)).toHaveLength(1);
+    expect(jobUpdate.table).toBe("jobs");
+    expect(jobUpdate.dependsOn).toBeUndefined();
+    expect(jobUpdate.payload).toMatchObject({
+      status: "completed",
+      ready_to_invoice: true,
+      completion_notes: "Signed off by technician Brodie Unwin on 03/11/2026 (customer not on site)",
+    });
+    const cal = ops.find((o) => o.kind === "side_effect")!;
+    expect(cal.dependsOn).toBe(jobUpdate.id);
+  });
+
+  it("names 'the technician' when the name isn't known", () => {
+    expect(technicianSignOffNote(null, "03/11/2026")).toBe("Signed off by the technician on 03/11/2026 (customer not on site)");
+  });
+
+  it("finishForToday leaves a dated day note and one stage-complete call per stage, and completes nothing", async () => {
+    const { outbox, ops } = captureOutbox();
+    const repo = new SignatureRepository(outbox, seqIds(), fixedTime());
+    await repo.finishForToday({
+      jobId: "j1",
+      authorId: "u1",
+      date: "04/11/2026",
+      note: "Sewer laid to boundary",
+      stages: [{ id: "s1", name: "Sewer" }],
+    });
+    const [note] = writes(ops);
+    expect(writes(ops)).toHaveLength(1);
+    expect(note.table).toBe("job_notes");
+    expect(note.payload).toEqual({
+      job_id: "j1",
+      author_id: "u1",
+      source: "day_finish",
+      content: "Finished for today (04/11/2026): Sewer laid to boundary\nStage complete: Sewer",
+    });
+    const stage = ops.find((o) => o.kind === "side_effect")!;
+    expect(stage).toMatchObject({ effect: "stage-complete", coalesceKey: "stage-complete:s1" });
+    expect(stage.payload).toEqual({ jobId: "j1", stageId: "s1", completedAt: "2026-07-22T10:00:00.000Z" });
+    expect(ops.some((o) => o.kind === "write" && o.table === "jobs")).toBe(false);
+  });
+
+  it("dayFinishNote works with no note and no stages", () => {
+    expect(dayFinishNote({ date: "04/11/2026", note: " ", stagesCompleted: [] })).toBe("Finished for today (04/11/2026)");
+  });
 });
+
