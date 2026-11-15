@@ -48,6 +48,50 @@ export type Database = {
         }
         Relationships: []
       }
+      auto_clock_status: {
+        Row: {
+          app_version: string | null
+          approximate: boolean
+          background_off: boolean
+          platform: string | null
+          reason: string | null
+          site_count: number
+          staff_id: string
+          tracking: boolean
+          updated_at: string
+        }
+        Insert: {
+          app_version?: string | null
+          approximate?: boolean
+          background_off?: boolean
+          platform?: string | null
+          reason?: string | null
+          site_count?: number
+          staff_id: string
+          tracking?: boolean
+          updated_at?: string
+        }
+        Update: {
+          app_version?: string | null
+          approximate?: boolean
+          background_off?: boolean
+          platform?: string | null
+          reason?: string | null
+          site_count?: number
+          staff_id?: string
+          tracking?: boolean
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "auto_clock_status_staff_id_fkey"
+            columns: ["staff_id"]
+            isOneToOne: true
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       backflow_devices: {
         Row: {
           created_at: string | null
@@ -2394,6 +2438,54 @@ export type Database = {
           {
             foreignKeyName: "staff_cost_profiles_updated_by_fkey"
             columns: ["updated_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      staff_leave_balances: {
+        Row: {
+          as_of: string
+          hours: number
+          imported_by: string | null
+          leave_name: string
+          leave_type: string
+          staff_id: string
+          updated_at: string
+          xero_leave_type_id: string
+        }
+        Insert: {
+          as_of?: string
+          hours: number
+          imported_by?: string | null
+          leave_name: string
+          leave_type?: string
+          staff_id: string
+          updated_at?: string
+          xero_leave_type_id: string
+        }
+        Update: {
+          as_of?: string
+          hours?: number
+          imported_by?: string | null
+          leave_name?: string
+          leave_type?: string
+          staff_id?: string
+          updated_at?: string
+          xero_leave_type_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "staff_leave_balances_imported_by_fkey"
+            columns: ["imported_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "staff_leave_balances_staff_id_fkey"
+            columns: ["staff_id"]
             isOneToOne: false
             referencedRelation: "profiles"
             referencedColumns: ["id"]

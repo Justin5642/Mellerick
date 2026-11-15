@@ -43,6 +43,14 @@ export interface XeroEmployee {
     superLines?: XeroSuperLine[];
     leaveLines?: XeroLeaveLine[];
   };
+  /** On the single-employee read (getEmployee), not the list. */
+  leaveBalances?: XeroLeaveBalance[];
+}
+export interface XeroLeaveBalance {
+  leaveName?: string;
+  leaveTypeID?: string;
+  numberOfUnits?: number;
+  typeOfUnits?: string; // "Hours" for every AU leave type we have seen
 }
 export interface XeroEarningsRate {
   earningsRateID?: string;
@@ -285,4 +293,40 @@ export function isCurrentEmployee(e: XeroEmployee, today: string): boolean {
   }
   const t = xeroDate(e.terminationDate);
   return !t || t >= today;
+}
+
+// ---------------------------------------------------------------------------
+// Leave balances (0104, drafted — not applied yet)
+// ---------------------------------------------------------------------------
+
+export interface ImportedBalance {
+  xeroLeaveTypeId: string;
+  name: string;
+  leaveType: AppLeaveType;
+  hours: number;
+}
+
+/**
+ * What each person has left, per Xero leave type. Only balances kept in hours
+ * — the app counts leave in hours. A balance in other units is reported as a
+ * note rather than guessed into hours. Negative balances (leave taken in
+ * advance) are kept: they are real.
+ */
+export function balancesFromXero(employee: XeroEmployee, leaveTypes: XeroLeaveType[]): { balances: ImportedBalance[]; notes: string[] } {
+  const balances: ImportedBalance[] = [];
+  const notes: string[] = [];
+  for (const b of employee.leaveBalances ?? []) {
+    if (!b.leaveTypeID) continue;
+    const units = (b.typeOfUnits ?? "Hours").trim().toLowerCase();
+    const hours = Number(b.numberOfUnits);
+    if (!Number.isFinite(hours)) continue;
+    const type = leaveTypes.find((t) => t.leaveTypeID === b.leaveTypeID);
+    const name = (b.leaveName ?? type?.name ?? "Leave").trim();
+    if (units !== "hours") {
+      notes.push(`${name} balance is kept in ${b.typeOfUnits} in Xero, not hours — not imported.`);
+      continue;
+    }
+    balances.push({ xeroLeaveTypeId: b.leaveTypeID, name, leaveType: leaveTypeFromXero(type ?? { name }), hours: round2(hours) });
+  }
+  return { balances, notes };
 }

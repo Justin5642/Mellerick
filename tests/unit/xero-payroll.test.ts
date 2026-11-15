@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   STATUTORY_SUPER_RATE,
+  balancesFromXero,
   isCurrentEmployee,
   leaveFromXero,
   leaveTypeFromXero,
@@ -165,4 +166,39 @@ it("isCurrentEmployee leaves out people who have finished", () => {
   expect(isCurrentEmployee(emp(), "2026-11-15")).toBe(true);
   expect(isCurrentEmployee(emp({ status: "TERMINATED", terminationDate: "2026-09-30T00:00:00" }), "2026-11-15")).toBe(false);
   expect(isCurrentEmployee(emp({ terminationDate: "2026-12-20T00:00:00" }), "2026-11-15")).toBe(true);
+});
+
+// Leave balances (0104): what each person has left, per Xero leave type.
+describe("balancesFromXero", () => {
+  it("reads each balance in hours, with the app's category", () => {
+    const { balances, notes } = balancesFromXero(
+      emp({
+        leaveBalances: [
+          { leaveTypeID: "al", leaveName: "Annual Leave", numberOfUnits: 76.456, typeOfUnits: "Hours" },
+          { leaveTypeID: "pc", leaveName: "Personal/Carer's Leave", numberOfUnits: -3.8, typeOfUnits: "Hours" },
+          { leaveTypeID: "lsl", numberOfUnits: 0, typeOfUnits: "Hours" },
+        ],
+      }),
+      leaveTypes
+    );
+    expect(notes).toEqual([]);
+    expect(balances).toEqual([
+      { xeroLeaveTypeId: "al", name: "Annual Leave", leaveType: "annual", hours: 76.46 },
+      { xeroLeaveTypeId: "pc", name: "Personal/Carer's Leave", leaveType: "sick", hours: -3.8 },
+      { xeroLeaveTypeId: "lsl", name: "Long Service Leave", leaveType: "long_service", hours: 0 },
+    ]);
+  });
+
+  it("does not guess hours from a balance kept in other units", () => {
+    const { balances, notes } = balancesFromXero(
+      emp({ leaveBalances: [{ leaveTypeID: "x", leaveName: "Rostered Day Off", numberOfUnits: 2, typeOfUnits: "Days" }] }),
+      leaveTypes
+    );
+    expect(balances).toEqual([]);
+    expect(notes[0]).toContain("Rostered Day Off");
+  });
+
+  it("has nothing when Xero sent no balances", () => {
+    expect(balancesFromXero(emp(), leaveTypes)).toEqual({ balances: [], notes: [] });
+  });
 });

@@ -30,6 +30,7 @@ export async function POST(request: NextRequest) {
       xeroEmployeeId: r.xeroEmployeeId,
       fields: (Array.isArray(r.fields) ? r.fields : []).filter((f: unknown) => (PAY_FIELDS as readonly unknown[]).includes(f)),
       leave: r.leave === true,
+      balances: r.balances === true,
     });
   }
 

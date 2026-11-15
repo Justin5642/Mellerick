@@ -20,6 +20,7 @@ import { useDataLayer } from "./data/DataProvider";
 import type { DataLayer } from "./data/createDataLayer";
 
 import { arrivalCostCentre, nextGeofenceState, type TrackedSite } from "./geofenceState";
+import { sendAutoClockReport, shouldReport, type AutoClockReport } from "./autoClockStatusReport";
 import {
   applyGeofenceTransition,
   type GeofenceTransitionDeps,
@@ -638,6 +639,36 @@ export function LocationTrackingProvider({ children }: { children: ReactNode }) 
     };
   }
 
+
+  // Tell the office whether auto clock can work on this phone (0102). On every change, and every few hours otherwise; best-effort,
+  // never in the way of clocking — see lib/autoClockStatusReport.ts.
+  const lastReportRef = useRef<{ report: AutoClockReport; atMs: number } | null>(null);
+  useEffect(() => {
+    if (!userId) {
+      lastReportRef.current = null;
+      return;
+    }
+    // Before the first site load the status is just the idle default.
+    if (!sitesLoadedRef.current && !tracking && status.reason === null) return;
+    const report: AutoClockReport = {
+      tracking,
+      reason: status.reason,
+      backgroundOff: status.backgroundOff,
+      approximate: status.approximate,
+      siteCount: sitesRef.current.length,
+    };
+    const now = Date.now();
+    if (!shouldReport(lastReportRef.current, report, now)) return;
+    lastReportRef.current = { report, atMs: now };
+    sendAutoClockReport(userId, report)
+      .then((ok) => {
+        // Not sent: forget it, so the next change (or tick) tries again.
+        if (!ok) lastReportRef.current = null;
+      })
+      .catch(() => {
+        lastReportRef.current = null;
+      });
+  }, [userId, tracking, status]);
 
   return (
     <LocationTrackingContext.Provider value={{ enabled: tracking, ...status }}>
