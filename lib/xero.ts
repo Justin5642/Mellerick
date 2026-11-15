@@ -64,8 +64,17 @@ function safeParse(s: string): any {
   }
 }
 
-export function getXeroClient() {
+/**
+ * `state` is the OAuth CSRF value for a connect flow: the auth route passes the
+ * one it just issued (so it goes in the consent URL), the callback passes the
+ * one it just verified against the cookie. xero-node checks the callback's
+ * state against config.state itself and throws "checks.state argument is
+ * missing" if it was never told — which is how every reconnect failed from
+ * October to 15 Nov 2026 while the old token quietly stayed in place.
+ */
+export function getXeroClient(state?: string) {
   return new XeroClient({
+    ...(state ? { state } : {}),
     clientId: process.env.XERO_CLIENT_ID!,
     clientSecret: process.env.XERO_CLIENT_SECRET!,
     redirectUris: [process.env.XERO_REDIRECT_URI!],
