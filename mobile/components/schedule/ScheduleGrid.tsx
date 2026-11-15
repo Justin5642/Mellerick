@@ -28,6 +28,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Animated, StyleSheet, Text, View, type LayoutChangeEvent } from "react-native";
 import { Gesture, GestureDetector, RefreshControl, ScrollView as GHScrollView } from "react-native-gesture-handler";
 import { Ionicons } from "@expo/vector-icons";
+import * as Haptics from "expo-haptics";
 import { colors, statusColors } from "../../lib/theme";
 import { shortTime, shortDayLabel } from "../../lib/scheduleDisplay";
 import { formatHours, dayOfLabel, type BoardBooking, type BoardCell, type BoardEntry, type BoardIndex } from "../../lib/boardModel";
@@ -60,7 +61,15 @@ import {
 const AnimatedGHScrollView = Animated.createAnimatedComponent(GHScrollView);
 
 const HEADER_HEIGHT = 40;
-const LONG_PRESS_MS = 350;
+// Half a second — iOS's own long-press time. At 350ms a thumb that paused on
+// a block before swiping picked the job up instead of scrolling, and on a
+// phone the Day view is mostly blocks (Justin, 15 Nov 2026: "locks up when
+// scrolling").
+const LONG_PRESS_MS = 500;
+// A drag never starts from a touch that landed while the grid was moving
+// (catching a flick), and one that hears nothing for this long is dropped.
+const SCROLL_SETTLE_MS = 150;
+const DRAG_WATCHDOG_MS = 15000;
 const GRIP_LONG_PRESS_MS = 200;
 const EDGE = 48; // auto-scroll zone while dragging near an edge
 const AUTO_SCROLL_STEP = 14;
@@ -148,6 +157,7 @@ export function ScheduleGrid(props: ScheduleGridProps) {
   const headerTranslate = useMemo(() => Animated.multiply(scrollX, -1), [scrollX]);
   const scrollXNow = useRef(0);
   const scrollYNow = useRef(0);
+  const lastScrollAt = useRef(0);
   const hRef = useRef<GHScrollView | null>(null);
   const vRef = useRef<GHScrollView | null>(null);
   const viewportRef = useRef<View | null>(null);
@@ -158,6 +168,7 @@ export function ScheduleGrid(props: ScheduleGridProps) {
         useNativeDriver: true,
         listener: (e: { nativeEvent: { contentOffset: { x: number } } }) => {
           scrollXNow.current = e.nativeEvent.contentOffset.x;
+          lastScrollAt.current = Date.now();
         },
       }),
     [scrollX],
@@ -168,6 +179,7 @@ export function ScheduleGrid(props: ScheduleGridProps) {
   const [hover, setHover] = useState<{ row: number; col: number; endCol?: number } | null>(null);
   const ghost = useRef(new Animated.ValueXY({ x: 0, y: 0 })).current;
   const finger = useRef({ x: 0, y: 0 });
+  const lastDragEventAt = useRef(0);
   const autoScroll = useRef<ReturnType<typeof setInterval> | null>(null);
   const dragRef = useRef<Drag | null>(null);
   const hoverRef = useRef<typeof hover>(null);
@@ -230,6 +242,11 @@ export function ScheduleGrid(props: ScheduleGridProps) {
   );
 
   const tickAutoScroll = useCallback(() => {
+    // Belt and braces: a drag must never leave scrolling switched off.
+    if (Date.now() - lastDragEventAt.current > DRAG_WATCHDOG_MS) {
+      latest.current.endDragNow(false);
+      return;
+    }
     const v = viewport.current;
     const { x, y } = finger.current;
     let dx = 0;
@@ -260,7 +277,15 @@ export function ScheduleGrid(props: ScheduleGridProps) {
   }, [contentWidth, bodyHeight, updateHover]);
 
   const beginDragNow = (d: Drag, absX: number, absY: number) => {
+    // The finger came down while the grid was still moving: that was a catch
+    // or a scroll, not a pick-up. Ignore it; the gesture's later events see no
+    // drag and do nothing.
+    const holdMs = d.kind === "resize" ? GRIP_LONG_PRESS_MS : LONG_PRESS_MS;
+    if (Date.now() - lastScrollAt.current < holdMs + SCROLL_SETTLE_MS) return;
     if (d.kind === "resize") d = { ...d, startScrollX: scrollXNow.current };
+    lastDragEventAt.current = Date.now();
+    // So it's obvious the job is now in hand, not the screen frozen.
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
     measure();
     dragRef.current = d;
     setDrag(d);
@@ -272,6 +297,8 @@ export function ScheduleGrid(props: ScheduleGridProps) {
   };
 
   const moveDragNow = (absX: number, absY: number) => {
+    if (!dragRef.current) return;
+    lastDragEventAt.current = Date.now();
     finger.current = { x: absX, y: absY };
     ghost.setValue({ x: absX, y: absY });
     updateHover(absX, absY);
@@ -312,6 +339,14 @@ export function ScheduleGrid(props: ScheduleGridProps) {
 
   // Leaving the screen mid-drag must not leave the auto-scroll timer running.
   useEffect(() => () => stopAutoScroll(), []);
+
+  // New data mid-drag (pull-to-refresh, or the re-check after an earlier
+  // move) rebuilds the blocks, and RNGH drops a gesture that is rebuilt
+  // mid-flight — its end never arrives, so the drag would stay "on" and
+  // scrolling stay off until the screen was left. Put the job down instead.
+  useEffect(() => {
+    if (dragRef.current) latest.current.endDragNow(false);
+  }, [board, rows, view, dayKey]);
 
   // ---- rendering -----------------------------------------------------------
   const dragging = drag !== null;
@@ -354,6 +389,7 @@ export function ScheduleGrid(props: ScheduleGridProps) {
           scrollEventThrottle={16}
           onScroll={(e) => {
             scrollYNow.current = e.nativeEvent.contentOffset.y;
+            lastScrollAt.current = Date.now();
           }}
           refreshControl={<RefreshControl refreshing={props.refreshing} onRefresh={props.onRefresh} tintColor={colors.blue600} />}
         >
@@ -521,21 +557,27 @@ function Block({ placed, top, view, rowStaffId, staffNames, others, saveState, l
       return Gesture.Exclusive(hold, tap);
     }
     let ended = false;
+    let started = false;
     const pan = Gesture.Pan()
       .runOnJS(true)
       .activateAfterLongPress(LONG_PRESS_MS)
       .onStart((e) => {
         ended = false;
+        started = true;
         onBegin({ kind: "move", entry, source, width }, e.absoluteX, e.absoluteY);
       })
       .onUpdate((e) => onMove(e.absoluteX, e.absoluteY))
-      .onEnd(() => {
+      // success is false when the system cancelled it (a call, the app
+      // backgrounded): put the job back, change nothing.
+      .onEnd((_e, success) => {
         ended = true;
-        onEnd(true);
+        onEnd(success);
       })
-      .onFinalize((_e, ok) => {
-        // Cancelled by the system (a call, the app backgrounded): drop the drag, change nothing.
-        if (ok && !ended) onEnd(false);
+      // Whatever happened, an unfinished drag is dropped — scrolling must
+      // come back on.
+      .onFinalize(() => {
+        if (started && !ended) onEnd(false);
+        started = false;
       });
     return Gesture.Exclusive(pan, tap);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -543,20 +585,27 @@ function Block({ placed, top, view, rowStaffId, staffNames, others, saveState, l
 
   const grip = useMemo(() => {
     let ended = false;
+    let started = false;
     return Gesture.Pan()
       .runOnJS(true)
       .activateAfterLongPress(GRIP_LONG_PRESS_MS)
       .onStart((e) => {
         ended = false;
+        started = true;
         onBegin({ kind: "resize", entry, source, width, startX: e.absoluteX, startScrollX: -1 }, e.absoluteX, e.absoluteY);
       })
       .onUpdate((e) => onMove(e.absoluteX, e.absoluteY))
-      .onEnd(() => {
+      // success is false when the system cancelled it (a call, the app
+      // backgrounded): put the job back, change nothing.
+      .onEnd((_e, success) => {
         ended = true;
-        onEnd(true);
+        onEnd(success);
       })
-      .onFinalize((_e, ok) => {
-        if (ok && !ended) onEnd(false);
+      // Whatever happened, an unfinished drag is dropped — scrolling must
+      // come back on.
+      .onFinalize(() => {
+        if (started && !ended) onEnd(false);
+        started = false;
       });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [entry, rowStaffId, width, onBegin, onMove, onEnd]);
