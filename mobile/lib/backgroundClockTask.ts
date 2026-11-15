@@ -1,4 +1,5 @@
 import { AppState } from "react-native";
+import { closeProblem } from "./data/repositories/timeEntries";
 import { supabase } from "./supabase";
 import { plausibleAutoClockHours, MAX_PLAUSIBLE_TRAVEL_HOURS, MAX_PLAUSIBLE_WORK_HOURS } from "./autoClockHours";
 import {
@@ -150,7 +151,10 @@ async function closeWorkEntry(jobId: string, at: string, staffId: string, fix?: 
   // the technician came back to the site and the foreground clocked them in
   // again while this departure waited out a dead zone. Closing that entry with
   // an earlier clock_out would erase the second visit.
-  if (Date.parse(openEntry.clock_in) > Date.parse(at)) return;
+  if (Date.parse(openEntry.clock_in) >= Date.parse(at)) return;
+  // Open over 24 hours: the database refuses to close it (0051), so leave it
+  // open for the office rather than fail on every retry (15 Nov 2026).
+  if (closeProblem(openEntry.clock_in, at)) return;
 
   // The entry CLOSES either way; only `hours` is withheld when implausible, so
   // the office sees a gap to correct rather than a number that reconciles wrong.

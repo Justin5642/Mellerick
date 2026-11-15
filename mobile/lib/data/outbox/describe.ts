@@ -69,6 +69,9 @@ export function explainError(error: string | null | undefined): string {
   if (e.includes("row-level security") || e.includes("42501") || e.includes("permission denied") || e.includes("only office") || e.includes("office/admin")) {
     return "Your login isn't allowed to make this change (it may be on a job you're no longer on). Ask the office.";
   }
+  if (e.includes("time_entries_duration_sane")) {
+    return "A time entry must end after it starts and within 24 hours. This one didn't — usually a shift left clocked on overnight or longer. Discard this, then edit the entry's real start and finish times.";
+  }
   if (e.includes("violates check constraint") || e.includes("23514")) return "The server rejected a value in it (for example, a clock-off before the clock-on).";
   if (e.includes("violates foreign key") || e.includes("23503")) return "Something it points to (a job, site or entry) no longer exists.";
   if (e.includes("jwt") || e.includes("session")) return "Your sign-in had expired. Retry after signing in again.";

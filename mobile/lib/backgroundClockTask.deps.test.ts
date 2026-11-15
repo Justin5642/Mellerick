@@ -149,14 +149,31 @@ describe("supabaseClockDeps.onDepart", () => {
 
   it("still CLOSES the entry when the duration is implausible, withholding only hours", async () => {
     // Leaving it open is its own problem — the office then sees an entry
-    // running for days rather than a gap to correct.
+    // running for days rather than a gap to correct. 20h: past the 16h
+    // plausibility ceiling, inside the database's 24h limit.
+    mockMaybeSingleResult.data = { id: "entry-1", clock_in: iso(0) };
+
+    await supabaseClockDeps.onDepart("job-a", iso(20 * 60 * MIN), "staff-1");
+
+    const payload = mockUpdate.mock.calls[0][0];
+    expect(payload.clock_out).toBe(iso(20 * 60 * MIN));
+    expect("hours" in payload).toBe(false);
+  });
+
+  it("leaves an entry open over 24 hours alone: the database refuses to close it (15 Nov 2026)", async () => {
     mockMaybeSingleResult.data = { id: "entry-1", clock_in: iso(0) };
 
     await supabaseClockDeps.onDepart("job-a", iso(40 * 60 * MIN), "staff-1");
 
-    const payload = mockUpdate.mock.calls[0][0];
-    expect(payload.clock_out).toBe(iso(40 * 60 * MIN));
-    expect("hours" in payload).toBe(false);
+    expect(mockUpdate).not.toHaveBeenCalled();
+  });
+
+  it("does not close an entry at the same instant it opened (the database refuses that too)", async () => {
+    mockMaybeSingleResult.data = { id: "entry-1", clock_in: iso(0) };
+
+    await supabaseClockDeps.onDepart("job-a", iso(0), "staff-1");
+
+    expect(mockUpdate).not.toHaveBeenCalled();
   });
 
   it("does nothing when there is no open entry", async () => {
