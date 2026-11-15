@@ -23,6 +23,20 @@ describe("serviceDue", () => {
     expect(dueLabel(d)).toBe("No service recorded");
   });
 
+  it("a later repair or tyres record without a next-due keeps the service schedule (audit 15 Nov)", () => {
+    const d = serviceDue(
+      [
+        rec({ service_date: "2026-04-01", next_due_date: "2026-10-01", next_due_km: 90_000 }),
+        rec({ service_date: "2026-10-15", service_type: "tyres" }),
+      ],
+      today
+    );
+    expect(d.latest?.service_type).toBe("tyres");
+    expect(d.state).toBe("overdue");
+    expect(d.dueDate).toBe("2026-10-01");
+    expect(d.dueKm).toBe(90_000);
+  });
+
   it("uses the LATEST service's next-due, not an older one", () => {
     const d = serviceDue(
       [

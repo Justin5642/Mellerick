@@ -35,8 +35,8 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   try {
     const admin = createAdminClient();
     const [equipmentRes, lines, usageRes] = await Promise.all([
-      // day_rate is read only to say WHETHER an item is day-rated (0100 — draft,
-      // not applied yet); the amount never leaves the server.
+      // day_rate (0100) is read only to say WHETHER an item is day-rated;
+      // the amount never leaves the server.
       admin.from("equipment").select("id, name, category, day_rate").eq("is_active", true).order("name"),
       jobLines(admin, id),
       admin

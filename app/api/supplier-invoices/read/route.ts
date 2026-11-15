@@ -52,9 +52,21 @@ export async function POST(request: NextRequest) {
     reportError(seen.error, { route: "api/supplier-invoices/read", step: "dedupe" });
     return NextResponse.json({ error: "Could not check whether this file was already read." }, { status: 500 });
   }
-  if ((seen.data ?? []).length > 0) {
-    if (seen.data![0].storage_path !== storagePath) await admin.storage.from("supplier-invoices").remove([storagePath]);
-    return NextResponse.json({ alreadyRead: true, invoices: seen.data });
+  const seenRows = seen.data ?? [];
+  if (seenRows.length > 0 && seenRows.every((r) => r.status === "failed")) {
+    // Only a failed read is on record (a reader outage, a timeout): read it
+    // again rather than answering "already read" for ever (audit, 15 Nov
+    // 2026). The failure rows go; this upload becomes the file of record.
+    const del = await admin.from("supplier_invoices").delete().eq("file_sha256", sha).eq("status", "failed");
+    if (del.error) {
+      reportError(del.error, { route: "api/supplier-invoices/read", step: "clear failed read" });
+      return NextResponse.json({ error: "Could not retry this file. Try again." }, { status: 500 });
+    }
+    const oldPaths = [...new Set(seenRows.map((r) => r.storage_path))].filter((p) => p !== storagePath);
+    if (oldPaths.length) await admin.storage.from("supplier-invoices").remove(oldPaths);
+  } else if (seenRows.length > 0) {
+    if (seenRows[0].storage_path !== storagePath) await admin.storage.from("supplier-invoices").remove([storagePath]);
+    return NextResponse.json({ alreadyRead: true, invoices: seenRows });
   }
 
   if (!(await consumeRateLimit(guard.userId, SUPPLIER_INVOICE_READ_LIMIT))) return rateLimitedResponse();

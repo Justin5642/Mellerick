@@ -46,7 +46,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     byCostCentre: rateMap(body.byCostCentre),
   };
 
-  const result = await applyInvoiceHours(await callerClient(request), id, choice);
-  if (!result.ok) return NextResponse.json({ error: result.error }, { status: result.status });
+  const result = await applyInvoiceHours(await callerClient(request), id, choice, body.confirmOutside === true);
+  if (!result.ok) return NextResponse.json({ error: result.error, code: result.code }, { status: result.status });
   return NextResponse.json(result);
 }

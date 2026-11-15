@@ -16,7 +16,7 @@ import { ListPageSkeleton } from "@/components/ui/loading-skeletons";
 // name, account number and phone of those. The ordering email and default
 // cost centre are set here. Suppliers not in Xero can be added by hand.
 //
-// Pinned suppliers (0097, drafted — not applied yet) sit at the top of every PO supplier picker, web and
+// Pinned suppliers (0097) sit at the top of every PO supplier picker, web and
 // phone, in the order set here. Without the pin_order column the pin controls
 // are hidden.
 

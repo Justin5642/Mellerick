@@ -56,7 +56,7 @@ export function InvoiceDetail({ invoice, jobSite, xeroConnected, payments }: Pro
   // Hours on the job not yet priced on this invoice (InvoiceHours reports it).
   const [unpricedHours, setUnpricedHours] = useState(0);
 
-  async function sendInvoice() {
+  async function sendInvoice(confirmUnpriced = false) {
     if (!sendTo.trim()) {
       toast.error("Enter an email address to send to");
       return;
@@ -74,9 +74,15 @@ export function InvoiceDetail({ invoice, jobSite, xeroConnected, payments }: Pro
           to: sendTo,
           message: sendMessage,
           ...(includeReport && reportSelection ? { jobReport: reportSelection } : {}),
+          confirmUnpriced,
         }),
       });
       const data = await res.json();
+      if (res.status === 409 && data?.code === "unpriced_hours" && !confirmUnpriced) {
+        setSending(false);
+        if (window.confirm(`${data.error}\n\nSend it without them?`)) await sendInvoice(true);
+        return;
+      }
       if (!res.ok) throw new Error(data.error);
       toast.success(
         data.jobReportAttached
@@ -108,7 +114,8 @@ export function InvoiceDetail({ invoice, jobSite, xeroConnected, payments }: Pro
       const res = await fetch("/api/xero/push-invoice", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ invoiceId: invoice.id }),
+        // Confirmed above when hours are unpriced; the server re-checks.
+        body: JSON.stringify({ invoiceId: invoice.id, confirmUnpriced: unpricedHours > 0 }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
@@ -175,7 +182,7 @@ export function InvoiceDetail({ invoice, jobSite, xeroConnected, payments }: Pro
               }
               footer={
                 <div className="flex justify-end">
-                  <Button onClick={sendInvoice} disabled={sending} className="gap-2 bg-blue-600 hover:bg-blue-700">
+                  <Button onClick={() => sendInvoice()} disabled={sending} className="gap-2 bg-blue-600 hover:bg-blue-700">
                     <Send className="w-4 h-4" />
                     {sending ? (includeReport ? "Making report and sending..." : "Sending...") : "Send Email"}
                   </Button>
