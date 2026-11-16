@@ -19,7 +19,7 @@ import { CustomerPicker } from "@/components/customer-picker";
 import { AddSiteDialog } from "@/components/site-add-dialog";
 import { ScheduleFields } from "@/components/job/schedule-fields";
 import { BuilderPoLines, blankLine, type StageOption } from "@/components/job/builder-po-lines";
-import { planBuilderPo, type BuilderPoLineInput, type CostCentreOption } from "@/lib/builder-po";
+import { hasBuilderPo, planBuilderPo, type BuilderPoLineInput, type CostCentreOption } from "@/lib/builder-po";
 
 // Radix/shadcn's SelectItem can't take value="", so an explicit "Unassigned"
 // option needs a sentinel value that gets translated back to "" (-> null on
@@ -111,8 +111,10 @@ export default function NewJobPage() {
       toast.error(built.error);
       return;
     }
-    // No value = no PO yet (a service call, or the PO comes later).
-    const hasPo = poValue.trim() !== "";
+    // No value and no lines = no PO yet (a service call, or the PO comes
+    // later). Lines with no value make a PO worth their total — a cartage
+    // line with hours only is a $0 PO.
+    const hasPo = hasBuilderPo({ value: poValue, lines: poLines });
     const planned = hasPo ? planBuilderPo({ value: poValue, lines: poLines }, costCentres) : null;
     if (planned && !planned.ok) {
       toast.error(planned.error);
@@ -288,27 +290,27 @@ export default function NewJobPage() {
                 inputMode="decimal"
                 value={poValue}
                 onChange={(e) => setPoValue(e.target.value)}
-                placeholder="The builder's rate for this job (leave blank if none yet)"
+                placeholder="Blank = the cost centres' total, or no PO yet"
                 className="max-w-xs"
               />
             </div>
-            {poValue.trim() !== "" && (
-              <div className="space-y-2">
-                <Label>Split across cost centres</Label>
-                <p className="text-xs text-slate-400">
-                  Each cost centre&apos;s share is its budget, e.g. Below Ground Drainage and Transport for a drainage PO.
-                </p>
-                <BuilderPoLines
-                  value={poValue}
-                  lines={poLines}
-                  onChange={setPoLines}
-                  costCentres={costCentres}
-                  stages={stages}
-                  loadError={costCentresFailed}
-                  onCostCentreAdded={(c) => setCostCentres((prev) => [...prev, c])}
-                />
-              </div>
-            )}
+            <div className="space-y-2">
+              <Label>Split across cost centres</Label>
+              <p className="text-xs text-slate-400">
+                Each cost centre&apos;s share is its budget, e.g. Below Ground Drainage and Transport for a drainage PO.
+                A line can be hours only (truck cartage with no price yet). Leave the value and the lines blank for no PO.
+              </p>
+              <BuilderPoLines
+                value={poValue}
+                lines={poLines}
+                onChange={setPoLines}
+                costCentres={costCentres}
+                stages={stages}
+                loadError={costCentresFailed}
+                onCostCentreAdded={(c) => setCostCentres((prev) => [...prev, c])}
+                valueFromLines
+              />
+            </div>
             <div className="space-y-2">
               <Label htmlFor="description">Description</Label>
               <Textarea id="description" value={form.description} onChange={(e) => set("description", e.target.value)} placeholder="Describe the work required..." rows={3} />
