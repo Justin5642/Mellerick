@@ -1,4 +1,5 @@
 import { Document, Page, Text, View, StyleSheet, Image } from "@react-pdf/renderer";
+import { attentionName, billingName } from "@/lib/customer-billing";
 import { formatDate } from "@/lib/date";
 import { formatInvoiceNumber } from "@/lib/utils";
 import type { JobSite } from "@/lib/job-site";
@@ -102,7 +103,7 @@ export interface DocumentPdfItem {
 export interface DocumentPdfProps {
   docType: "Quote" | "Tax Invoice";
   docNumber: number | string;
-  customer: { name: string; email?: string | null; phone?: string | null };
+  customer: { name: string; company?: string | null; email?: string | null; phone?: string | null };
   items: DocumentPdfItem[];
   subtotal: number;
   taxAmount: number;
@@ -195,7 +196,8 @@ export function DocumentPdf({
 
         <View style={styles.partyRow}>
           <View style={styles.billTo}>
-            <Text style={styles.billToName}>{customer.name}</Text>
+            <Text style={styles.billToName}>{billingName(customer)}</Text>
+            {attentionName(customer) && <Text>Attn: {attentionName(customer)}</Text>}
             {customer.email && <Text>{customer.email}</Text>}
             {customer.phone && <Text>{customer.phone}</Text>}
           </View>

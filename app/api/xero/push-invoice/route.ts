@@ -3,6 +3,7 @@ import { unpricedHoursOn, unpricedRefusal } from "@/lib/invoice-hours";
 import { getRefreshedXero, describeXeroError } from "@/lib/xero";
 import { requireAdmin } from "@/lib/api/guards";
 import { callerClient } from "@/lib/api/caller-client";
+import { billingName } from "@/lib/customer-billing";
 import { Invoice, LineItem, Contact, Invoices, LineAmountTypes } from "xero-node";
 import { reportError } from "@/lib/monitoring";
 import { INVOICE_SITE_SELECT, invoiceJobSite, xeroReference } from "@/lib/job-site";
@@ -27,7 +28,7 @@ export async function POST(request: NextRequest) {
 
     const { data: invoice } = await supabase
       .from("invoices")
-      .select(`*, customers(name, email, phone), invoice_items(*), ${INVOICE_SITE_SELECT}`)
+      .select(`*, customers(name, company, email, phone), invoice_items(*), ${INVOICE_SITE_SELECT}`)
       .eq("id", invoiceId)
       .single();
 
@@ -56,7 +57,7 @@ export async function POST(request: NextRequest) {
 
     // Find or create Xero contact
     const contact: Contact = {
-      name: invoice.customers.name,
+      name: billingName(invoice.customers),
       emailAddress: invoice.customers.email ?? undefined,
       phones: invoice.customers.phone ? [{ phoneType: "DEFAULT" as any, phoneNumber: invoice.customers.phone }] : undefined,
     };

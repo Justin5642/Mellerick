@@ -108,11 +108,11 @@ export default function EditCustomerPage() {
           <CardContent className="space-y-4">
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="space-y-2">
-                <Label htmlFor="name">Full Name *</Label>
+                <Label htmlFor="name">Contact Name *</Label>
                 <Input id="name" value={form.name} onChange={(e) => set("name", e.target.value)} required />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="company">Company</Label>
+                <Label htmlFor="company">Company (invoices are made out to this)</Label>
                 <Input id="company" value={form.company} onChange={(e) => set("company", e.target.value)} />
               </div>
               <div className="space-y-2">

@@ -101,7 +101,7 @@ export function AddCustomerDialog({ open, onOpenChange, initialName, onCreated }
           }}
         >
           <div className="space-y-1.5">
-            <Label htmlFor="new-customer-name">Full Name *</Label>
+            <Label htmlFor="new-customer-name">Contact Name *</Label>
             <Input
               id="new-customer-name"
               value={form.name}
@@ -113,7 +113,7 @@ export function AddCustomerDialog({ open, onOpenChange, initialName, onCreated }
             {nameError && <p className="text-xs text-red-500">A name is required.</p>}
           </div>
           <div className="space-y-1.5">
-            <Label htmlFor="new-customer-company">Company</Label>
+            <Label htmlFor="new-customer-company">Company (invoices are made out to this)</Label>
             <Input id="new-customer-company" value={form.company} onChange={(e) => set("company", e.target.value)} placeholder="Smith Enterprises" />
           </div>
           <div className="grid grid-cols-2 gap-3">

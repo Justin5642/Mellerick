@@ -10,7 +10,7 @@ export default async function QuoteDetailPage({ params }: { params: Promise<{ id
 
   const { data: quote } = await supabase
     .from("quotes")
-    .select("*, customers(name, email, phone), quote_items(*)")
+    .select("*, customers(name, company, email, phone), quote_items(*)")
     .eq("id", id)
     .single();
 

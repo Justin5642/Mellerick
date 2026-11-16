@@ -20,7 +20,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 
   const { data: quote } = await supabase
     .from("quotes")
-    .select(`*, customers(name, email, phone), quote_items(*), ${QUOTE_SITE_SELECT}`)
+    .select(`*, customers(name, company, email, phone), quote_items(*), ${QUOTE_SITE_SELECT}`)
     .eq("id", id)
     .single();
 
