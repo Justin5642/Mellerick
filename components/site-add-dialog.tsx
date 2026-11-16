@@ -21,6 +21,8 @@ export interface PickedSite {
   id: string;
   name: string;
   suburb: string | null;
+  /** For the picker's search and its second line. */
+  address_line1?: string | null;
 }
 
 interface Props {
