@@ -993,6 +993,19 @@ from it. The phone side (branch `feat/job-bookings-mobile`):
   cards show times without stage names; the IDs, and therefore the clock-in
   default, work offline.
 
+### A role change reaches the phone when the app is reopened (16 Nov 2026)
+
+Justin switched himself to technician and the phone still showed the office
+dashboard with overdue invoice amounts: the profile (and so the role) was only
+re-read at a cold start or the hourly token refresh. `lib/auth-context.tsx` now
+re-reads it quietly every time the app returns to the foreground (at most every
+30 s, `shouldRecheckProfile` in `lib/profileCache.ts`, tested; a backward clock
+jump rechecks). A changed role re-gates the routes and PowerSyncProvider wipes
+the old role's mirror, exactly as at a cold start. RLS and the sync streams were
+never at fault — they gate on the server-side role — the phone was showing data
+it had already synced while it still believed the user was office. Reaches
+devices with the next build.
+
 ### Sync reliability and sign-out (17 October 2026 audit)
 
 Twelve findings fixed in one PR (branch `fix/mobile-sync-reliability`). What
