@@ -2,7 +2,7 @@ export const dynamic = "force-dynamic";
 
 import { createClient } from "@/lib/supabase/server";
 import { getViewer } from "@/lib/auth/viewer";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { JobDetailClient } from "@/components/job/job-detail-client";
 import { TIME_ENTRY_SELECT_WITH_STAFF } from "@/lib/time-entry-columns";
 import { sumAllocatedHours } from "@/lib/hours-scoreboard";
@@ -158,6 +158,13 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
     isAdmin || isOffice ? variations ?? [] : (await loadTechVariations(supabase, { jobId: id })).data;
 
   const currentAssignedIds = (jobAssignments ?? []).map((a: { staff_id: string }) => a.staff_id);
+
+  // Technicians see only their own work (Justin, 16 Nov 2026): a job they are
+  // not on is refused, not shown read-only. Migration 0107 makes the database
+  // refuse it too; this covers the time before it is applied.
+  if (!isOffice && !(user && (currentAssignedIds.includes(user.id) || job.assigned_to === user.id))) {
+    redirect("/dashboard/my-jobs");
+  }
 
   return (
     <JobDetailClient

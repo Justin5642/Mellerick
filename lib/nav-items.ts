@@ -20,7 +20,7 @@ export type NavItem = { href: string; label: string; tech?: boolean };
 
 export const NAV_ITEMS: NavItem[] = [
   { href: "/dashboard", label: "Dashboard" },
-  { href: "/dashboard/jobs", label: "Jobs", tech: true },
+  { href: "/dashboard/jobs", label: "Jobs" },
   { href: "/dashboard/my-jobs", label: "My Jobs", tech: true },
   { href: "/dashboard/approvals", label: "Approvals" },
   { href: "/dashboard/schedule", label: "Schedule" },
@@ -43,12 +43,14 @@ export function navItemsFor(role: string | undefined): NavItem[] {
   return role === "technician" ? NAV_ITEMS.filter((i) => i.tech) : NAV_ITEMS;
 }
 
-/** Pages under a technician section that are still office-only. Creating a
- *  job is office-only in the mobile app and in the database (migration 0074). */
-const TECH_DENIED = ["/dashboard/jobs/new"];
+/** A single job's page. Technicians reach their jobs from My Jobs; the page
+ *  itself refuses a job they are not on (app/dashboard/jobs/[id]/page.tsx).
+ *  The Jobs LIST and New Job stay office-only (Justin, 16 Nov 2026: technicians
+ *  see only their own work). */
+const JOB_PAGE = /^\/dashboard\/jobs\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(\/|$)/i;
 
 /** Whether a role may open a given dashboard path. */
 export function mayOpen(role: string | undefined, path: string): boolean {
-  if (role === "technician" && TECH_DENIED.some((d) => path === d || path.startsWith(`${d}/`))) return false;
+  if (role === "technician" && JOB_PAGE.test(path)) return true;
   return navItemsFor(role).some((i) => path === i.href || path.startsWith(`${i.href}/`));
 }

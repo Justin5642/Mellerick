@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { requireUser } from "@/lib/api/guards";
+import { requireOnJob } from "@/lib/api/guards";
 import { consumeRateLimit, rateLimitedResponse, SUPPLIER_ORDER_LIMIT } from "@/lib/api/rate-limit";
 import { businessInfo } from "@/lib/business-info";
 import { getResend, getFromAddress } from "@/lib/resend";
@@ -144,9 +144,9 @@ async function loadRecentSupplierIds(admin: Admin, userId: string, suppliers: Su
 // of the job's budget lines belongs to — so picking the quarry can put the PO
 // on the job's Transport line by itself.
 export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const guard = await requireUser(request);
-  if (!guard.ok) return guard.response;
   const { id } = await params;
+  const guard = await requireOnJob(request, id);
+  if (!guard.ok) return guard.response;
 
   try {
     const admin = createAdminClient();
@@ -216,9 +216,9 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 }
 
 export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const guard = await requireUser(request);
-  if (!guard.ok) return guard.response;
   const { id: jobId } = await params;
+  const guard = await requireOnJob(request, jobId);
+  if (!guard.ok) return guard.response;
 
   const parsed = parseSupplierOrder(await request.json().catch(() => null));
   if (!parsed.ok) return NextResponse.json({ error: parsed.error }, { status: 400 });

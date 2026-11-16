@@ -13,7 +13,7 @@ const selects: { table: string; cols: string }[] = [];
 const inserts: { table: string; rows: unknown }[] = [];
 let tableData: Record<string, { list?: unknown[]; one?: unknown }> = {};
 
-vi.mock("@/lib/api/guards", () => ({ requireUser: (...a: unknown[]) => requireUser(...a) }));
+vi.mock("@/lib/api/guards", () => ({ requireOnJob: (...a: unknown[]) => requireUser(...a) }));
 vi.mock("@/lib/api/rate-limit", () => ({
   consumeRateLimit: vi.fn(async () => true),
   rateLimitedResponse: vi.fn(),

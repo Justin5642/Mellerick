@@ -10,7 +10,7 @@ const adminConstructed = vi.fn();
 const updates: Record<string, unknown>[] = [];
 let order: Record<string, unknown> | null = null;
 
-vi.mock("@/lib/api/guards", () => ({ requireUser: (...a: unknown[]) => requireUser(...a) }));
+vi.mock("@/lib/api/guards", () => ({ requireOnJob: (...a: unknown[]) => requireUser(...a) }));
 vi.mock("@/lib/monitoring", () => ({ reportError: vi.fn() }));
 vi.mock("@/lib/supabase/admin", () => ({
   createAdminClient: vi.fn(() => {

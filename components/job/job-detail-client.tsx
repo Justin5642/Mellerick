@@ -238,7 +238,7 @@ export function JobDetailClient({ job, currentUserId, photos: initialPhotos, doc
       <div className="bg-white border-b px-6 py-4">
         <div className="flex items-start justify-between gap-4">
           <div className="flex items-start gap-3 flex-1 min-w-0">
-            <Link href="/dashboard/jobs">
+            <Link href={isOffice ? "/dashboard/jobs" : "/dashboard/my-jobs"}>
               <Button variant="ghost" size="sm" className="gap-1.5 text-slate-500 mt-0.5">
                 <ArrowLeft className="w-4 h-4" /> Back
               </Button>
