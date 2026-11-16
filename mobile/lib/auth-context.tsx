@@ -147,7 +147,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       void loadProfile(id, { quiet: true });
     });
     return () => sub.remove();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   async function loadProfile(userId: string, opts: { quiet?: boolean } = {}) {
