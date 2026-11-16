@@ -9,6 +9,8 @@ import {
   computeJobLedger,
   loadedRatesByStaff,
   plantCosts,
+  rowBelowMinimum,
+  rowMarginPct,
   type EquipmentInput,
   type StaffCostProfileInput,
 } from "@/lib/job-ledger";
@@ -113,13 +115,14 @@ export function JobLedger({ purchaseOrders, timeEntries, expenses, vendorOrders,
                 <th className="font-medium pb-2">Materials</th>
                 <th className="font-medium pb-2">Plant</th>
                 <th className="font-medium pb-2">Cost</th>
-                <th className="font-medium pb-2">Left</th>
+                <th className="font-medium pb-2">Margin</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {ledger.rows.map((r) => {
                 const left = r.budget - r.cost;
-                const over = r.budget > 0 && left < 0;
+                const pct = rowMarginPct(r);
+                const over = rowBelowMinimum(r, minMarginPct);
                 return (
                   <tr key={r.key} className="text-right">
                     <td className="text-left py-2">
@@ -140,7 +143,9 @@ export function JobLedger({ purchaseOrders, timeEntries, expenses, vendorOrders,
                     <td className="py-2 text-slate-600">{r.materials ? money(r.materials) : "—"}</td>
                     <td className="py-2 text-slate-600">{r.plant ? money(r.plant) : "—"}</td>
                     <td className="py-2 font-medium text-slate-800">{money(r.cost)}</td>
-                    <td className={`py-2 font-medium ${over ? "text-red-600" : "text-slate-800"}`}>{r.budget ? money(left) : "—"}</td>
+                    <td className={`py-2 font-medium ${over ? "text-red-600" : "text-slate-800"}`}>
+                      {r.budget ? <>{money(left)}{pct !== null && <span className="block text-xs font-normal">{pct.toFixed(0)}% margin</span>}</> : "—"}
+                    </td>
                   </tr>
                 );
               })}

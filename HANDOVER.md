@@ -297,6 +297,17 @@ that cost centre's budget. Cartage comes out of the drainage PO.
   logged time or expenses can't be removed — set it to $0. On New Job and the
   PO tab the value may be left blank when there are lines: it becomes the
   lines' total, which may be $0 (a cartage line with hours only).
+- **Several POs, one job; invoice each, margin per cost centre** (Justin, 16 Nov
+  2026): one builder's Sewer and Stormwater POs, done the same day, stay on one
+  job so the figures merge, but each is invoiced on its own. Each PO card has
+  **Invoice this PO** → `/dashboard/invoices/new?job_id=…&po_id=…`, which
+  fills that PO's number, a title naming it, and its value as the lines
+  (`lib/po-invoice.ts`: one line per priced cost-centre line when they add up,
+  else one line for the value; tested) instead of the job's items, and warns
+  when the PO already has an invoice. The Job Ledger shows a margin % per cost
+  centre (red under `min_margin_pct`; `rowMarginPct` / `rowBelowMinimum`), and
+  Reports → Job margins adds a by-cost-centre total across the open jobs
+  (`costCentreTotals`) and each job's per-centre margins.
 - **Quote → job** (web) creates `<job number>-1` with the quote's subtotal (ex
   GST), unsplit, and opens the PO tab. Mobile quote conversion does not yet.
 - **Which builder PO an invoice is for** (1 Nov 2026): on New Invoice, a job

@@ -217,3 +217,45 @@ export function computeJobLedger(i: LedgerInputs): JobLedger {
 export function belowMinimumMargin(ledger: Pick<JobLedger, "budget" | "marginPct">, minMarginPct: number): boolean {
   return ledger.budget > 0 && ledger.marginPct !== null && ledger.marginPct < minMarginPct;
 }
+
+/**
+ * One cost centre's margin as a % of its own budget (Justin, 16 Nov 2026:
+ * "we need a margin for each cost centre" — below ground and above ground
+ * kept apart even when several POs share the job). null with no budget.
+ */
+export function rowMarginPct(r: Pick<LedgerRow, "budget" | "cost">): number | null {
+  return r.budget > 0 ? round(((r.budget - r.cost) / r.budget) * 100) : null;
+}
+
+/** A cost centre's row is under the minimum margin (only rows with a budget). */
+export function rowBelowMinimum(r: Pick<LedgerRow, "budget" | "cost">, minMarginPct: number): boolean {
+  const pct = rowMarginPct(r);
+  return pct !== null && pct < minMarginPct;
+}
+
+export interface CostCentreTotal {
+  key: string;
+  name: string;
+  budget: number;
+  cost: number;
+  margin: number;
+  marginPct: number | null;
+}
+
+/** The same cost centre added up across several jobs' ledgers, in first-seen order. */
+export function costCentreTotals(ledgers: Pick<JobLedger, "rows">[]): CostCentreTotal[] {
+  const totals = new Map<string, { key: string; name: string; budget: number; cost: number }>();
+  for (const l of ledgers) {
+    for (const r of l.rows) {
+      const t = totals.get(r.key) ?? { key: r.key, name: r.name, budget: 0, cost: 0 };
+      t.budget += r.budget;
+      t.cost += r.cost;
+      totals.set(r.key, t);
+    }
+  }
+  return [...totals.values()].map((t) => {
+    const budget = round(t.budget);
+    const cost = round(t.cost);
+    return { ...t, budget, cost, margin: round(budget - cost), marginPct: rowMarginPct({ budget, cost }) };
+  });
+}
