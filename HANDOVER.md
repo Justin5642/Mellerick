@@ -683,10 +683,12 @@ Stage 1 is web + database + pure rules; the phone comes next.
   costed from `equipment_usage_log` against PO lines, and operator labour
   would be counted against the quoted work; mixing them now would make the
   quoted margin wrong. Next stages:
-  1. **Phone:** Day Works entry and builder sign-off on the phone (online
-     first, then the outbox; add `hire_entries` to a technician stream with
-     its columns listed — it has no money column), truck day stops, float
-     moves with a distance lookup.
+  1. ~~**Phone:** Day Works entry and builder sign-off~~ — **done, Stage 2
+     (below).** Still to come on the phone: truck day stops, float moves
+     with a distance lookup (km are typed in today), and an offline path
+     if it is ever wanted (outbox + `hire_entries` in a technician stream
+     with its columns listed — it has no money column). Office void and
+     Invoice Day Works stay web-only.
   2. **Dry hire controls:** hirer details, condition photos out/in, meter
      readings at hand-over.
   3. **Truck register:** body volume and cartage rates per truck.
@@ -698,6 +700,46 @@ Stage 1 is web + database + pure rules; the phone comes next.
      attachments, standby rates (700L dozer and others), fuel and tip-fee
      pass-through, and confirm the twin-steer float's 30 km / $5 per km
      (assumed equal to the quad axle).
+
+**Day Works / Hire, Stage 2 — the phone (16 Nov 2026; no migration).**
+Justin's workflow 1 (wet hire, hours) and 2 (dry hire, days or engine hours):
+on a job they are on, the crew (and office on the phone) add the day's hire
+line and hand the phone to the builder's rep, who signs it; it then locks.
+- **Online only, like supplier POs.** No outbox, nothing in PowerSync /
+  `sync-streams.yaml`: the builder signs on the spot, and an entry that only
+  synced later couldn't be shown to them as locked. Offline the tab says "Day
+  Works needs signal".
+- **Routes** (all `requireOnJob`; every write uses the CALLER's client via
+  `callerClient`, so RLS and 0108's `hire_entries_guard` apply exactly as on
+  the web — never the service role for a write; each answers with the fresh
+  tab): `POST /api/jobs/[id]/hire-entries` (add a draft; a retry with the
+  same client id is answered as saved), `PATCH`/`DELETE
+  .../hire-entries/[entryId]` (drafts only), `POST .../[entryId]/sign`
+  (`signer_name` + base64 PNG; uploaded to `job-documents` at
+  `<job>/day-works/signature-<entry>-<ts>.png`, the web's path, then set
+  signed; a retry by the same signer is answered as signed). The GET's reads
+  moved unchanged into `lib/day-works-load.ts`.
+- **Validation** shared with the web form: `lib/day-works-entry.ts`
+  (`buildHireEntryRow` — the web tab now calls it, same words —
+  `parseHireEntryBody`, `dayWorksWriteError`: fixed sentences, 0108's own
+  refusals passed through only from an exact allow list). Tests:
+  `tests/unit/day-works-routes.test.ts` (incl. a technician's GET and POST
+  answers walked for money keys and rate/amount values) and
+  `tests/unit/day-works-entry.test.ts`.
+- **Phone:** a "Day Works" tab after Time (`mobile/app/job/[id].tsx`), only
+  for office or someone on the job (lead or crew), never on view-only jobs.
+  Calls in `mobile/lib/dayWorks.ts` (Bearer, like `supplierOrders.ts`;
+  tested); UI `mobile/components/job/day-works.tsx`: entries by date with
+  status, "+ Add day" (KeyboardSheet: machine, hire option, the inputs for
+  its unit — hours / days / meter open-close / km + from-to for a float or
+  cartage — attachments, description), clash warnings, "Get builder to sign"
+  (full-screen name + signature, the same `react-native-signature-canvas`
+  pad as the job sign-off). Office amounts only through `MoneyText` inside a
+  `RoleGate`, and only when the server sent them.
+- Reaches phones with the next build (`react-native-signature-canvas` is
+  already in the binary).
+- **Not on the phone:** office void, Invoice Day Works, truck day stops,
+  float distance lookup (km typed), offline entry.
 
 ---
 

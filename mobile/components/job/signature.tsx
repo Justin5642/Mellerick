@@ -204,7 +204,7 @@ export function JobSignatureTab({
   );
 }
 
-const signatureWebStyle = `
+export const signatureWebStyle = `
   .m-signature-pad--footer { display: flex; justify-content: space-between; padding: 8px; }
   .m-signature-pad--body { border: none; }
   body,html { background-color: #f8fafc; }

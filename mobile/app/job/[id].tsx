@@ -21,6 +21,7 @@ import { isMultiDay } from "../../lib/jobStages";
 import { JobDocumentsTab } from "../../components/job/documents";
 import { JobVariationsTab } from "../../components/job/variations";
 import { JobSupplierOrdersTab } from "../../components/job/supplier-orders";
+import { JobDayWorksTab } from "../../components/job/day-works";
 import { ScheduleJobModal } from "../../components/job/schedule-job-modal";
 import { isJobClosedForScheduling } from "../../lib/jobSchedulable";
 import { KeyboardSheet, KEYBOARD_SHEET_INPUT_FONT_SIZE } from "../../components/KeyboardSheet";
@@ -34,6 +35,7 @@ import { useDataLayer } from "../../lib/data/DataProvider";
 const TABS = [
   { key: "overview", label: "Overview" },
   { key: "time", label: "Time" },
+  { key: "dayworks", label: "Day Works" },
   { key: "variations", label: "Variations" },
   { key: "orders", label: "Orders" },
   { key: "photos", label: "Photos" },
@@ -51,6 +53,10 @@ type TabKey = (typeof TABS)[number]["key"];
 // On a job they are not on, a technician looks up the plans: no Notes (office
 // chatter, scheduling notes) and no schedule anywhere (Justin, 16 Nov 2026).
 const VIEW_ONLY_TABS = new Set<TabKey>(["overview", "orders", "photos", "documents"]);
+
+// Day Works / Hire (Stage 2, Nov 2026): only for the job's crew and the office
+// — the server's requireOnJob refuses anyone else — and never on a view-only
+// job (it is not in VIEW_ONLY_TABS). Online only; offline it says it needs signal.
 
 const JOB_STATUSES = ["pending", "scheduled", "in_progress", "on_hold", "completed", "cancelled"] as const;
 const JOB_PRIORITIES = ["low", "normal", "high", "urgent"] as const;
@@ -272,7 +278,12 @@ export default function JobDetailScreen() {
   // and a refused write would otherwise sit failed in the outbox.
   const viewOnly =
     !isOfficeOrAdmin && assignmentKnown && !!userId && !assignedStaff.some((a) => a.id === userId);
-  const visibleTabs = viewOnly ? TABS.filter((t) => VIEW_ONLY_TABS.has(t.key)) : TABS;
+  // On the job: office, the lead (jobs.assigned_to — known offline too) or the crew.
+  const onJob =
+    isOfficeOrAdmin || (!!userId && (job.assigned_to === userId || assignedStaff.some((a) => a.id === userId)));
+  const visibleTabs = (viewOnly ? TABS.filter((t) => VIEW_ONLY_TABS.has(t.key)) : TABS).filter(
+    (t) => t.key !== "dayworks" || onJob
+  );
   const activeTab: TabKey = visibleTabs.some((t) => t.key === tab) ? tab : "overview";
 
   const sc = statusColors[job.status] ?? statusColors.pending;
@@ -397,6 +408,7 @@ export default function JobDetailScreen() {
         )}
         {/* Truck & plant (Stage 7): the driver logs cartage against the job's cost centre. */}
         {activeTab === "time" && userId && <JobPlantUsage jobId={job.id} />}
+        {activeTab === "dayworks" && userId && <JobDayWorksTab jobId={job.id} />}
         {activeTab === "variations" && userId && <JobVariationsTab jobId={job.id} currentUserId={userId} />}
         {activeTab === "orders" && <JobSupplierOrdersTab jobId={job.id} currentUserId={userId ?? null} costCentres={costCenters} />}
         {activeTab === "photos" && userId && (

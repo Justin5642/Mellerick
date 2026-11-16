@@ -15,6 +15,7 @@ import { SignaturePad, type SignaturePadHandle } from "./signature-pad";
 import { dateKeyInBusinessTZ, startOfWeekKey, shiftDateKey } from "@/lib/date";
 import { dayWorksPeriodLabel, quantityProblem, type HireType, type HireUnit } from "@/lib/hire-pricing";
 import type { DayWorksView, DayWorksEntry } from "@/lib/day-works-view";
+import { buildHireEntryRow } from "@/lib/day-works-entry";
 
 // The job's Day Works / Hire tab (Stage 1, Nov 2026). Hire and cartage are
 // their own lines under the job — never part of the quoted value or a progress
@@ -159,29 +160,12 @@ export function JobDayWorks({ jobId, readOnly = false }: Props) {
 
   async function saveDraft() {
     if (!draft) return;
-    const opt = option(draft);
-    if (!draft.equipment_id || !opt) return toast.error("Pick the machine and how it's hired.");
-    if (!draft.work_date) return toast.error("Pick the date.");
     const [hire_type, hire_unit] = draft.optionKey.split("|") as [HireType, HireUnit];
-    const row = {
-      job_id: jobId,
-      equipment_id: draft.equipment_id,
-      hire_type,
-      hire_unit,
-      work_date: draft.work_date,
-      hours: hire_unit === "hour" ? numOrNull(draft.hours) : null,
-      days: hire_unit === "day" ? numOrNull(draft.days) : null,
-      meter_open: hire_unit === "engine_hour" ? numOrNull(draft.meter_open) : null,
-      meter_close: hire_unit === "engine_hour" ? numOrNull(draft.meter_close) : null,
-      km: hire_unit === "km" || hire_unit === "move" ? numOrNull(draft.km) : null,
-      pickup: hire_unit === "move" || hire_type === "cartage" ? draft.pickup.trim() || null : null,
-      dropoff: hire_unit === "move" || hire_type === "cartage" ? draft.dropoff.trim() || null : null,
-      description: draft.description.trim() || null,
-    };
-    if (opt.whole_days_only && row.days != null && !Number.isInteger(row.days)) return toast.error("This machine is hired in full days only.");
-    for (const v of [row.hours, row.days, row.meter_open, row.meter_close, row.km]) {
-      if (v != null && (!Number.isFinite(v) || v < 0)) return toast.error("Check the numbers entered.");
-    }
+    // Shared with the phone's API routes (lib/day-works-entry.ts), so both
+    // refuse the same things in the same words.
+    const built = buildHireEntryRow({ ...draft, hire_type, hire_unit }, option(draft));
+    if (!built.ok) return toast.error(built.error);
+    const row = { job_id: jobId, ...built.row };
     setSaving(true);
     try {
       const entryId = draft.id ?? crypto.randomUUID();

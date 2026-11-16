@@ -1,25 +1,21 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createAdminClient } from "@/lib/supabase/admin";
 import { requireOnJob } from "@/lib/api/guards";
 import { callerClient } from "@/lib/api/caller-client";
 import { reportError } from "@/lib/monitoring";
-import { buildDayWorksView, type EntryRow, type MachineRow, type OtherAttachmentUse } from "@/lib/day-works-view";
+import { loadDayWorks, hireOptionFlags } from "@/lib/day-works-load";
+import { buildHireEntryRow, clashWarning, dayWorksWriteError, parseHireEntryBody, rowLimitProblem } from "@/lib/day-works-entry";
 
 // The job's Day Works / Hire tab (Stage 1, Nov 2026): the machines that can be
 // hired out, the attachments, this job's entries and any attachment clashes.
+// The reads (and the money rule) are in lib/day-works-load.ts: names and
+// quantities for the crew, amounts only for office/admin.
 //
-// `equipment`, `equipment_hire_options` and `hire_attachments` are office/admin
-// only by RLS (they carry costs and rates), so they are read here through the
-// service role, after requireOnJob, and lib/day-works-view.ts copies names and
-// flags only — amounts are added for office/admin alone. The entries are read
-// with the CALLER's session, so RLS (jobs you are on) still decides.
-//
-// Writes (add, edit, sign, delete a draft; office void) go straight from the
-// browser under RLS and the hire_entries_guard trigger. Before the Day Works
-// migration (drafted, not yet applied) is in the database this answers
-// { ready: false } and the tab says so.
-
-const MISSING_TABLE = new Set(["42P01", "PGRST205", "PGRST200"]);
+// Web writes (add, edit, sign, delete a draft; office void) go straight from
+// the browser under RLS and the hire_entries_guard trigger. The phone (Stage 2)
+// writes through these routes instead — POST here adds a draft;
+// [entryId] edits or deletes one; [entryId]/sign signs it off — always with the
+// CALLER's client, so RLS and the 0108 trigger apply exactly as on the web.
+// Never the service role for a write. Every write answers with the fresh tab.
 
 export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id: jobId } = await params;
@@ -28,92 +24,68 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   const isOffice = guard.role === "office" || guard.role === "admin";
 
   try {
-    const admin = createAdminClient();
-    const supabase = await callerClient(request);
-
-    const [machinesRes, attachmentsRes, entriesRes, centresRes] = await Promise.all([
-      admin
-        .from("equipment")
-        .select("id, name, is_active, equipment_hire_options(hire_type, hire_unit, rate, whole_days_only, fuel_included, float_base, float_km_included, float_per_km, cost_centre_id, is_active)")
-        .order("name"),
-      admin.from("hire_attachments").select("id, name, day_rate, is_active").order("name"),
-      supabase
-        .from("hire_entries")
-        .select("*, hire_entry_attachments(attachment_id), profiles!hire_entries_created_by_fkey(full_name)")
-        .eq("job_id", jobId)
-        .order("work_date", { ascending: false })
-        .order("created_at", { ascending: false }),
-      admin.from("cost_centres").select("id, name"),
-    ]);
-    for (const r of [machinesRes, attachmentsRes, entriesRes]) {
-      if (r.error && MISSING_TABLE.has(r.error.code ?? "")) return NextResponse.json({ ready: false });
-    }
-    if (machinesRes.error) throw machinesRes.error;
-    if (attachmentsRes.error) throw attachmentsRes.error;
-    if (entriesRes.error) throw entriesRes.error;
-    if (centresRes.error) throw centresRes.error;
-
-    type RawEntry = Omit<EntryRow, "attachment_ids" | "created_by_name"> & {
-      hire_entry_attachments: { attachment_id: string }[] | null;
-      profiles: { full_name: string | null } | null;
-    };
-    const entries: EntryRow[] = ((entriesRes.data ?? []) as unknown as RawEntry[]).map(({ hire_entry_attachments, profiles, ...e }) => ({
-      ...e,
-      attachment_ids: (hire_entry_attachments ?? []).map((a) => a.attachment_id),
-      created_by_name: profiles?.full_name ?? null,
-    }));
-
-    type RawMachine = Omit<MachineRow, "options"> & { equipment_hire_options: MachineRow["options"] | null };
-    const machines: MachineRow[] = ((machinesRes.data ?? []) as unknown as RawMachine[]).map(({ equipment_hire_options, ...m }) => ({
-      ...m,
-      options: (equipment_hire_options ?? []).map((o) => ({ ...o, equipment_id: m.id })),
-    }));
-
-    // Other entries (on any job) ticking the same attachments on the same days.
-    const attachmentIds = [...new Set(entries.flatMap((e) => e.attachment_ids))];
-    const dates = [...new Set(entries.filter((e) => e.attachment_ids.length > 0).map((e) => e.work_date))];
-    let others: OtherAttachmentUse[] = [];
-    if (attachmentIds.length > 0) {
-      const { data, error } = await admin
-        .from("hire_entry_attachments")
-        .select("entry_id, attachment_id, hire_entries!inner(equipment_id, work_date, status, jobs(job_number))")
-        .in("attachment_id", attachmentIds)
-        .in("hire_entries.work_date", dates)
-        .neq("hire_entries.status", "void");
-      if (error) throw error;
-      type RawOther = { entry_id: string; attachment_id: string; hire_entries: { equipment_id: string; work_date: string; status: string; jobs: { job_number: number } | null } };
-      others = ((data ?? []) as unknown as RawOther[]).map((o) => ({
-        entry_id: o.entry_id,
-        attachment_id: o.attachment_id,
-        equipment_id: o.hire_entries.equipment_id,
-        work_date: o.hire_entries.work_date,
-        status: o.hire_entries.status,
-        job_number: o.hire_entries.jobs?.job_number ?? null,
-      }));
-    }
-
-    // Signatures live in job-documents under this job; the caller is on the job.
-    const paths = entries.map((e) => e.signature_path).filter((p): p is string => !!p);
-    const signatureUrls = new Map<string, string>();
-    if (paths.length > 0) {
-      const { data: signed } = await admin.storage.from("job-documents").createSignedUrls(paths, 3600);
-      for (const s of signed ?? []) if (s.path && s.signedUrl) signatureUrls.set(s.path, s.signedUrl);
-    }
-
-    const view = buildDayWorksView({
-      isOffice,
-      jobId,
-      machines,
-      attachments: attachmentsRes.data ?? [],
-      entries,
-      others,
-      costCentreNames: new Map((centresRes.data ?? []).map((c) => [c.id as string, c.name as string])),
-      signatureUrls,
-    });
-    return NextResponse.json({ ready: true, isOffice, userId: guard.userId, ...view });
+    return NextResponse.json(await loadDayWorks(request, jobId, { userId: guard.userId, isOffice }));
   } catch (err) {
     console.error("day works list error:", err);
     reportError(err, { route: "api/jobs/hire-entries" });
     return NextResponse.json({ error: "Couldn't load Day Works. Try again." }, { status: 500 });
+  }
+}
+
+/**
+ * Add a draft entry (the phone). Safe to retry with the same `id`: an entry
+ * already saved under it on this job is answered as saved, not added twice.
+ */
+export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const { id: jobId } = await params;
+  const guard = await requireOnJob(request, jobId);
+  if (!guard.ok) return guard.response;
+  const isOffice = guard.role === "office" || guard.role === "admin";
+
+  const parsed = parseHireEntryBody(await request.json().catch(() => null));
+  if (!parsed.ok) return NextResponse.json({ error: parsed.error }, { status: 400 });
+
+  try {
+    const { input, attachmentIds } = parsed;
+    const opt = await hireOptionFlags(input.equipment_id, input.hire_type, input.hire_unit);
+    const built = buildHireEntryRow(input, opt);
+    if (!built.ok) return NextResponse.json({ error: built.error }, { status: 400 });
+    const limit = rowLimitProblem(built.row);
+    if (limit) return NextResponse.json({ error: limit }, { status: 400 });
+
+    const supabase = await callerClient(request);
+    const entryId = parsed.id ?? crypto.randomUUID();
+    let warning: string | null = null;
+
+    const { data: existing, error: existingError } = await supabase.from("hire_entries").select("id, job_id").eq("id", entryId).maybeSingle();
+    if (existingError) throw existingError;
+    if (existing && existing.job_id !== jobId) {
+      return NextResponse.json({ error: "That entry belongs to another job." }, { status: 409 });
+    }
+    if (!existing) {
+      const { error } = await supabase.from("hire_entries").insert({ id: entryId, job_id: jobId, ...built.row });
+      if (error) {
+        const refused = dayWorksWriteError(error);
+        if (refused.status === 500) throw error;
+        return NextResponse.json({ error: refused.error }, { status: refused.status });
+      }
+      if (attachmentIds.length > 0) {
+        const { error: addErr } = await supabase
+          .from("hire_entry_attachments")
+          .insert(attachmentIds.map((attachment_id) => ({ entry_id: entryId, attachment_id })));
+        if (addErr) {
+          console.error("day works attachments not saved:", addErr);
+          warning = "The entry was saved but its attachments were not. Edit it and tick them again.";
+        }
+      }
+    }
+
+    const view = await loadDayWorks(request, jobId, { userId: guard.userId, isOffice });
+    if (view.ready) warning = warning ?? clashWarning(view.clashes, entryId);
+    return NextResponse.json({ ...view, saved: { id: entryId }, ...(warning ? { warning } : {}) }, { status: existing ? 200 : 201 });
+  } catch (err) {
+    console.error("day works add error:", err);
+    reportError(err, { route: "api/jobs/hire-entries" });
+    return NextResponse.json({ error: "Couldn't save the entry. Try again." }, { status: 500 });
   }
 }
