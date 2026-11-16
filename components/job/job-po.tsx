@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { FileDropzone } from "@/components/ui/file-dropzone";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Plus, Pencil, Trash2, Navigation, MapPin, Loader2, ShoppingCart, X } from "lucide-react";
+import { Plus, Pencil, Trash2, Navigation, MapPin, Loader2, ShoppingCart, X, FileText } from "lucide-react";
 import { nextJobPoNumber } from "@/lib/job-po-number";
 import { siteOneLine, type JobSiteParts } from "@/lib/job-site";
 import { lineInputFromSaved, planBuilderPo, planBuilderPoEdit, planBuilderPoLines, type BuilderPoLineInput, type CostCentreOption } from "@/lib/builder-po";
@@ -991,6 +991,13 @@ export function JobPO({ jobId, jobNumber, customerName, site, pos: initialPos, t
                 <Button variant="outline" size="sm" className="gap-1.5 h-8 text-xs" onClick={() => openEditPO(po)}>
                   <Pencil className="w-3.5 h-3.5" />Edit
                 </Button>
+                {Number(po.total_value) > 0 && (
+                  <a href={`/dashboard/invoices/new?job_id=${jobId}&po_id=${po.id}`}>
+                    <Button variant="outline" size="sm" className="gap-1.5 h-8 text-xs">
+                      <FileText className="w-3.5 h-3.5" />Invoice this PO
+                    </Button>
+                  </a>
+                )}
                 <button onClick={() => deletePO(po.id)} className="text-slate-300 hover:text-red-400 transition-colors p-1" aria-label="Delete PO">
                   <Trash2 className="w-4 h-4" />
                 </button>

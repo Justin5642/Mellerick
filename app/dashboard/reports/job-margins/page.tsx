@@ -4,7 +4,7 @@ import Link from "next/link";
 import { getViewer } from "@/lib/auth/viewer";
 import { createClient } from "@/lib/supabase/server";
 import { fetchAllRows } from "@/lib/fetch-all-rows";
-import { belowMinimumMargin, computeJobLedger, loadedRatesByStaff, plantCosts, type JobLedger } from "@/lib/job-ledger";
+import { belowMinimumMargin, computeJobLedger, costCentreTotals, loadedRatesByStaff, plantCosts, rowBelowMinimum, rowMarginPct, type JobLedger } from "@/lib/job-ledger";
 import { attachEffectiveRates } from "@/lib/fleet-rates";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -137,6 +137,9 @@ export default async function JobMarginsPage() {
   }
 
   const flaggedCount = rows.filter((r) => belowMinimumMargin(r.ledger, minMarginPct)).length;
+  // Below ground, above ground, transport… each with its own margin across
+  // these jobs. Travel and untagged cost have no budget of their own.
+  const byCentre = costCentreTotals(rows.map((r) => r.ledger)).filter((c) => c.budget > 0);
 
   return (
     <div className="p-6 space-y-6 max-w-6xl">
@@ -163,6 +166,38 @@ export default async function JobMarginsPage() {
             <span className="text-red-600 font-medium"> · {flaggedCount} under your {minMarginPct.toFixed(0)}% minimum</span>
           )}
         </p>
+      )}
+
+      {byCentre.length > 0 && (
+        <Card>
+          <CardContent className="p-0 overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="bg-slate-50 text-xs text-slate-500">
+                <tr className="text-right">
+                  <th className="text-left font-medium px-4 py-2">By cost centre (these jobs)</th>
+                  <th className="font-medium px-4 py-2">Budget</th>
+                  <th className="font-medium px-4 py-2">Cost so far</th>
+                  <th className="font-medium px-4 py-2">Margin left</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {byCentre.map((c) => {
+                  const low = c.marginPct !== null && c.marginPct < minMarginPct;
+                  return (
+                    <tr key={c.key} className="text-right">
+                      <td className="text-left px-4 py-2 font-medium text-slate-800">{c.name}</td>
+                      <td className="px-4 py-2 text-slate-700">{money(c.budget)}</td>
+                      <td className="px-4 py-2 text-slate-700">{money(c.cost)}</td>
+                      <td className={`px-4 py-2 font-semibold ${low ? "text-red-600" : "text-green-700"}`}>
+                        {money(c.margin)}{c.marginPct !== null ? ` (${c.marginPct.toFixed(0)}%)` : ""}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </CardContent>
+        </Card>
       )}
 
       <Card>
@@ -198,6 +233,15 @@ export default async function JobMarginsPage() {
                           #{job.job_number} — {job.title}
                         </Link>
                         {job.customers?.name && <span className="block text-xs text-slate-400">{job.customers.name}</span>}
+                        {ledger.rows.filter((r) => r.budget > 0).length > 1 && (
+                          <span className="block text-xs text-slate-500">
+                            {ledger.rows.filter((r) => r.budget > 0).map((r, i) => (
+                              <span key={r.key} className={rowBelowMinimum(r, minMarginPct) ? "text-red-600" : ""}>
+                                {i > 0 ? " · " : ""}{r.name} {rowMarginPct(r)?.toFixed(0)}%
+                              </span>
+                            ))}
+                          </span>
+                        )}
                       </td>
                       <td className="text-left px-4 py-2.5 text-slate-500 capitalize">{job.status.replace("_", " ")}</td>
                       <td className="px-4 py-2.5 text-slate-700">{money(ledger.budget)}</td>

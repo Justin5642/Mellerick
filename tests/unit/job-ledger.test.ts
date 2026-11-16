@@ -129,3 +129,21 @@ describe("computeJobLedger — plant on its cost centre", () => {
     expect(l.rows.find((r) => r.key === "transport")).toMatchObject({ plant: 300, cost: 300 });
   });
 });
+
+describe("per cost centre margins", () => {
+  it("gives each row its own margin and adds the same centre up across jobs", async () => {
+    const { rowMarginPct, rowBelowMinimum, costCentreTotals } = await import("@/lib/job-ledger");
+    expect(rowMarginPct({ budget: 1000, cost: 800 })).toBe(20);
+    expect(rowMarginPct({ budget: 0, cost: 50 })).toBeNull();
+    expect(rowBelowMinimum({ budget: 1000, cost: 850 }, 20)).toBe(true);
+    expect(rowBelowMinimum({ budget: 1000, cost: 700 }, 20)).toBe(false);
+    const totals = costCentreTotals([
+      { rows: [{ key: "bgd", name: "Below Ground", budget: 1000, cost: 700 } as never, { key: "agp", name: "Above Ground", budget: 500, cost: 450 } as never] },
+      { rows: [{ key: "bgd", name: "Below Ground", budget: 2000, cost: 1700 } as never] },
+    ]);
+    expect(totals).toEqual([
+      { key: "bgd", name: "Below Ground", budget: 3000, cost: 2400, margin: 600, marginPct: 20 },
+      { key: "agp", name: "Above Ground", budget: 500, cost: 450, margin: 50, marginPct: 10 },
+    ]);
+  });
+});

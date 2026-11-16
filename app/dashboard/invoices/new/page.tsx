@@ -15,6 +15,7 @@ import { ArrowLeft, Plus, Trash2, GitPullRequestArrow } from "lucide-react";
 import Link from "next/link";
 import { CustomerPicker } from "@/components/customer-picker";
 import { PaymentTermsField } from "@/components/invoice/payment-terms-field";
+import { poInvoiceLines } from "@/lib/po-invoice";
 import { melbourneDay } from "@/lib/invoice-terms";
 import { moneyTotals } from "@/lib/replace-line-items";
 import { variationLineDescription } from "@/lib/variation-qty";
@@ -77,6 +78,8 @@ function NewInvoiceForm() {
   const jobIdParam = searchParams.get("job_id");
   const customerIdParam = searchParams.get("customer_id");
   const titleParam = searchParams.get("title");
+  // "Invoice this PO" on the job's PO tab: start from that one builder PO.
+  const poIdParam = searchParams.get("po_id");
 
   const [form, setForm] = useState({
     title: titleParam ?? "",
@@ -88,7 +91,7 @@ function NewInvoiceForm() {
     customer_po: "",
   });
   // Edited by hand: a later job pick must not overwrite it.
-  const [poTouched, setPoTouched] = useState(false);
+  const [poTouched, setPoTouched] = useState(!!poIdParam);
   // Payment terms count from today, the day the invoice is raised.
   const invoiceDay = useMemo(() => melbourneDay(new Date()), []);
   const [claim, setClaim] = useState<ClaimDraft>(emptyClaimDraft);
@@ -149,6 +152,7 @@ function NewInvoiceForm() {
       if (!jobIdParam) { setJobQuery(""); return; }
       const { data } = await supabase.from("jobs").select(jobSelectFields).eq("id", jobIdParam).single();
       if (data) {
+        if (!customerIdParam) setForm((prev) => (prev.customer_id ? prev : { ...prev, customer_id: (data as any).customer_id }));
         setJobQuery(jobLabel(data as any));
         setAllJobs((prev) => (prev.some((j) => j.id === (data as any).id) ? prev : [data as any, ...prev]));
       }
@@ -243,6 +247,44 @@ function NewInvoiceForm() {
   }, [form.job_id]);
   const pickedPo = jobPos.find((p) => p.po_number === form.customer_po.trim()) ?? null;
 
+  // "Invoice this PO": the PO's number, a title naming it, and its value as
+  // the lines (lib/po-invoice.ts). Says so when this PO already has an invoice.
+  const [poAlreadyInvoiced, setPoAlreadyInvoiced] = useState<string | null>(null);
+  const prefilledPoRef = useRef("");
+  useEffect(() => {
+    async function prefillFromPo() {
+      if (!poIdParam || !jobIdParam || prefilledPoRef.current === poIdParam) return;
+      prefilledPoRef.current = poIdParam;
+      const { data: po } = await supabase
+        .from("purchase_orders")
+        .select("po_number, total_value, po_cost_centers(name, allocated_amount, sort_order)")
+        .eq("id", poIdParam)
+        .eq("job_id", jobIdParam)
+        .maybeSingle();
+      if (!po) { toast.error("Couldn't load that PO. Pick it from the PO list below."); return; }
+      const poNumber = (po as any).po_number as string;
+      setForm((prev) => ({
+        ...prev,
+        customer_po: poNumber,
+        title: prev.title ? `${prev.title} — PO ${poNumber}` : `PO ${poNumber}`,
+      }));
+      setLineItems(poInvoiceLines({
+        po_number: poNumber,
+        total_value: Number((po as any).total_value) || 0,
+        lines: ((po as any).po_cost_centers ?? []) as { name: string; allocated_amount: number | null; sort_order: number | null }[],
+      }));
+      const { data: existing } = await supabase
+        .from("invoices")
+        .select("invoice_number")
+        .eq("job_id", jobIdParam)
+        .eq("customer_po", poNumber)
+        .limit(1);
+      setPoAlreadyInvoiced(existing && existing.length > 0 ? String((existing[0] as any).invoice_number ?? "") || "yes" : null);
+    }
+    prefillFromPo();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [poIdParam, jobIdParam]);
+
   useEffect(() => {
     // Pre-fill "Description of Works" from the linked job's on-site record so
     // the office starts from what the technician actually wrote rather than a
@@ -279,6 +321,8 @@ function NewInvoiceForm() {
       if (!form.job_id) { prefilledJobRef.current = ""; return; }
       if (prefilledJobRef.current === form.job_id) return;
       prefilledJobRef.current = form.job_id;
+      // Invoicing one PO: its own lines come from the PO, not the whole job.
+      if (poIdParam && form.job_id === jobIdParam) return;
       setPrefilling(true);
       try {
         await fetch(`/api/jobs/${form.job_id}/sync-billing`, { method: "POST" }).catch(() => {});
@@ -556,6 +600,11 @@ function NewInvoiceForm() {
                   maxLength={CUSTOMER_PO_MAX}
                   placeholder="e.g. 4500123"
                 />
+                {poAlreadyInvoiced && (
+                  <p className="text-xs text-orange-600">
+                    This PO already has an invoice{poAlreadyInvoiced !== "yes" ? ` (${poAlreadyInvoiced})` : ""}. Check before sending another.
+                  </p>
+                )}
                 {jobPos.length > 1 && (
                   <select
                     value={pickedPo?.id ?? ""}
