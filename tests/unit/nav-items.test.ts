@@ -23,6 +23,7 @@ describe("navItemsFor", () => {
   it("gives a technician only the screens they work from", () => {
     expect(navItemsFor("technician").map((i) => i.href).sort()).toEqual([
       "/dashboard/backflow",
+      "/dashboard/jobs",
       "/dashboard/my-jobs",
     ]);
   });
@@ -52,20 +53,12 @@ describe("mayOpen", () => {
   });
 
   it("allows a technician their own screens, including nested routes", () => {
-    // A job detail page is /dashboard/jobs/<uuid> — refusing that would stop a
-    // technician opening the job they are standing in front of. The page
-    // itself refuses a job they are not on.
-    const job = "/dashboard/jobs/d017615b-0226-40ed-9582-8d857d56903a";
-    expect(mayOpen("technician", job)).toBe(true);
-    expect(mayOpen("technician", `${job}?tab=notes`.split("?")[0])).toBe(true);
+    // A job detail page is /dashboard/jobs/<id> — refusing that would stop a
+    // technician opening the job they are standing in front of.
+    expect(mayOpen("technician", "/dashboard/jobs")).toBe(true);
+    expect(mayOpen("technician", "/dashboard/jobs/abc-123")).toBe(true);
     expect(mayOpen("technician", "/dashboard/my-jobs")).toBe(true);
     expect(mayOpen("technician", "/dashboard/backflow/xyz/test/new")).toBe(true);
-  });
-
-  it("keeps the all-jobs list office-only: technicians see only their own work", () => {
-    expect(mayOpen("technician", "/dashboard/jobs")).toBe(false);
-    expect(mayOpen("technician", "/dashboard/jobs/abc-123")).toBe(false);
-    expect(mayOpen("office", "/dashboard/jobs")).toBe(true);
   });
 
   it("keeps job creation office-only for technicians (0074)", () => {

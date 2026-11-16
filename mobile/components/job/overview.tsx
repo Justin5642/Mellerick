@@ -210,7 +210,8 @@ export function JobOverviewTab({
 
   return (
     <View style={styles.container}>
-      <ScheduleNoteBanner jobId={job.id} />
+      {/* Not on someone else's job: scheduling notes are the office's (16 Nov 2026). */}
+      {!readOnly && <ScheduleNoteBanner jobId={job.id} />}
       {!readOnly && <JobHoursScoreboard job={job} currentUserId={currentUserId} />}
 
       {!readOnly && <>

@@ -218,7 +218,9 @@ export function JobsListClient({
                     </p>
                     <p className="text-xs text-slate-500 mt-0.5 truncate">
                       {job.customers?.name ?? "No customer"}
-                      {job.scheduled_start
+                      {/* Dates are office-only: technicians look jobs up for plans,
+                          not other people's schedules (Justin, 16 Nov 2026). */}
+                      {canCreate && job.scheduled_start
                         ? ` · ${job.schedule_daily ? formatScheduleDates(job) : formatDate(job.scheduled_start)}`
                         : ""}
                     </p>

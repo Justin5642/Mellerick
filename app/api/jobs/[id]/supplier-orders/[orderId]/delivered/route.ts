@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { requireOnJob } from "@/lib/api/guards";
+import { requireUser } from "@/lib/api/guards";
 import { reportError } from "@/lib/monitoring";
 
 // The crew taps Delivered on a supplier PO when the materials arrive on site
@@ -8,9 +8,9 @@ import { reportError } from "@/lib/monitoring";
 // by RLS, so like raising the order this goes through the service-role client
 // after requireUser — and writes only the delivery, never a price.
 export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string; orderId: string }> }) {
-  const { id: jobId, orderId } = await params;
-  const guard = await requireOnJob(request, jobId);
+  const guard = await requireUser(request);
   if (!guard.ok) return guard.response;
+  const { id: jobId, orderId } = await params;
 
   try {
     const admin = createAdminClient();

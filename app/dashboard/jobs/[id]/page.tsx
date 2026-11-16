@@ -2,7 +2,7 @@ export const dynamic = "force-dynamic";
 
 import { createClient } from "@/lib/supabase/server";
 import { getViewer } from "@/lib/auth/viewer";
-import { notFound, redirect } from "next/navigation";
+import { notFound } from "next/navigation";
 import { JobDetailClient } from "@/components/job/job-detail-client";
 import { TIME_ENTRY_SELECT_WITH_STAFF } from "@/lib/time-entry-columns";
 import { sumAllocatedHours } from "@/lib/hours-scoreboard";
@@ -159,21 +159,22 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
 
   const currentAssignedIds = (jobAssignments ?? []).map((a: { staff_id: string }) => a.staff_id);
 
-  // Technicians see only their own work (Justin, 16 Nov 2026): a job they are
-  // not on is refused, not shown read-only. Migration 0107 makes the database
-  // refuse it too; this covers the time before it is applied.
-  if (!isOffice && !(user && (currentAssignedIds.includes(user.id) || job.assigned_to === user.id))) {
-    redirect("/dashboard/my-jobs");
-  }
+  // A technician may open any job to look up its plans, but on a job they are
+  // not on they get no schedule (who is booked, when) and no notes (Justin,
+  // 16 Nov 2026). Stripped here so none of it reaches the browser.
+  const hideSchedule = !isOffice && !(user && (currentAssignedIds.includes(user.id) || job.assigned_to === user.id));
+  const shownJob = hideSchedule
+    ? { ...job, scheduled_start: null, scheduled_end: null, schedule_daily: false, schedule_all_day: false, assigned_to: null }
+    : job;
 
   return (
     <JobDetailClient
-      job={job}
+      job={shownJob}
       currentUserId={user!.id}
       photos={photos ?? []}
       documents={documents ?? []}
-      notes={notes ?? []}
-      stageNotes={stageNotes ?? []}
+      notes={hideSchedule ? [] : notes ?? []}
+      stageNotes={hideSchedule ? [] : stageNotes ?? []}
       lineItems={lineItems ?? []}
       staff={staffForDisplay}
       purchaseOrders={purchaseOrders ?? []}
@@ -190,7 +191,8 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
       jobInvoices={jobInvoices}
       minMarginPct={minMarginPct}
       currentAssignedIds={currentAssignedIds}
-      bookings={bookingsResult.bookings}
+      bookings={hideSchedule ? [] : bookingsResult.bookings}
+      hideSchedule={hideSchedule}
       bookingsReady={!bookingsResult.missingTable}
       bookingsError={bookingsResult.missingTable ? null : bookingsResult.error}
     />

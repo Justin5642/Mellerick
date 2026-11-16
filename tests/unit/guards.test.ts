@@ -154,3 +154,52 @@ describe("requireCronSecret", () => {
     expect(requireCronSecret(req({ authorization: "Bearer s3cret" })).ok).toBe(true);
   });
 });
+
+describe("requireOnJob", () => {
+  // Technicians see only their own work (16 Nov 2026): routes that read a job
+  // through the service role must refuse a technician who is not on it.
+  function tables(role: string, job: { assigned_to: string | null } | null, crewRow: boolean) {
+    adminFrom.mockImplementation((table: string) => {
+      if (table === "profiles") return roleRow(role);
+      const chain: Record<string, unknown> = {};
+      chain.select = vi.fn(() => chain);
+      chain.eq = vi.fn(() => chain);
+      chain.maybeSingle = vi.fn(async () => ({
+        data: table === "jobs" ? (job ? { id: "j1", ...job } : null) : crewRow ? { job_id: "j1" } : null,
+        error: null,
+      }));
+      return chain;
+    });
+  }
+  const call = async () => {
+    const { requireOnJob } = await import("@/lib/api/guards");
+    serverGetUser.mockResolvedValue({ data: { user: { id: "tech-1" } } });
+    return requireOnJob(req(), "j1");
+  };
+
+  it("lets office and admin into any job", async () => {
+    tables("office", { assigned_to: "someone-else" }, false);
+    expect((await call()).ok).toBe(true);
+  });
+
+  it("lets the job's lead and its crew in", async () => {
+    tables("technician", { assigned_to: "tech-1" }, false);
+    expect((await call()).ok).toBe(true);
+    tables("technician", { assigned_to: "someone-else" }, true);
+    expect((await call()).ok).toBe(true);
+  });
+
+  it("refuses a technician who is not on the job", async () => {
+    tables("technician", { assigned_to: "someone-else" }, false);
+    const r = await call();
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.response.status).toBe(403);
+  });
+
+  it("answers 404 for a job that doesn't exist", async () => {
+    tables("technician", null, false);
+    const r = await call();
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.response.status).toBe(404);
+  });
+});
