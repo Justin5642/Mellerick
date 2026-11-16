@@ -17,6 +17,12 @@ export interface CreateJobInput {
   title: string;
   siteId?: string | null;
   assignedTo?: string | null;
+  /**
+   * The crew, first = primary. Overrides assignedTo when given: the first is
+   * written as assigned_to, and two or more also queue set_job_assignments
+   * for the whole list (see createJob).
+   */
+  crewIds?: string[];
   jobType?: string;
   priority?: string;
   status?: string;
@@ -55,7 +61,9 @@ export class JobsRepository {
     const rowId = this.ids.newId();
     const payload: Record<string, unknown> = { customer_id: input.customerId, title: input.title };
     if (input.siteId !== undefined) payload.site_id = input.siteId;
-    if (input.assignedTo !== undefined) payload.assigned_to = input.assignedTo;
+    const crew = input.crewIds ? [...new Set(input.crewIds)] : null;
+    if (crew) payload.assigned_to = crew[0] ?? null;
+    else if (input.assignedTo !== undefined) payload.assigned_to = input.assignedTo;
     if (input.jobType !== undefined) payload.job_type = input.jobType;
     if (input.priority !== undefined) payload.priority = input.priority;
     if (input.status !== undefined) payload.status = input.status;
@@ -87,6 +95,30 @@ export class JobsRepository {
     };
     await this.outbox.enqueue(op);
 
+    // A crew of two or more, the same way as the website's New Job: the insert
+    // makes the first technician the crew (0059) and, with a schedule, books
+    // them on it (0079); set_job_assignments then adds the rest, and 0079
+    // gives each newcomer their own booking on that one window. So N
+    // technicians = N bookings, not one. Waits for the insert; the calendar
+    // sync waits for this, so every booking gets its event.
+    let lastId = insertId;
+    if (crew && crew.length > 1) {
+      const assign: SideEffectOperation = {
+        kind: "side_effect",
+        id: this.ids.newId(),
+        effect: "assign-technicians",
+        coalesceKey: `assign-technicians:${rowId}`,
+        payload: { jobId: rowId, staffIds: crew },
+        dependsOn: insertId,
+        status: "pending",
+        attempts: 0,
+        nextAttemptAt: 0,
+        createdAt: this.time.nowMs(),
+      };
+      await this.outbox.enqueue(assign);
+      lastId = assign.id;
+    }
+
     if (input.scheduledStartIso) {
       const cal: SideEffectOperation = {
         kind: "side_effect",
@@ -94,7 +126,7 @@ export class JobsRepository {
         effect: "sync-calendar",
         coalesceKey: `sync-calendar:${rowId}`,
         payload: { jobId: rowId },
-        dependsOn: insertId,
+        dependsOn: lastId,
         status: "pending",
         attempts: 0,
         nextAttemptAt: 0,

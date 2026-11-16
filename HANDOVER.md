@@ -410,6 +410,23 @@ one once, against its PO, and the app makes the Xero bill.
 - **Allowed hours per cost centre already existed** — PO tab, Hours on each
   cost-centre line (`po_cost_centers.allocated_hours`); not rebuilt.
 
+**New Job: site search and a crew (16 Nov 2026; no migration).** Office
+feedback. The Site picker on web New Job, the job Overview and phone New Job
+is now searchable (name, street, suburb, postcode; every word must match),
+A–Z with numbers in order ("Lot 2" before "Lot 10"), with "+ Add new site" as
+the FIRST row. Rules `lib/site-picker.ts`, mirrored at
+`mobile/lib/sitePicker.ts` (`tests/unit/site-picker.test.ts`); pickers
+`components/job/site-picker.tsx` and `mobile/components/job/site-picker.tsx`.
+"Assign To" on New Job (web and phone) takes one or more technicians: the job
+is inserted with the first as `assigned_to` (0059 makes them the crew; with a
+schedule 0079 books them), then `set_job_assignments` adds the rest — 0079's
+`job_assignments_to_bookings` gives each newcomer their own booking on the
+job's one window, so N technicians = N bookings (checked on a scratch Postgres
+with the real 0059/0079 functions, scheduled and unscheduled). Web reports a
+failed crew write with a toast and opens the job; the phone queues it as an
+`assign-technicians` side effect after the insert, with the calendar sync
+after that.
+
 **Customer job report with the invoice (14 Nov 2026; no migration).** Justin
 approved: the web **Send Invoice** dialog has "Include job report and photos"
 (only when the invoice has a job). Ticked, it loads a draft

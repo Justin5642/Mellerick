@@ -21,6 +21,7 @@ import { scheduleDays } from "@/lib/scheduling";
 import { bookingWindow, describeBooking, type JobBookingWithNames } from "@/lib/bookings";
 import { CustomerPicker } from "@/components/customer-picker";
 import { AddSiteDialog } from "@/components/site-add-dialog";
+import { SitePicker } from "@/components/job/site-picker";
 
 interface Props {
   job: any;
@@ -35,14 +36,10 @@ interface Props {
   canEditSite?: boolean;
 }
 
-// Radix/shadcn's SelectItem can't take value="", so "no site selected" — a
-// job can exist without a site — needs a sentinel value that gets translated
-// back to "" (-> null on save) instead of colliding with a real site id.
-const NO_SITE_VALUE = "__no_site__";
-// Sentinel picked from the Site dropdown itself to open the "Add New Site"
-// dialog inline, so a wrong/missing site can be fixed here without a trip to
-// the Customer page — same pattern used on the New Job form.
-const ADD_NEW_SITE_VALUE = "__add_new_site__";
+// The Site picker (components/job/site-picker.tsx) offers "No site" — a job
+// can exist without a site — and, first, "+ Add new site", which opens the
+// "Add New Site" dialog inline, so a wrong/missing site can be fixed here
+// without a trip to the Customer page — same picker as the New Job form.
 
 export function JobOverview({ job, readOnly = false, bookings, bookingsError, onEditSchedule, canEditSite = false }: Props) {
   const [pinOpen, setPinOpen] = useState(false);
@@ -93,7 +90,7 @@ export function JobOverview({ job, readOnly = false, bookings, bookingsError, on
       if (!form.customer_id) { setSites([]); return; }
       // Active sites only — plus the job's saved site even if it has since
       // been archived, so the dropdown never blanks out an existing value.
-      let query = supabase.from("sites").select("id, name, suburb").eq("customer_id", form.customer_id);
+      let query = supabase.from("sites").select("id, name, suburb, address_line1").eq("customer_id", form.customer_id);
       query = job.site_id ? query.or(`is_active.eq.true,id.eq.${job.site_id}`) : query.eq("is_active", true);
       const { data } = await query;
       setSites(data ?? []);
@@ -173,21 +170,15 @@ export function JobOverview({ job, readOnly = false, bookings, bookingsError, on
               </div>
               <div className="space-y-2">
                 <Label>Site</Label>
-                <Select
-                  value={form.site_id || NO_SITE_VALUE}
-                  onValueChange={(v) => {
-                    if (v === ADD_NEW_SITE_VALUE) { setAddSiteOpen(true); return; }
-                    set("site_id", v === NO_SITE_VALUE ? "" : (v as string));
-                  }}
+                <SitePicker
+                  sites={sites}
+                  value={form.site_id}
+                  onChange={(id) => set("site_id", id)}
+                  onAddNew={() => setAddSiteOpen(true)}
+                  allowNone
                   disabled={!form.customer_id}
-                >
-                  <SelectTrigger><SelectValue placeholder={form.customer_id ? "Select site" : "Select customer first"} /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value={NO_SITE_VALUE}>No site</SelectItem>
-                    {sites.map((s) => <SelectItem key={s.id} value={s.id}>{s.name}{s.suburb ? ` — ${s.suburb}` : ""}</SelectItem>)}
-                    <SelectItem value={ADD_NEW_SITE_VALUE}>+ Add new site</SelectItem>
-                  </SelectContent>
-                </Select>
+                  placeholder={form.customer_id ? "Select site" : "Select customer first"}
+                />
               </div>
               <div className="space-y-2">
                 <Label>Job Type</Label>

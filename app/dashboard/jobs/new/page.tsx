@@ -11,25 +11,23 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, Check } from "lucide-react";
 import Link from "next/link";
 import type { ScheduleInput } from "@/lib/scheduling";
 import { emptyScheduleInput, scheduleColumnsFromForm } from "@/lib/schedule-form";
 import { CustomerPicker } from "@/components/customer-picker";
 import { AddSiteDialog } from "@/components/site-add-dialog";
+import { SitePicker } from "@/components/job/site-picker";
+import { setJobAssignments, type ScheduleWriteClient } from "@/lib/schedule-dispatch";
+import { cn } from "@/lib/utils";
 import { ScheduleFields } from "@/components/job/schedule-fields";
 import { BuilderPoLines, blankLine, type StageOption } from "@/components/job/builder-po-lines";
 import { planBuilderPo, type BuilderPoLineInput, type CostCentreOption } from "@/lib/builder-po";
 
-// Radix/shadcn's SelectItem can't take value="", so an explicit "Unassigned"
-// option needs a sentinel value that gets translated back to "" (-> null on
-// save) instead of colliding with a real staff id.
-const UNASSIGNED_VALUE = "__unassigned__";
-// Sentinel picked from the Site dropdown itself (its last item) to open the
-// "Add New Site" dialog over the form, instead of making staff go create the
-// site somewhere else first. Works for a customer just made with the picker's
-// "+ Add customer" too: that dialog saves the customer before selecting it.
-const ADD_NEW_SITE_VALUE = "__add_new_site__";
+// The Site picker's first row, "+ Add new site", opens the "Add New Site"
+// dialog over the form, instead of making staff go create the site somewhere
+// else first. Works for a customer just made with the picker's "+ Add
+// customer" too: that dialog saves the customer before selecting it.
 
 export default function NewJobPage() {
   const router = useRouter();
@@ -48,13 +46,17 @@ export default function NewJobPage() {
   // quotes/new and invoices/new.
   const params = typeof window !== "undefined" ? new URLSearchParams(window.location.search) : null;
   const [form, setForm] = useState({
-    title: "", description: "", customer_id: params?.get("customer_id") ?? "", site_id: "", assigned_to: "",
+    title: "", description: "", customer_id: params?.get("customer_id") ?? "", site_id: "",
     status: "pending", priority: "normal", job_type: "service",
     notes: "", customer_po: "",
   });
   // Start date, end date, All day and daily times — the same inputs as the
   // Schedule Job wizard. A blank start date creates the job unscheduled.
   const [schedule, setSchedule] = useState<ScheduleInput>(emptyScheduleInput);
+  // The crew, in the order picked: the first is the job's primary
+  // (jobs.assigned_to). Justin, Nov 2026: jobs are often worked in pairs, so
+  // the office can pick more than one technician here.
+  const [assignees, setAssignees] = useState<string[]>([]);
   // The builder's PO value and its split by cost centre (Stage 2, 31 Oct
   // 2026): entered here once, it becomes the job's budget on the PO tab and
   // the crew can raise supplier orders against it straight away.
@@ -85,7 +87,7 @@ export default function NewJobPage() {
     let cancelled = false;
     async function loadSites() {
       if (!form.customer_id) { setSites([]); return; }
-      const { data } = await supabase.from("sites").select("id, name, suburb").eq("customer_id", form.customer_id).eq("is_active", true);
+      const { data } = await supabase.from("sites").select("id, name, suburb, address_line1").eq("customer_id", form.customer_id).eq("is_active", true);
       if (cancelled) return;
       // Keep a site added in the dialog while this load was in flight.
       setSites((prev) => {
@@ -104,6 +106,10 @@ export default function NewJobPage() {
     setForm((prev) => ({ ...prev, [field]: value ?? "" }));
   }
 
+  function toggleAssignee(staffId: string) {
+    setAssignees((prev) => (prev.includes(staffId) ? prev.filter((id) => id !== staffId) : [...prev, staffId]));
+  }
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     const built = scheduleColumnsFromForm(schedule, { optional: true });
@@ -119,9 +125,26 @@ export default function NewJobPage() {
       return;
     }
     setLoading(true);
+    // The crew is saved in two steps, both through paths the database already
+    // translates (0059 + 0079), rather than by writing job_bookings here:
+    //   1. the job is inserted with the FIRST technician as assigned_to.
+    //      0059's collapse trigger makes them the crew; with a schedule, 0079's
+    //      jobs_schedule_to_bookings then books that crew on the window (one
+    //      unassigned booking if nobody was picked) — exactly what this form
+    //      did before it took more than one technician;
+    //   2. with more than one, set_job_assignments adds the rest. 0079's
+    //      job_assignments_to_bookings gives each new crew member their own
+    //      booking on the job's one window (all bookings share it, so it is
+    //      never the "several windows" case), so N technicians = N bookings,
+    //      not one collapsed booking. Without a schedule there are no
+    //      bookings and they simply join the crew.
+    // Writing assigned_to alone for everyone would collapse the crew to one
+    // person (0059); inserting job_bookings directly would duplicate rules the
+    // triggers own. The RPC returns the resulting crew and setJobAssignments
+    // checks it, so a technician RLS dropped is reported, not lost silently.
     const payload: any = {
       ...form,
-      assigned_to: form.assigned_to || null,
+      assigned_to: assignees[0] ?? null,
       site_id: form.site_id || null,
       customer_po: normalizeCustomerPo(form.customer_po),
       ...built.columns,
@@ -132,7 +155,18 @@ export default function NewJobPage() {
       setLoading(false);
       return;
     }
+    let crewFailed = false;
+    if (data?.id && assignees.length > 1) {
+      const crew = await setJobAssignments(supabase as unknown as ScheduleWriteClient, data.id, assignees);
+      if (!crew.ok) {
+        console.error("New job crew not saved:", crew.error);
+        crewFailed = true;
+        const missing = assignees.slice(1).map((id) => staff.find((s) => s.id === id)?.full_name ?? "a technician");
+        toast.error(`Job created, but ${missing.join(" and ")} couldn't be assigned. Add them from Schedule Job on the job.`);
+      }
+    }
     if (data?.id) {
+      // After the crew, so each technician's booking gets its calendar event.
       fetch(`/api/jobs/${data.id}/sync-calendar`, { method: "POST" }).catch(() => {});
     }
     if (data?.id && planned?.ok) {
@@ -143,6 +177,11 @@ export default function NewJobPage() {
         window.location.href = `/dashboard/jobs/${data.id}?tab=po`;
         return;
       }
+    }
+    if (data?.id && crewFailed) {
+      // The job exists with its first technician; open it to add the rest.
+      window.location.href = `/dashboard/jobs/${data.id}`;
+      return;
     }
     toast.success("Job created successfully");
     window.location.href = "/dashboard/jobs";
@@ -198,33 +237,46 @@ export default function NewJobPage() {
               </div>
               <div className="space-y-2">
                 <Label>Site</Label>
-                <Select
+                <SitePicker
+                  sites={sites}
                   value={form.site_id}
-                  onValueChange={(v) => {
-                    if (v === ADD_NEW_SITE_VALUE) { setAddSiteOpen(true); return; }
-                    set("site_id", v as string);
-                  }}
+                  onChange={(id) => set("site_id", id)}
+                  onAddNew={() => setAddSiteOpen(true)}
                   disabled={!form.customer_id}
-                >
-                  <SelectTrigger><SelectValue placeholder={form.customer_id ? "Select site" : "Select customer first"} /></SelectTrigger>
-                  <SelectContent>
-                    {sites.map((s) => <SelectItem key={s.id} value={s.id}>{s.name}{s.suburb ? ` — ${s.suburb}` : ""}</SelectItem>)}
-                    <SelectItem value={ADD_NEW_SITE_VALUE}>+ Add new site</SelectItem>
-                  </SelectContent>
-                </Select>
+                  placeholder={form.customer_id ? "Select site" : "Select customer first"}
+                />
               </div>
-              <div className="space-y-2">
+              <div className="space-y-2 sm:col-span-2">
                 <Label>Assign To</Label>
-                <Select
-                  value={form.assigned_to || UNASSIGNED_VALUE}
-                  onValueChange={(v) => set("assigned_to", v === UNASSIGNED_VALUE ? "" : v)}
-                >
-                  <SelectTrigger><SelectValue placeholder="Select technician" /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value={UNASSIGNED_VALUE}>Unassigned</SelectItem>
-                    {staff.map((s) => <SelectItem key={s.id} value={s.id}>{s.full_name} ({s.role})</SelectItem>)}
-                  </SelectContent>
-                </Select>
+                {/* One or more; same toggles as the Schedule dialog's technicians. */}
+                <div className="flex flex-wrap gap-1.5">
+                  {staff.map((s) => {
+                    const active = assignees.includes(s.id);
+                    return (
+                      <button
+                        key={s.id}
+                        type="button"
+                        aria-pressed={active}
+                        onClick={() => toggleAssignee(s.id)}
+                        className={cn(
+                          "inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs transition-colors",
+                          active ? "border-blue-500 bg-blue-50 text-blue-700" : "border-slate-200 text-slate-600 hover:bg-slate-50",
+                        )}
+                      >
+                        {active && <Check className="w-3 h-3" />}
+                        {s.full_name}
+                        {s.role !== "technician" && <span className="text-slate-400">({s.role})</span>}
+                      </button>
+                    );
+                  })}
+                </div>
+                <p className="text-xs text-slate-400">
+                  {assignees.length === 0
+                    ? "Nobody picked = unassigned."
+                    : assignees.length === 1
+                      ? "Tap more names to send a crew."
+                      : "Each technician gets their own booking when the job is scheduled."}
+                </p>
               </div>
               <div className="space-y-2">
                 <Label>Job Type</Label>

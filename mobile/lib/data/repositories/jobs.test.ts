@@ -119,6 +119,40 @@ describe("JobsRepository.createJob", () => {
     expect(cal.payload).toEqual({ jobId: "id-1" });
   });
 
+  it("a crew of one is just assigned_to — no extra side effect", async () => {
+    const { outbox, ops } = captureOutbox();
+    await makeRepo(outbox).createJob({ customerId: "c1", title: "T", crewIds: ["tech-1"] });
+    expect(writes(ops)[0].payload).toMatchObject({ assigned_to: "tech-1" });
+    expect(sides(ops)).toHaveLength(0);
+  });
+
+  it("an empty crew is unassigned", async () => {
+    const { outbox, ops } = captureOutbox();
+    await makeRepo(outbox).createJob({ customerId: "c1", title: "T", crewIds: [] });
+    expect(writes(ops)[0].payload).toMatchObject({ assigned_to: null });
+    expect(sides(ops)).toHaveLength(0);
+  });
+
+  it("a crew of two: first is assigned_to, then set_job_assignments for all, then the calendar", async () => {
+    const { outbox, ops } = captureOutbox();
+    await makeRepo(outbox).createJob({
+      customerId: "c1",
+      title: "T",
+      crewIds: ["tech-1", "tech-2", "tech-1"],
+      scheduledStartIso: "2026-08-01T00:00:00.000Z",
+    });
+    const insert = writes(ops)[0];
+    expect(insert.payload).toMatchObject({ assigned_to: "tech-1" });
+    const [assign, cal] = sides(ops);
+    expect(assign).toMatchObject({
+      effect: "assign-technicians",
+      coalesceKey: "assign-technicians:id-1",
+      payload: { jobId: "id-1", staffIds: ["tech-1", "tech-2"] },
+      dependsOn: insert.id,
+    });
+    expect(cal).toMatchObject({ effect: "sync-calendar", dependsOn: assign.id });
+  });
+
   it("has no dependency when the customer and site are already on the server", async () => {
     const { outbox, ops } = captureOutbox();
     await makeRepo(outbox).createJob({ customerId: "c1", siteId: "s1", title: "T" });
