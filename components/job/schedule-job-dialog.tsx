@@ -18,9 +18,11 @@ import {
   bookingWindow,
   buildBookingWindow,
   describeBooking,
+  BOOKING_NOTE_MAX,
   isEmptyPlan,
   planBookingSave,
   saveBookingPlan,
+  scheduleNotesToLog,
   type BookingDraft,
   type BookingWriteClient,
   type JobBookingWithNames,
@@ -89,6 +91,7 @@ function rowFromBooking(b: JobBookingWithNames): Row {
     staffIds: b.staff_id ? [b.staff_id] : [],
     costCenterId: b.cost_center_id,
     schedule: bookingScheduleInput(b),
+    note: b.note ?? "",
     allDayDecided: true,
   };
 }
@@ -100,13 +103,16 @@ function rowFromBooking(b: JobBookingWithNames): Row {
  * unscheduled job starts today, All day.
  */
 function newRow(after: Row | undefined): Row {
-  if (after) return { key: nextKey(), staffIds: [], costCenterId: after.costCenterId, schedule: { ...after.schedule }, allDayDecided: true };
+  if (after) {
+    return { key: nextKey(), staffIds: [], costCenterId: after.costCenterId, schedule: { ...after.schedule }, note: after.note ?? "", allDayDecided: true };
+  }
   const today = dateKeyInBusinessTZ(new Date());
   return {
     key: nextKey(),
     staffIds: [],
     costCenterId: null,
     schedule: { startDateKey: today, endDateKey: today, startTime: DEFAULT_SHIFT_START_TIME, endTime: DEFAULT_SHIFT_END_TIME, allDay: true },
+    note: "",
     allDayDecided: false,
   };
 }
@@ -147,7 +153,6 @@ export function ScheduleJobDialog({
   const [rows, setRows] = useState<Row[]>([]);
   const [editingKey, setEditingKey] = useState<string | null>(null);
   const [conflicts, setConflicts] = useState<Record<string, number>>({});
-  const [noteText, setNoteText] = useState("");
   const [saving, setSaving] = useState(false);
   const staffById = useMemo(() => new Map(staff.map((s) => [s.id, s])), [staff]);
   const costCenterName = (id: string | null) => (id ? costCenters.find((cc) => cc.id === id)?.name ?? null : null);
@@ -174,7 +179,6 @@ export function ScheduleJobDialog({
       setEditingKey(null);
     }
     setConflicts({});
-    setNoteText("");
   }, [open, bookings, editable]);
 
   const editing = rows.find((r) => r.key === editingKey) ?? null;
@@ -276,8 +280,9 @@ export function ScheduleJobDialog({
   async function save() {
     if (!editable || rowErrors.size > 0) return;
     const plan = planBookingSave(jobId, bookings, rows);
-    const trimmed = noteText.trim();
-    if (isEmptyPlan(plan) && !trimmed) {
+    // New or changed booking notes also go to the job's Notes history.
+    const notesToLog = scheduleNotesToLog(bookings, rows);
+    if (isEmptyPlan(plan) && notesToLog.length === 0) {
       onOpenChange(false);
       return;
     }
@@ -309,13 +314,16 @@ export function ScheduleJobDialog({
       if (statusError || count === 0) toast.warning("Bookings saved — the job's status could not be set to Scheduled");
     }
 
-    // The bookings landed — a note failure shouldn't read as the whole
-    // operation failing, so it gets its own toast rather than aborting here.
-    if (trimmed) {
+    // Each booking keeps its own note (job_bookings.note — 0109, a draft) — that is what
+    // the technician sees, and only while the booking is current. A copy of
+    // each new or changed note goes to Notes & Activity as the history. The
+    // bookings landed — a note failure shouldn't read as the whole operation
+    // failing, so it gets its own toast rather than aborting here.
+    if (notesToLog.length > 0) {
       const { error: noteError } = await supabaseClient
         .from("job_notes")
-        .insert({ job_id: jobId, author_id: currentUserId, content: trimmed, source: "schedule" });
-      if (noteError) toast.warning("Bookings saved — note could not be saved");
+        .insert(notesToLog.map((content) => ({ job_id: jobId, author_id: currentUserId, content, source: "schedule" })));
+      if (noteError) toast.warning("Bookings saved — the note could not be added to the job's Notes");
     }
 
     // One calendar event per booking: created, moved, retitled or removed
@@ -409,6 +417,7 @@ export function ScheduleJobDialog({
                       {error ?? (window ? describeBooking(window) : "")}
                       {!error && row.schedule.allDay ? " · All day" : ""}
                     </p>
+                    {row.note?.trim() && <p className="text-xs text-amber-700 truncate">Note: {row.note.trim()}</p>}
                   </button>
                   {editable && (
                     <>
@@ -486,6 +495,22 @@ export function ScheduleJobDialog({
                       </div>
                     )}
 
+                    <div className="space-y-2">
+                      <Label>Note for this booking (optional)</Label>
+                      <Textarea
+                        value={row.note ?? ""}
+                        onChange={(e) => updateRow(row.key, (r) => ({ ...r, note: e.target.value }))}
+                        placeholder="What should they achieve on this booking?"
+                        maxLength={BOOKING_NOTE_MAX}
+                        rows={3}
+                      />
+                      <p className="text-xs text-slate-400">
+                        Shown at the top of the job to the technician on this booking until it is over. A copy goes to the
+                        job&apos;s Notes. Bookings set the planned time only — worked hours are still captured by
+                        clock-on/clock-off.
+                      </p>
+                    </div>
+
                     <ScheduleFields value={row.schedule} onChange={(next) => changeSchedule(row.key, next)}>
                       {Object.entries(conflicts).map(([staffId, n]) =>
                         row.staffIds.includes(staffId) ? (
@@ -508,22 +533,6 @@ export function ScheduleJobDialog({
             </Button>
           )}
         </div>
-
-        {editable && (
-          <div className="space-y-2">
-            <Label>Notes for the technicians (optional)</Label>
-            <Textarea
-              value={noteText}
-              onChange={(e) => setNoteText(e.target.value)}
-              placeholder="What should they achieve on this job?"
-              rows={3}
-            />
-            <p className="text-xs text-slate-400">
-              Posted to this job&apos;s Notes tab, visible to everyone assigned. Bookings set the planned time only — worked
-              hours are still captured by clock-on/clock-off.
-            </p>
-          </div>
-        )}
       </KeyboardSafeDialogContent>
     </Dialog>
   );

@@ -6,6 +6,7 @@ import { TransientSyncError, isTransientStatus, syncError } from "./outbox/error
 import type { SupabaseGateway, ApiBridge } from "./gateway";
 import type { SideEffectKind } from "./outbox/types";
 import { OUTBOX_ATTACHMENT_DIR } from "./attachments";
+import { withoutMissingOptionalColumns } from "./optionalColumns";
 
 // Real gateway: the processor's writes hit Supabase through here. All reads
 // still go through supabase-js elsewhere, so RLS + the rate-stripped views
@@ -16,7 +17,10 @@ export const supabaseGateway: SupabaseGateway = {
     // `status` travels with every failure from here down: 0 (no connection,
     // timeout) and 5xx say nothing about the write and must not spend its
     // dead-letter budget — see outbox/errors.ts.
-    const { error, status } = await supabase.from(table).insert(row);
+    let { error, status } = await supabase.from(table).insert(row);
+    // A column whose migration is not applied yet (optionalColumns.ts): once more without it.
+    const trimmed = withoutMissingOptionalColumns(table, row, error);
+    if (trimmed) ({ error, status } = await supabase.from(table).insert(trimmed));
     if (!error) return;
     // 23505 = unique_violation, and it means two very different things here.
     //
@@ -42,10 +46,16 @@ export const supabaseGateway: SupabaseGateway = {
     // leaving no error, no dead letter and no badge. The same shape as the
     // geofence and clock-in defects: asking "did it fail?" when the question is
     // "did it happen?".
-    const { error, count, status } = await supabase
+    let { error, count, status } = await supabase
       .from(table)
       .update(patch, { count: "exact" })
       .eq("id", id);
+    // A column whose migration is not applied yet (optionalColumns.ts): once
+    // more without it. An edit of nothing but that column has nothing left to
+    // write — done, not a dead letter.
+    const trimmed = withoutMissingOptionalColumns(table, patch, error);
+    if (trimmed && Object.keys(trimmed).length === 0) return;
+    if (trimmed) ({ error, count, status } = await supabase.from(table).update(trimmed, { count: "exact" }).eq("id", id));
     if (error) throw syncError(`${table} update: ${error.message}`, status);
 
     // An ABSENT count is not zero. Some PostgREST configurations omit the

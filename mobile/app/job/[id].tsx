@@ -429,7 +429,14 @@ export default function JobDetailScreen() {
             onGo={setTab}
           />
         )}
-        {activeTab === "overview" && <JobOverviewTab job={viewOnly ? { ...job, scheduled_start: null, scheduled_end: null } : job} currentUserId={userId} readOnly={viewOnly} onChanged={loadJob} />}
+        {activeTab === "overview" && <JobOverviewTab
+            job={viewOnly ? { ...job, scheduled_start: null, scheduled_end: null } : job}
+            currentUserId={userId}
+            readOnly={viewOnly}
+            onChanged={loadJob}
+            bookings={viewOnly ? null : bookings}
+            isOffice={isOfficeOrAdmin}
+          />}
         {activeTab === "time" && userId && <AutoClockStatus />}
         {activeTab === "time" && userId && (
           <JobTimeTab

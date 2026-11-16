@@ -1457,6 +1457,7 @@ export type Database = {
           google_event_id: string | null
           id: string
           job_id: string
+          note: string | null
           staff_id: string | null
           starts_at: string
           sync_office: boolean
@@ -1472,6 +1473,7 @@ export type Database = {
           google_event_id?: string | null
           id?: string
           job_id: string
+          note?: string | null
           staff_id?: string | null
           starts_at: string
           sync_office?: boolean
@@ -1487,6 +1489,7 @@ export type Database = {
           google_event_id?: string | null
           id?: string
           job_id?: string
+          note?: string | null
           staff_id?: string | null
           starts_at?: string
           sync_office?: boolean

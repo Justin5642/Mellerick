@@ -7,7 +7,14 @@ import { BUSINESS_TIME_ZONE } from "@/lib/date";
 import type { TodoJob } from "@/components/schedule/todo-list-panel";
 import { crewFromRow, type BoardBooking, type BoardJob } from "@/components/schedule/board-model";
 import { allocatedHoursByJob } from "@/lib/todo-list";
-import { BOOKING_COLUMNS, bookingsFromJobWindow, isBookingsTableMissing, type JobBooking } from "@/lib/bookings";
+import {
+  BOOKING_COLUMNS,
+  BOOKING_NOTE_COLUMN,
+  bookingsFromJobWindow,
+  isBookingsTableMissing,
+  isMissingNoteColumn,
+  type JobBooking,
+} from "@/lib/bookings";
 
 const BOARD_COLUMNS =
   "id, job_number, title, status, scheduled_start, scheduled_end, scheduled_cost_center_id, assigned_to, job_assignments(staff_id), customers(name), sites(name, address_line1, suburb, state, site_lat, site_lng)";
@@ -63,7 +70,12 @@ export default async function SchedulePage() {
         .not("scheduled_start", "is", null)
         .not("status", "in", '("completed","cancelled")')
         .order("scheduled_start", { ascending: true, nullsFirst: false });
-    const withBookings = await run(`${BOARD_COLUMNS}, schedule_daily, schedule_all_day, job_bookings(${BOOKING_COLUMNS})`);
+    // Each booking's scheduling note (0109, a draft) rides along; on a database without
+    // that column the embed is retried without it before anything else falls back.
+    let withBookings = await run(`${BOARD_COLUMNS}, schedule_daily, schedule_all_day, job_bookings(${BOOKING_COLUMNS}, ${BOOKING_NOTE_COLUMN})`);
+    if (isMissingNoteColumn(withBookings.error)) {
+      withBookings = await run(`${BOARD_COLUMNS}, schedule_daily, schedule_all_day, job_bookings(${BOOKING_COLUMNS})`);
+    }
     if (!isBookingsTableMissing(withBookings.error) && withBookings.error?.code !== "42703") {
       return { ...withBookings, hasBookings: true };
     }

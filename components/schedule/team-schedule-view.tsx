@@ -64,7 +64,7 @@ import {
 import { scheduleDays } from "@/lib/scheduling";
 import { formatDateKeyRange } from "@/lib/schedule-form";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Navigation, LayoutList, ListTodo, ChevronLeft, ChevronRight, GripVertical, CalendarDays, CalendarRange, Scissors, X } from "lucide-react";
+import { Navigation, LayoutList, ListTodo, ChevronLeft, ChevronRight, GripVertical, CalendarDays, CalendarRange, Scissors, StickyNote, X } from "lucide-react";
 import {
   formatTime,
   formatDate,
@@ -316,6 +316,7 @@ function JobCardBody({ entry, tag }: { entry: BoardEntry; tag: TileTag }) {
       {booking.cost_center_name && (
         <p className="text-xs font-medium text-cyan-700 truncate">{booking.cost_center_name}</p>
       )}
+      <BookingNoteLine note={booking.note} className="text-xs" />
       <p className="text-xs text-slate-500 truncate">
         {dayOf && <span className="font-medium text-violet-600">{dayOf}</span>}
         {dayOf && job.customers?.name && " · "}
@@ -400,6 +401,17 @@ function DroppableColumn({
   );
 }
 
+/** The booking's scheduling note (0109, a draft), one truncated line; the whole note on hover. */
+function BookingNoteLine({ note, className }: { note?: string | null; className: string }) {
+  if (!note) return null;
+  return (
+    <p className={cn(className, "text-amber-700 truncate flex items-center gap-1")} title={note}>
+      <StickyNote className="w-3 h-3 flex-shrink-0" aria-hidden />
+      <span className="truncate">{note}</span>
+    </p>
+  );
+}
+
 // Compact job entry for a single day cell in the week grid — the grid is
 // staff (rows) x day (columns), so each cell is narrow; this trades the
 // full job card's detail for a glanceable time + job + customer stack.
@@ -419,6 +431,7 @@ function WeekJobChipBody({ entry, tag }: { entry: BoardEntry; tag: TileTag }) {
         #{job.job_number} {job.title}
       </p>
       {booking.cost_center_name && <p className="text-[10px] font-medium text-cyan-700 truncate">{booking.cost_center_name}</p>}
+      <BookingNoteLine note={booking.note} className="text-[10px]" />
       {dayOf && <p className="text-[10px] font-medium text-violet-600 truncate">{dayOf}</p>}
       {job.customers?.name && <p className="text-[10px] text-slate-400 truncate">{job.customers.name}</p>}
     </>
@@ -852,7 +865,8 @@ export function TeamScheduleView({
         return;
       }
       const real = inserted.rows[0];
-      setBookings((prev) => prev.map((b) => (b.id === tempId ? { ...real, cost_center_name: booking.cost_center_name } : b)));
+      // The insert's answer has no note column (BOOKING_COLUMNS); the copy's is the one written.
+      setBookings((prev) => prev.map((b) => (b.id === tempId ? { ...real, note: copy.note ?? null, cost_center_name: booking.cost_center_name } : b)));
       announce(`#${job.job_number} booked for ${nameOf(target.staffId)} too`, await pushJobToCalendar(job.id));
       return;
     }
