@@ -482,6 +482,7 @@ export function JobDetailClient({ job, currentUserId, photos: initialPhotos, doc
                 stageNotes={stageNotes}
                 onUpdateStageNotes={setStageNotes}
                 readOnly={viewOnly}
+                canEditAll={isOffice}
               />
             </TabsContent>
             <TabsContent value="signature" className="m-0 h-full">

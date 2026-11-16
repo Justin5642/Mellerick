@@ -112,6 +112,37 @@ describe("invoice send — job report", () => {
   });
 });
 
+describe("invoice send — dropped attachments", () => {
+  const b64 = (s: string) => Buffer.from(s).toString("base64");
+
+  it("adds each file after the invoice and names them in the email", async () => {
+    callerClient.mockResolvedValue(mockClient(INVOICE));
+    const res = await invoiceSend(
+      post({ attachments: [{ filename: "cert.pdf", content: b64("pdf") }, { filename: "site <1>.jpg", content: b64("jpg") }] }),
+      params("i1"),
+    );
+    expect(res.status).toBe(200);
+    expect(attachments()).toEqual(["invoice-42.pdf", "cert.pdf", "site 1.jpg"]);
+    expect(html()).toContain("Also attached: cert.pdf, site 1.jpg.");
+    expect((await res.json()).attachmentCount).toBe(2);
+  });
+
+  it("renames a file that would clash with the invoice PDF", async () => {
+    callerClient.mockResolvedValue(mockClient(INVOICE));
+    await invoiceSend(post({ attachments: [{ filename: "invoice-42.pdf", content: b64("x") }] }), params("i1"));
+    expect(attachments()).toEqual(["invoice-42.pdf", "invoice-42 (2).pdf"]);
+  });
+
+  it("refuses an unsupported type or a bad file, without sending", async () => {
+    callerClient.mockResolvedValue(mockClient(INVOICE));
+    for (const bad of [{ filename: "run.exe", content: b64("x") }, { filename: "a.pdf", content: "not base64!" }]) {
+      const res = await invoiceSend(post({ attachments: [bad] }), params("i1"));
+      expect(res.status).toBe(400);
+    }
+    expect(emailSend).not.toHaveBeenCalled();
+  });
+});
+
 describe("job report routes — authorization", () => {
   const routes = [
     { name: "GET job-report", run: () => reportGet(new NextRequest("https://app.test/api/x"), params("i1")) },

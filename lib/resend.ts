@@ -13,7 +13,7 @@ export function getResend() {
 // Falls back to Resend's own shared sending domain, which only works for
 // testing (delivers to the Resend account owner's own address). For real
 // customer delivery, set EMAIL_FROM to an address on a domain verified in
-// the Resend dashboard, e.g. "Mellerick Plumbing <quotes@mellerickplumbing.com.au>".
+// the Resend dashboard, e.g. "Mellerick Pty Ltd <quotes@mellerickplumbing.com.au>".
 export function getFromAddress() {
-  return process.env.EMAIL_FROM || "Mellerick Plumbing <onboarding@resend.dev>";
+  return process.env.EMAIL_FROM || "Mellerick Pty Ltd <onboarding@resend.dev>";
 }

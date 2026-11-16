@@ -478,6 +478,34 @@ approved: the web **Send Invoice** dialog has "Include job report and photos"
   `components/invoice/job-report-options.tsx`; route behaviour in
   `tests/unit/invoice-send-job-report.test.ts`. Not yet on the phone.
 
+**Attach files to the invoice email (16 Nov 2026; no migration).** The web
+Send Invoice dialog has an "Attachments" drop zone: drag files on (or browse)
+and they go with the invoice PDF (and the job report, when ticked). PDF,
+photos, Word, Excel, CSV, text; up to 10 files and **3 MB in total** — they
+travel inside the send request as base64 and Vercel caps a request at 4.5 MB.
+Photos are shrunk in the browser first (`lib/image-resize.ts`). Not stored
+anywhere; the email names them ("Also attached: …"). A bad file refuses the
+whole send. Rules `lib/invoice-attachments.ts` (tested), field
+`components/invoice/invoice-attachments-field.tsx`. Bigger files would need a
+Storage upload first (a new office-only bucket + migration). Not on the phone.
+
+**Invoices are made out to the Company (16 Nov 2026; no migration).**
+Invoice and quote PDFs, their detail pages and the Xero contact used
+`customers.name` alone and ignored `company`, so the office swapped the two
+fields to get the business on the invoice. Now `billingName()` (company,
+else name) is billed and `attentionName()` adds "Attn: <name>" when they
+differ (`lib/customer-billing.ts`, tested). The form labels are "Contact Name"
+and "Company (invoices are made out to this)". Customers already swapped by
+hand should be swapped back. Xero matches contacts by name, so a customer
+whose Xero contact is the person's name gets a new contact under the company
+on its next push.
+
+**Stage notes can be edited and deleted (web, 16 Nov 2026; no migration).**
+Pencil and bin icons on the "Currently at" banner and on each stage note
+(`components/job/job-notes.tsx`). Shown for your own notes, or every note for
+office/admin, which is the 0074 RLS rule; a refused write shows an error. Not
+on the phone yet.
+
 **Xero analytics mirror (14 Nov 2026; branch `feat/xero-analytics-sync`; migration `0105`, first numbered 0098, applied 2026-11-14).**
 Renumbered 0098→0105 and 0099→0106 on merge (main already had its own 0098/0099).
 Record them in the ledger once: `insert into supabase_migrations.schema_migrations (version,name) values ('0105','xero_analytics'),('0106','xero_bill_allocations') on conflict do nothing;`
