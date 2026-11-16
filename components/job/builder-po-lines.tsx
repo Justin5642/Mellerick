@@ -6,7 +6,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Plus, Trash2 } from "lucide-react";
-import { remainingToSplit, type BuilderPoLineInput, type CostCentreOption } from "@/lib/builder-po";
+import { isBlankLine, remainingToSplit, type BuilderPoLineInput, type CostCentreOption } from "@/lib/builder-po";
 
 // The split of a builder's PO value across cost centres (lib/builder-po.ts).
 // Used by the New Job form and the job's PO tab, so the office enters a
@@ -34,6 +34,7 @@ export function BuilderPoLines({
   stages,
   loadError,
   onCostCentreAdded,
+  valueFromLines,
 }: {
   /** The PO value as typed, for the running "unallocated" figure. */
   value: string;
@@ -45,6 +46,8 @@ export function BuilderPoLines({
   loadError?: boolean;
   /** A cost centre added here, for the parent to add to its list. */
   onCostCentreAdded?: (c: CostCentreOption) => void;
+  /** A blank value means "the lines' total" (planBuilderPo); say so instead of the split status. */
+  valueFromLines?: boolean;
 }) {
   const [addingFor, setAddingFor] = useState<number | null>(null);
   const [newName, setNewName] = useState("");
@@ -85,6 +88,8 @@ export function BuilderPoLines({
   const total = num(value);
   const split = lines.reduce((s, l) => s + num(l.amount), 0);
   const left = Math.round((total - split) * 100) / 100;
+  const anyLine = lines.some((l) => !isBlankLine(l));
+  const valueTyped = value.trim() !== "";
 
   return (
     <div className="space-y-2">
@@ -99,6 +104,11 @@ export function BuilderPoLines({
       </div>
       {lines.map((l, i) => {
         const stageOptions = stages.filter((s) => s.cost_centre_id === l.costCentreId);
+        // A saved line's own stage name (e.g. a Simpro line) stays selectable
+        // even when it is not one of the cost centre's template stages.
+        if (l.stage && !stageOptions.some((s) => s.name === l.stage)) {
+          stageOptions.push({ cost_centre_id: l.costCentreId || null, name: l.stage });
+        }
         return (
           <div key={i} className="grid grid-cols-12 gap-2 items-center">
             {addingFor === i ? (
@@ -177,11 +187,13 @@ export function BuilderPoLines({
         >
           <Plus className="w-3 h-3" />Add cost centre
         </Button>
-        {total > 0 && (
+        {valueTyped && (total > 0 || anyLine) ? (
           <span className={`text-xs font-medium ${left === 0 ? "text-green-600" : left > 0 ? "text-orange-600" : "text-red-600"}`}>
             {left === 0 ? "Fully split" : left > 0 ? `${money(left)} not split yet` : `Split is ${money(-left)} over the PO value`}
           </span>
-        )}
+        ) : !valueTyped && valueFromLines && anyLine ? (
+          <span className="text-xs font-medium text-slate-500">PO value will be the lines&apos; total, {money(split)}</span>
+        ) : null}
       </div>
     </div>
   );

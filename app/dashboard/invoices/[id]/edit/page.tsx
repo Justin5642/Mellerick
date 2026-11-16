@@ -16,6 +16,8 @@ import Link from "next/link";
 import { FormSkeleton } from "@/components/ui/loading-skeletons";
 import { replaceLineItems, moneyTotals } from "@/lib/replace-line-items";
 import { ProgressClaimFields, emptyClaimDraft, claimColumns, claimDraftFromInvoice, type ClaimDraft } from "@/components/invoice/progress-claim-fields";
+import { PaymentTermsField } from "@/components/invoice/payment-terms-field";
+import { melbourneDay } from "@/lib/invoice-terms";
 
 // `source` rides along unchanged so lines built by "Apply hourly rate" stay
 // marked as hours lines when this screen re-saves them (0098). Without it a
@@ -37,6 +39,8 @@ export default function EditInvoicePage() {
   // Hours lines as loaded, to notice one being removed (see handleSubmit).
   const [originalHoursLines, setOriginalHoursLines] = useState(0);
   const [errors, setErrors] = useState<Record<string, boolean>>({});
+  // Payment terms count from the day the invoice was raised.
+  const [invoiceDay, setInvoiceDay] = useState(() => melbourneDay(new Date()));
 
   useEffect(() => {
     async function load() {
@@ -55,6 +59,7 @@ export default function EditInvoicePage() {
           customer_po: invoice.customer_po ?? "",
         });
         setClaim(claimDraftFromInvoice(invoice));
+        if (invoice.created_at) setInvoiceDay(melbourneDay(new Date(invoice.created_at)));
         setJobId(invoice.job_id ?? null);
         setOriginalHoursLines((invoice.invoice_items ?? []).filter((i: any) => i.source === "hours").length);
         setLineItems((invoice.invoice_items ?? []).map((i: any) => ({
@@ -202,10 +207,11 @@ export default function EditInvoicePage() {
               {errors.title && <p className="text-xs text-red-500">Title is required</p>}
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label>Due Date</Label>
-                <Input type="date" value={form.due_date} onChange={e => setField("due_date", e.target.value)} />
-              </div>
+              <PaymentTermsField
+                dueDate={form.due_date}
+                invoiceDay={invoiceDay}
+                onChange={(d) => setField("due_date", d)}
+              />
               <div className="space-y-2">
                 <Label htmlFor="customer_po">Customer PO number</Label>
                 <Input

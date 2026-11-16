@@ -8,10 +8,10 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { FileDropzone } from "@/components/ui/file-dropzone";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Plus, Trash2, Navigation, MapPin, Loader2, ShoppingCart, X } from "lucide-react";
+import { Plus, Pencil, Trash2, Navigation, MapPin, Loader2, ShoppingCart, X } from "lucide-react";
 import { nextJobPoNumber } from "@/lib/job-po-number";
 import { siteOneLine, type JobSiteParts } from "@/lib/job-site";
-import { planBuilderPo, planBuilderPoLines, type BuilderPoLineInput, type CostCentreOption } from "@/lib/builder-po";
+import { lineInputFromSaved, planBuilderPo, planBuilderPoEdit, planBuilderPoLines, type BuilderPoLineInput, type CostCentreOption } from "@/lib/builder-po";
 import { BuilderPoLines, blankLine, type StageOption } from "@/components/job/builder-po-lines";
 import { SupplierPicker, OTHER_SUPPLIER } from "@/components/job/supplier-picker";
 import { recentSupplierIds } from "@/lib/supplier-picker";
@@ -23,6 +23,7 @@ interface CostCenter {
   code: string | null;
   allocated_amount: number;
   allocated_hours: number;
+  sort_order?: number | null;
   /** Marked complete from site or here (0095). */
   completed_at?: string | null;
 }
@@ -130,6 +131,8 @@ export function JobPO({ jobId, jobNumber, customerName, site, pos: initialPos, t
   // and the PO number is assigned by the database (0085).
   const [voForm, setVoForm] = useState(BLANK_VO_FORM);
   const [showForm, setShowForm] = useState(false);
+  // The PO being edited in place; the form state below is shared with "new".
+  const [editingPoId, setEditingPoId] = useState<string | null>(null);
   const [geocoding, setGeocoding] = useState(false);
   const [saving, setSaving] = useState(false);
   const [newPO, setNewPO] = useState({ po_number: "", client_reference: "", site_address: "" });
@@ -253,7 +256,136 @@ export function JobPO({ jobId, jobNumber, customerName, site, pos: initialPos, t
     setPoValue("");
     setPoLines([blankLine()]);
     setErrors({});
+    setEditingPoId(null);
     setShowForm(true);
+  }
+
+  // Edit an existing PO in place (Justin, Nov 2026: "can't edit, only
+  // delete"). Uses the same form state as a new PO; only one is open at a time.
+  function openEditPO(po: PurchaseOrder) {
+    setNewPO({
+      po_number: po.po_number ?? "",
+      client_reference: po.client_reference ?? "",
+      site_address: po.site_address ?? "",
+    });
+    setGeocoded(
+      po.site_address && po.site_lat != null && po.site_lng != null
+        ? { lat: Number(po.site_lat), lng: Number(po.site_lng), display: po.site_address }
+        : null
+    );
+    setPoValue(Number(po.total_value || 0).toFixed(2));
+    const saved = [...(po.po_cost_centers ?? [])].sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
+    setPoLines(saved.length > 0 ? saved.map((l) => lineInputFromSaved(l, costCentreOptions)) : [blankLine()]);
+    setErrors({});
+    setShowForm(false);
+    setAddLinesFor(null);
+    setEditingPoId(po.id);
+  }
+
+  function closePoForm() {
+    setShowForm(false);
+    setEditingPoId(null);
+    setNewPO({ po_number: "", client_reference: "", site_address: "" });
+    setGeocoded(null);
+    setPoValue("");
+    setPoLines([blankLine()]);
+    setErrors({});
+  }
+
+  // Why a saved line can't be removed: something on the job points at it.
+  // Supplier orders would be deleted with it (0061 cascades); time and
+  // expenses would silently lose their cost centre.
+  function linesInUse(po: PurchaseOrder): Record<string, string> {
+    const inUse: Record<string, string> = {};
+    for (const l of po.po_cost_centers ?? []) {
+      if ((vendorOrdersByCostCenter[l.id] ?? []).length > 0) inUse[l.id] = "it has supplier orders against it.";
+      else if ((hoursByCostCenter[l.id] ?? 0) > 0) inUse[l.id] = "time is logged against it.";
+      else if ((spentByCostCenter[l.id] ?? 0) > 0) inUse[l.id] = "expenses are recorded against it.";
+    }
+    return inUse;
+  }
+
+  // Saves the Edit form: lines updated by id, new ones inserted, removed ones
+  // deleted, then the PO itself. Not atomic, so any failure closes the form
+  // and re-reads the PO from the server to show what was actually saved.
+  async function savePOEdit(po: PurchaseOrder) {
+    if (!newPO.po_number.trim()) { setErrors({ po_number: true }); return; }
+    const planned = planBuilderPoEdit(
+      { poNumber: newPO.po_number, value: poValue, lines: poLines },
+      po.po_cost_centers ?? [],
+      costCentreOptions,
+      linesInUse(po)
+    );
+    if (!planned.ok) { toast.error(planned.error); return; }
+    const { updates, inserts, deletes, value, totalHours, unallocated } = planned.edit;
+    setSaving(true);
+    try {
+      // Re-check on the server: a technician may have raised a supplier
+      // order against a line since this page loaded.
+      if (deletes.length > 0) {
+        const { data: orders, error: ordersError } = await supabase
+          .from("vendor_orders")
+          .select("cost_center_id")
+          .in("cost_center_id", deletes)
+          .limit(1);
+        if (ordersError) { toast.error("Couldn't check the PO's supplier orders. Nothing was changed."); return; }
+        if ((orders ?? []).length > 0) {
+          const name = (po.po_cost_centers ?? []).find((l) => l.id === orders![0].cost_center_id)?.name ?? "A cost centre";
+          toast.error(`${name} can't be removed: it has supplier orders against it. Set its amount to $0 instead.`);
+          return;
+        }
+      }
+      let failed = false;
+      const updateResults = await Promise.all(
+        updates.map(({ id, ...row }) =>
+          supabase.from("po_cost_centers").update(row, { count: "exact" }).eq("id", id).eq("po_id", po.id)
+        )
+      );
+      if (updateResults.some((r) => r.error || r.count === 0)) failed = true;
+      if (!failed && inserts.length > 0) {
+        const { error } = await supabase.from("po_cost_centers").insert(inserts.map((l) => ({ ...l, po_id: po.id })));
+        if (error) failed = true;
+      }
+      if (!failed && deletes.length > 0) {
+        const { error, count } = await supabase
+          .from("po_cost_centers")
+          .delete({ count: "exact" })
+          .in("id", deletes)
+          .eq("po_id", po.id);
+        if (error || count !== deletes.length) failed = true;
+      }
+      if (!failed) {
+        const { error, count } = await supabase
+          .from("purchase_orders")
+          .update(
+            {
+              po_number: newPO.po_number.trim(),
+              client_reference: newPO.client_reference.trim() || null,
+              site_address: newPO.site_address.trim() || null,
+              site_lat: geocoded?.lat ?? null,
+              site_lng: geocoded?.lng ?? null,
+              total_value: value,
+              total_hours: totalHours,
+            },
+            { count: "exact" }
+          )
+          .eq("id", po.id);
+        if (error || count === 0) failed = true;
+      }
+      await refreshPO(po.id);
+      closePoForm();
+      if (failed) {
+        toast.error("Some of the PO's changes didn't save. Check it and try again.");
+        return;
+      }
+      toast.success(unallocated > 0 ? "PO updated — part of its value isn't split yet" : "PO updated");
+    } catch {
+      closePoForm();
+      refreshPO(po.id).catch(() => {});
+      toast.error("Couldn't reach the server. Check your connection, then check the PO.");
+    } finally {
+      setSaving(false);
+    }
   }
 
   async function geocodeAddress() {
@@ -303,16 +435,17 @@ export function JobPO({ jobId, jobNumber, customerName, site, pos: initialPos, t
       // budget figure derived from it is wrong. The PO itself is real, so the
       // message says so rather than pretending nothing was written.
       if (centersError) {
-        toast.error(`Purchase order saved, but its cost centres did not: ${centersError.message}`);
+        console.error("po_cost_centers insert failed:", centersError);
+        await refreshPO(po.id);
+        closePoForm();
+        toast.error("Purchase order saved, but its cost centres didn't. Use Edit on the PO to add them.");
+        setSaving(false);
+        return;
       }
     }
 
     await refreshPO(po.id);
-    setShowForm(false);
-    setNewPO({ po_number: "", client_reference: "", site_address: "" });
-    setPoValue("");
-    setPoLines([blankLine()]);
-    setGeocoded(null);
+    closePoForm();
     toast.success(planned.po.unallocated > 0 ? "Purchase order saved — part of its value isn't split yet" : "Purchase order saved");
     setSaving(false);
   }
@@ -682,6 +815,101 @@ export function JobPO({ jobId, jobNumber, customerName, site, pos: initialPos, t
     );
   }
 
+  // The PO form: a new PO at the foot of the tab, or an existing one edited
+  // in place of its card. Both share the form state above.
+  function renderPoForm(mode: "new" | "edit", po?: PurchaseOrder) {
+    return (
+      <Card>
+        <CardHeader><CardTitle className="text-base">{mode === "new" ? "New Purchase Order" : `Edit PO #${po?.po_number ?? ""}`}</CardTitle></CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-1.5">
+              <Label>Builder&apos;s PO number *</Label>
+              <Input
+                value={newPO.po_number}
+                onChange={e => { setNewPO(p => ({ ...p, po_number: e.target.value })); setErrors({}); }}
+                placeholder={`e.g. ${jobNumber}-1`}
+                className={fieldErr("po_number")}
+              />
+              {errors.po_number
+                ? <p className="text-xs text-red-500">PO number is required</p>
+                : <p className="text-xs text-slate-400">For quoted work with no builder PO, keep the job number.</p>}
+            </div>
+            <div className="space-y-1.5">
+              <Label>Client</Label>
+              <Input
+                value={newPO.client_reference}
+                onChange={e => setNewPO(p => ({ ...p, client_reference: e.target.value }))}
+                placeholder="Optional"
+              />
+            </div>
+          </div>
+
+          <div className="space-y-1.5">
+            <Label>Site Address</Label>
+            <div className="flex gap-2">
+              <Input
+                value={newPO.site_address}
+                onChange={e => { setNewPO(p => ({ ...p, site_address: e.target.value })); setGeocoded(null); }}
+                placeholder="123 Main St, Suburb, QLD"
+                className="flex-1"
+                onBlur={geocodeAddress}
+              />
+              <Button type="button" variant="outline" size="icon" onClick={geocodeAddress} disabled={geocoding || !newPO.site_address.trim()}>
+                {geocoding ? <Loader2 className="w-4 h-4 animate-spin" /> : <MapPin className="w-4 h-4" />}
+              </Button>
+            </div>
+            {geocoded && (
+              <p className="text-xs text-green-600 flex items-center gap-1.5">
+                <MapPin className="w-3 h-3" />Confirmed: {geocoded.display.split(",").slice(0, 3).join(",")}
+              </p>
+            )}
+            {!geocoded && newPO.site_address && (
+              <p className="text-xs text-slate-400">Click the pin icon to confirm the address for Waze and geo-fencing</p>
+            )}
+          </div>
+
+          <div className="space-y-1.5">
+            <Label>PO value (ex GST)</Label>
+            <Input
+              inputMode="decimal"
+              value={poValue}
+              onChange={e => setPoValue(e.target.value)}
+              placeholder="Blank = the cost centres' total"
+              className="max-w-xs"
+            />
+          </div>
+
+          <div className="space-y-1.5">
+            <Label>Split across cost centres</Label>
+            <p className="text-xs text-slate-400">
+              Each cost centre&apos;s share is its budget. A drainage PO usually splits between Below Ground Drainage and
+              Transport. A line can be hours only (truck cartage with no price yet). You can save now and split the
+              rest later.
+            </p>
+            <BuilderPoLines
+              value={poValue}
+              lines={poLines}
+              onChange={setPoLines}
+              costCentres={costCentreOptions}
+              stages={stages}
+              loadError={costCentresFailed}
+              onCostCentreAdded={(c) => setCostCentreOptions((prev) => [...prev, c])}
+              valueFromLines
+            />
+          </div>
+
+          <div className="flex justify-end gap-2 pt-2">
+            <Button type="button" variant="outline" onClick={closePoForm} disabled={saving}>Cancel</Button>
+            <Button type="button" onClick={() => (mode === "edit" && po ? savePOEdit(po) : savePO())} disabled={saving}>
+              {saving ? "Saving..." : mode === "edit" ? "Save changes" : "Save PO"}
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
+
   return (
     <div className="p-6 space-y-6">
       {/* Scoreboard */}
@@ -725,7 +953,9 @@ export function JobPO({ jobId, jobNumber, customerName, site, pos: initialPos, t
       )}
 
       {/* PO List */}
-      {pos.map(po => (
+      {pos.map(po => editingPoId === po.id ? (
+        <div key={po.id}>{renderPoForm("edit", po)}</div>
+      ) : (
         <Card key={po.id}>
           <CardHeader className="pb-3">
             <div className="flex items-start justify-between gap-2">
@@ -758,7 +988,10 @@ export function JobPO({ jobId, jobNumber, customerName, site, pos: initialPos, t
                     </Button>
                   </a>
                 )}
-                <button onClick={() => deletePO(po.id)} className="text-slate-300 hover:text-red-400 transition-colors p-1">
+                <Button variant="outline" size="sm" className="gap-1.5 h-8 text-xs" onClick={() => openEditPO(po)}>
+                  <Pencil className="w-3.5 h-3.5" />Edit
+                </Button>
+                <button onClick={() => deletePO(po.id)} className="text-slate-300 hover:text-red-400 transition-colors p-1" aria-label="Delete PO">
                   <Trash2 className="w-4 h-4" />
                 </button>
               </div>
@@ -942,92 +1175,7 @@ export function JobPO({ jobId, jobNumber, customerName, site, pos: initialPos, t
 
       {/* Add PO Form */}
       {showForm ? (
-        <Card>
-          <CardHeader><CardTitle className="text-base">New Purchase Order</CardTitle></CardHeader>
-          <CardContent className="space-y-4">
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-1.5">
-                <Label>Builder&apos;s PO number *</Label>
-                <Input
-                  value={newPO.po_number}
-                  onChange={e => { setNewPO(p => ({ ...p, po_number: e.target.value })); setErrors({}); }}
-                  placeholder={`e.g. ${jobNumber}-1`}
-                  className={fieldErr("po_number")}
-                />
-                {errors.po_number
-                  ? <p className="text-xs text-red-500">PO number is required</p>
-                  : <p className="text-xs text-slate-400">For quoted work with no builder PO, keep the job number.</p>}
-              </div>
-              <div className="space-y-1.5">
-                <Label>Client</Label>
-                <Input
-                  value={newPO.client_reference}
-                  onChange={e => setNewPO(p => ({ ...p, client_reference: e.target.value }))}
-                  placeholder="Optional"
-                />
-              </div>
-            </div>
-
-            <div className="space-y-1.5">
-              <Label>Site Address</Label>
-              <div className="flex gap-2">
-                <Input
-                  value={newPO.site_address}
-                  onChange={e => { setNewPO(p => ({ ...p, site_address: e.target.value })); setGeocoded(null); }}
-                  placeholder="123 Main St, Suburb, QLD"
-                  className="flex-1"
-                  onBlur={geocodeAddress}
-                />
-                <Button type="button" variant="outline" size="icon" onClick={geocodeAddress} disabled={geocoding || !newPO.site_address.trim()}>
-                  {geocoding ? <Loader2 className="w-4 h-4 animate-spin" /> : <MapPin className="w-4 h-4" />}
-                </Button>
-              </div>
-              {geocoded && (
-                <p className="text-xs text-green-600 flex items-center gap-1.5">
-                  <MapPin className="w-3 h-3" />Confirmed: {geocoded.display.split(",").slice(0, 3).join(",")}
-                </p>
-              )}
-              {!geocoded && newPO.site_address && (
-                <p className="text-xs text-slate-400">Click the pin icon to confirm the address for Waze and geo-fencing</p>
-              )}
-            </div>
-
-            <div className="space-y-1.5">
-              <Label>PO value (ex GST) *</Label>
-              <Input
-                inputMode="decimal"
-                value={poValue}
-                onChange={e => setPoValue(e.target.value)}
-                placeholder="What the builder's PO (or the quote) is for"
-                className="max-w-xs"
-              />
-            </div>
-
-            <div className="space-y-1.5">
-              <Label>Split across cost centres</Label>
-              <p className="text-xs text-slate-400">
-                Each cost centre&apos;s share is its budget. A drainage PO usually splits between Below Ground Drainage and
-                Transport. You can save now and split the rest later.
-              </p>
-              <BuilderPoLines
-                value={poValue}
-                lines={poLines}
-                onChange={setPoLines}
-                costCentres={costCentreOptions}
-                stages={stages}
-                loadError={costCentresFailed}
-                onCostCentreAdded={(c) => setCostCentreOptions((prev) => [...prev, c])}
-              />
-            </div>
-
-            <div className="flex justify-end gap-2 pt-2">
-              <Button type="button" variant="outline" onClick={() => { setShowForm(false); setGeocoded(null); setPoValue(""); setPoLines([blankLine()]); }}>Cancel</Button>
-              <Button type="button" onClick={savePO} disabled={saving}>
-                {saving ? "Saving..." : "Save PO"}
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
+        renderPoForm("new")
       ) : (
         <Button variant="outline" className="gap-2" onClick={openNewPO}>
           <Plus className="w-4 h-4" />Add Purchase Order

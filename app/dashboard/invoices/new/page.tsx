@@ -14,6 +14,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ArrowLeft, Plus, Trash2, GitPullRequestArrow } from "lucide-react";
 import Link from "next/link";
 import { CustomerPicker } from "@/components/customer-picker";
+import { PaymentTermsField } from "@/components/invoice/payment-terms-field";
+import { melbourneDay } from "@/lib/invoice-terms";
 import { moneyTotals } from "@/lib/replace-line-items";
 import { variationLineDescription } from "@/lib/variation-qty";
 import { ProgressClaimFields, emptyClaimDraft, claimColumns, claimDraftFromInvoice, type ClaimDraft } from "@/components/invoice/progress-claim-fields";
@@ -87,6 +89,8 @@ function NewInvoiceForm() {
   });
   // Edited by hand: a later job pick must not overwrite it.
   const [poTouched, setPoTouched] = useState(false);
+  // Payment terms count from today, the day the invoice is raised.
+  const invoiceDay = useMemo(() => melbourneDay(new Date()), []);
   const [claim, setClaim] = useState<ClaimDraft>(emptyClaimDraft);
   const [lineItems, setLineItems] = useState<LineItem[]>([{ name: "", description: "", quantity: "1", unit_price: "" }]);
   const [errors, setErrors] = useState<Record<string, boolean>>({});
@@ -538,10 +542,11 @@ function NewInvoiceForm() {
                 />
                 {errors.customer_id && <p className="text-xs text-red-500">Customer is required</p>}
               </div>
-              <div className="space-y-2">
-                <Label>Due Date</Label>
-                <Input type="date" value={form.due_date} onChange={e => setField("due_date", e.target.value)} />
-              </div>
+              <PaymentTermsField
+                dueDate={form.due_date}
+                invoiceDay={invoiceDay}
+                onChange={(d) => setField("due_date", d)}
+              />
               <div className="space-y-2">
                 <Label htmlFor="customer_po">Customer PO number</Label>
                 <Input

@@ -290,6 +290,13 @@ that cost centre's budget. Cartage comes out of the drainage PO.
 - **PO tab**: new POs take a value and a split; each PO card edits its value,
   tags any line with a cost centre (Simpro lines 0087 couldn't place), and
   "Add cost centre to this PO" splits what's left.
+- **Edit and $0 POs** (Justin, Nov 2026): each PO card has **Edit** — number,
+  client, site, value and its lines — saved in place (`planBuilderPoEdit`:
+  lines updated by id, new inserted, removed deleted; `total_hours` = sum of
+  line hours). A line with supplier orders (0061 would cascade-delete them),
+  logged time or expenses can't be removed — set it to $0. On New Job and the
+  PO tab the value may be left blank when there are lines: it becomes the
+  lines' total, which may be $0 (a cartage line with hours only).
 - **Quote → job** (web) creates `<job number>-1` with the quote's subtotal (ex
   GST), unsplit, and opens the PO tab. Mobile quote conversion does not yet.
 - **Which builder PO an invoice is for** (1 Nov 2026): on New Invoice, a job
@@ -410,6 +417,23 @@ one once, against its PO, and the app makes the Xero bill.
 - **Allowed hours per cost centre already existed** — PO tab, Hours on each
   cost-centre line (`po_cost_centers.allocated_hours`); not rebuilt.
 
+**New Job: site search and a crew (16 Nov 2026; no migration).** Office
+feedback. The Site picker on web New Job, the job Overview and phone New Job
+is now searchable (name, street, suburb, postcode; every word must match),
+A–Z with numbers in order ("Lot 2" before "Lot 10"), with "+ Add new site" as
+the FIRST row. Rules `lib/site-picker.ts`, mirrored at
+`mobile/lib/sitePicker.ts` (`tests/unit/site-picker.test.ts`); pickers
+`components/job/site-picker.tsx` and `mobile/components/job/site-picker.tsx`.
+"Assign To" on New Job (web and phone) takes one or more technicians: the job
+is inserted with the first as `assigned_to` (0059 makes them the crew; with a
+schedule 0079 books them), then `set_job_assignments` adds the rest — 0079's
+`job_assignments_to_bookings` gives each newcomer their own booking on the
+job's one window, so N technicians = N bookings (checked on a scratch Postgres
+with the real 0059/0079 functions, scheduled and unscheduled). Web reports a
+failed crew write with a toast and opens the job; the phone queues it as an
+`assign-technicians` side effect after the insert, with the calendar sync
+after that.
+
 **Customer job report with the invoice (14 Nov 2026; no migration).** Justin
 approved: the web **Send Invoice** dialog has "Include job report and photos"
 (only when the invoice has a job). Ticked, it loads a draft
@@ -502,6 +526,13 @@ account, not by job. This finds the bills with no job and gets them assigned.
 - **Next (not built):** pull supplier invoices from the admin Gmail label, read the PO
   number off each PDF and attach it to the job automatically (needs Gmail read scope on
   the Google connection → reconnect); unmatched ones land in this queue.
+
+**Invoice payment terms (16 Nov 2026; no migration).** New and Edit Invoice
+have a "Payment terms" drop-down (14 days / 30 days / Custom date) beside the
+due date (`components/invoice/payment-terms-field.tsx`, rules in
+`lib/invoice-terms.ts`, tested). A term fills `due_date` from the invoice date
+(today on New, `created_at` on Edit, Melbourne days); only `due_date` is
+stored. The phone's New Invoice has "14 days" / "30 days" chips.
 
 ---
 

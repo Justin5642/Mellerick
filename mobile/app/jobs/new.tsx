@@ -11,6 +11,7 @@ import { getCustomer, type Site, type CustomerListRow } from "../../lib/data/rea
 import { listAssignableStaff, type AssignableStaff } from "../../lib/data/reads/schedule";
 import { SiteFormSheet, type SiteSaveStatus } from "../../components/customer/site-form";
 import { CustomerFormSheet } from "../../components/customer/customer-form";
+import { SitePickerSheet } from "../../components/job/site-picker";
 
 const JOB_TYPES = ["service", "installation", "maintenance", "emergency", "quote"] as const;
 const PRIORITIES = ["low", "normal", "high", "urgent"] as const;
@@ -27,7 +28,9 @@ export default function NewJobScreen() {
   const [site, setSite] = useState<Site | null>(null);
   const [pickSite, setPickSite] = useState(false);
   const [staff, setStaff] = useState<AssignableStaff[]>([]);
-  const [assignee, setAssignee] = useState<AssignableStaff | null>(null);
+  // One or more technicians, in the order picked: the first is the job's
+  // primary (assigned_to), the rest join the crew (JobsRepository.createJob).
+  const [assignees, setAssignees] = useState<AssignableStaff[]>([]);
   const [pickAssignee, setPickAssignee] = useState(false);
   const [jobType, setJobType] = useState<(typeof JOB_TYPES)[number]>("service");
   const [priority, setPriority] = useState<(typeof PRIORITIES)[number]>("normal");
@@ -145,7 +148,7 @@ export default function NewJobScreen() {
         customerId: customer.id,
         title: title.trim(),
         siteId: site?.id ?? null,
-        assignedTo: assignee?.id ?? null,
+        crewIds: assignees.map((a) => a.id),
         jobType,
         priority,
         status: scheduledStartIso ? "scheduled" : "pending",
@@ -214,7 +217,9 @@ export default function NewJobScreen() {
 
       <Text style={styles.label}>Assign to (optional)</Text>
       <TouchableOpacity style={styles.selector} onPress={openAssignee}>
-        <Text style={[styles.selectorText, !assignee && styles.placeholder]}>{assignee ? assignee.full_name : "Unassigned"}</Text>
+        <Text style={[styles.selectorText, assignees.length === 0 && styles.placeholder]}>
+          {assignees.length ? assignees.map((a) => a.full_name).join(", ") : "Unassigned"}
+        </Text>
         <Ionicons name="chevron-forward" size={16} color={colors.slate400} />
       </TouchableOpacity>
 
@@ -256,27 +261,19 @@ export default function NewJobScreen() {
 
       <CustomerPicker visible={pickCustomer} onClose={() => setPickCustomer(false)} onSelect={onSelectCustomer} />
 
-      <PickerModal visible={pickSite} title="Select site" onClose={() => setPickSite(false)}>
-        {sites.map((s) => (
-          <TouchableOpacity key={s.id} style={styles.row} onPress={() => { setSite(s); setPickSite(false); }}>
-            <Text style={styles.rowText}>{s.name}</Text>
-            {s.suburb ? <Text style={styles.rowSub}>{s.suburb}</Text> : null}
-          </TouchableOpacity>
-        ))}
-        <TouchableOpacity
-          style={[styles.row, styles.addRow]}
-          onPress={() => {
-            setPickSite(false);
-            // iOS won't present a modal while another is still sliding away;
-            // wait out the picker's dismissal before opening the site sheet.
-            setTimeout(() => setAddingSite(true), Platform.OS === "ios" ? 400 : 0);
-          }}
-          accessibilityRole="button"
-        >
-          <Ionicons name="add-circle-outline" size={18} color={colors.blue600} />
-          <Text style={styles.addRowText}>Add new site</Text>
-        </TouchableOpacity>
-      </PickerModal>
+      <SitePickerSheet
+        visible={pickSite}
+        sites={sites}
+        selectedId={site?.id ?? null}
+        onPick={(s) => { setSite(s); setPickSite(false); }}
+        onAddNew={() => {
+          setPickSite(false);
+          // iOS won't present a modal while another is still sliding away;
+          // wait out the picker's dismissal before opening the site sheet.
+          setTimeout(() => setAddingSite(true), Platform.OS === "ios" ? 400 : 0);
+        }}
+        onClose={() => setPickSite(false)}
+      />
 
       {customer && (
         <SiteFormSheet
@@ -294,16 +291,28 @@ export default function NewJobScreen() {
         onSaved={(id, _synced, name) => onCustomerCreated(id, name)}
       />
 
-      <PickerModal visible={pickAssignee} title="Assign to" onClose={() => setPickAssignee(false)}>
-        <TouchableOpacity style={styles.row} onPress={() => { setAssignee(null); setPickAssignee(false); }}>
+      <PickerModal visible={pickAssignee} title="Assign to (one or more)" onClose={() => setPickAssignee(false)} closeLabel="Done">
+        <TouchableOpacity style={styles.row} onPress={() => { setAssignees([]); setPickAssignee(false); }}>
           <Text style={styles.rowText}>Unassigned</Text>
         </TouchableOpacity>
-        {staff.map((s) => (
-          <TouchableOpacity key={s.id} style={styles.row} onPress={() => { setAssignee(s); setPickAssignee(false); }}>
-            <Text style={styles.rowText}>{s.full_name}</Text>
-            <Text style={styles.rowSub}>{s.role}</Text>
-          </TouchableOpacity>
-        ))}
+        {staff.map((s) => {
+          const picked = assignees.some((a) => a.id === s.id);
+          return (
+            <TouchableOpacity
+              key={s.id}
+              style={[styles.row, styles.checkRow]}
+              onPress={() => setAssignees((prev) => (picked ? prev.filter((a) => a.id !== s.id) : [...prev, s]))}
+              accessibilityRole="checkbox"
+              accessibilityState={{ checked: picked }}
+            >
+              <View style={{ flex: 1 }}>
+                <Text style={styles.rowText}>{s.full_name}</Text>
+                <Text style={styles.rowSub}>{s.role}</Text>
+              </View>
+              <Ionicons name={picked ? "checkbox" : "square-outline"} size={22} color={picked ? colors.blue600 : colors.slate400} />
+            </TouchableOpacity>
+          );
+        })}
       </PickerModal>
     </ScrollView>
   );
@@ -317,14 +326,14 @@ function Chip({ label, active, onPress }: { label: string; active: boolean; onPr
   );
 }
 
-function PickerModal({ visible, title, onClose, children }: { visible: boolean; title: string; onClose: () => void; children: ReactNode }) {
+function PickerModal({ visible, title, onClose, closeLabel = "Cancel", children }: { visible: boolean; title: string; onClose: () => void; closeLabel?: string; children: ReactNode }) {
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
       <View style={styles.overlay}>
         <View style={styles.sheet}>
           <Text style={styles.sheetTitle}>{title}</Text>
           <ScrollView automaticallyAdjustKeyboardInsets keyboardDismissMode="interactive" keyboardShouldPersistTaps="handled" style={{ maxHeight: 360 }}>{children}</ScrollView>
-          <TouchableOpacity style={styles.cancelBtn} onPress={onClose}><Text style={styles.cancelText}>Cancel</Text></TouchableOpacity>
+          <TouchableOpacity style={styles.cancelBtn} onPress={onClose}><Text style={styles.cancelText}>{closeLabel}</Text></TouchableOpacity>
         </View>
       </View>
     </Modal>
@@ -359,8 +368,7 @@ const styles = StyleSheet.create({
   cancelText: { fontSize: 14, fontWeight: "600", color: colors.slate700 },
   inlineAction: { flexDirection: "row", alignItems: "center", gap: 4, alignSelf: "flex-start", paddingVertical: 8 },
   inlineActionText: { fontSize: 13, fontWeight: "600", color: colors.blue600 },
-  addRow: { flexDirection: "row", alignItems: "center", gap: 6 },
-  addRowText: { fontSize: 15, fontWeight: "600", color: colors.blue600 },
+  checkRow: { flexDirection: "row", alignItems: "center", gap: 8 },
   siteOk: { fontSize: 12, color: colors.green600, marginTop: 6 },
   siteNote: { fontSize: 12, color: colors.slate500, marginTop: 6 },
   siteWarn: { fontSize: 12, color: colors.orange700, marginTop: 6 },
