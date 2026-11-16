@@ -1105,6 +1105,15 @@ never at fault — they gate on the server-side role — the phone was showing d
 it had already synced while it still believed the user was office. Reaches
 devices with the next build.
 
+### The job screen always has a Back button (16 Nov 2026)
+
+Justin found himself on a job with no way back. The native header only draws
+its back arrow when a screen sits behind the job; one opened from a push
+notification, a deep link, or after the routes re-gate on a role change has
+none. `app/job/[id].tsx` now sets its own `headerLeft` "Back": it pops when it
+can, otherwise goes home for the role (`/dashboard` office, `/` technician —
+`lib/jobBack.ts`, tested). Reaches phones with the next build.
+
 ### Sync reliability and sign-out (17 October 2026 audit)
 
 Twelve findings fixed in one PR (branch `fix/mobile-sync-reliability`). What

@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useState } from "react";
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, Alert, TextInput } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
+import { useFocusEffect, useLocalSearchParams, useNavigation, useRouter } from "expo-router";
+import { jobBackTarget } from "../../lib/jobBack";
 import { Ionicons } from "@expo/vector-icons";
 import { supabase } from "../../lib/supabase";
 import { getJob } from "../../lib/data/reads/jobs";
@@ -65,7 +66,32 @@ const JOB_TYPES = ["service", "installation", "maintenance", "emergency", "quote
 export default function JobDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
+  const navigation = useNavigation();
   const isOfficeOrAdmin = useIsOfficeOrAdmin();
+
+  // Always a way out (lib/jobBack.ts): the native arrow only appears when a
+  // screen sits behind this one, and a job opened from a notification or after
+  // a role re-gate has none.
+  useLayoutEffect(() => {
+    navigation.setOptions({
+      headerLeft: () => (
+        <TouchableOpacity
+          onPress={() => {
+            const target = jobBackTarget(router.canGoBack(), isOfficeOrAdmin);
+            if (target.kind === "pop") router.back();
+            else router.replace(target.path);
+          }}
+          accessibilityRole="button"
+          accessibilityLabel="Back"
+          hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+          style={styles.headerBack}
+        >
+          <Ionicons name="chevron-back" size={24} color={colors.blue600} />
+          <Text style={styles.headerBackText}>Back</Text>
+        </TouchableOpacity>
+      ),
+    });
+  }, [navigation, router, isOfficeOrAdmin]);
   const jobEdit = useJobEdit();
   const [job, setJob] = useState<any>(null);
   const [userId, setUserId] = useState<string | null>(null);
@@ -266,7 +292,14 @@ export default function JobDetailScreen() {
       <SafeAreaView style={styles.center} edges={["bottom", "left", "right"]}>
         <Text style={styles.notFound}>Job not found.</Text>
         <Text style={styles.notFoundHint}>It may have been removed, or you may not have access.</Text>
-        <TouchableOpacity style={styles.notFoundBtn} onPress={() => router.back()}>
+        <TouchableOpacity
+          style={styles.notFoundBtn}
+          onPress={() => {
+            const target = jobBackTarget(router.canGoBack(), isOfficeOrAdmin);
+            if (target.kind === "pop") router.back();
+            else router.replace(target.path);
+          }}
+        >
           <Text style={styles.notFoundBtnText}>Go back</Text>
         </TouchableOpacity>
       </SafeAreaView>
@@ -541,6 +574,8 @@ export default function JobDetailScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.bg },
+  headerBack: { flexDirection: "row", alignItems: "center", paddingRight: 8, marginLeft: -6 },
+  headerBackText: { fontSize: 17, color: colors.blue600 },
   viewOnlyBanner: { margin: 12, marginBottom: 0, padding: 10, borderRadius: 10, backgroundColor: colors.blue100 },
   viewOnlyText: { fontSize: 13, fontWeight: "600", color: colors.blue600, textAlign: "center" },
   center: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: colors.bg, padding: 24 },
