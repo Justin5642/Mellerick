@@ -500,6 +500,12 @@ hand should be swapped back. Xero matches contacts by name, so a customer
 whose Xero contact is the person's name gets a new contact under the company
 on its next push.
 
+**Stage notes can be edited and deleted (web, 16 Nov 2026; no migration).**
+Pencil and bin icons on the "Currently at" banner and on each stage note
+(`components/job/job-notes.tsx`). Shown for your own notes, or every note for
+office/admin, which is the 0074 RLS rule; a refused write shows an error. Not
+on the phone yet.
+
 **Xero analytics mirror (14 Nov 2026; branch `feat/xero-analytics-sync`; migration `0105`, first numbered 0098, applied 2026-11-14).**
 Renumbered 0098→0105 and 0099→0106 on merge (main already had its own 0098/0099).
 Record them in the ledger once: `insert into supabase_migrations.schema_migrations (version,name) values ('0105','xero_analytics'),('0106','xero_bill_allocations') on conflict do nothing;`

@@ -5,7 +5,7 @@ import { createClient } from "@/lib/supabase/client";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { MessageSquare, Send, Sparkles, Mic, Square, Loader2 } from "lucide-react";
+import { MessageSquare, Send, Sparkles, Mic, Square, Loader2, Pencil, Trash2 } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { formatDate, formatTime } from "@/lib/date";
@@ -21,9 +21,11 @@ interface Props {
   onUpdateStageNotes: (notes: any[]) => void;
   /** A technician viewing a job they are not assigned to: read, don't write. */
   readOnly?: boolean;
+  /** Office/admin may edit or delete anyone's stage note (0074); others only their own. */
+  canEditAll?: boolean;
 }
 
-export function JobNotes({ jobId, notes, onUpdate, currentUserId, stageNotes, onUpdateStageNotes, readOnly = false }: Props) {
+export function JobNotes({ jobId, notes, onUpdate, currentUserId, stageNotes, onUpdateStageNotes, readOnly = false, canEditAll = false }: Props) {
   const supabase = createClient();
   const [content, setContent] = useState("");
   const [saving, setSaving] = useState(false);
@@ -121,6 +123,61 @@ export function JobNotes({ jobId, notes, onUpdate, currentUserId, stageNotes, on
     setStageSaving(false);
   }
 
+  // Edit / delete a stage note: the author's own, or anyone's for office/admin
+  // (same rule as RLS, 0074 — the database refuses anything else).
+  const [editingStageId, setEditingStageId] = useState<string | null>(null);
+  const [editStageText, setEditStageText] = useState("");
+  const [stageBusy, setStageBusy] = useState(false);
+  const canChangeStageNote = (note: any) => !readOnly && (canEditAll || note.author_id === currentUserId);
+
+  async function reloadStageNotes() {
+    const { data } = await supabase.from("job_stage_notes").select("*, profiles(full_name)").eq("job_id", jobId).order("created_at", { ascending: false });
+    onUpdateStageNotes(data ?? []);
+  }
+
+  async function saveStageEdit(id: string) {
+    const text = editStageText.trim();
+    if (!text) { toast.error("A note can't be empty — delete it instead"); return; }
+    setStageBusy(true);
+    const { data, error } = await supabase.from("job_stage_notes").update({ content: text }).eq("id", id).select("id");
+    setStageBusy(false);
+    if (error || !data?.length) { toast.error(error?.message ?? "You can only edit your own notes"); return; }
+    setEditingStageId(null);
+    await reloadStageNotes();
+    toast.success("Note updated");
+  }
+
+  async function deleteStageNote(note: any) {
+    if (!window.confirm(`Delete this stage note?\n\n"${String(note.content).slice(0, 120)}"`)) return;
+    setStageBusy(true);
+    const { data, error } = await supabase.from("job_stage_notes").delete().eq("id", note.id).select("id");
+    setStageBusy(false);
+    if (error || !data?.length) { toast.error(error?.message ?? "You can only delete your own notes"); return; }
+    if (editingStageId === note.id) setEditingStageId(null);
+    await reloadStageNotes();
+    toast.success("Note deleted");
+  }
+
+  function startStageEdit(note: any) {
+    setEditingStageId(note.id);
+    setEditStageText(note.content ?? "");
+    setStageFilter("all");
+  }
+
+  function stageNoteActions(note: any) {
+    if (!canChangeStageNote(note)) return null;
+    return (
+      <span className="ml-auto flex shrink-0 items-center gap-1">
+        <button type="button" aria-label="Edit note" title="Edit" disabled={stageBusy} onClick={() => startStageEdit(note)} className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-blue-600">
+          <Pencil className="h-3.5 w-3.5" />
+        </button>
+        <button type="button" aria-label="Delete note" title="Delete" disabled={stageBusy} onClick={() => deleteStageNote(note)} className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-red-600">
+          <Trash2 className="h-3.5 w-3.5" />
+        </button>
+      </span>
+    );
+  }
+
   // Grouped by stage in the fixed workflow order (rather than by timestamp)
   // so "history builds up stage by stage" — a technician opening the drain
   // stage's history sees every drain note together, not interleaved with
@@ -156,13 +213,14 @@ export function JobNotes({ jobId, notes, onUpdate, currentUserId, stageNotes, on
             <Badge className="bg-cyan-100 text-cyan-800 hover:bg-cyan-100 w-fit shrink-0">
               Currently at: {getJobStageLabel(currentStageNote.stage)}
             </Badge>
-            <div className="min-w-0">
+            <div className="min-w-0 flex-1">
               <p className="text-xs text-slate-600 truncate">{currentStageNote.content}</p>
               <p className="text-[11px] text-slate-400">
                 {currentStageNote.profiles?.full_name ?? "Unknown"} ·{" "}
                 {formatDate(currentStageNote.created_at, { day: "numeric", month: "short" })} at {formatTime(currentStageNote.created_at)}
               </p>
             </div>
+            {stageNoteActions(currentStageNote)}
           </div>
         )}
 
@@ -255,8 +313,27 @@ export function JobNotes({ jobId, notes, onUpdate, currentUserId, stageNotes, on
                           <span className="text-xs text-slate-400">
                             {formatDate(note.created_at, { day: "numeric", month: "short", year: "numeric" })} at {formatTime(note.created_at)}
                           </span>
+                          {editingStageId !== note.id && stageNoteActions(note)}
                         </div>
-                        <p className="text-sm text-slate-700 whitespace-pre-wrap">{note.content}</p>
+                        {editingStageId === note.id ? (
+                          <div className="space-y-2">
+                            <Textarea
+                              autoFocus
+                              value={editStageText}
+                              onChange={(e) => setEditStageText(e.target.value)}
+                              rows={3}
+                              className="resize-none text-sm"
+                            />
+                            <div className="flex justify-end gap-2">
+                              <Button type="button" variant="outline" size="sm" onClick={() => setEditingStageId(null)} disabled={stageBusy}>Cancel</Button>
+                              <Button type="button" size="sm" onClick={() => saveStageEdit(note.id)} disabled={stageBusy || !editStageText.trim()}>
+                                {stageBusy ? "Saving..." : "Save"}
+                              </Button>
+                            </div>
+                          </div>
+                        ) : (
+                          <p className="text-sm text-slate-700 whitespace-pre-wrap">{note.content}</p>
+                        )}
                       </div>
                     ))}
                   </div>
