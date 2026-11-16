@@ -127,7 +127,7 @@ describe("listJobBookings", () => {
   });
 });
 
-describe("listJobBookings — the booking's scheduling note (0109, a draft)", () => {
+describe("listJobBookings — the booking's scheduling note (0109)", () => {
   it("local: carries the note", async () => {
     const getAll = jest.fn().mockResolvedValue([{ ...localRow, note: "Use the side gate", staff_name: "Dave" }]);
     setLocalReads(fakeReads(getAll));

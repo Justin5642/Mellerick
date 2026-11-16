@@ -33,7 +33,7 @@ export interface Booking {
   daily: boolean;
   all_day: boolean;
   /**
-   * The scheduling note for THIS booking (migration 0109, a draft). Null/absent when
+   * The scheduling note for THIS booking (migration 0109). Null/absent when
    * there is none, on a database without the column, or on a device whose
    * sync streams predate it.
    */

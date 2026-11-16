@@ -123,7 +123,7 @@ export function JobOverviewTab({
   job: Job;
   currentUserId: string | null;
   readOnly?: boolean;
-  /** The job's bookings — their current/upcoming scheduling notes head the tab (0109, a draft). */
+  /** The job's bookings — their current/upcoming scheduling notes head the tab (0109). */
   bookings?: JobBooking[] | null;
   isOffice?: boolean;
   /** Reload the job after something here changed it (the site pin). */

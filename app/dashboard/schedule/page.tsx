@@ -70,7 +70,7 @@ export default async function SchedulePage() {
         .not("scheduled_start", "is", null)
         .not("status", "in", '("completed","cancelled")')
         .order("scheduled_start", { ascending: true, nullsFirst: false });
-    // Each booking's scheduling note (0109, a draft) rides along; on a database without
+    // Each booking's scheduling note (0109) rides along; on a database without
     // that column the embed is retried without it before anything else falls back.
     let withBookings = await run(`${BOARD_COLUMNS}, schedule_daily, schedule_all_day, job_bookings(${BOOKING_COLUMNS}, ${BOOKING_NOTE_COLUMN})`);
     if (isMissingNoteColumn(withBookings.error)) {

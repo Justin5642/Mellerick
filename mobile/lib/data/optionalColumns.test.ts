@@ -1,6 +1,6 @@
 import { withoutMissingOptionalColumns } from "./optionalColumns";
 
-// A queued booking write carrying `note` before 0109 (a draft) is applied must still land
+// A queued booking write carrying `note` before 0109 is applied must still land
 // (without the note) rather than dead-letter the booking itself.
 describe("withoutMissingOptionalColumns", () => {
   const missing = { code: "PGRST204", message: "Could not find the 'note' column of 'job_bookings' in the schema cache" };

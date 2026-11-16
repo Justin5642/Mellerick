@@ -34,7 +34,7 @@ export interface JobBooking extends Booking {
 const COLUMNS = "id, job_id, staff_id, cost_center_id, starts_at, ends_at, daily, all_day";
 
 /**
- * The booking's scheduling note (migration 0109, a draft). Selected only by the reads
+ * The booking's scheduling note (migration 0109). Selected only by the reads
  * that show it, and each retries without it on a database where 0109 is not
  * applied yet (isMissingNoteColumn) — the bookings then simply have no notes.
  */

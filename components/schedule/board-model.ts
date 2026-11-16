@@ -209,7 +209,7 @@ export function planBoardAdd(
     (b) => b.job_id === booking.job_id && b.staff_id === target.staffId && b.cost_center_id === booking.cost_center_id && sameBookingWindow(b, window),
   );
   if (duplicate) return null;
-  // The copy carries the booking's scheduling note (0109, a draft): it is the same job
+  // The copy carries the booking's scheduling note (0109): it is the same job
   // of work for the second technician.
   return {
     job_id: booking.job_id,

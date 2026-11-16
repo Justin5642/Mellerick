@@ -1,7 +1,7 @@
 -- ============================================================================
 -- A scheduling note on each booking, not on the job forever.
 --
--- STATUS: DRAFT — NOT APPLIED. To apply: paste this file into the Supabase SQL
+-- STATUS: ✅ APPLIED IN PRODUCTION (2026-11-16, via SQL editor; gate test passed). Was: paste this file into the Supabase SQL
 -- editor, then supabase/tests/0109_job_booking_note_test.sql, and trust only
 -- its final "0109 PASSED" row. Then redeploy the PowerSync sync streams
 -- (tech_job_bookings / office_job_bookings now list `note`) — AFTER this, not

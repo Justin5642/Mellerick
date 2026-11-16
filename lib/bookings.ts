@@ -35,7 +35,7 @@ export interface JobBooking {
   google_event_id?: string | null;
   updated_at?: string | null;
   /**
-   * The scheduling note for THIS booking (0109, a draft). Absent on a database
+   * The scheduling note for THIS booking (0109). Absent on a database
    * without the column (readers retry without it) and on rows a write
    * returned (insertBookings selects BOOKING_COLUMNS).
    */

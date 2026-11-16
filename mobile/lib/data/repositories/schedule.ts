@@ -15,7 +15,7 @@ export interface BookingPatch {
   costCenterId?: string | null;
   /** The window and both 0071 flags, always together (buildScheduleColumns, or a moved window). */
   columns?: ScheduleWindowColumns;
-  /** The booking's scheduling note (0109, a draft); null clears it. */
+  /** The booking's scheduling note (0109); null clears it. */
   note?: string | null;
 }
 

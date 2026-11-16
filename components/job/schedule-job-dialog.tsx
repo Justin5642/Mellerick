@@ -314,7 +314,7 @@ export function ScheduleJobDialog({
       if (statusError || count === 0) toast.warning("Bookings saved — the job's status could not be set to Scheduled");
     }
 
-    // Each booking keeps its own note (job_bookings.note — 0109, a draft) — that is what
+    // Each booking keeps its own note (job_bookings.note — 0109) — that is what
     // the technician sees, and only while the booking is current. A copy of
     // each new or changed note goes to Notes & Activity as the history. The
     // bookings landed — a note failure shouldn't read as the whole operation
