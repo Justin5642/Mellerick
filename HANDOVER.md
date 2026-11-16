@@ -611,7 +611,7 @@ due date (`components/invoice/payment-terms-field.tsx`, rules in
 (today on New, `created_at` on Edit, Melbourne days); only `due_date` is
 stored. The phone's New Invoice has "14 days" / "30 days" chips.
 
-**Day Works / Hire, Stage 1 (16 Nov 2026; migration `0108` DRAFT — NOT YET APPLIED).**
+**Day Works / Hire, Stage 1 (16 Nov 2026; migration `0108` applied 2026-11-16).**
 Justin: hire and cartage are always their own line under a job, never part of
 the quoted value or progress claims. Each day's line is signed by the
 builder's rep on a phone or tablet, then locks; signed lines are invoiced
@@ -670,7 +670,7 @@ Stage 1 is web + database + pure rules; the phone comes next.
   attachment, then the lines are marked invoiced. Never touches
   `purchase_orders`, progress-claim fields, `customer_po` or Ready to Invoice.
   Refuses a line whose machine has no rate rather than invoicing $0.
-- **Before 0108 is applied** the tab says Day Works isn't switched on and
+- **0108 applied 2026-11-16 (gate test passed).** Before it, the tab said Day Works isn't switched on and
   Fleet hides the hire controls; nothing else changes. To apply: paste 0108,
   then run `supabase/tests/0108_day_works_hire_test.sql` (needs an active
   technician and an active office/admin profile) and trust only `0108 PASSED`;
@@ -1541,7 +1541,7 @@ a shippable release.
 | **Check `EMAIL_FROM` for supplier POs** | Justin | Supplier PO emails go from `EMAIL_FROM` — it must be on a domain verified in Resend, or suppliers never receive them. (0085 itself applied 2026-10-28.) |
 | **Xero analytics: reconnect Xero** | Justin | `0105` is applied (2026-11-14). After deploy, click **Connect Xero** once so the new read scopes are granted, then `POST /api/xero/sync-analytics` as admin (or wait for the nightly cron) to start the 24-month backfill. |
 | **Unallocated bills: set `WEEKLY_DIGEST_TO`** | Justin | `0106` is applied (2026-11-14). Set `WEEKLY_DIGEST_TO` in Vercel (Production) to the office recipients' addresses. |
-| **Day Works / Hire: apply `0108`** | Justin | Paste `supabase/migrations/0108_day_works_hire.sql` into the SQL editor, then run `supabase/tests/0108_day_works_hire_test.sql` and trust only `0108 PASSED`. Check Fleet → Hire setup for machines the name match missed, and confirm the twin-steer float's 30 km / $5 per km. |
+| **Day Works / Hire: check rates** | Justin | `0108` is applied (2026-11-16). Check Fleet → Hire setup for machines the name match missed, and confirm the twin-steer float's 30 km / $5 per km. |
 | **Maestro flow 02** | Avi | Needs `ADMIN_EMAIL` / `ADMIN_PASSWORD` in the environment. The login subflow deliberately skips when a session already exists, so a password never passes through a script — which is why flows 01/03/04 could be run and 02 could not. |
 
 ### QA fixture — do not delete
