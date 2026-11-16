@@ -478,6 +478,17 @@ approved: the web **Send Invoice** dialog has "Include job report and photos"
   `components/invoice/job-report-options.tsx`; route behaviour in
   `tests/unit/invoice-send-job-report.test.ts`. Not yet on the phone.
 
+**Attach files to the invoice email (16 Nov 2026; no migration).** The web
+Send Invoice dialog has an "Attachments" drop zone: drag files on (or browse)
+and they go with the invoice PDF (and the job report, when ticked). PDF,
+photos, Word, Excel, CSV, text; up to 10 files and **3 MB in total** — they
+travel inside the send request as base64 and Vercel caps a request at 4.5 MB.
+Photos are shrunk in the browser first (`lib/image-resize.ts`). Not stored
+anywhere; the email names them ("Also attached: …"). A bad file refuses the
+whole send. Rules `lib/invoice-attachments.ts` (tested), field
+`components/invoice/invoice-attachments-field.tsx`. Bigger files would need a
+Storage upload first (a new office-only bucket + migration). Not on the phone.
+
 **Xero analytics mirror (14 Nov 2026; branch `feat/xero-analytics-sync`; migration `0105`, first numbered 0098, applied 2026-11-14).**
 Renumbered 0098→0105 and 0099→0106 on merge (main already had its own 0098/0099).
 Record them in the ledger once: `insert into supabase_migrations.schema_migrations (version,name) values ('0105','xero_analytics'),('0106','xero_bill_allocations') on conflict do nothing;`

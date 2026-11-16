@@ -26,6 +26,7 @@ import type { JobSite } from "@/lib/job-site";
 import { invoiceProgress } from "@/lib/progress-claim";
 import type { JobReportRequest } from "@/lib/job-report";
 import { JobReportOptions } from "./job-report-options";
+import { InvoiceAttachmentsField, fileToBase64, type PickedAttachment } from "./invoice-attachments-field";
 import { InvoiceHours } from "./invoice-hours";
 
 interface Props {
@@ -44,6 +45,8 @@ export function InvoiceDetail({ invoice, jobSite, xeroConnected, payments }: Pro
   const [sendOpen, setSendOpen] = useState(false);
   const [sendTo, setSendTo] = useState(invoice.customers?.email ?? "");
   const [sendMessage, setSendMessage] = useState("");
+  // Files dropped onto the Send dialog, emailed with the invoice.
+  const [attachments, setAttachments] = useState<PickedAttachment[]>([]);
   const [status, setStatus] = useState(invoice.status);
   const [deleteOpen, setDeleteOpen] = useState(false);
   // "Include job report and photos" (invoices linked to a job only). The
@@ -67,6 +70,9 @@ export function InvoiceDetail({ invoice, jobSite, xeroConnected, payments }: Pro
     }
     setSending(true);
     try {
+      const extra = await Promise.all(
+        attachments.map(async (a) => ({ filename: a.file.name, content: await fileToBase64(a.file) }))
+      );
       const res = await fetch(`/api/invoices/${invoice.id}/send`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -74,6 +80,7 @@ export function InvoiceDetail({ invoice, jobSite, xeroConnected, payments }: Pro
           to: sendTo,
           message: sendMessage,
           ...(includeReport && reportSelection ? { jobReport: reportSelection } : {}),
+          ...(extra.length ? { attachments: extra } : {}),
           confirmUnpriced,
         }),
       });
@@ -84,14 +91,15 @@ export function InvoiceDetail({ invoice, jobSite, xeroConnected, payments }: Pro
         return;
       }
       if (!res.ok) throw new Error(data.error);
-      toast.success(
-        data.jobReportAttached
-          ? `Invoice and job report emailed to ${data.sentTo}`
-          : `Invoice emailed to ${data.sentTo}`
-      );
+      const extras = [
+        data.jobReportAttached ? "job report" : null,
+        data.attachmentCount ? `${data.attachmentCount} attached file${data.attachmentCount === 1 ? "" : "s"}` : null,
+      ].filter(Boolean);
+      toast.success(`Invoice${extras.length ? ` and ${extras.join(" and ")}` : ""} emailed to ${data.sentTo}`);
       if (data.reportNotice) toast.warning(data.reportNotice);
       if (data.warning) toast.warning(data.warning);
       setStatus("sent");
+      setAttachments([]);
       setSendOpen(false);
     } catch (err: any) {
       toast.error(err.message ?? "Failed to send invoice");
@@ -197,6 +205,10 @@ export function InvoiceDetail({ invoice, jobSite, xeroConnected, payments }: Pro
                 <div className="space-y-2">
                   <Label>Message (optional)</Label>
                   <Textarea value={sendMessage} onChange={(e) => setSendMessage(e.target.value)} rows={3} placeholder="Add a personal note..." />
+                </div>
+                <div className="space-y-2">
+                  <Label>Attachments (optional)</Label>
+                  <InvoiceAttachmentsField value={attachments} onChange={setAttachments} disabled={sending} />
                 </div>
                 {invoice.job_id && (
                   <div className="space-y-3">

@@ -13,6 +13,7 @@ import { formatInvoiceNumber } from "@/lib/utils";
 import { escapeHtml } from "@/lib/html";
 import { reportError } from "@/lib/monitoring";
 import { parseJobReportRequest } from "@/lib/job-report";
+import { parseExtraAttachments } from "@/lib/invoice-attachments";
 import { buildJobReportPdf, loadJobReportContext } from "@/lib/job-report-data";
 
 // A user is waiting on this request while it calls an outside service (Xero,
@@ -58,6 +59,13 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     if (!invoice.invoice_items || invoice.invoice_items.length === 0) {
       return NextResponse.json({ error: "Invoice has no line items — add items before sending" }, { status: 400 });
     }
+
+    // Files the office dropped onto the Send dialog. Checked before anything
+    // slow happens; a bad one refuses the whole send.
+    const invoiceFile = `invoice-${invoice.invoice_number}.pdf`;
+    const reportFile = `job-report-${invoice.invoice_number}.pdf`;
+    const extras = parseExtraAttachments(body.attachments, [invoiceFile, reportFile]);
+    if (!extras.ok) return NextResponse.json({ error: extras.error }, { status: 400 });
 
     const buffer = await renderDocumentPdf({
       docType: "Tax Invoice",
@@ -138,18 +146,20 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
           ${personalNote}
           ${dueDateLine}
           ${jobReport ? "<p>We've also attached a job report with the dates we attended, notes on the work carried out and photos of the job.</p>" : ""}
+          ${extras.value.length ? `<p>Also attached: ${extras.value.map((a) => escapeHtml(a.filename)).join(", ")}.</p>` : ""}
           <p>If you have any questions, just reply to this email.</p>
           <p>Thanks,<br/>${businessInfo.name}</p>
         </div>
       `,
       attachments: [
         {
-          filename: `invoice-${invoice.invoice_number}.pdf`,
+          filename: invoiceFile,
           content: buffer.toString("base64"),
         },
         ...(jobReport
-          ? [{ filename: `job-report-${invoice.invoice_number}.pdf`, content: jobReport.buffer.toString("base64") }]
+          ? [{ filename: reportFile, content: jobReport.buffer.toString("base64") }]
           : []),
+        ...extras.value,
       ],
     });
 
@@ -177,6 +187,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       success: true,
       sentTo: to,
       jobReportAttached: !!jobReport,
+      attachmentCount: extras.value.length,
       reportNotice: jobReport?.notice ?? null,
     });
   } catch (err: any) {
