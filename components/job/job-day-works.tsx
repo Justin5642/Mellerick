@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { toast } from "sonner";
 import { createClient } from "@/lib/supabase/client";
 import { Button } from "@/components/ui/button";
@@ -9,12 +10,12 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { AlertTriangle, CheckCircle2, Lock, Pencil, PenLine, Plus, Receipt, RotateCcw, Trash2, Truck, XCircle } from "lucide-react";
 import { SignaturePad, type SignaturePadHandle } from "./signature-pad";
 import { dateKeyInBusinessTZ, startOfWeekKey, shiftDateKey } from "@/lib/date";
 import { dayWorksPeriodLabel, quantityProblem, type HireType, type HireUnit } from "@/lib/hire-pricing";
-import type { DayWorksView, DayWorksEntry } from "@/lib/day-works-view";
+import { splitMachinesByHire, type DayWorksView, type DayWorksEntry } from "@/lib/day-works-view";
 import { buildHireEntryRow } from "@/lib/day-works-entry";
 
 // The job's Day Works / Hire tab (Stage 1, Nov 2026). Hire and cartage are
@@ -127,6 +128,8 @@ export function JobDayWorks({ jobId, readOnly = false }: Props) {
 
   const view = state;
   const machine = (id: string) => view.machines.find((m) => m.id === id);
+  // The whole fleet is listed; only machines with a hire rate can take a line.
+  const hireReady = splitMachinesByHire(view.machines).ready.length > 0;
   const option = (d: Draft) => {
     const [t, u] = d.optionKey.split("|");
     return machine(d.equipment_id)?.options.find((o) => o.hire_type === t && o.hire_unit === u) ?? null;
@@ -243,16 +246,32 @@ export function JobDayWorks({ jobId, readOnly = false }: Props) {
           </p>
         </div>
         {!readOnly && !draft && (
-          <Button className="gap-2 shrink-0" onClick={startNew} disabled={view.machines.length === 0}>
+          <Button className="gap-2 shrink-0" onClick={startNew} disabled={!hireReady}>
             <Plus className="w-4 h-4" />Add Day Works
           </Button>
         )}
       </div>
 
-      {view.machines.length === 0 && (
+      {view.machines.length === 0 ? (
         <p className="text-sm text-amber-700">
-          No machines are set up for hire yet.{view.isOffice ? " Set them up in Fleet → Hire setup." : " Ask the office to set them up."}
+          There are no machines in the fleet register yet.{view.isOffice ? <> Add them in <Link prefetch={false} href="/dashboard/fleet" className="underline">Fleet</Link>.</> : " Ask the office to add them."}
         </p>
+      ) : !hireReady ? (
+        <p className="text-sm text-amber-700">
+          No machine in the fleet has a hire rate yet.
+          {view.isOffice ? <> <Link prefetch={false} href="/dashboard/fleet#hire-rates" className="underline">Set rates in Fleet → Hire rates</Link>.</> : " Ask the office to set them up in Fleet."}
+        </p>
+      ) : (
+        view.isOffice &&
+        (() => {
+          const missing = splitMachinesByHire(view.machines).noRate.length;
+          return missing > 0 ? (
+            <p className="text-sm text-amber-700">
+              {missing === 1 ? "1 machine has" : `${missing} machines have`} no hire rate yet and can&apos;t be picked.{" "}
+              <Link prefetch={false} href="/dashboard/fleet#hire-rates" className="underline">Set rates in Fleet → Hire rates</Link>.
+            </p>
+          ) : null;
+        })()
       )}
 
       {view.clashes.length > 0 && (
@@ -416,6 +435,8 @@ function EntryForm({ draft, setDraft, view, saving, onSave, onCancel }: {
   onCancel: () => void;
 }) {
   const m = view.machines.find((x) => x.id === draft.equipment_id);
+  // Machines with no hire rate are listed greyed out (the server refuses a line for them anyway).
+  const { ready, noRate } = splitMachinesByHire(view.machines);
   const [t, u] = draft.optionKey.split("|") as [HireType | "", HireUnit | ""];
   const opt = m?.options.find((o) => o.hire_type === t && o.hire_unit === u) ?? null;
   const set = (patch: Partial<Draft>) => setDraft({ ...draft, ...patch });
@@ -449,9 +470,23 @@ function EntryForm({ draft, setDraft, view, saving, onSave, onCancel }: {
             <Select value={draft.equipment_id || null} onValueChange={(v) => pickMachine((v as string) ?? "")}>
               <SelectTrigger><SelectValue placeholder="Pick from the fleet register" /></SelectTrigger>
               <SelectContent>
-                {view.machines.map((x) => <SelectItem key={x.id} value={x.id}>{x.name}</SelectItem>)}
+                {ready.map((x) => <SelectItem key={x.id} value={x.id}>{x.name}</SelectItem>)}
+                {noRate.length > 0 && (
+                  <SelectGroup>
+                    <SelectLabel className="text-xs text-amber-700">No hire rate yet — office to set up in Fleet</SelectLabel>
+                    {noRate.map((x) => (
+                      <SelectItem key={x.id} value={x.id} disabled>{x.name}</SelectItem>
+                    ))}
+                  </SelectGroup>
+                )}
               </SelectContent>
             </Select>
+            {m && m.options.length === 0 && (
+              <p className="text-xs text-amber-700">
+                {m.name} has no hire rate yet.{" "}
+                {view.isOffice ? <Link prefetch={false} href="/dashboard/fleet#hire-rates" className="underline">Set it up in Fleet → Hire rates</Link> : "Ask the office to set it up in Fleet."}
+              </p>
+            )}
           </div>
           {m && m.options.length > 1 && (
             <div className="space-y-1.5">

@@ -18,6 +18,7 @@ import { FleetYearSummary } from "@/components/fleet/fleet-year-summary";
 import { dueLabel, serviceDue, type ServiceDue, type ServiceRecord } from "@/lib/service-due";
 import { EquipmentHireDialog, type HireOptionRow } from "@/components/fleet/equipment-hire-dialog";
 import { HireAttachments, type HireAttachmentRow } from "@/components/fleet/hire-attachments";
+import { FleetHireRates } from "@/components/fleet/fleet-hire-rates";
 import { hireOptionLabel } from "@/lib/hire-pricing";
 
 // Radix/shadcn's SelectItem can't take value="", so an explicit "Unassigned"
@@ -329,6 +330,8 @@ export function FleetClient({ role, currentUserId, equipment: initialEquipment, 
           )}
         </CardContent>
       </Card>
+
+      {canEditHire && <FleetHireRates equipment={equipment} hireOptions={hireOptions} onEdit={setHireDialogFor} />}
 
       {canEditHire && hireAttachments && <HireAttachments initial={hireAttachments} />}
 

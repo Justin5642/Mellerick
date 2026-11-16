@@ -22,6 +22,8 @@ export interface MachineRow {
   id: string;
   name: string;
   is_active: boolean;
+  /** vehicle / machinery / tool / other (0016). Tools ("Plant & equipment", 0100) are never hired out. */
+  category?: string | null;
   options: (HireOption & { whole_days_only?: boolean | null; fuel_included?: boolean | null; is_active?: boolean | null })[];
 }
 
@@ -65,6 +67,7 @@ export interface OtherAttachmentUse {
 export interface DayWorksMachine {
   id: string;
   name: string;
+  /** Empty = the office hasn't set a hire rate for this machine yet: shown greyed, can't be picked. */
   options: { hire_type: HireType; hire_unit: HireUnit; label: string; whole_days_only: boolean; fuel_included: boolean }[];
 }
 
@@ -120,6 +123,16 @@ export interface DayWorksView {
   pricing?: DayWorksOfficePricing;
 }
 
+/** Active and not a tool: the machines Day Works lists (and Fleet → Hire rates covers). */
+export function isHireableMachine(m: { is_active: boolean | null; category?: string | null }): boolean {
+  return m.is_active === true && m.category !== "tool";
+}
+
+/** The picker's two groups: machines that can be picked, then those still waiting for a hire rate. */
+export function splitMachinesByHire<M extends { options: unknown[] }>(machines: M[]): { ready: M[]; noRate: M[] } {
+  return { ready: machines.filter((m) => m.options.length > 0), noRate: machines.filter((m) => m.options.length === 0) };
+}
+
 const n = (v: number | string | null | undefined) => (v === null || v === undefined || v === "" ? null : Number(v));
 
 export function buildDayWorksView(input: {
@@ -136,10 +149,12 @@ export function buildDayWorksView(input: {
   const machineName = new Map(machines.map((m) => [m.id, m.name]));
   const attachmentName = new Map(attachments.map((a) => [a.id, a.name]));
 
-  // The register for the picker: active machines with at least one active hire
-  // option. Names, hire types and flags only — never a rate.
+  // The register for the picker: the WHOLE active fleet except tools (the same
+  // rule 0108's seed used), so a machine the office hasn't priced yet is still
+  // seen — with no options, greyed out — instead of silently missing. Names,
+  // hire types and flags only — never a rate.
   const shownMachines: DayWorksMachine[] = machines
-    .filter((m) => m.is_active)
+    .filter(isHireableMachine)
     .map((m) => ({
       id: m.id,
       name: m.name,
@@ -153,7 +168,6 @@ export function buildDayWorksView(input: {
           fuel_included: !!o.fuel_included,
         })),
     }))
-    .filter((m) => m.options.length > 0)
     .sort((a, b) => a.name.localeCompare(b.name));
 
   const shownEntries: DayWorksEntry[] = entries.map((e) => ({

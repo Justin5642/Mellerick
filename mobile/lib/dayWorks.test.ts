@@ -72,6 +72,24 @@ describe("the calls", () => {
   });
 });
 
+describe("machines with no hire rate yet", () => {
+  // The server now lists the whole fleet; an unpriced machine comes with no options.
+  const all = [...machines, { id: "pc180", name: "Komatsu PC180", options: [] }];
+
+  it("splits pickable machines from those waiting for a rate", () => {
+    const { ready, noRate } = dw.splitMachinesByHire(all);
+    expect(ready.map((m) => m.id)).toEqual(["bobcat", "roller", "float", "pc35"]);
+    expect(noRate.map((m) => m.id)).toEqual(["pc180"]);
+  });
+
+  it("refuses a draft on a machine with no hire rate", () => {
+    expect(dw.entryInputFromDraft({ ...dw.emptyDraft("2026-11-16"), equipment_id: "pc180", optionKey: "wet|hour", hours: "4" }, all)).toEqual({
+      ok: false,
+      error: "Pick the machine and how it's hired.",
+    });
+  });
+});
+
 describe("entryInputFromDraft — the web form's rules", () => {
   const draft = (over: Partial<import("./dayWorks").DayWorksDraft>) => ({ ...dw.emptyDraft("2026-11-16"), ...over });
 

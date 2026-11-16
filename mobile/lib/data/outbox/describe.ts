@@ -32,6 +32,7 @@ const TABLE_LABELS: Record<string, string> = {
 const EFFECT_LABELS: Record<string, string> = {
   "assign-technicians": "Assigning technicians",
   "backflow-submit": "Submitting a backflow test",
+  "quote-po": "Adding the quote's purchase order",
   "stage-complete": "Marking a stage complete",
   "sync-billing": "Updating billing",
   "sync-calendar": "Updating the calendar",

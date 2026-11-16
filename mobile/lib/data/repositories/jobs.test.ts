@@ -213,4 +213,25 @@ describe("JobsRepository.createJobFromQuote", () => {
     expect(writes(ops).find((w) => w.table === "jobs")).toBeDefined();
     expect(writes(ops).find((w) => w.table === "quotes")!.payload).toEqual({ job_id: "id-1" });
   });
+
+  it("queues the quote-value PO as a server side effect after the quote link, never a purchase_orders write", async () => {
+    const { outbox, ops } = captureOutbox();
+    await makeRepo(outbox).createJobFromQuote({
+      quoteId: "q1",
+      title: "T",
+      customerId: "c1",
+      items: [{ name: "Pipe", description: null, quantity: 1, unitPrice: 500 }],
+    });
+    // The job number is a DB serial the phone doesn't know yet, so the PO is
+    // numbered (and valued, from the quote) on the server.
+    expect(writes(ops).some((w) => w.table === "purchase_orders")).toBe(false);
+    const link = writes(ops).find((w) => w.table === "quotes")!;
+    const po = sides(ops).find((o) => o.effect === "quote-po")!;
+    expect(po).toMatchObject({ coalesceKey: "quote-po:id-1", dependsOn: link.id });
+    expect(po.payload).toEqual({ jobId: "id-1", quoteId: "q1", poId: expect.any(String) });
+    // A client id of its own, so a retry finds the PO it already made.
+    const used = ops.flatMap((o) => (o.kind === "write" ? [o.id, o.rowId] : [o.id]));
+    expect(used).not.toContain(po.payload.poId);
+    expect(ops[ops.length - 1]).toBe(po);
+  });
 });

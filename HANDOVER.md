@@ -308,8 +308,21 @@ that cost centre's budget. Cartage comes out of the drainage PO.
   centre (red under `min_margin_pct`; `rowMarginPct` / `rowBelowMinimum`), and
   Reports → Job margins adds a by-cost-centre total across the open jobs
   (`costCentreTotals`) and each job's per-centre margins.
-- **Quote → job** (web) creates `<job number>-1` with the quote's subtotal (ex
-  GST), unsplit, and opens the PO tab. Mobile quote conversion does not yet.
+- **Quote → job** creates `<job number>-1` with the quote's subtotal (ex
+  GST), unsplit (rule `lib/quote-job-po.ts`, tested in
+  `tests/unit/quote-job-po.test.ts`); the web then opens the PO tab. The
+  phone (16 Nov 2026) does the same offline-safely: the job number is a
+  database serial it only learns once its queued job insert syncs, so after
+  the job insert, items and quote link it queues a `quote-po` side effect →
+  `POST /api/jobs/[id]/quote-po` (office/admin; runs as the caller under RLS,
+  never the service role). The server numbers the PO against the real job
+  (next after any existing `<n>-k`), values it from the quote — which must
+  already be linked to that job — never from the request, and inserts it with
+  the phone's client UUID, so a retry finds it and adds nothing. No
+  `purchase_orders` write leaves the phone and no stream changed
+  (`office_purchase_orders` is office-gated). Needs the web deployed before
+  the phone build that carries it (a missing route would dead-letter the
+  step, reported); reaches phones with the next build.
 - **Which builder PO an invoice is for** (1 Nov 2026): on New Invoice, a job
   with more than one priced PO shows a picker; it sets the invoice's
   `customer_po` to that PO's number, and a progress claim then defaults its
@@ -500,11 +513,19 @@ hand should be swapped back. Xero matches contacts by name, so a customer
 whose Xero contact is the person's name gets a new contact under the company
 on its next push.
 
-**Stage notes can be edited and deleted (web, 16 Nov 2026; no migration).**
+**Stage notes can be edited and deleted (web and phone, 16 Nov 2026; no migration).**
 Pencil and bin icons on the "Currently at" banner and on each stage note
-(`components/job/job-notes.tsx`). Shown for your own notes, or every note for
-office/admin, which is the 0074 RLS rule; a refused write shows an error. Not
-on the phone yet.
+(web `components/job/job-notes.tsx`, phone `mobile/components/job/notes.tsx`).
+Shown for your own notes, or every note for office/admin, which is the 0074
+RLS rule; never on view-only jobs. Rule in `mobile/lib/stageNoteEdits.ts`
+(`canChangeStageNote`, tested). On the phone, edit opens a `KeyboardSheet`
+and delete asks to confirm; both go through the outbox
+(`JobStageNotesRepository.update` — `content` only — and `.remove`), so they
+work offline. A write the server refuses (0 rows → the gateway fails it) gives
+an alert after the flush and ends in "not synced"; reloads keep a queued
+edit/delete on screen (`mergeStageNotes`) until it lands or dies. No sync-rule
+change (`tech_job_stage_notes` already has `author_id`). Reaches phones with
+the next build.
 
 **Technicians don't see other people's schedules (16 Nov 2026; migration `0107` applied 2026-11-16).**
 Justin: technicians may look any job up for its plans, but must not watch the
@@ -694,8 +715,23 @@ Stage 1 is web + database + pure rules; the phone comes next.
   3. **Truck register:** body volume and cartage rates per truck.
   4. **Operator labour not double counted:** the operator's time on a wet
      hire is a cost against the hire line, not the quoted cost centres.
-  5. **Reports:** Day Works by cost centre per month; then hire revenue (and
-     its costs) in the Job Ledger / Job margins.
+  5. **Reports:** ~~Day Works by cost centre per month~~ — **done (16 Nov
+     2026, no migration):** Reports → **Day Works**
+     (`app/dashboard/reports/day-works`, office/admin; linked from the
+     Reports header). Last 12 months × company cost centre, signed and
+     invoiced kept apart (toggle: signed + invoiced / signed only /
+     invoiced), drafts shown as a "not yet signed" count and amount, void
+     left out; click a month for its job-by-job breakdown, each linking to
+     the job's Day Works tab. Priced with `lib/hire-pricing.ts` at
+     **today's** rates (entries keep no rate — the page says so); a line
+     whose machine has no hire setup is counted as unpriced, never $0. Cost
+     centre = the entry's own, else its hire setup's, else the type's
+     default by name (as `hire_entry_cost_centre()`), else "Not tagged".
+     Reads run under the viewer's session (rate tables are office-only by
+     RLS — no service role). Sums in `lib/day-works-report.ts` (pure,
+     `tests/unit/day-works-report.test.ts`); without 0108 the page says
+     Day Works isn't switched on. **Still to do:** hire revenue (and its
+     costs) in the Job Ledger / Job margins.
   6. **Open items from Justin's list:** rates for the other excavators and
      attachments, standby rates (700L dozer and others), fuel and tip-fee
      pass-through, and confirm the twin-steer float's 30 km / $5 per km
@@ -740,6 +776,27 @@ line and hand the phone to the builder's rep, who signs it; it then locks.
   already in the binary).
 - **Not on the phone:** office void, Invoice Day Works, truck day stops,
   float distance lookup (km typed), offline entry.
+
+**Day Works lists the whole fleet; Fleet → Hire rates (16 Nov 2026; no migration).**
+Justin: "The whole Fleet doesn't seem to be there." The picker used to list
+only machines with an active `equipment_hire_options` row, and 0108 seeded
+rates by name match only, so every other machine was invisible.
+- **Day Works picker** (web `components/job/job-day-works.tsx`, phone
+  `mobile/components/job/day-works.tsx`): every active machine that is not a
+  `tool` (0108's seed rule; `isHireableMachine` in `lib/day-works-view.ts`).
+  One with no active hire option arrives with `options: []` and is shown
+  greyed, unpickable, under "No hire rate yet — office to set up in Fleet"
+  (office on the web gets a link to Fleet → Hire rates and a count of
+  unpriced machines). Split by `splitMachinesByHire` (web lib, mirrored in
+  `mobile/lib/dayWorks.ts`). Technicians still get names, hire types and
+  flags only. The server already refused a line for a machine with no
+  option (`hireOptionFlags` → 400); now tested for an unpriced machine.
+  "No machines in the fleet register" shows only when the register is empty.
+- **Fleet → Hire rates** card (`components/fleet/fleet-hire-rates.tsx`,
+  office/admin, anchor `#hire-rates`, above Attachments): every hireable
+  machine with its options and rates (`lib/fleet-hire-overview.ts`, tested),
+  or an amber "No hire rate yet"; unpriced first with a count, each with
+  Set up / Edit opening the existing Hire setup dialog.
 
 ---
 
@@ -1047,6 +1104,15 @@ the old role's mirror, exactly as at a cold start. RLS and the sync streams were
 never at fault — they gate on the server-side role — the phone was showing data
 it had already synced while it still believed the user was office. Reaches
 devices with the next build.
+
+### The job screen always has a Back button (16 Nov 2026)
+
+Justin found himself on a job with no way back. The native header only draws
+its back arrow when a screen sits behind the job; one opened from a push
+notification, a deep link, or after the routes re-gate on a role change has
+none. `app/job/[id].tsx` now sets its own `headerLeft` "Back": it pops when it
+can, otherwise goes home for the role (`/dashboard` office, `/` technician —
+`lib/jobBack.ts`, tested). Reaches phones with the next build.
 
 ### Sync reliability and sign-out (17 October 2026 audit)
 
@@ -1583,7 +1649,7 @@ a shippable release.
 | **Check `EMAIL_FROM` for supplier POs** | Justin | Supplier PO emails go from `EMAIL_FROM` — it must be on a domain verified in Resend, or suppliers never receive them. (0085 itself applied 2026-10-28.) |
 | **Xero analytics: reconnect Xero** | Justin | `0105` is applied (2026-11-14). After deploy, click **Connect Xero** once so the new read scopes are granted, then `POST /api/xero/sync-analytics` as admin (or wait for the nightly cron) to start the 24-month backfill. |
 | **Unallocated bills: set `WEEKLY_DIGEST_TO`** | Justin | `0106` is applied (2026-11-14). Set `WEEKLY_DIGEST_TO` in Vercel (Production) to the office recipients' addresses. |
-| **Day Works / Hire: check rates** | Justin | `0108` is applied (2026-11-16). Check Fleet → Hire setup for machines the name match missed, and confirm the twin-steer float's 30 km / $5 per km. |
+| **Day Works / Hire: check rates** | Justin | `0108` is applied (2026-11-16). Set rates for the machines the name match missed — Fleet → **Hire rates** lists them first — and confirm the twin-steer float's 30 km / $5 per km. |
 | **Maestro flow 02** | Avi | Needs `ADMIN_EMAIL` / `ADMIN_PASSWORD` in the environment. The login subflow deliberately skips when a session already exists, so a password never passes through a script — which is why flows 01/03/04 could be run and 02 could not. |
 
 ### QA fixture — do not delete

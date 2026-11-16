@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { attentionName, billingName } from "@/lib/customer-billing";
+import { quoteBudgetPo } from "@/lib/quote-job-po";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { createClient } from "@/lib/supabase/client";
@@ -142,14 +143,11 @@ export function QuoteDetail({ quote }: Props) {
     // total, split by cost centre"). It lands on the PO tab unsplit; the
     // office splits it across cost centres there, which also lets the crew
     // raise supplier orders against it.
-    const quoteValue = Number(quote.subtotal) || 0;
-    if (quoteValue > 0) {
-      const { error: poError } = await supabase.from("purchase_orders").insert({
-        job_id: job.id,
-        po_number: `${job.job_number ?? "JOB"}-1`,
-        total_value: quoteValue,
-        total_hours: 0,
-      });
+    // Same rule as the phone's conversion (lib/quote-job-po.ts).
+    const budgetPo = quoteBudgetPo(job.job_number ?? "JOB", [], quote.subtotal);
+    const quoteValue = budgetPo?.total_value ?? 0;
+    if (budgetPo) {
+      const { error: poError } = await supabase.from("purchase_orders").insert({ job_id: job.id, ...budgetPo });
       if (poError) {
         toast.error("Job created, but the quote total didn't carry across as its budget. Add it on the job's PO tab.");
         setConverted(true);

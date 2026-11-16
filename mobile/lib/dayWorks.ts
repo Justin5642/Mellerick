@@ -25,6 +25,7 @@ export type HireStatus = "draft" | "signed" | "invoiced" | "void";
 export interface DayWorksMachine {
   id: string;
   name: string;
+  /** The server lists the whole active fleet (not tools). Empty = no hire rate yet: shown greyed, can't be picked. */
   options: { hire_type: HireType; hire_unit: HireUnit; label: string; whole_days_only: boolean; fuel_included: boolean }[];
 }
 
@@ -198,6 +199,11 @@ export function draftFromEntry(e: DayWorksEntry): DayWorksDraft {
 }
 
 export const optionKey = (o: { hire_type: HireType; hire_unit: HireUnit }) => `${o.hire_type}|${o.hire_unit}`;
+
+/** The picker's two groups (as the web's lib/day-works-view.ts): pickable, then still waiting for a hire rate. */
+export function splitMachinesByHire(machines: DayWorksMachine[]): { ready: DayWorksMachine[]; noRate: DayWorksMachine[] } {
+  return { ready: machines.filter((m) => m.options.length > 0), noRate: machines.filter((m) => m.options.length === 0) };
+}
 
 /** The machine's hire option the draft is on, or null. */
 export function draftOption(draft: Pick<DayWorksDraft, "equipment_id" | "optionKey">, machines: DayWorksMachine[]): DayWorksMachine["options"][number] | null {
