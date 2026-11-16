@@ -15,7 +15,7 @@ const StatusPieChart = dynamic(() => import("./reports-charts").then((m) => m.St
   ssr: false,
   loading: chartLoading,
 });
-import { DollarSign, TrendingUp, AlertTriangle, Target, Briefcase, Users, HeartPulse, Truck } from "lucide-react";
+import { DollarSign, TrendingUp, AlertTriangle, Target, Briefcase, Users, HeartPulse, Truck, Construction } from "lucide-react";
 import { jobStatusChartColors, quoteStatusChartColors } from "@/lib/badge-colors";
 
 function money(n: number) {
@@ -96,6 +96,12 @@ export function ReportsDashboard({
             className="inline-flex items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
           >
             <DollarSign className="w-4 h-4 text-blue-600" /> Unallocated bills
+          </Link>
+          <Link
+            href="/dashboard/reports/day-works"
+            className="inline-flex items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+          >
+            <Construction className="w-4 h-4 text-blue-600" /> Day Works
           </Link>
           {showJobMargins && (
             <Link

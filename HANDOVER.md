@@ -694,8 +694,23 @@ Stage 1 is web + database + pure rules; the phone comes next.
   3. **Truck register:** body volume and cartage rates per truck.
   4. **Operator labour not double counted:** the operator's time on a wet
      hire is a cost against the hire line, not the quoted cost centres.
-  5. **Reports:** Day Works by cost centre per month; then hire revenue (and
-     its costs) in the Job Ledger / Job margins.
+  5. **Reports:** ~~Day Works by cost centre per month~~ — **done (16 Nov
+     2026, no migration):** Reports → **Day Works**
+     (`app/dashboard/reports/day-works`, office/admin; linked from the
+     Reports header). Last 12 months × company cost centre, signed and
+     invoiced kept apart (toggle: signed + invoiced / signed only /
+     invoiced), drafts shown as a "not yet signed" count and amount, void
+     left out; click a month for its job-by-job breakdown, each linking to
+     the job's Day Works tab. Priced with `lib/hire-pricing.ts` at
+     **today's** rates (entries keep no rate — the page says so); a line
+     whose machine has no hire setup is counted as unpriced, never $0. Cost
+     centre = the entry's own, else its hire setup's, else the type's
+     default by name (as `hire_entry_cost_centre()`), else "Not tagged".
+     Reads run under the viewer's session (rate tables are office-only by
+     RLS — no service role). Sums in `lib/day-works-report.ts` (pure,
+     `tests/unit/day-works-report.test.ts`); without 0108 the page says
+     Day Works isn't switched on. **Still to do:** hire revenue (and its
+     costs) in the Job Ledger / Job margins.
   6. **Open items from Justin's list:** rates for the other excavators and
      attachments, standby rates (700L dozer and others), fuel and tip-fee
      pass-through, and confirm the twin-steer float's 30 km / $5 per km
