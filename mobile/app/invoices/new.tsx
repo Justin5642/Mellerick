@@ -182,6 +182,22 @@ export default function NewInvoiceScreen() {
         <Text style={[styles.selectorText, !dueDate && styles.placeholder]}>{dueDate ? dueDate.toLocaleDateString("en-AU") : "No due date"}</Text>
         <Ionicons name="calendar-outline" size={16} color={colors.slate400} />
       </TouchableOpacity>
+      {/* Payment terms: fill the due date 14 or 30 days from today. */}
+      <View style={[styles.varChips, { marginTop: 8 }]}>
+        {[14, 30].map((n) => (
+          <TouchableOpacity
+            key={n}
+            style={styles.varChip}
+            onPress={() => {
+              const d = new Date();
+              d.setDate(d.getDate() + n);
+              setDueDate(d);
+            }}
+          >
+            <Text style={styles.varChipText}>{n} days</Text>
+          </TouchableOpacity>
+        ))}
+      </View>
       {showDate && <DateTimePicker value={dueDate ?? new Date()} mode="date" onChange={onDateChange} />}
 
       <Text style={[styles.label, { marginTop: 18 }]}>Line items</Text>

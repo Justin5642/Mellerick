@@ -503,6 +503,13 @@ account, not by job. This finds the bills with no job and gets them assigned.
   number off each PDF and attach it to the job automatically (needs Gmail read scope on
   the Google connection → reconnect); unmatched ones land in this queue.
 
+**Invoice payment terms (16 Nov 2026; no migration).** New and Edit Invoice
+have a "Payment terms" drop-down (14 days / 30 days / Custom date) beside the
+due date (`components/invoice/payment-terms-field.tsx`, rules in
+`lib/invoice-terms.ts`, tested). A term fills `due_date` from the invoice date
+(today on New, `created_at` on Edit, Melbourne days); only `due_date` is
+stored. The phone's New Invoice has "14 days" / "30 days" chips.
+
 ---
 
 ## 2. The one rule that must never break
