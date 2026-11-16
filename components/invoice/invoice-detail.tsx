@@ -26,6 +26,7 @@ import type { JobSite } from "@/lib/job-site";
 import { invoiceProgress } from "@/lib/progress-claim";
 import type { JobReportRequest } from "@/lib/job-report";
 import { JobReportOptions } from "./job-report-options";
+import { attentionName, billingName } from "@/lib/customer-billing";
 import { InvoiceAttachmentsField, fileToBase64, type PickedAttachment } from "./invoice-attachments-field";
 import { InvoiceHours } from "./invoice-hours";
 
@@ -147,7 +148,7 @@ export function InvoiceDetail({ invoice, jobSite, xeroConnected, payments }: Pro
               <h1 className="text-xl font-bold text-slate-900">{formatInvoiceNumber(invoice.invoice_number)} — {invoice.title}</h1>
               <span className={`text-xs px-2 py-0.5 rounded-full font-medium capitalize ${invoiceStatusColors[status] ?? ""}`}>{status}</span>
             </div>
-            <p className="text-sm text-slate-500 mt-0.5">{invoice.customers?.name}</p>
+            <p className="text-sm text-slate-500 mt-0.5">{billingName(invoice.customers)}</p>
           </div>
         </div>
 
@@ -284,7 +285,8 @@ export function InvoiceDetail({ invoice, jobSite, xeroConnected, payments }: Pro
         <Card>
           <CardHeader><CardTitle className="text-sm">Customer</CardTitle></CardHeader>
           <CardContent className="text-sm space-y-1">
-            <p className="font-medium">{invoice.customers?.name}</p>
+            <p className="font-medium">{billingName(invoice.customers)}</p>
+            {attentionName(invoice.customers) && <p className="text-slate-500">Attn: {attentionName(invoice.customers)}</p>}
             {invoice.customers?.email && <p className="text-slate-500">{invoice.customers.email}</p>}
             {invoice.customers?.phone && <p className="text-slate-500">{invoice.customers.phone}</p>}
             {jobSite && (

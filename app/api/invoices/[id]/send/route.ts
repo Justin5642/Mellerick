@@ -36,7 +36,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
 
     const { data: invoice } = await supabase
       .from("invoices")
-      .select(`*, customers(name, email, phone), invoice_items(*), ${INVOICE_SITE_SELECT}`)
+      .select(`*, customers(name, company, email, phone), invoice_items(*), ${INVOICE_SITE_SELECT}`)
       .eq("id", id)
       .single();
 

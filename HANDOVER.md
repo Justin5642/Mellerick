@@ -489,6 +489,17 @@ whole send. Rules `lib/invoice-attachments.ts` (tested), field
 `components/invoice/invoice-attachments-field.tsx`. Bigger files would need a
 Storage upload first (a new office-only bucket + migration). Not on the phone.
 
+**Invoices are made out to the Company (16 Nov 2026; no migration).**
+Invoice and quote PDFs, their detail pages and the Xero contact used
+`customers.name` alone and ignored `company`, so the office swapped the two
+fields to get the business on the invoice. Now `billingName()` (company,
+else name) is billed and `attentionName()` adds "Attn: <name>" when they
+differ (`lib/customer-billing.ts`, tested). The form labels are "Contact Name"
+and "Company (invoices are made out to this)". Customers already swapped by
+hand should be swapped back. Xero matches contacts by name, so a customer
+whose Xero contact is the person's name gets a new contact under the company
+on its next push.
+
 **Xero analytics mirror (14 Nov 2026; branch `feat/xero-analytics-sync`; migration `0105`, first numbered 0098, applied 2026-11-14).**
 Renumbered 0098→0105 and 0099→0106 on merge (main already had its own 0098/0099).
 Record them in the ledger once: `insert into supabase_migrations.schema_migrations (version,name) values ('0105','xero_analytics'),('0106','xero_bill_allocations') on conflict do nothing;`

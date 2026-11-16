@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { attentionName, billingName } from "@/lib/customer-billing";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { createClient } from "@/lib/supabase/client";
@@ -176,7 +177,7 @@ export function QuoteDetail({ quote }: Props) {
               <h1 className="text-xl font-bold text-slate-900">#{quote.quote_number} — {quote.title}</h1>
               <span className={`text-xs px-2 py-0.5 rounded-full font-medium capitalize ${quoteStatusColors[status] ?? ""}`}>{status}</span>
             </div>
-            <p className="text-sm text-slate-500 mt-0.5">{quote.customers?.name}</p>
+            <p className="text-sm text-slate-500 mt-0.5">{billingName(quote.customers)}</p>
           </div>
         </div>
 
@@ -256,7 +257,8 @@ export function QuoteDetail({ quote }: Props) {
         <Card>
           <CardHeader><CardTitle className="text-sm">Customer</CardTitle></CardHeader>
           <CardContent className="text-sm space-y-1">
-            <p className="font-medium">{quote.customers?.name}</p>
+            <p className="font-medium">{billingName(quote.customers)}</p>
+            {attentionName(quote.customers) && <p className="text-slate-500">Attn: {attentionName(quote.customers)}</p>}
             {quote.customers?.email && <p className="text-slate-500">{quote.customers.email}</p>}
             {quote.customers?.phone && <p className="text-slate-500">{quote.customers.phone}</p>}
           </CardContent>
