@@ -290,6 +290,13 @@ that cost centre's budget. Cartage comes out of the drainage PO.
 - **PO tab**: new POs take a value and a split; each PO card edits its value,
   tags any line with a cost centre (Simpro lines 0087 couldn't place), and
   "Add cost centre to this PO" splits what's left.
+- **Edit and $0 POs** (Justin, Nov 2026): each PO card has **Edit** — number,
+  client, site, value and its lines — saved in place (`planBuilderPoEdit`:
+  lines updated by id, new inserted, removed deleted; `total_hours` = sum of
+  line hours). A line with supplier orders (0061 would cascade-delete them),
+  logged time or expenses can't be removed — set it to $0. On New Job and the
+  PO tab the value may be left blank when there are lines: it becomes the
+  lines' total, which may be $0 (a cartage line with hours only).
 - **Quote → job** (web) creates `<job number>-1` with the quote's subtotal (ex
   GST), unsplit, and opens the PO tab. Mobile quote conversion does not yet.
 - **Which builder PO an invoice is for** (1 Nov 2026): on New Invoice, a job
