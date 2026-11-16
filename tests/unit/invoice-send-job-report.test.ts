@@ -19,7 +19,7 @@ const buildJobReportDraft = vi.fn(async (..._a: unknown[]) => ({}));
 vi.mock("@/lib/api/guards", () => ({ requireOfficeOrAdmin: (...a: unknown[]) => requireOfficeOrAdmin(...a) }));
 vi.mock("@/lib/api/caller-client", () => ({ callerClient: (...a: unknown[]) => callerClient(...a) }));
 vi.mock("@/lib/pdf/render", () => ({ renderDocumentPdf: (...a: unknown[]) => renderDocumentPdf(...a) }));
-vi.mock("@/lib/resend", () => ({ getResend: () => ({ emails: { send: emailSend } }), getFromAddress: () => "billing@test" }));
+vi.mock("@/lib/resend", () => ({ getResend: () => ({ emails: { send: emailSend } }), getFromAddress: () => "billing@test", getReplyTo: () => ["accounts@test"] }));
 vi.mock("@/lib/business-info", () => ({ businessInfo: { name: "Test Co" } }));
 vi.mock("@/lib/job-report-data", () => ({
   loadJobReportContext: (...a: unknown[]) => loadJobReportContext(...a),
@@ -74,6 +74,8 @@ describe("invoice send — job report", () => {
     expect(loadJobReportContext).not.toHaveBeenCalled();
     expect(attachments()).toEqual(["invoice-42.pdf"]);
     expect(html()).not.toContain("job report");
+    // Replies go to the monitored mailbox (EMAIL_REPLY_TO), not the sending address.
+    expect((emailSend.mock.calls[0][0] as { replyTo: string[] }).replyTo).toEqual(["accounts@test"]);
   });
 
   it("attaches the report as a second PDF and says so in the email", async () => {

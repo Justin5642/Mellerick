@@ -23,6 +23,7 @@ vi.mock("@/lib/monitoring", () => ({ reportError: vi.fn() }));
 vi.mock("@/lib/resend", () => ({
   getResend: () => ({ emails: { send: (...a: unknown[]) => sendEmail(...a) } }),
   getFromAddress: () => "Mellerick <po@example.com>",
+  getReplyTo: () => ["accounts@example.com"],
 }));
 vi.mock("@/lib/supabase/admin", () => ({
   createAdminClient: vi.fn(() => {

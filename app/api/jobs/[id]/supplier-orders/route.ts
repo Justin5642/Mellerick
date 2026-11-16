@@ -3,7 +3,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { requireUser } from "@/lib/api/guards";
 import { consumeRateLimit, rateLimitedResponse, SUPPLIER_ORDER_LIMIT } from "@/lib/api/rate-limit";
 import { businessInfo } from "@/lib/business-info";
-import { getResend, getFromAddress } from "@/lib/resend";
+import { getResend, getFromAddress, getReplyTo } from "@/lib/resend";
 import { siteOneLine } from "@/lib/job-site";
 import { parseSupplierOrder, supplierOrderEmail } from "@/lib/supplier-orders";
 import { reportError } from "@/lib/monitoring";
@@ -328,7 +328,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
         from: getFromAddress(),
         to: order.supplierEmail,
         cc: businessInfo.email,
-        replyTo: businessInfo.email,
+        replyTo: getReplyTo(),
         subject: email.subject,
         html: email.html,
       });
