@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { View, Text, StyleSheet, TextInput, TouchableOpacity, FlatList, ActivityIndicator, Alert } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { supabase } from "../../lib/supabase";
@@ -14,6 +14,8 @@ import { useDataLayer } from "../../lib/data/DataProvider";
 import { useSyncSettled } from "../../lib/data/hooks/useSyncSettled";
 import { reconcileRows } from "../../lib/data/reconcile";
 import { joinSegments, useDictation } from "../../lib/dictation";
+import { canChangeStageNote, mergeStageNotes, validateStageNoteEdit } from "../../lib/stageNoteEdits";
+import { KeyboardSheet, KEYBOARD_SHEET_INPUT_FONT_SIZE } from "../KeyboardSheet";
 
 // The "office server": /api/ai/polish-note on the web app cleans up grammar
 // and voice-to-text artifacts with Claude.
@@ -55,6 +57,7 @@ interface Note {
 
 interface StageNote extends Note {
   stage: string;
+  author_id?: string | null;
 }
 
 // A provisional note shown the instant it's queued (also the offline path). It
@@ -64,14 +67,32 @@ function optimisticNote(id: string, content: string): Note {
   return { id, content, created_at: new Date().toISOString(), profiles: { full_name: "You" } };
 }
 
-function optimisticStageNote(id: string, stage: string, content: string): StageNote {
-  return { id, stage, content, created_at: new Date().toISOString(), profiles: { full_name: "You" } };
+function optimisticStageNote(id: string, stage: string, content: string, authorId: string): StageNote {
+  return { id, stage, content, author_id: authorId, created_at: new Date().toISOString(), profiles: { full_name: "You" } };
 }
+
+// After the flush the write is still failing: the server refused it (RLS 0074)
+// or could not be reached. It stays queued and, if refused for good, shows in
+// the sync badge's "not synced" list.
+const REFUSED_STAGE_NOTE =
+  "The office server hasn't accepted this change. You can only change your own stage notes. It will retry, and shows under \"not synced\" on the sync badge if it keeps failing.";
 
 // readOnly: a technician viewing a job they are not assigned to (opened from
 // Search). The database refuses their notes there (migration 0074), so the
-// composers are hidden rather than letting a note fail to sync later.
-export function JobNotesTab({ jobId, currentUserId, readOnly = false }: { jobId: string; currentUserId: string; readOnly?: boolean }) {
+// composers — and the stage-note edit/delete controls — are hidden rather than
+// letting a note fail to sync later.
+// canEditAll: office/admin, who may edit or delete anyone's stage note (0074).
+export function JobNotesTab({
+  jobId,
+  currentUserId,
+  readOnly = false,
+  canEditAll = false,
+}: {
+  jobId: string;
+  currentUserId: string;
+  readOnly?: boolean;
+  canEditAll?: boolean;
+}) {
   const [notes, setNotes] = useState<Note[]>([]);
   const [content, setContent] = useState("");
   const [saving, setSaving] = useState(false);
@@ -88,6 +109,15 @@ export function JobNotesTab({ jobId, currentUserId, readOnly = false }: { jobId:
   const [stageError, setStageError] = useState<unknown>(null);
   const [stageTranscribing, setStageTranscribing] = useState(false);
   const stageNotesComposer = useJobStageNotes();
+
+  // Edit / delete a stage note (same rule as the web and RLS 0074). Ids this
+  // screen has deleted stay hidden from reloads while the delete is queued.
+  const [editingStageNote, setEditingStageNote] = useState<StageNote | null>(null);
+  const [editStageText, setEditStageText] = useState("");
+  const [stageBusy, setStageBusy] = useState(false);
+  const removedStageIds = useRef(new Set<string>());
+  const canChange = (note: StageNote) =>
+    canChangeStageNote(note, { currentUserId, isOfficeOrAdmin: canEditAll, readOnly });
 
   // Voice-to-text for stage notes, on the phone itself (lib/dictation.ts):
   // words appear in the box as the technician talks; on Stop the dictated
@@ -128,7 +158,7 @@ export function JobNotesTab({ jobId, currentUserId, readOnly = false }: { jobId:
         .order("created_at", { ascending: false });
       const rows = unwrapRows(res as never, "JobNotesTab.loadStageNotes") as unknown as StageNote[];
       const pending = layer ? await layer.outbox.pendingRowIds() : new Set<string>();
-      setStageNotes((prev) => reconcileRows(prev, rows, pending));
+      setStageNotes((prev) => mergeStageNotes(prev, rows, pending, removedStageIds.current));
     } catch (e) {
       setStageError(e);
     }
@@ -147,11 +177,99 @@ export function JobNotesTab({ jobId, currentUserId, readOnly = false }: { jobId:
       const text = stageContent.trim();
       const stage = selectedStage;
       const { id } = await stageNotesComposer.addNote({ jobId, stage, authorId: currentUserId, content: text });
-      setStageNotes((prev) => [optimisticStageNote(id, stage, text), ...prev]);
+      setStageNotes((prev) => [optimisticStageNote(id, stage, text, currentUserId), ...prev]);
       setStageContent("");
     } finally {
       setStageSaving(false);
     }
+  }
+
+  function startStageEdit(note: StageNote) {
+    setEditingStageNote(note);
+    setEditStageText(note.content ?? "");
+  }
+
+  async function saveStageEdit() {
+    const note = editingStageNote;
+    if (!note || stageBusy || !stageNotesComposer.ready) return;
+    const checked = validateStageNoteEdit(editStageText);
+    if ("error" in checked) {
+      Alert.alert("Can't save", checked.error);
+      return;
+    }
+    setStageBusy(true);
+    const previous = note.content;
+    // Optimistic: the queued edit shows at once (also the offline path).
+    setStageNotes((prev) => prev.map((n) => (n.id === note.id ? { ...n, content: checked.content } : n)));
+    setEditingStageNote(null);
+    try {
+      const outcome = await stageNotesComposer.editNote({ id: note.id, content: checked.content });
+      // Still queued for retry, so the edit stays on screen; if the server
+      // keeps refusing it goes "dead" and the next reload shows the server's text.
+      if (outcome === "failed") Alert.alert("Note not updated", REFUSED_STAGE_NOTE);
+    } catch (e) {
+      setStageNotes((prev) => prev.map((n) => (n.id === note.id ? { ...n, content: previous } : n)));
+      Alert.alert("Note not updated", e instanceof Error ? e.message : "Try again.");
+    } finally {
+      setStageBusy(false);
+    }
+  }
+
+  function confirmDeleteStageNote(note: StageNote) {
+    const preview = note.content.length > 120 ? `${note.content.slice(0, 120)}…` : note.content;
+    Alert.alert("Delete this stage note?", `"${preview}"`, [
+      { text: "Cancel", style: "cancel" },
+      { text: "Delete", style: "destructive", onPress: () => void deleteStageNote(note) },
+    ]);
+  }
+
+  async function deleteStageNote(note: StageNote) {
+    if (stageBusy || !stageNotesComposer.ready) return;
+    setStageBusy(true);
+    removedStageIds.current.add(note.id);
+    setStageNotes((prev) => prev.filter((n) => n.id !== note.id));
+    try {
+      const outcome = await stageNotesComposer.deleteNote({ id: note.id });
+      // Still queued for retry, so it stays hidden; if the server keeps
+      // refusing it goes "dead" and the next reload brings the note back.
+      if (outcome === "failed") Alert.alert("Note not deleted", REFUSED_STAGE_NOTE);
+    } catch (e) {
+      removedStageIds.current.delete(note.id);
+      setStageNotes((prev) => (prev.some((n) => n.id === note.id) ? prev : [note, ...prev]));
+      Alert.alert("Note not deleted", e instanceof Error ? e.message : "Try again.");
+    } finally {
+      setStageBusy(false);
+    }
+  }
+
+  function stageNoteActions(note: StageNote) {
+    if (!canChange(note)) return null;
+    return (
+      <View style={styles.noteActions}>
+        <TouchableOpacity
+          accessibilityRole="button"
+          accessibilityLabel="Edit note"
+          onPress={() => startStageEdit(note)}
+          disabled={stageBusy}
+          hitSlop={8}
+          style={styles.noteActionButton}
+          testID={`stage-note-edit-${note.id}`}
+        >
+          <Ionicons name="pencil" size={16} color={colors.slate400} />
+        </TouchableOpacity>
+        <TouchableOpacity
+          accessibilityRole="button"
+          accessibilityLabel="Delete note"
+          onPress={() => confirmDeleteStageNote(note)}
+          disabled={stageBusy}
+          hitSlop={8}
+          style={styles.noteActionButton}
+          testID={`stage-note-delete-${note.id}`}
+        >
+          <Ionicons name="trash-outline" size={16} color={colors.slate400} />
+        </TouchableOpacity>
+      </View>
+    );
   }
 
   // Grouped by stage in the fixed workflow order, not by timestamp, so a
@@ -270,8 +388,11 @@ export function JobNotesTab({ jobId, currentUserId, readOnly = false }: { jobId:
 
       {currentStageNote && (
         <View style={styles.currentStageBanner}>
-          <View style={styles.currentStageBadge}>
-            <Text style={styles.currentStageBadgeText}>Currently at: {getJobStageLabel(currentStageNote.stage)}</Text>
+          <View style={styles.currentStageHeader}>
+            <View style={styles.currentStageBadge}>
+              <Text style={styles.currentStageBadgeText}>Currently at: {getJobStageLabel(currentStageNote.stage)}</Text>
+            </View>
+            {stageNoteActions(currentStageNote)}
           </View>
           <Text style={styles.currentStageContent} numberOfLines={2}>{currentStageNote.content}</Text>
           <Text style={styles.currentStageMeta}>
@@ -370,10 +491,13 @@ export function JobNotesTab({ jobId, currentUserId, readOnly = false }: { jobId:
                 <View key={note.id} style={styles.noteCard}>
                   <View style={styles.noteHeader}>
                     <Text style={styles.noteAuthor}>{note.profiles?.full_name ?? "Unknown"}</Text>
-                    <Text style={styles.noteDate}>
-                      {new Date(note.created_at).toLocaleDateString("en-AU", { day: "numeric", month: "short" })}{" "}
-                      {new Date(note.created_at).toLocaleTimeString("en-AU", { hour: "2-digit", minute: "2-digit" })}
-                    </Text>
+                    <View style={styles.noteHeaderRight}>
+                      <Text style={styles.noteDate}>
+                        {new Date(note.created_at).toLocaleDateString("en-AU", { day: "numeric", month: "short" })}{" "}
+                        {new Date(note.created_at).toLocaleTimeString("en-AU", { hour: "2-digit", minute: "2-digit" })}
+                      </Text>
+                      {stageNoteActions(note)}
+                    </View>
                   </View>
                   <Text style={styles.noteContent}>{note.content}</Text>
                 </View>
@@ -382,6 +506,37 @@ export function JobNotesTab({ jobId, currentUserId, readOnly = false }: { jobId:
           );
         })
       )}
+
+      <KeyboardSheet
+        visible={!!editingStageNote}
+        onRequestClose={() => setEditingStageNote(null)}
+        title={editingStageNote ? `Edit ${getJobStageLabel(editingStageNote.stage)} note` : "Edit note"}
+        testID="stage-note-edit-sheet"
+        footer={
+          <View style={styles.buttonRow}>
+            <TouchableOpacity style={styles.polishButton} onPress={() => setEditingStageNote(null)} disabled={stageBusy}>
+              <Text style={styles.polishButtonText}>Cancel</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.addButton}
+              onPress={() => void saveStageEdit()}
+              disabled={stageBusy || !editStageText.trim()}
+              testID="stage-note-edit-save"
+            >
+              <Text style={styles.addButtonText}>{stageBusy ? "..." : "Save"}</Text>
+            </TouchableOpacity>
+          </View>
+        }
+      >
+        <TextInput
+          style={[styles.input, styles.editInput]}
+          value={editStageText}
+          onChangeText={setEditStageText}
+          multiline
+          autoFocus
+          placeholder="Note text"
+        />
+      </KeyboardSheet>
 
       <View style={styles.divider} />
 
@@ -500,7 +655,12 @@ const styles = StyleSheet.create({
   addButton: { backgroundColor: colors.blue600, borderRadius: 10, paddingHorizontal: 16, paddingVertical: 12 },
   addButtonText: { color: "#fff", fontWeight: "600", fontSize: 14 },
   noteCard: { backgroundColor: colors.card, borderWidth: 1, borderColor: colors.border, borderRadius: 10, padding: 12, marginBottom: 8 },
-  noteHeader: { flexDirection: "row", justifyContent: "space-between", marginBottom: 4 },
+  noteHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 4 },
+  noteHeaderRight: { flexDirection: "row", alignItems: "center", gap: 4 },
+  noteActions: { flexDirection: "row", alignItems: "center", gap: 2, marginLeft: "auto" },
+  noteActionButton: { padding: 4 },
+  currentStageHeader: { flexDirection: "row", alignItems: "center", gap: 8 },
+  editInput: { fontSize: KEYBOARD_SHEET_INPUT_FONT_SIZE, minHeight: 120, textAlignVertical: "top" },
   scheduleTag: { alignSelf: "flex-start", backgroundColor: colors.blue100, borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2, marginBottom: 4 },
   scheduleTagText: { fontSize: 10, fontWeight: "700", color: colors.blue600 },
   noteAuthor: { fontSize: 12, fontWeight: "700", color: colors.slate700 },

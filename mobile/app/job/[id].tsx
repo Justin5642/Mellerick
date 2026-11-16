@@ -421,7 +421,7 @@ export default function JobDetailScreen() {
           />
         )}
         {activeTab === "documents" && <JobDocumentsTab jobId={job.id} />}
-        {activeTab === "notes" && userId && <JobNotesTab jobId={job.id} currentUserId={userId} readOnly={viewOnly} />}
+        {activeTab === "notes" && userId && <JobNotesTab jobId={job.id} currentUserId={userId} readOnly={viewOnly} canEditAll={isOfficeOrAdmin} />}
         {activeTab === "signature" && userId && (
           <JobSignatureTab
             jobId={job.id}

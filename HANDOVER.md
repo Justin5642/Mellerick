@@ -500,11 +500,19 @@ hand should be swapped back. Xero matches contacts by name, so a customer
 whose Xero contact is the person's name gets a new contact under the company
 on its next push.
 
-**Stage notes can be edited and deleted (web, 16 Nov 2026; no migration).**
+**Stage notes can be edited and deleted (web and phone, 16 Nov 2026; no migration).**
 Pencil and bin icons on the "Currently at" banner and on each stage note
-(`components/job/job-notes.tsx`). Shown for your own notes, or every note for
-office/admin, which is the 0074 RLS rule; a refused write shows an error. Not
-on the phone yet.
+(web `components/job/job-notes.tsx`, phone `mobile/components/job/notes.tsx`).
+Shown for your own notes, or every note for office/admin, which is the 0074
+RLS rule; never on view-only jobs. Rule in `mobile/lib/stageNoteEdits.ts`
+(`canChangeStageNote`, tested). On the phone, edit opens a `KeyboardSheet`
+and delete asks to confirm; both go through the outbox
+(`JobStageNotesRepository.update` — `content` only — and `.remove`), so they
+work offline. A write the server refuses (0 rows → the gateway fails it) gives
+an alert after the flush and ends in "not synced"; reloads keep a queued
+edit/delete on screen (`mergeStageNotes`) until it lands or dies. No sync-rule
+change (`tech_job_stage_notes` already has `author_id`). Reaches phones with
+the next build.
 
 **Technicians don't see other people's schedules (16 Nov 2026; migration `0107` applied 2026-11-16).**
 Justin: technicians may look any job up for its plans, but must not watch the
