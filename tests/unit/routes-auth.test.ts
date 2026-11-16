@@ -41,6 +41,8 @@ import { GET as geocodeGET } from "@/app/api/geocode/route";
 import { GET as xeroAuthGET } from "@/app/api/xero/auth/route";
 import { GET as xeroCallbackGET } from "@/app/api/xero/callback/route";
 import { GET as pollCalendarGET } from "@/app/api/google/poll-calendar/route";
+import { GET as hireEntriesGET } from "@/app/api/jobs/[id]/hire-entries/route";
+import { POST as hireInvoicePOST } from "@/app/api/jobs/[id]/hire-entries/invoice/route";
 
 // The service-role client now serves both the guard's role read and the
 // route's own token-table write (0075 makes those service-role only), so the
@@ -86,6 +88,38 @@ describe("POST /api/xero/expense-account-code (office/admin only)", () => {
     adminFrom.mockReturnValue(roleChain("office"));
     const res = await expenseCodePOST(post({ accountCode: "429" }));
     expect(res.status).toBe(200);
+  });
+});
+
+describe("Day Works / Hire routes", () => {
+  const JOB = "11111111-1111-4111-8111-111111111111";
+  const ctx = { params: Promise.resolve({ id: JOB }) };
+
+  it("GET 401s an unauthenticated caller before reading any rates", async () => {
+    serverGetUser.mockResolvedValue({ data: { user: null } });
+    const res = await hireEntriesGET(new NextRequest(`http://test.local/api/jobs/${JOB}/hire-entries`), ctx);
+    expect(res.status).toBe(401);
+    expect(adminFrom).not.toHaveBeenCalledWith("equipment_hire_options");
+    expect(adminFrom).not.toHaveBeenCalledWith("equipment");
+  });
+
+  it("invoice 401s an unauthenticated caller", async () => {
+    serverGetUser.mockResolvedValue({ data: { user: null } });
+    const res = await hireInvoicePOST(
+      new NextRequest(`http://test.local/api/jobs/${JOB}/hire-entries/invoice`, { method: "POST", body: JSON.stringify({ entryIds: [JOB] }) }),
+      ctx
+    );
+    expect(res.status).toBe(401);
+  });
+
+  it("invoice 403s a technician — only the office invoices Day Works", async () => {
+    serverGetUser.mockResolvedValue({ data: { user: { id: "u1" } } });
+    adminFrom.mockReturnValue(roleChain("technician"));
+    const res = await hireInvoicePOST(
+      new NextRequest(`http://test.local/api/jobs/${JOB}/hire-entries/invoice`, { method: "POST", body: JSON.stringify({ entryIds: [JOB] }) }),
+      ctx
+    );
+    expect(res.status).toBe(403);
   });
 });
 

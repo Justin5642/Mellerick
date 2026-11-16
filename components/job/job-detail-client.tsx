@@ -8,7 +8,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { isJobViewOnly, VIEW_ONLY_TABS } from "@/lib/job-view-only";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { ArrowLeft, Briefcase, FileText, Image, List, MessageSquare, PenLine, ClipboardList, Clock, Receipt, GitPullRequestArrow, DollarSign, Truck, TrendingUp, Trash2, CalendarClock } from "lucide-react";
+import { ArrowLeft, Briefcase, FileText, Image, List, MessageSquare, PenLine, ClipboardList, Clock, Receipt, GitPullRequestArrow, DollarSign, Truck, TrendingUp, Trash2, CalendarClock, Construction } from "lucide-react";
 import Link from "next/link";
 import { JobOverview } from "./job-overview";
 import { DeleteJobDialog } from "./delete-job-dialog";
@@ -36,6 +36,7 @@ const JobTime = dynamic(() => import("./job-time").then((m) => m.JobTime), { loa
 const JobVariations = dynamic(() => import("./job-variations").then((m) => m.JobVariations), { loading: TabLoading });
 const JobExpenses = dynamic(() => import("./job-expenses").then((m) => m.JobExpenses), { loading: TabLoading });
 const JobEquipment = dynamic(() => import("./job-equipment").then((m) => m.JobEquipment), { loading: TabLoading });
+const JobDayWorks = dynamic(() => import("./job-day-works").then((m) => m.JobDayWorks), { loading: TabLoading });
 const JobProfitability = dynamic(() => import("./job-profitability").then((m) => m.JobProfitability), { loading: TabLoading });
 // The schedule wizard is mounted on first open (it re-seeds itself on every
 // open anyway), so its code is only fetched when someone clicks Schedule Job.
@@ -46,7 +47,7 @@ import { getCurrentStageNote, getJobStageLabel } from "@/lib/job-stages";
 // Kept in sync with the `value`s in the TabsTrigger list below — used to
 // validate a `?tab=` query param (e.g. from the Approvals page's "Price &
 // review" link) before trusting it as the initial active tab.
-const TAB_VALUES = ["overview", "po", "time", "variations", "expenses", "equipment", "costing", "documents", "photos", "items", "notes", "signature"];
+const TAB_VALUES = ["overview", "po", "time", "variations", "expenses", "equipment", "dayworks", "costing", "documents", "photos", "items", "notes", "signature"];
 
 // Reference catalogs (pricing items, variation types, equipment) are only
 // read by one or two tabs, so the server page no longer loads them up front.
@@ -354,6 +355,7 @@ export function JobDetailClient({ job, currentUserId, photos: initialPhotos, doc
                 { value: "variations", label: "Variations", icon: GitPullRequestArrow },
                 { value: "expenses", label: "Expenses", icon: DollarSign },
                 { value: "equipment", label: "Equipment", icon: Truck },
+                { value: "dayworks", label: "Day Works / Hire", icon: Construction },
                 ...(isAdmin ? [{ value: "costing", label: "Costing", icon: TrendingUp }] : []),
                 { value: "documents", label: "Documents", icon: FileText },
                 { value: "photos", label: "Photos", icon: Image },
@@ -433,6 +435,9 @@ export function JobDetailClient({ job, currentUserId, photos: initialPhotos, doc
               ) : (
                 <TabLoading />
               )}
+            </TabsContent>
+            <TabsContent value="dayworks" className="m-0 h-full">
+              <JobDayWorks jobId={job.id} readOnly={viewOnly} />
             </TabsContent>
             {isAdmin && (
               <TabsContent value="costing" className="m-0 h-full">
