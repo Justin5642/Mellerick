@@ -34,6 +34,12 @@ export interface JobBooking {
   all_day: boolean;
   google_event_id?: string | null;
   updated_at?: string | null;
+  /**
+   * The scheduling note for THIS booking (0109, a draft). Absent on a database
+   * without the column (readers retry without it) and on rows a write
+   * returned (insertBookings selects BOOKING_COLUMNS).
+   */
+  note?: string | null;
 }
 
 export interface JobBookingWithNames extends JobBooking {
@@ -43,6 +49,40 @@ export interface JobBookingWithNames extends JobBooking {
 
 /** The columns every reader selects. */
 export const BOOKING_COLUMNS = "id, job_id, staff_id, cost_center_id, starts_at, ends_at, daily, all_day";
+
+/**
+ * The scheduling note's column, selected beside BOOKING_COLUMNS by the readers
+ * that show it. Kept out of BOOKING_COLUMNS on purpose: 0109 adds it, and a
+ * reader that selected it on a database without 0109 would fail outright —
+ * each reader that wants it retries without it (isMissingNoteColumn).
+ */
+export const BOOKING_NOTE_COLUMN = "note";
+
+/** 0109's check: job_bookings_note_length. */
+export const BOOKING_NOTE_MAX = 2000;
+
+/** A typed note as stored: trimmed, and empty means none. */
+export function normaliseBookingNote(note: string | null | undefined): string | null {
+  const t = (note ?? "").trim();
+  return t ? t : null;
+}
+
+/**
+ * What PostgREST answers when job_bookings.note does not exist yet (0109 not
+ * applied): 42703 undefined column on a select/filter, PGRST204 "column not in
+ * the schema cache" on an insert/update body. Matched on the code AND the
+ * column name, so an unrelated missing column is never mistaken for this one.
+ */
+export function isMissingNoteColumn(error: { code?: string | null; message?: string | null } | null | undefined): boolean {
+  return !!error && (error.code === "42703" || error.code === "PGRST204") && /\bnote\b/.test(error.message ?? "");
+}
+
+/** A write without its note — the retry on a database without 0109. */
+export function withoutNote<T extends { note?: string | null }>(row: T): Omit<T, "note"> {
+  const { note: _note, ...rest } = row;
+  void _note;
+  return rest;
+}
 
 /** The window columns a booking write sets — buildBookingWindow() returns exactly these. */
 export interface BookingWindowColumns {
@@ -187,10 +227,21 @@ export interface BookingDraft {
   staffIds: string[];
   costCenterId: string | null;
   schedule: ScheduleInput;
+  /** The scheduling note for this row's booking(s) (0109). Empty = none. */
+  note?: string | null;
 }
 
-export type BookingInsert = BookingWindowColumns & { job_id: string; staff_id: string | null; cost_center_id: string | null };
-export type BookingUpdate = { id: string; patch: Partial<BookingWindowColumns> & { staff_id?: string | null; cost_center_id?: string | null } };
+export type BookingInsert = BookingWindowColumns & {
+  job_id: string;
+  staff_id: string | null;
+  cost_center_id: string | null;
+  /** Only present when there is one — a write without a note never names the column. */
+  note?: string | null;
+};
+export type BookingUpdate = {
+  id: string;
+  patch: Partial<BookingWindowColumns> & { staff_id?: string | null; cost_center_id?: string | null; note?: string | null };
+};
 
 export interface BookingSavePlan {
   inserts: BookingInsert[];
@@ -228,6 +279,7 @@ export function planBookingSave(jobId: string, saved: readonly JobBooking[], row
     if (original && staff.includes(original.staff_id)) {
       staff = [original.staff_id, ...staff.filter((s) => s !== original.staff_id)];
     }
+    const note = normaliseBookingNote(row.note);
     let rest = staff;
     if (original) {
       kept.add(original.id);
@@ -237,10 +289,11 @@ export function planBookingSave(jobId: string, saved: readonly JobBooking[], row
       if (first !== original.staff_id) patch.staff_id = first;
       if (row.costCenterId !== original.cost_center_id) patch.cost_center_id = row.costCenterId;
       if (!sameBookingWindow(window, original)) Object.assign(patch, window);
+      if (note !== normaliseBookingNote(original.note)) patch.note = note;
       if (Object.keys(patch).length > 0) plan.updates.push({ id: original.id, patch });
     }
     for (const staffId of rest) {
-      plan.inserts.push({ job_id: jobId, staff_id: staffId, cost_center_id: row.costCenterId, ...window });
+      plan.inserts.push({ job_id: jobId, staff_id: staffId, cost_center_id: row.costCenterId, ...window, ...(note ? { note } : null) });
     }
   }
 
@@ -270,13 +323,13 @@ export async function loadJobBookings(
   jobId: string,
   staff: readonly { id: string; full_name: string }[],
 ): Promise<{ bookings: JobBookingWithNames[]; error: string | null; missingTable: boolean }> {
-  const { data, error } = await supabase
-    .from("job_bookings")
-    .select(`${BOOKING_COLUMNS}, google_event_id, updated_at`)
-    .eq("job_id", jobId)
-    .order("starts_at", { ascending: true });
+  const read = (columns: string) =>
+    supabase.from("job_bookings").select(columns).eq("job_id", jobId).order("starts_at", { ascending: true });
+  let { data, error } = await read(`${BOOKING_COLUMNS}, google_event_id, updated_at, ${BOOKING_NOTE_COLUMN}`);
+  // 0109 not applied: the bookings without their notes.
+  if (isMissingNoteColumn(error)) ({ data, error } = await read(`${BOOKING_COLUMNS}, google_event_id, updated_at`));
   if (error) return { bookings: [], error: error.message, missingTable: isBookingsTableMissing(error) };
-  const rows = (data ?? []) as JobBooking[];
+  const rows = (data ?? []) as unknown as JobBooking[];
   return { bookings: await withNames(supabase, rows, staff), error: null, missingTable: false };
 }
 
@@ -319,10 +372,10 @@ export type BookingWriteResult = { ok: true } | { ok: false; error: string };
 export type BookingWriteClient = {
   from(table: "job_bookings"): {
     insert(row: BookingInsert | BookingInsert[]): {
-      select(columns: string): PromiseLike<{ data: unknown[] | null; error: { message: string } | null }>;
+      select(columns: string): PromiseLike<{ data: unknown[] | null; error: { message: string; code?: string } | null }>;
     };
     update(patch: BookingUpdate["patch"], options?: { count: "exact" }): {
-      eq(column: "id", value: string): PromiseLike<{ error: { message: string } | null; count?: number | null }>;
+      eq(column: "id", value: string): PromiseLike<{ error: { message: string; code?: string } | null; count?: number | null }>;
     };
     delete(options?: { count: "exact" }): {
       eq(column: "id", value: string): PromiseLike<{ error: { message: string } | null; count?: number | null }>;
@@ -336,7 +389,15 @@ export type BookingWriteClient = {
 const REFUSED = "That booking could not be changed — it may have been removed, or you may not have permission.";
 
 export async function updateBooking(supabase: BookingWriteClient, id: string, patch: BookingUpdate["patch"]): Promise<BookingWriteResult> {
-  const { error, count } = await supabase.from("job_bookings").update(patch, { count: "exact" }).eq("id", id);
+  let { error, count } = await supabase.from("job_bookings").update(patch, { count: "exact" }).eq("id", id);
+  // 0109 not applied: save the rest; the note still reaches the job's Notes
+  // history (the dialog posts it there too). A note-only edit then has
+  // nothing left to write.
+  if (isMissingNoteColumn(error) && "note" in patch) {
+    const rest = withoutNote(patch);
+    if (Object.keys(rest).length === 0) return { ok: true };
+    ({ error, count } = await supabase.from("job_bookings").update(rest, { count: "exact" }).eq("id", id));
+  }
   if (error) return { ok: false, error: error.message };
   if (count === 0) return { ok: false, error: REFUSED };
   return { ok: true };
@@ -355,7 +416,11 @@ export async function insertBookings(
   rows: BookingInsert[],
 ): Promise<{ ok: true; rows: JobBooking[] } | { ok: false; error: string }> {
   if (rows.length === 0) return { ok: true, rows: [] };
-  const { data, error } = await supabase.from("job_bookings").insert(rows).select(BOOKING_COLUMNS);
+  let { data, error } = await supabase.from("job_bookings").insert(rows).select(BOOKING_COLUMNS);
+  // 0109 not applied: insert them without their notes (see updateBooking).
+  if (isMissingNoteColumn(error) && rows.some((r) => "note" in r)) {
+    ({ data, error } = await supabase.from("job_bookings").insert(rows.map(withoutNote)).select(BOOKING_COLUMNS));
+  }
   if (error) return { ok: false, error: error.message };
   // An insert RLS refuses is an error, not a silent zero — but check anyway.
   if ((data ?? []).length !== rows.length) return { ok: false, error: REFUSED };
@@ -387,6 +452,26 @@ export async function saveBookingPlan(
     partial = true;
   }
   return { ok: true };
+}
+
+/**
+ * The scheduling notes a dialog save should also post to the job's Notes
+ * history (job_notes, source 'schedule'): each row's note when it is new or
+ * changed from its saved booking's, once per distinct text. A row whose note
+ * is unchanged posts nothing — reopening the dialog to move a booking must not
+ * repeat the note in the history.
+ */
+export function scheduleNotesToLog(saved: readonly Pick<JobBooking, "id" | "note">[], rows: readonly Pick<BookingDraft, "bookingId" | "note">[]): string[] {
+  const savedById = new Map(saved.map((b) => [b.id, b]));
+  const out: string[] = [];
+  for (const row of rows) {
+    const note = normaliseBookingNote(row.note);
+    if (!note) continue;
+    const original = row.bookingId ? savedById.get(row.bookingId) : undefined;
+    if (original && normaliseBookingNote(original.note) === note) continue;
+    if (!out.includes(note)) out.push(note);
+  }
+  return out;
 }
 
 /** Whether a plan writes anything at all. */

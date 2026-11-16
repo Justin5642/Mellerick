@@ -176,7 +176,7 @@ export function planBoardMove(booking: BoardBooking, source: BoardCell, target: 
 
 /**
  * Shift-drop / Shift-paste: ADD a booking for the target technician that
- * copies the dragged one — same cost centre, same hours and shape — instead of
+ * copies the dragged one — same cost centre, note, hours and shape — instead of
  * moving it. Jobs are often done in pairs; building one used to mean opening
  * the Schedule dialog. Dropped on the same day the copy is the same window;
  * on another day (Week view) it starts there, as a move would.
@@ -203,7 +203,15 @@ export function planBoardAdd(
     (b) => b.job_id === booking.job_id && b.staff_id === target.staffId && b.cost_center_id === booking.cost_center_id && sameBookingWindow(b, window),
   );
   if (duplicate) return null;
-  return { job_id: booking.job_id, staff_id: target.staffId, cost_center_id: booking.cost_center_id, ...window };
+  // The copy carries the booking's scheduling note (0109, a draft): it is the same job
+  // of work for the second technician.
+  return {
+    job_id: booking.job_id,
+    staff_id: target.staffId,
+    cost_center_id: booking.cost_center_id,
+    ...window,
+    ...(booking.note ? { note: booking.note } : null),
+  };
 }
 
 /** The booking as it will look once a patch lands — for the optimistic update. */

@@ -14,7 +14,11 @@ jest.mock("../../supabase", () => {
         return b;
       };
     }
-    b.then = (resolve: (v: unknown) => unknown) => resolve(mockAnswers[table] ?? { data: [], error: null });
+    // An array answers one call per element, in order (a retry's second answer).
+    b.then = (resolve: (v: unknown) => unknown) => {
+      const a = mockAnswers[table];
+      return resolve((Array.isArray(a) ? a.shift() : a) ?? { data: [], error: null });
+    };
     return b;
   }
   return { supabase: { from: (table: string) => builder(table) } };
@@ -57,6 +61,7 @@ const mapped = {
   ends_at: "2026-10-20 04:30:00Z",
   daily: true,
   all_day: false,
+  note: null,
 };
 
 afterEach(() => {
@@ -119,6 +124,28 @@ describe("listJobBookings", () => {
     await listJobBookings("j1");
     const select = mockCalls.find((c) => c.method === "select")!;
     expect(select.args[0]).toContain("profiles!job_bookings_staff_id_fkey(full_name)");
+  });
+});
+
+describe("listJobBookings — the booking's scheduling note (0109, a draft)", () => {
+  it("local: carries the note", async () => {
+    const getAll = jest.fn().mockResolvedValue([{ ...localRow, note: "Use the side gate", staff_name: "Dave" }]);
+    setLocalReads(fakeReads(getAll));
+    expect(await listJobBookings("j1")).toEqual([{ ...mapped, note: "Use the side gate", staff_name: "Dave" }]);
+  });
+
+  it("remote: selects the note, and retries without it before 0109 is applied", async () => {
+    mockAnswers = {
+      job_bookings: [
+        { data: null, error: { code: "42703", message: "column job_bookings.note does not exist" } },
+        { data: [{ ...localRow, daily: true, all_day: false, staff: { full_name: "Dave" } }], error: null },
+      ],
+    };
+    expect(await listJobBookings("j1")).toEqual([{ ...mapped, staff_name: "Dave" }]);
+    const selects = mockCalls.filter((c) => c.method === "select").map((c) => String(c.args[0]));
+    expect(selects).toHaveLength(2);
+    expect(selects[0]).toMatch(/\bnote\b/);
+    expect(selects[1]).not.toMatch(/\bnote\b/);
   });
 });
 

@@ -8,6 +8,7 @@ import { colors } from "../../lib/theme";
 import { openExternalUrl, openNavigation } from "../../lib/open-external-url";
 import { JobHoursScoreboard } from "./hours-scoreboard";
 import { ScheduleNoteBanner } from "./schedule-note-banner";
+import type { JobBooking } from "../../lib/data/reads/bookings";
 import { dateRangeLabel } from "../../lib/scheduleDisplay";
 import { scheduleDays } from "../../lib/scheduling";
 
@@ -116,10 +117,15 @@ export function JobOverviewTab({
   currentUserId,
   readOnly = false,
   onChanged,
+  bookings = null,
+  isOffice = false,
 }: {
   job: Job;
   currentUserId: string | null;
   readOnly?: boolean;
+  /** The job's bookings — their current/upcoming scheduling notes head the tab (0109, a draft). */
+  bookings?: JobBooking[] | null;
+  isOffice?: boolean;
   /** Reload the job after something here changed it (the site pin). */
   onChanged?: () => void;
 }) {
@@ -211,7 +217,7 @@ export function JobOverviewTab({
   return (
     <View style={styles.container}>
       {/* Not on someone else's job: scheduling notes are the office's (16 Nov 2026). */}
-      {!readOnly && <ScheduleNoteBanner jobId={job.id} />}
+      {!readOnly && <ScheduleNoteBanner bookings={bookings} userId={currentUserId} isOffice={isOffice} />}
       {!readOnly && <JobHoursScoreboard job={job} currentUserId={currentUserId} />}
 
       {!readOnly && <>

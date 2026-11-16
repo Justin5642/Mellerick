@@ -185,15 +185,54 @@ more", the customer picker queries as you type, max 20). `lib/fetch-all-rows.ts`
 takes a query *builder function* and fetches pages 2..n in parallel — a
 Supabase query object mutates its own range, so pages cannot share one.
 
-**Scheduling notes surface on the mobile Overview tab, not just in Notes.**
-`job_notes` has a `source` column (migration `0062`); both the web and mobile
-"Schedule job" flows tag their note `source: "schedule"`. `mobile/components/
-job/schedule-note-banner.tsx` reads the latest one and renders it at the top of
-the Overview tab so a technician sees it on opening the job, instead of it
-sitting unlabeled among other entries on the 6th-of-7 Notes tab. The same note
-still also appears in Notes & Activity, badged "Scheduling note". `tech_job_notes`
-in `sync-streams.yaml` had to be updated to explicitly select the new column —
-it's a technician-visible stream, so columns are listed, never `.*`.
+**Scheduling notes belong to the booking (migration `0109` — DRAFT, not applied yet).**
+Justin, 16 Nov 2026: "When we schedule people and we have a schedule note,
+that note needs to be just for that schedule and not carry on every time the
+job is opened." Before: the note was only a `job_notes` row (`source:
+"schedule"`, 0062) and the phone's Overview banner showed the job's LATEST
+such note forever. Now:
+- **Stored on each booking:** `job_bookings.note` (text, ≤2000, 0109). The web
+  Schedule dialog has a note per booking row (inside the row editor; several
+  technicians on a row = the same note on each booking); the phone's Add /
+  Edit booking sheet has a "Note for this booking" step (edit reopens with
+  the saved note). Writes: web `planBookingSave` (`lib/bookings.ts`, note in
+  inserts / in the patch only when changed), phone
+  `ScheduleRepository.addBookings/updateBooking` through the outbox. Board
+  moves keep the note; Shift-copy carries it (`planBoardAdd`, mirrored).
+- **History unchanged:** a new or CHANGED note is also posted to `job_notes`
+  (`source: "schedule"`, once per distinct text — `scheduleNotesToLog`), so
+  Notes & Activity still shows it badged "Scheduling note". Re-saving to move a
+  booking posts nothing. The pre-bookings single-schedule form (database
+  without 0079) only writes `job_notes`, as before.
+- **Banner** (`mobile/components/job/schedule-note-banner.tsx`, rules
+  `mobile/lib/bookingNotes.ts`, tested): the notes of the job's bookings whose
+  last booked Melbourne day is today or later; a technician sees only their
+  own bookings' notes, office every booking's, labelled day/time (and whose).
+  No such note → no banner. Legacy `job_notes` schedule notes are no longer
+  read by it. Pop-up seen-ness is per booking id + note text. Hidden on
+  view-only jobs, as before. Data: the job screen's `listJobBookings` (local
+  first — `tech_job_bookings` now lists `note`; `office_job_bookings` is
+  `job_bookings.*`; `note` added to `mobile/lib/powersync/schema.ts` by hand).
+- **Web display:** the job Overview's bookings list and the board cards (one
+  line, full text on hover) show a booking's note.
+- **Before 0109 is applied nothing breaks:** readers select `note` and retry
+  without it on 42703 (web `loadJobBookings`, the board's embed, phone
+  `listJobBookings`); web writes retry without `note` on 42703/PGRST204
+  (`isMissingNoteColumn`), and the phone gateway does the same for queued
+  writes (`mobile/lib/data/optionalColumns.ts`) so a queued booking never
+  dead-letters over its note. The note then only reaches `job_notes`.
+- **Apply / deploy order:** paste `0109_job_booking_note.sql`, then
+  `supabase/tests/0109_job_booking_note_test.sql`, trust only `0109 PASSED`
+  (checked on a scratch Postgres 16 with the real 0079/0096/0107: applies
+  twice cleanly, passes, and fails with the length check dropped or the update
+  grant revoked; a note-only edit on a completed job's booking passes 0096 and
+  leaves the job's derived schedule alone). Mark 0109's header applied; record
+  it in the ledger. THEN redeploy the PowerSync streams
+  (`docs/powersync-deploy.md`) — not before: `tech_job_bookings` names
+  `note`, and PowerSync's validator was not run here against a database
+  without it (expect a "column not found" warning at best). Then merge web,
+  then ship the phone (the banner and sheet reach phones with the next build;
+  older builds keep showing the latest `job_notes` schedule note).
 
 **Supplier POs from the phone (migration `0085` applied 2026-10-28).**
 Justin, 28 Oct 2026: any technician, on any job, can raise a purchase order to
@@ -835,7 +874,8 @@ windows) — all 16 technician-visible streams are money-free:
   `tech_job_stage_notes` — no monetary column in the selected sets
 - `tech_job_bookings` (added for build 16; 0079/0080 applied 2026-10-19,
   deployed as sync config v5 on 2026-11-14) — 10 named columns: who, when, cost-centre **id**;
-  no money column exists on `job_bookings`
+  plus `note` (the booking's free-text scheduling note, 0109 — DRAFT; YAML
+  redeploy pending); no money column exists on `job_bookings`
 
 Office/admin streams gate on the caller's own profile row:
 
@@ -1650,6 +1690,7 @@ a shippable release.
 | **Xero analytics: reconnect Xero** | Justin | `0105` is applied (2026-11-14). After deploy, click **Connect Xero** once so the new read scopes are granted, then `POST /api/xero/sync-analytics` as admin (or wait for the nightly cron) to start the 24-month backfill. |
 | **Unallocated bills: set `WEEKLY_DIGEST_TO`** | Justin | `0106` is applied (2026-11-14). Set `WEEKLY_DIGEST_TO` in Vercel (Production) to the office recipients' addresses. |
 | **Day Works / Hire: check rates** | Justin | `0108` is applied (2026-11-16). Set rates for the machines the name match missed — Fleet → **Hire rates** lists them first — and confirm the twin-steer float's 30 km / $5 per km. |
+| **Booking notes: apply 0109, then redeploy sync streams** | Justin | Paste `0109_job_booking_note.sql` and its gate test (trust only `0109 PASSED`), then redeploy `sync-streams.yaml` (§1, "Scheduling notes belong to the booking"). Until then notes go only to the job's Notes. |
 | **Maestro flow 02** | Avi | Needs `ADMIN_EMAIL` / `ADMIN_PASSWORD` in the environment. The login subflow deliberately skips when a session already exists, so a password never passes through a script — which is why flows 01/03/04 could be run and 02 could not. |
 
 ### QA fixture — do not delete

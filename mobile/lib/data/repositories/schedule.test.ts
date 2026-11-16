@@ -187,6 +187,27 @@ describe("ScheduleRepository bookings", () => {
     expect(sides(second.ops)[0].dependsOn).toBe(writes(second.ops)[0].id);
   });
 
+  // 0109, a draft: the scheduling note belongs to the booking.
+  it("addBookings puts the note on every booking it makes, and names no note column without one", async () => {
+    const { outbox, ops } = captureOutbox();
+    await makeRepo(outbox).addBookings("j1", ["dave", "sam"], cols, null, "Use the side gate");
+    expect(writes(ops).map((w) => w.payload.note)).toEqual(["Use the side gate", "Use the side gate"]);
+
+    const plain = captureOutbox();
+    await makeRepo(plain.outbox).addBookings("j1", ["dave"], cols, null);
+    expect("note" in writes(plain.ops)[0].payload).toBe(false);
+  });
+
+  it("updateBooking writes a changed or cleared note", async () => {
+    const { outbox, ops } = captureOutbox();
+    await makeRepo(outbox).updateBooking("j1", "b1", { note: "New" });
+    expect(writes(ops)[0].payload).toEqual({ note: "New" });
+
+    const cleared = captureOutbox();
+    await makeRepo(cleared.outbox).updateBooking("j1", "b1", { note: null });
+    expect(writes(cleared.ops)[0].payload).toEqual({ note: null });
+  });
+
   it("updateBooking with nothing to change enqueues nothing", async () => {
     const { outbox, ops } = captureOutbox();
     await makeRepo(outbox).updateBooking("j1", "b1", {});

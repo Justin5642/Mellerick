@@ -32,7 +32,16 @@ export interface Booking {
   ends_at: string | null;
   daily: boolean;
   all_day: boolean;
+  /**
+   * The scheduling note for THIS booking (migration 0109, a draft). Null/absent when
+   * there is none, on a database without the column, or on a device whose
+   * sync streams predate it.
+   */
+  note?: string | null;
 }
+
+/** job_bookings_note_length (0109). */
+export const BOOKING_NOTE_MAX = 2000;
 
 /** The parts of a booking the clock-in needs, small enough to hand to the background task. */
 export type BookingWindow = Pick<Booking, "starts_at" | "ends_at" | "daily" | "cost_center_id">;
@@ -52,7 +61,7 @@ export function bookingWindow(b: Pick<Booking, "starts_at" | "ends_at" | "daily"
 }
 
 /** A new booking row, as the board model (./boardModel.ts planBoardAdd) plans it. Same shape as the web's. */
-export type BookingInsert = Pick<Booking, "job_id" | "staff_id" | "cost_center_id" | "starts_at" | "ends_at" | "daily" | "all_day">;
+export type BookingInsert = Pick<Booking, "job_id" | "staff_id" | "cost_center_id" | "starts_at" | "ends_at" | "daily" | "all_day" | "note">;
 
 function instant(iso: string | null): number | null {
   return iso === null ? null : new Date(iso).getTime();

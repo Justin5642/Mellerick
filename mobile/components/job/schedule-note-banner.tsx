@@ -1,128 +1,135 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { View, Text, StyleSheet, Modal, TouchableOpacity } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Ionicons } from "@expo/vector-icons";
-import { supabase } from "../../lib/supabase";
 import { colors } from "../../lib/theme";
+import { bookingNotesToShow, type BookingNoteToShow } from "../../lib/bookingNotes";
+import type { JobBooking } from "../../lib/data/reads/bookings";
 
-// Surfaces the note a scheduler (office, on web or mobile) typed into the
-// "Schedule job" flow at the very top of the Overview tab — the first thing a
-// technician sees on opening the job — instead of it sitting unlabeled, one
-// of many entries, on the 6th-of-7 Notes tab. Read-only here; the full history
-// (including every other schedule note, if the job was rescheduled more than
-// once) still lives in Notes & Activity, tagged "Scheduling note" there too.
+// The scheduling notes for this job's CURRENT and UPCOMING bookings, at the
+// very top of the Overview tab — the first thing a technician sees on opening
+// the job. Since migration 0109 (a draft until applied) a note belongs to the booking it was written
+// for (job_bookings.note), so it stops showing once that booking is over
+// (Justin, 16 Nov 2026: "that note needs to be just for that schedule and not
+// carry on every time the job is opened"). Which notes, for whom: see
+// lib/bookingNotes.ts. The job_notes copy (source 'schedule') stays in Notes &
+// Activity as the history, badged "Scheduling note"; it is no longer read
+// here, so a note written before 0109 no longer follows the job around.
 //
-// Best-effort, same reasoning as the calendar resync in overview.tsx: this is
-// supplementary context, not safety-critical, so a failed fetch just means no
-// banner rather than taking down a screen that otherwise loaded fine.
+// The bookings come from the job screen's own read (listJobBookings — local
+// first, so this works offline once the sync streams carry `note`). No
+// bookings, or none with a note that is still current → no banner.
 //
 // The first time a given note is shown on this device it ALSO pops up as a
 // modal, so a technician opening the job from My Jobs can't miss it. Seen-ness
-// is keyed by job + the note's created_at, so a new note (job rescheduled)
-// pops up again, while reopening the job or switching tabs doesn't.
-const SEEN_KEY_PREFIX = "scheduleNoteSeen:";
+// is keyed by booking + the note's text, so an edited note (or a new booking's
+// note) pops up again, while reopening the job or switching tabs doesn't.
+const SEEN_KEY_PREFIX = "scheduleNoteSeen:booking:";
 
-export function seenKey(jobId: string): string {
-  return `${SEEN_KEY_PREFIX}${jobId}`;
+export function seenKey(bookingId: string): string {
+  return `${SEEN_KEY_PREFIX}${bookingId}`;
 }
 
-/** True when this note hasn't been acknowledged on this device yet. */
-export async function shouldPopUp(jobId: string, noteCreatedAt: string): Promise<boolean> {
+/** True when this booking's note (this exact text) hasn't been acknowledged on this device yet. */
+export async function shouldPopUp(bookingId: string, note: string): Promise<boolean> {
   try {
-    return (await AsyncStorage.getItem(seenKey(jobId))) !== noteCreatedAt;
+    return (await AsyncStorage.getItem(seenKey(bookingId))) !== note;
   } catch {
     return false; // storage unavailable: the banner still shows; don't nag
   }
 }
 
-export async function markSeen(jobId: string, noteCreatedAt: string): Promise<void> {
+export async function markSeen(bookingId: string, note: string): Promise<void> {
   try {
-    await AsyncStorage.setItem(seenKey(jobId), noteCreatedAt);
+    await AsyncStorage.setItem(seenKey(bookingId), note);
   } catch {
     // Best-effort: worst case it pops up once more next time.
   }
 }
 
-interface ScheduleNote {
-  content: string;
-  created_at: string;
-  profiles: { full_name: string } | null;
+function label(n: BookingNoteToShow): string {
+  return n.staffName ? `${n.staffName} · ${n.when}` : n.when;
 }
 
-export function ScheduleNoteBanner({ jobId }: { jobId: string }) {
-  const [note, setNote] = useState<ScheduleNote | null>(null);
-  const [popUp, setPopUp] = useState(false);
+export function ScheduleNoteBanner({
+  bookings,
+  userId,
+  isOffice,
+}: {
+  /** The job's bookings (null before bookings exist, or when unreadable — no banner). */
+  bookings: JobBooking[] | null | undefined;
+  userId: string | null;
+  isOffice: boolean;
+}) {
+  const notes = useMemo(() => bookingNotesToShow(bookings, { userId, isOffice }), [bookings, userId, isOffice]);
+  const [unseen, setUnseen] = useState<BookingNoteToShow[]>([]);
+  // Stands for `notes` in the effect below: a fresh array holding the same
+  // notes (every bookings reload) must not re-run it.
+  const notesKey = JSON.stringify(notes.map((n) => [n.bookingId, n.note]));
 
   useEffect(() => {
     let cancelled = false;
-    async function load() {
-      try {
-        const { data } = await supabase
-          .from("job_notes")
-          .select("content, created_at, profiles(full_name)")
-          .eq("job_id", jobId)
-          .eq("source", "schedule")
-          .order("created_at", { ascending: false })
-          .limit(1);
-        const latest = (data?.[0] as unknown as ScheduleNote) ?? null;
-        if (cancelled) return;
-        setNote(latest);
-        if (latest && (await shouldPopUp(jobId, latest.created_at)) && !cancelled) setPopUp(true);
-      } catch {
-        // Best-effort — see file comment.
-      }
-    }
-    void load();
+    void (async () => {
+      const fresh: BookingNoteToShow[] = [];
+      for (const n of notes) if (await shouldPopUp(n.bookingId, n.note)) fresh.push(n);
+      if (!cancelled) setUnseen(fresh);
+    })();
     return () => {
       cancelled = true;
     };
-  }, [jobId]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [notesKey]);
 
-  if (!note) return null;
+  if (notes.length === 0) return null;
 
   function dismiss() {
-    setPopUp(false);
-    if (note) void markSeen(jobId, note.created_at);
+    const seen = unseen;
+    setUnseen([]);
+    for (const n of seen) void markSeen(n.bookingId, n.note);
   }
-
-  const author = note.profiles?.full_name ?? "Office";
-  const when = new Date(note.created_at).toLocaleDateString("en-AU", { day: "numeric", month: "short" });
 
   return (
     <>
-    <Modal visible={popUp} transparent animationType="fade" onRequestClose={dismiss}>
-      <View style={styles.overlay}>
-        <View style={styles.dialog} accessibilityRole="alert">
-          <View style={styles.header}>
-            <Ionicons name="calendar" size={16} color={colors.blue600} />
-            <Text style={styles.dialogTitle}>Scheduling note</Text>
+      <Modal visible={unseen.length > 0} transparent animationType="fade" onRequestClose={dismiss}>
+        <View style={styles.overlay}>
+          <View style={styles.dialog} accessibilityRole="alert">
+            <View style={styles.header}>
+              <Ionicons name="calendar" size={16} color={colors.blue600} />
+              <Text style={styles.dialogTitle}>Scheduling note{unseen.length === 1 ? "" : "s"}</Text>
+            </View>
+            {unseen.map((n) => (
+              <View key={n.bookingId} style={styles.item}>
+                <Text style={styles.meta}>{label(n)}</Text>
+                <Text style={styles.dialogContent}>{n.note}</Text>
+              </View>
+            ))}
+            <TouchableOpacity style={styles.okBtn} onPress={dismiss} accessibilityLabel="Dismiss scheduling note">
+              <Text style={styles.okText}>Got it</Text>
+            </TouchableOpacity>
           </View>
-          <Text style={styles.dialogContent}>{note.content}</Text>
-          <Text style={styles.meta}>{author} · {when}</Text>
-          <TouchableOpacity style={styles.okBtn} onPress={dismiss} accessibilityLabel="Dismiss scheduling note">
-            <Text style={styles.okText}>Got it</Text>
-          </TouchableOpacity>
         </View>
+      </Modal>
+      <View style={styles.banner}>
+        <View style={styles.header}>
+          <Ionicons name="calendar" size={14} color={colors.blue600} />
+          <Text style={styles.headerText}>Scheduling note{notes.length === 1 ? "" : "s"}</Text>
+        </View>
+        {notes.map((n) => (
+          <View key={n.bookingId} style={styles.item}>
+            <Text style={styles.meta}>{label(n)}</Text>
+            <Text style={styles.content}>{n.note}</Text>
+          </View>
+        ))}
       </View>
-    </Modal>
-    <View style={styles.banner}>
-      <View style={styles.header}>
-        <Ionicons name="calendar" size={14} color={colors.blue600} />
-        <Text style={styles.headerText}>Scheduling note</Text>
-      </View>
-      <Text style={styles.content}>{note.content}</Text>
-      <Text style={styles.meta}>
-        {author} · {when}
-      </Text>
-    </View>
     </>
   );
 }
 
 const styles = StyleSheet.create({
-  banner: { backgroundColor: colors.blue100, borderRadius: 10, padding: 12, marginBottom: 12, gap: 4 },
+  banner: { backgroundColor: colors.blue100, borderRadius: 10, padding: 12, marginBottom: 12, gap: 8 },
   header: { flexDirection: "row", alignItems: "center", gap: 6 },
   headerText: { fontSize: 12, fontWeight: "700", color: colors.blue600, textTransform: "uppercase" },
+  item: { gap: 2 },
   content: { fontSize: 14, color: colors.slate900 },
   meta: { fontSize: 11, color: colors.slate400 },
   overlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.4)", justifyContent: "center", padding: 24 },

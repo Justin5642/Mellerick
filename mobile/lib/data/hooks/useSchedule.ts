@@ -20,9 +20,9 @@ export function useSchedule() {
   // The new booking ids come back so the screen can show the rows at once —
   // offline they reach the device mirror only after they have synced.
   const addBookings = useCallback(
-    async (jobId: string, staffIds: string[], columns: ScheduleColumns, costCenterId: string | null) => {
+    async (jobId: string, staffIds: string[], columns: ScheduleColumns, costCenterId: string | null, note: string | null = null) => {
       if (!layer) throw new Error("Data layer not ready");
-      const ids = await layer.schedule.addBookings(jobId, staffIds, columns, costCenterId);
+      const ids = await layer.schedule.addBookings(jobId, staffIds, columns, costCenterId, note);
       return { ids, synced: await flush() };
     },
     [layer, flush]

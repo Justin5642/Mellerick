@@ -34,6 +34,18 @@ export interface JobBooking extends Booking {
 const COLUMNS = "id, job_id, staff_id, cost_center_id, starts_at, ends_at, daily, all_day";
 
 /**
+ * The booking's scheduling note (migration 0109, a draft). Selected only by the reads
+ * that show it, and each retries without it on a database where 0109 is not
+ * applied yet (isMissingNoteColumn) — the bookings then simply have no notes.
+ */
+const NOTE_COLUMN = "note";
+
+/** 42703 (undefined column) / PGRST204 naming `note`: 0109 not applied. Code AND column, never the message alone. */
+export function isMissingNoteColumn(error: { code?: string; message?: string } | null | undefined): boolean {
+  return !!error && (error.code === "42703" || error.code === "PGRST204") && /\bnote\b/.test(error.message ?? "");
+}
+
+/**
  * True when PostgREST says the table is not there — 0079 not applied yet.
  * PGRST205 is "not in the schema cache" (current PostgREST); 42P01 is
  * Postgres' undefined_table, which older versions passed through. Matched on
@@ -52,6 +64,7 @@ interface RawBookingRow {
   ends_at: string | null;
   daily: boolean | number | null;
   all_day: boolean | number | null;
+  note?: string | null;
 }
 
 function mapBooking(r: RawBookingRow): Booking {
@@ -64,6 +77,7 @@ function mapBooking(r: RawBookingRow): Booking {
     ends_at: r.ends_at ?? null,
     daily: bool(r.daily) ?? false,
     all_day: bool(r.all_day) ?? false,
+    note: r.note ?? null,
   };
 }
 
@@ -72,7 +86,7 @@ function mapBooking(r: RawBookingRow): Booking {
 // ---------------------------------------------------------------------------
 
 export const SQL_JOB_BOOKINGS = `
-  SELECT b.id, b.job_id, b.staff_id, b.cost_center_id, b.starts_at, b.ends_at, b.daily, b.all_day,
+  SELECT b.id, b.job_id, b.staff_id, b.cost_center_id, b.starts_at, b.ends_at, b.daily, b.all_day, b.note,
          p.full_name AS staff_name
   FROM job_bookings b
   LEFT JOIN profiles p ON p.id = b.staff_id
@@ -100,11 +114,14 @@ export async function listJobBookings(jobId: string): Promise<JobBooking[] | nul
       return rows.map((r) => ({ ...mapBooking(r), staff_name: r.staff_name ?? null }));
     },
     async () => {
-      const res = await supabase
-        .from("job_bookings")
-        .select(`${COLUMNS}, staff:profiles!job_bookings_staff_id_fkey(full_name)`)
-        .eq("job_id", jobId)
-        .order("starts_at");
+      const read = (columns: string) =>
+        supabase
+          .from("job_bookings")
+          .select(`${columns}, staff:profiles!job_bookings_staff_id_fkey(full_name)`)
+          .eq("job_id", jobId)
+          .order("starts_at");
+      let res = await read(`${COLUMNS}, ${NOTE_COLUMN}`);
+      if (isMissingNoteColumn(res.error)) res = await read(COLUMNS);
       if (isMissingTable(res.error)) return null;
       const rows = unwrapRows(res as never, "listJobBookings") as unknown as (RawBookingRow & {
         staff: { full_name: string } | null;

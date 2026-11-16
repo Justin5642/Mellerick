@@ -15,6 +15,8 @@ export interface BookingPatch {
   costCenterId?: string | null;
   /** The window and both 0071 flags, always together (buildScheduleColumns, or a moved window). */
   columns?: ScheduleWindowColumns;
+  /** The booking's scheduling note (0109, a draft); null clears it. */
+  note?: string | null;
 }
 
 export interface RescheduleFlags {
@@ -159,14 +161,16 @@ export class ScheduleRepository {
 
   /**
    * One booking per technician on the same window and cost centre — the
-   * editor's "add" row. No technicians = one unassigned booking.
+   * editor's "add" row. No technicians = one unassigned booking. Each
+   * carries the row's scheduling note (0109), if any.
    * Returns the new booking ids, in `staffIds` order.
    */
   async addBookings(
     jobId: string,
     staffIds: string[],
     columns: ScheduleColumns,
-    costCenterId: string | null
+    costCenterId: string | null,
+    note: string | null = null
   ): Promise<string[]> {
     const people: (string | null)[] = staffIds.length > 0 ? [...new Set(staffIds)] : [null];
     const ids: string[] = [];
@@ -178,6 +182,9 @@ export class ScheduleRepository {
         staff_id: staffId,
         cost_center_id: costCenterId,
         ...bookingColumns(columns),
+        // Only named when there is one, so a booking without a note writes
+        // exactly what it did before 0109 (see optionalColumns.ts).
+        ...(note ? { note } : null),
       });
       ids.push(rowId);
     }
@@ -190,6 +197,7 @@ export class ScheduleRepository {
     if (patch.staffId !== undefined) payload.staff_id = patch.staffId;
     if (patch.costCenterId !== undefined) payload.cost_center_id = patch.costCenterId;
     if (patch.columns) Object.assign(payload, bookingColumns(patch.columns));
+    if (patch.note !== undefined) payload.note = patch.note;
     if (Object.keys(payload).length === 0) return;
     const opId = await this.writeBooking("update", bookingId, payload);
     await this.syncCalendar(jobId, opId);

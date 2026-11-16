@@ -294,6 +294,7 @@ export function JobOverview({ job, readOnly = false, bookings, bookingsError, hi
                         {describeBooking(b)}
                         {b.all_day ? " · All day" : ""}
                       </p>
+                      {b.note && <p className="text-xs text-amber-800 whitespace-pre-wrap mt-0.5">Note: {b.note}</p>}
                     </div>
                   </li>
                 ))}

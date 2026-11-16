@@ -19,7 +19,7 @@ import { businessTodayKey, formatScheduleSummary, shortDayLabel } from "../../li
 import { localDateKey } from "../../lib/date";
 import type { JobCostCentre } from "../../lib/data/reads/jobBilling";
 import type { JobBooking } from "../../lib/data/reads/bookings";
-import { bookingColumns, bookingWindow } from "../../lib/bookings";
+import { BOOKING_NOTE_MAX, bookingColumns, bookingWindow } from "../../lib/bookings";
 import { closedJobScheduleMessage, isJobClosedForScheduling } from "../../lib/jobSchedulable";
 import { KeyboardSheet, KEYBOARD_SHEET_INPUT_FONT_SIZE } from "../KeyboardSheet";
 
@@ -165,7 +165,9 @@ export function ScheduleJobModal({
     }
     setShowDatePicker(null);
     setConflictsByTechnician({});
-    setNoteText("");
+    // A booking's own scheduling note (0109, a draft) reopens with it, so it can be
+    // changed or cleared; a new booking starts blank.
+    setNoteText(editing?.note ?? "");
   }
 
   useEffect(() => {
@@ -302,8 +304,6 @@ export function ScheduleJobModal({
   // The single-schedule form needs a crew (as it always did); a booking may
   // be unassigned — the board's Unassigned row.
   const needsTechnician = !isBookings;
-  // An edit changes one booking's who/when/stage; a note belongs with a new booking.
-  const skipNotes = mode.kind === "edit";
 
   function staffName(id: string | null): string | null {
     return id ? (staff.find((s) => s.id === id)?.full_name ?? null) : null;
@@ -312,24 +312,31 @@ export function ScheduleJobModal({
   async function confirmBooking() {
     if (!columns || saving || !ready || !bookings || isJobClosedForScheduling(jobStatus)) return;
     setSaving(true);
+    // The note is this booking's (0109): it shows on the technician's Overview
+    // only while the booking is current or upcoming.
+    const note = noteText.trim() || null;
+    const previousNote = mode.kind === "edit" ? (mode.booking.note ?? "").trim() || null : null;
     try {
       if (mode.kind === "edit") {
         const b = mode.booking;
         const staffId = technicianIds[0] ?? null;
-        await updateBooking(jobId, b.id, { staffId, costCenterId, columns });
+        await updateBooking(jobId, b.id, { staffId, costCenterId, columns, ...(note !== previousNote ? { note } : null) });
         const next = bookings.map((x) =>
-          x.id === b.id ? { ...x, staff_id: staffId, staff_name: staffName(staffId), cost_center_id: costCenterId, ...bookingColumns(columns) } : x
+          x.id === b.id
+            ? { ...x, staff_id: staffId, staff_name: staffName(staffId), cost_center_id: costCenterId, note, ...bookingColumns(columns) }
+            : x
         );
         onBookingsChanged?.(next.sort((a, c) => a.starts_at.localeCompare(c.starts_at)));
       } else {
         const people = technicianIds.length > 0 ? [...new Set(technicianIds)] : [null];
-        const { ids } = await addBookings(jobId, technicianIds, columns, costCenterId);
+        const { ids } = await addBookings(jobId, technicianIds, columns, costCenterId, note);
         const added: JobBooking[] = ids.map((id, i) => ({
           id,
           job_id: jobId,
           staff_id: people[i],
           staff_name: staffName(people[i]),
           cost_center_id: costCenterId,
+          note,
           ...bookingColumns(columns),
         }));
         onBookingsChanged?.([...bookings, ...added].sort((a, c) => a.starts_at.localeCompare(c.starts_at)));
@@ -339,13 +346,14 @@ export function ScheduleJobModal({
       Alert.alert("Couldn't save the booking", e instanceof Error ? e.message : "Please try again.");
       return;
     }
-    // Same as the single-schedule path: a note failure is reported on its
-    // own, never as the booking failing.
-    const trimmed = noteText.trim();
+    // The note also goes to the job's Notes & Activity as history (job_notes,
+    // source 'schedule'), but only when it is new or changed — re-saving a
+    // booking to move it must not repeat it there. Same as the single-schedule
+    // path: a note failure is reported on its own, never as the booking failing.
     let noteFailed = false;
-    if (trimmed && mode.kind === "add") {
+    if (note && note !== previousNote) {
       try {
-        await addNote({ jobId, authorId: currentUserId, content: trimmed, source: "schedule" });
+        await addNote({ jobId, authorId: currentUserId, content: note, source: "schedule" });
       } catch {
         noteFailed = true;
       }
@@ -461,7 +469,7 @@ export function ScheduleJobModal({
               ? (isBookings ? setMode({ kind: "list" }) : onClose())
               : setStep(
                   step === "confirm"
-                    ? (skipNotes ? (hasCostCenters ? "stage" : "time") : "notes")
+                    ? "notes"
                     : step === "notes"
                     ? (hasCostCenters ? "stage" : "time")
                     : step === "stage"
@@ -485,14 +493,14 @@ export function ScheduleJobModal({
         {step === "time" && (
           <TouchableOpacity
             style={[styles.doneBtn, !!windowError && styles.doneBtnDisabled]}
-            onPress={() => setStep(hasCostCenters ? "stage" : skipNotes ? "confirm" : "notes")}
+            onPress={() => setStep(hasCostCenters ? "stage" : "notes")}
             disabled={!!windowError}
           >
             <Text style={styles.doneText}>Next</Text>
           </TouchableOpacity>
         )}
         {step === "stage" && (
-          <TouchableOpacity style={styles.doneBtn} onPress={() => setStep(skipNotes ? "confirm" : "notes")}>
+          <TouchableOpacity style={styles.doneBtn} onPress={() => setStep("notes")}>
             <Text style={styles.doneText}>Next</Text>
           </TouchableOpacity>
         )}
@@ -550,6 +558,11 @@ export function ScheduleJobModal({
                     Stage: {costCenters.find((cc) => cc.id === b.cost_center_id)?.name ?? "—"}
                   </Text>
                 )}
+                {b.note ? (
+                  <Text style={styles.bookingSub} numberOfLines={2}>
+                    Note: {b.note}
+                  </Text>
+                ) : null}
               </View>
               <TouchableOpacity onPress={() => openForm({ kind: "edit", booking: b })} accessibilityLabel="Edit booking" style={styles.iconBtn}>
                 <Ionicons name="create-outline" size={19} color={colors.blue600} />
@@ -705,17 +718,20 @@ export function ScheduleJobModal({
 
       {step === "notes" && (
         <View style={{ gap: 6 }}>
-          <Text style={styles.label}>Notes for the technician (optional)</Text>
+          <Text style={styles.label}>{isBookings ? "Note for this booking (optional)" : "Notes for the technician (optional)"}</Text>
           <TextInput
             style={[styles.input, styles.inputMultiline]}
             value={noteText}
             onChangeText={setNoteText}
             placeholder="What should they achieve on this job today?"
+            maxLength={isBookings ? BOOKING_NOTE_MAX : undefined}
             placeholderTextColor={colors.slate400}
             multiline
           />
           <Text style={styles.hint}>
-            Posted to this job&apos;s Notes tab, visible to everyone assigned.
+            {isBookings
+              ? "Shown at the top of the job to the technician booked, until this booking is over. Also kept in the job's Notes."
+              : "Posted to this job's Notes tab, visible to everyone assigned."}
           </Text>
         </View>
       )}
@@ -732,6 +748,11 @@ export function ScheduleJobModal({
               Stage: {costCenters.find((cc) => cc.id === costCenterId)?.name ?? "None"}
             </Text>
           )}
+          {isBookings && noteText.trim() ? (
+            <Text style={styles.confirmLine} numberOfLines={3}>
+              Note: {noteText.trim()}
+            </Text>
+          ) : null}
           <Text style={styles.hint}>
             This sets the planned schedule block only — worked hours are still captured separately via clock-on/clock-off.
           </Text>

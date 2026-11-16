@@ -231,6 +231,8 @@ const job_bookings = new Table({
   created_at: column.text,
   updated_at: column.text,
   sync_office: column.integer,
+  // 0109 (DRAFT): added by hand, as the generator emits it once applied.
+  note: column.text,
 }, {
   indexes: {
     job_start: ['job_id', 'starts_at'],
