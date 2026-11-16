@@ -4,12 +4,18 @@ The app builds, signs (see the warning below), and runs. Everything blocking a
 store release needs a credential or an account that only the owner can create.
 This file is the exact sequence, with the reasons a step exists.
 
+> **iPhone, Nov 2026:** the Apple account, EAS credentials and TestFlight
+> auto-submit are all in place; parts of this file below predate that. The
+> current path from TestFlight to a private App Store release is
+> [`APPLE-PRIVATE-RELEASE.md`](APPLE-PRIVATE-RELEASE.md).
+
 ## Identifiers (already set, do not change casually)
 
 | | |
 |---|---|
 | Bundle ID (iOS) / package (Android) | `au.com.mellerick.field` |
-| EAS project | `cf2715d8-b2fc-420f-b5e3-61eb266bc49d` (owner `avi770`) |
+| EAS project | `2a14a6a0-9d24-493b-97c1-5a72273e20b4` (owner `justin5642`, as in `app.json`) |
+| App Store Connect app | `6806677435`, team `864FRPRM47` |
 | Slug | `mellerick-field` |
 | Version | `1.0.0` (build numbers auto-increment via `appVersionSource: remote`) |
 

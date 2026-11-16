@@ -506,7 +506,7 @@ Pencil and bin icons on the "Currently at" banner and on each stage note
 office/admin, which is the 0074 RLS rule; a refused write shows an error. Not
 on the phone yet.
 
-**Technicians don't see other people's schedules (16 Nov 2026; migration `0107` NOT YET APPLIED).**
+**Technicians don't see other people's schedules (16 Nov 2026; migration `0107` applied 2026-11-16).**
 Justin: technicians may look any job up for its plans, but must not watch the
 schedule or the office's work. On a job they are NOT on (web and phone):
 - no schedule anywhere — header line, Overview's Schedule card, the phone's
@@ -519,12 +519,9 @@ schedule or the office's work. On a job they are NOT on (web and phone):
 - the web Jobs list shows no dates to technicians.
 On jobs they ARE on, nothing changes: they see the whole crew's bookings
 (Justin's choice). Search and opening any job still work.
-- **Database:** `0107` replaces job_bookings' `using (true)` SELECT with
-  "office/admin, or `user_can_manage_job`", dropped by enumeration and
-  asserted. Apply it, then run `supabase/tests/0107_…_test.sql` (impersonates a
-  real technician; trust only the final `0107 PASSED`). Then change its header
-  to applied. Until then the app hides bookings but a technician with the anon
-  key could still query them.
+- **Database:** `0107` (applied 2026-11-16, gate test passed) replaces
+  job_bookings' `using (true)` SELECT with "office/admin, or
+  `user_can_manage_job`", dropped by enumeration and asserted.
 - **Still readable at the database** (left open, hidden in the app): jobs'
   dates, job_notes, job_stage_notes. Closing those needs column-level work on
   `jobs` and would break job look-ups; not done.
@@ -1508,6 +1505,19 @@ markdown.
 listing on either store. iPhone only: `ios.supportsTablet` is `false`, so no
 iPad screenshots are needed. Apple refuses dropping iPad support on an app that
 has ever been *released* with it; this was turned off before the first release.
+
+**iPhone private release plan (16 Nov 2026): [`mobile/APPLE-PRIVATE-RELEASE.md`](mobile/APPLE-PRIVATE-RELEASE.md).**
+Plan A is now a **custom app through Apple Business Manager** (Mellerick's own
+Organisation ID, Pricing and Availability → Private — permanent), with
+Unlisted as the fallback. Step-by-step for Justin: reviewer account on QA job
+#834, review notes and video, App Privacy answers, ABM enrolment and redeem
+codes. Never press Release on a *Public* version if custom is still wanted —
+a publicly released app can't become custom. Review prep landed with it:
+in-app Privacy policy / Delete account links (`mobile/components/LegalLinks.tsx`
+→ web `/privacy`, `/delete-account`), clearer camera/photo/speech purpose
+strings, no unused Face ID string, and Name/User ID/Other User Content/Crash
+Data in the privacy manifest — pinned by `mobile/app-config.test.ts`. Reaches
+phones with the next build.
 
 **Signing key** — nothing to prepare. Let **EAS manage credentials**; the upload
 keystore is created on the first production build. The alternative, a local
