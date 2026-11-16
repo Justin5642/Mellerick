@@ -185,7 +185,7 @@ more", the customer picker queries as you type, max 20). `lib/fetch-all-rows.ts`
 takes a query *builder function* and fetches pages 2..n in parallel — a
 Supabase query object mutates its own range, so pages cannot share one.
 
-**Scheduling notes belong to the booking (migration `0109` — DRAFT, not applied yet).**
+**Scheduling notes belong to the booking (migration `0109` applied 2026-11-16).**
 Justin, 16 Nov 2026: "When we schedule people and we have a schedule note,
 that note needs to be just for that schedule and not carry on every time the
 job is opened." Before: the note was only a `job_notes` row (`source:
@@ -874,8 +874,8 @@ windows) — all 16 technician-visible streams are money-free:
   `tech_job_stage_notes` — no monetary column in the selected sets
 - `tech_job_bookings` (added for build 16; 0079/0080 applied 2026-10-19,
   deployed as sync config v5 on 2026-11-14) — 10 named columns: who, when, cost-centre **id**;
-  plus `note` (the booking's free-text scheduling note, 0109 — DRAFT; YAML
-  redeploy pending); no money column exists on `job_bookings`
+  plus `note` (the booking's free-text scheduling note, 0109 applied
+  2026-11-16; YAML redeploy pending); no money column exists on `job_bookings`
 
 Office/admin streams gate on the caller's own profile row:
 
@@ -1690,7 +1690,7 @@ a shippable release.
 | **Xero analytics: reconnect Xero** | Justin | `0105` is applied (2026-11-14). After deploy, click **Connect Xero** once so the new read scopes are granted, then `POST /api/xero/sync-analytics` as admin (or wait for the nightly cron) to start the 24-month backfill. |
 | **Unallocated bills: set `WEEKLY_DIGEST_TO`** | Justin | `0106` is applied (2026-11-14). Set `WEEKLY_DIGEST_TO` in Vercel (Production) to the office recipients' addresses. |
 | **Day Works / Hire: check rates** | Justin | `0108` is applied (2026-11-16). Set rates for the machines the name match missed — Fleet → **Hire rates** lists them first — and confirm the twin-steer float's 30 km / $5 per km. |
-| **Booking notes: apply 0109, then redeploy sync streams** | Justin | Paste `0109_job_booking_note.sql` and its gate test (trust only `0109 PASSED`), then redeploy `sync-streams.yaml` (§1, "Scheduling notes belong to the booking"). Until then notes go only to the job's Notes. |
+| **Booking notes: redeploy sync streams** | Justin | `0109` is applied (2026-11-16, gate test passed). Redeploy `sync-streams.yaml` (`docs/powersync-deploy.md`) — until then a phone reading bookings from its local copy shows no booking note (the device copy has no `note`). Ledger: `insert into supabase_migrations.schema_migrations (version,name) values ('0109','job_booking_note') on conflict do nothing;` |
 | **Maestro flow 02** | Avi | Needs `ADMIN_EMAIL` / `ADMIN_PASSWORD` in the environment. The login subflow deliberately skips when a session already exists, so a password never passes through a script — which is why flows 01/03/04 could be run and 02 could not. |
 
 ### QA fixture — do not delete

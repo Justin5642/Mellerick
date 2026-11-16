@@ -2,7 +2,7 @@ import { bookingNotesToShow, lastBookedDayKey } from "./bookingNotes";
 import { buildBookingWindow } from "./bookings";
 import type { Booking } from "./bookings";
 
-// Which scheduling notes head a job's Overview (migration 0109, a draft). Melbourne
+// Which scheduling notes head a job's Overview (migration 0109). Melbourne
 // calendar: Mon 16 Nov 2026 … Fri 20 Nov.
 
 const NOW = new Date("2026-11-17T02:00:00Z"); // Tue 17 Nov, 1 pm Melbourne

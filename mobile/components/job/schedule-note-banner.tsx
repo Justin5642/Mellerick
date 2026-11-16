@@ -8,7 +8,7 @@ import type { JobBooking } from "../../lib/data/reads/bookings";
 
 // The scheduling notes for this job's CURRENT and UPCOMING bookings, at the
 // very top of the Overview tab — the first thing a technician sees on opening
-// the job. Since migration 0109 (a draft until applied) a note belongs to the booking it was written
+// the job. Since migration 0109 a note belongs to the booking it was written
 // for (job_bookings.note), so it stops showing once that booking is over
 // (Justin, 16 Nov 2026: "that note needs to be just for that schedule and not
 // carry on every time the job is opened"). Which notes, for whom: see

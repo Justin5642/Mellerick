@@ -165,7 +165,7 @@ export function ScheduleJobModal({
     }
     setShowDatePicker(null);
     setConflictsByTechnician({});
-    // A booking's own scheduling note (0109, a draft) reopens with it, so it can be
+    // A booking's own scheduling note (0109) reopens with it, so it can be
     // changed or cleared; a new booking starts blank.
     setNoteText(editing?.note ?? "");
   }

@@ -187,7 +187,7 @@ describe("ScheduleRepository bookings", () => {
     expect(sides(second.ops)[0].dependsOn).toBe(writes(second.ops)[0].id);
   });
 
-  // 0109, a draft: the scheduling note belongs to the booking.
+  // 0109: the scheduling note belongs to the booking.
   it("addBookings puts the note on every booking it makes, and names no note column without one", async () => {
     const { outbox, ops } = captureOutbox();
     await makeRepo(outbox).addBookings("j1", ["dave", "sam"], cols, null, "Use the side gate");

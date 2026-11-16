@@ -1,4 +1,4 @@
-// Which scheduling notes the job's Overview banner shows (migration 0109, a draft).
+// Which scheduling notes the job's Overview banner shows (migration 0109).
 //
 // Justin, 16 Nov 2026: "When we schedule people and we have a schedule note,
 // that note needs to be just for that schedule and not carry on every time the

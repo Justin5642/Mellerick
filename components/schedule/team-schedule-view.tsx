@@ -401,7 +401,7 @@ function DroppableColumn({
   );
 }
 
-/** The booking's scheduling note (0109, a draft), one truncated line; the whole note on hover. */
+/** The booking's scheduling note (0109), one truncated line; the whole note on hover. */
 function BookingNoteLine({ note, className }: { note?: string | null; className: string }) {
   if (!note) return null;
   return (
