@@ -2,7 +2,7 @@
 -- Day Works / Hire, Stage 1: hire setup on the fleet register, attachments,
 -- and one signed Day Works line per machine per day on a job.
 --
--- STATUS: DRAFT — NOT YET APPLIED. Paste into the Supabase SQL editor, then run
+-- STATUS: ✅ APPLIED IN PRODUCTION (2026-11-16, via SQL editor; gate test passed). Was: paste, then run
 -- supabase/tests/0108_day_works_hire_test.sql; trust only its final
 -- "0108 PASSED" row. Then change this line to applied.
 --
