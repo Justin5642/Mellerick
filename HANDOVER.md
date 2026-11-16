@@ -506,7 +506,7 @@ Pencil and bin icons on the "Currently at" banner and on each stage note
 office/admin, which is the 0074 RLS rule; a refused write shows an error. Not
 on the phone yet.
 
-**Technicians don't see other people's schedules (16 Nov 2026; migration `0107` NOT YET APPLIED).**
+**Technicians don't see other people's schedules (16 Nov 2026; migration `0107` applied 2026-11-16).**
 Justin: technicians may look any job up for its plans, but must not watch the
 schedule or the office's work. On a job they are NOT on (web and phone):
 - no schedule anywhere — header line, Overview's Schedule card, the phone's
@@ -519,12 +519,9 @@ schedule or the office's work. On a job they are NOT on (web and phone):
 - the web Jobs list shows no dates to technicians.
 On jobs they ARE on, nothing changes: they see the whole crew's bookings
 (Justin's choice). Search and opening any job still work.
-- **Database:** `0107` replaces job_bookings' `using (true)` SELECT with
-  "office/admin, or `user_can_manage_job`", dropped by enumeration and
-  asserted. Apply it, then run `supabase/tests/0107_…_test.sql` (impersonates a
-  real technician; trust only the final `0107 PASSED`). Then change its header
-  to applied. Until then the app hides bookings but a technician with the anon
-  key could still query them.
+- **Database:** `0107` (applied 2026-11-16, gate test passed) replaces
+  job_bookings' `using (true)` SELECT with "office/admin, or
+  `user_can_manage_job`", dropped by enumeration and asserted.
 - **Still readable at the database** (left open, hidden in the app): jobs'
   dates, job_notes, job_stage_notes. Closing those needs column-level work on
   `jobs` and would break job look-ups; not done.

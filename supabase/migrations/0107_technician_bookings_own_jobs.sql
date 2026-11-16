@@ -1,7 +1,7 @@
 -- ============================================================================
 -- Technicians see bookings only on jobs they are on.
 --
--- STATUS: DRAFT — NOT YET APPLIED. Paste into the Supabase SQL editor, then run
+-- STATUS: ✅ APPLIED IN PRODUCTION (2026-11-16, via SQL editor; gate test passed). Was: paste, then run
 -- supabase/tests/0107_technician_bookings_own_jobs_test.sql; trust only its
 -- final "0107 PASSED" row.
 --
