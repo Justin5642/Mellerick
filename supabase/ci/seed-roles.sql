@@ -268,6 +268,21 @@ values ('a2a2a2a2-0000-0000-0000-000000000001', 'a1a1a1a1-0000-0000-0000-0000000
         'service', 'CI Supplier', 660.00, 60.00)
 on conflict (id) do nothing;
 
+-- Day Works / Hire rates (0108): office/admin only. The migration's name-match
+-- seed finds nothing on CI's one truck, so one float option is seeded here so
+-- the money sweep checks real figures. Guarded: a production-only bootstrap
+-- may not have the table yet.
+do $$
+begin
+  if to_regclass('public.equipment_hire_options') is not null then
+    insert into equipment_hire_options (equipment_id, hire_type, hire_unit, rate,
+                                        float_base, float_km_included, float_per_km)
+    values ('a1a1a1a1-0000-0000-0000-000000000001', 'float', 'move', 0, 470.00, 30, 5.00)
+    on conflict (equipment_id, hire_type, hire_unit) do nothing;
+  end if;
+end;
+$$;
+
 -- category is omitted so its default ('materials') applies, for the same reason
 -- jobs.status is above: the CHECK constraint is not what this fixture tests.
 insert into job_expenses (id, job_id, supplier_name, amount, gst_amount)
