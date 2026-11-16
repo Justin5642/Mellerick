@@ -9,6 +9,7 @@ import { attachEffectiveRates } from "@/lib/fleet-rates";
 import { dateKeyInBusinessTZ } from "@/lib/date";
 import type { FleetExpense } from "@/lib/fleet-costs";
 import type { ServiceRecord } from "@/lib/service-due";
+import type { HireOptionRow } from "@/components/fleet/equipment-hire-dialog";
 
 export default async function FleetPage() {
   const supabase = await createClient();
@@ -20,7 +21,7 @@ export default async function FleetPage() {
   //
   // Every expense, paged: the yearly summary lets you pick any past financial
   // year, and a truncated read would understate a year's cost without saying so.
-  const [viewer, { data: equipment, error }, { data: staff }, expensesRes, servicesRes] = await Promise.all([
+  const [viewer, { data: equipment, error }, { data: staff }, expensesRes, servicesRes, hireOptionsRes, attachmentsRes, centresRes] = await Promise.all([
     getViewer(),
     supabase.from("equipment").select("*").order("name"),
     supabase.from("profiles").select("id, full_name, role").eq("is_active", true).order("full_name"),
@@ -35,6 +36,12 @@ export default async function FleetPage() {
         .select("id, equipment_id, service_date, service_type, odometer_km, engine_hours, next_due_date, next_due_km, next_due_hours, created_at", c)
         .order("id") as never
     ),
+    // Day Works / Hire setup (office/admin only by RLS). Before the Day Works
+    // migration is applied (drafted, not yet applied) these error and the
+    // hire controls stay hidden.
+    supabase.from("equipment_hire_options").select("*"),
+    supabase.from("hire_attachments").select("id, name, day_rate, is_active, notes").order("name"),
+    supabase.from("cost_centres").select("id, name").eq("is_active", true).order("sort_order").order("name"),
   ]);
 
   if (!viewer) redirect("/login");
@@ -52,6 +59,9 @@ export default async function FleetPage() {
       expensesError={expensesRes.ok ? null : expensesRes.error}
       today={today}
       services={servicesRes.ok ? servicesRes.rows : null}
+      hireOptions={hireOptionsRes.error ? null : ((hireOptionsRes.data ?? []) as HireOptionRow[])}
+      hireAttachments={attachmentsRes.error ? null : attachmentsRes.data ?? []}
+      costCentres={centresRes.data ?? []}
       fetchError={error?.message ?? null}
     />
   );

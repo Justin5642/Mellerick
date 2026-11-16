@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Truck, Plus, DollarSign, ChevronRight } from "lucide-react";
+import { Truck, Plus, DollarSign, ChevronRight, Construction } from "lucide-react";
 import Link from "next/link";
 import { EquipmentCostDialog } from "@/components/fleet/equipment-cost-dialog";
 import { computeEquipmentCost, EQUIPMENT_CATEGORY_LABELS } from "@/lib/equipment-cost";
@@ -16,6 +16,9 @@ import { equipmentCategoryColors } from "@/lib/badge-colors";
 import { costPerHourOf, financialYearsSince, type FleetExpense } from "@/lib/fleet-costs";
 import { FleetYearSummary } from "@/components/fleet/fleet-year-summary";
 import { dueLabel, serviceDue, type ServiceDue, type ServiceRecord } from "@/lib/service-due";
+import { EquipmentHireDialog, type HireOptionRow } from "@/components/fleet/equipment-hire-dialog";
+import { HireAttachments, type HireAttachmentRow } from "@/components/fleet/hire-attachments";
+import { hireOptionLabel } from "@/lib/hire-pricing";
 
 // Radix/shadcn's SelectItem can't take value="", so an explicit "Unassigned"
 // option needs a sentinel value that gets translated back to "" (-> null on
@@ -33,12 +36,16 @@ interface Props {
   today: string;
   /** All service records (0099); null when unavailable. */
   services: ServiceRecord[] | null;
+  /** Day Works hire setup; null when the tables are not in this database yet. */
+  hireOptions?: HireOptionRow[] | null;
+  hireAttachments?: HireAttachmentRow[] | null;
+  costCentres?: { id: string; name: string }[];
   fetchError: string | null;
 }
 
 // The fleet list and its actions. The page (app/dashboard/fleet/page.tsx) loads
 // the rows and the viewer's role on the server and hands them in.
-export function FleetClient({ role, currentUserId, equipment: initialEquipment, staff, expenses, expensesError, today, services, fetchError }: Props) {
+export function FleetClient({ role, currentUserId, equipment: initialEquipment, staff, expenses, expensesError, today, services, hireOptions: initialHireOptions = null, hireAttachments = null, costCentres = [], fetchError }: Props) {
   const supabase = createClient();
   const [equipment, setEquipment] = useState(initialEquipment);
   const years = useMemo(() => financialYearsSince((expenses ?? []).map((e) => e.expense_date), today), [expenses, today]);
@@ -72,6 +79,10 @@ export function FleetClient({ role, currentUserId, equipment: initialEquipment, 
   const [costDialogFor, setCostDialogFor] = useState<{ id: string; name: string } | null>(null);
 
   const isAdmin = role === "admin";
+  // Hire setup and attachment rates: office or admin (RLS on the hire tables).
+  const canEditHire = (role === "admin" || role === "office") && initialHireOptions !== null;
+  const [hireOptions, setHireOptions] = useState<HireOptionRow[]>(initialHireOptions ?? []);
+  const [hireDialogFor, setHireDialogFor] = useState<{ id: string; name: string } | null>(null);
 
   async function assignTo(id: string, staffId: string) {
     const newAssignedTo = staffId === UNASSIGNED_VALUE ? null : staffId;
@@ -249,6 +260,14 @@ export function FleetClient({ role, currentUserId, equipment: initialEquipment, 
                             const tone = d.state === "overdue" ? "bg-red-50 text-red-700" : d.state === "due_soon" ? "bg-amber-50 text-amber-700" : "text-slate-500";
                             return <span className={`text-xs px-1.5 py-0.5 rounded ${tone}`}>{dueLabel(d)}</span>;
                           })()}
+                          {canEditHire && (() => {
+                            const mine = hireOptions.filter((o) => o.equipment_id === item.id && o.is_active);
+                            return mine.length > 0 ? (
+                              <span className="text-xs px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-700">
+                                Hire: {mine.map((o) => hireOptionLabel(o).toLowerCase()).join(" / ")}
+                              </span>
+                            ) : null;
+                          })()}
                           {expenses && (
                             <span className="text-xs font-medium text-slate-700">
                               {period.label}: ${spent.toLocaleString("en-AU", { maximumFractionDigits: 0 })}
@@ -281,6 +300,15 @@ export function FleetClient({ role, currentUserId, equipment: initialEquipment, 
                       >
                         <DollarSign className="w-3 h-3" />Cost &amp; Usage
                       </Button>
+                      {canEditHire && (
+                        <Button
+                          variant="ghost" size="sm"
+                          className="text-xs h-7 gap-1 text-slate-400 hover:text-indigo-700"
+                          onClick={() => setHireDialogFor({ id: item.id, name: item.name })}
+                        >
+                          <Construction className="w-3 h-3" />Hire setup
+                        </Button>
+                      )}
                       {isAdmin && (
                         <Button
                           variant="ghost" size="sm"
@@ -301,6 +329,23 @@ export function FleetClient({ role, currentUserId, equipment: initialEquipment, 
           )}
         </CardContent>
       </Card>
+
+      {canEditHire && hireAttachments && <HireAttachments initial={hireAttachments} />}
+
+      {hireDialogFor && (
+        <EquipmentHireDialog
+          key={hireDialogFor.id}
+          equipmentId={hireDialogFor.id}
+          equipmentName={hireDialogFor.name}
+          options={hireOptions.filter((o) => o.equipment_id === hireDialogFor.id)}
+          costCentres={costCentres}
+          open={!!hireDialogFor}
+          onOpenChange={(open) => !open && setHireDialogFor(null)}
+          onSaved={(saved) =>
+            setHireOptions((all) => [...all.filter((o) => o.equipment_id !== hireDialogFor.id), ...saved])
+          }
+        />
+      )}
 
       {costDialogFor && (
         <EquipmentCostDialog

@@ -144,3 +144,20 @@ export function decideProfileResult(input: {
   if (shown) return { kind: "keep" };
   return { kind: "error", error };
 }
+
+/**
+ * Re-read the profile when the app comes back to the foreground? (16 Nov 2026)
+ *
+ * A role change (office → technician) used to reach the phone only at a cold
+ * start or the hourly token refresh, so a demoted user kept the office screens
+ * and the office mirror — invoices with dollar figures — until then. Now every
+ * return to the foreground re-reads the profile, at most once per
+ * PROFILE_RECHECK_MS. A negative elapsed time means the device clock moved
+ * backwards (HANDOVER §3), so it rechecks rather than waiting out a bogus gap.
+ */
+export const PROFILE_RECHECK_MS = 30_000;
+
+export function shouldRecheckProfile(lastCheckedAt: number, now: number): boolean {
+  const elapsed = now - lastCheckedAt;
+  return elapsed < 0 || elapsed >= PROFILE_RECHECK_MS;
+}

@@ -763,6 +763,75 @@ export type Database = {
           },
         ]
       }
+      equipment_hire_options: {
+        Row: {
+          cost_centre_id: string | null
+          created_at: string
+          equipment_id: string
+          float_base: number
+          float_km_included: number
+          float_per_km: number
+          fuel_included: boolean
+          hire_type: string
+          hire_unit: string
+          id: string
+          is_active: boolean
+          notes: string | null
+          rate: number
+          updated_at: string
+          whole_days_only: boolean
+        }
+        Insert: {
+          cost_centre_id?: string | null
+          created_at?: string
+          equipment_id: string
+          float_base?: number
+          float_km_included?: number
+          float_per_km?: number
+          fuel_included?: boolean
+          hire_type: string
+          hire_unit: string
+          id?: string
+          is_active?: boolean
+          notes?: string | null
+          rate?: number
+          updated_at?: string
+          whole_days_only?: boolean
+        }
+        Update: {
+          cost_centre_id?: string | null
+          created_at?: string
+          equipment_id?: string
+          float_base?: number
+          float_km_included?: number
+          float_per_km?: number
+          fuel_included?: boolean
+          hire_type?: string
+          hire_unit?: string
+          id?: string
+          is_active?: boolean
+          notes?: string | null
+          rate?: number
+          updated_at?: string
+          whole_days_only?: boolean
+        }
+        Relationships: [
+          {
+            foreignKeyName: "equipment_hire_options_cost_centre_id_fkey"
+            columns: ["cost_centre_id"]
+            isOneToOne: false
+            referencedRelation: "cost_centres"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "equipment_hire_options_equipment_id_fkey"
+            columns: ["equipment_id"]
+            isOneToOne: false
+            referencedRelation: "equipment"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       equipment_usage_log: {
         Row: {
           days: number
@@ -865,6 +934,196 @@ export type Database = {
           updated_at?: string | null
         }
         Relationships: []
+      }
+      hire_attachments: {
+        Row: {
+          created_at: string
+          day_rate: number
+          id: string
+          is_active: boolean
+          name: string
+          notes: string | null
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          day_rate?: number
+          id?: string
+          is_active?: boolean
+          name: string
+          notes?: string | null
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          day_rate?: number
+          id?: string
+          is_active?: boolean
+          name?: string
+          notes?: string | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      hire_entries: {
+        Row: {
+          cost_centre_id: string | null
+          created_at: string
+          created_by: string | null
+          days: number | null
+          description: string | null
+          dropoff: string | null
+          equipment_id: string
+          hire_type: string
+          hire_unit: string
+          hours: number | null
+          id: string
+          invoice_id: string | null
+          job_id: string
+          km: number | null
+          meter_close: number | null
+          meter_open: number | null
+          pickup: string | null
+          signature_path: string | null
+          signed_at: string | null
+          signed_by: string | null
+          signer_name: string | null
+          status: string
+          updated_at: string
+          void_reason: string | null
+          work_date: string
+        }
+        Insert: {
+          cost_centre_id?: string | null
+          created_at?: string
+          created_by?: string | null
+          days?: number | null
+          description?: string | null
+          dropoff?: string | null
+          equipment_id: string
+          hire_type: string
+          hire_unit: string
+          hours?: number | null
+          id?: string
+          invoice_id?: string | null
+          job_id: string
+          km?: number | null
+          meter_close?: number | null
+          meter_open?: number | null
+          pickup?: string | null
+          signature_path?: string | null
+          signed_at?: string | null
+          signed_by?: string | null
+          signer_name?: string | null
+          status?: string
+          updated_at?: string
+          void_reason?: string | null
+          work_date: string
+        }
+        Update: {
+          cost_centre_id?: string | null
+          created_at?: string
+          created_by?: string | null
+          days?: number | null
+          description?: string | null
+          dropoff?: string | null
+          equipment_id?: string
+          hire_type?: string
+          hire_unit?: string
+          hours?: number | null
+          id?: string
+          invoice_id?: string | null
+          job_id?: string
+          km?: number | null
+          meter_close?: number | null
+          meter_open?: number | null
+          pickup?: string | null
+          signature_path?: string | null
+          signed_at?: string | null
+          signed_by?: string | null
+          signer_name?: string | null
+          status?: string
+          updated_at?: string
+          void_reason?: string | null
+          work_date?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "hire_entries_cost_centre_id_fkey"
+            columns: ["cost_centre_id"]
+            isOneToOne: false
+            referencedRelation: "cost_centres"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "hire_entries_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "hire_entries_equipment_id_fkey"
+            columns: ["equipment_id"]
+            isOneToOne: false
+            referencedRelation: "equipment"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "hire_entries_invoice_id_fkey"
+            columns: ["invoice_id"]
+            isOneToOne: false
+            referencedRelation: "invoices"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "hire_entries_job_id_fkey"
+            columns: ["job_id"]
+            isOneToOne: false
+            referencedRelation: "jobs"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "hire_entries_signed_by_fkey"
+            columns: ["signed_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      hire_entry_attachments: {
+        Row: {
+          attachment_id: string
+          created_at: string
+          entry_id: string
+        }
+        Insert: {
+          attachment_id: string
+          created_at?: string
+          entry_id: string
+        }
+        Update: {
+          attachment_id?: string
+          created_at?: string
+          entry_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "hire_entry_attachments_attachment_id_fkey"
+            columns: ["attachment_id"]
+            isOneToOne: false
+            referencedRelation: "hire_attachments"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "hire_entry_attachments_entry_id_fkey"
+            columns: ["entry_id"]
+            isOneToOne: false
+            referencedRelation: "hire_entries"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       inventory: {
         Row: {

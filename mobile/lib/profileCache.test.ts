@@ -103,3 +103,14 @@ describe("decideProfileResult — the server always wins once it answers", () =>
     expect(decideProfileResult({ shown: null, data: null, error })).toEqual({ kind: "error", error });
   });
 });
+
+describe("shouldRecheckProfile", () => {
+  const { shouldRecheckProfile, PROFILE_RECHECK_MS } = jest.requireActual("./profileCache") as typeof import("./profileCache");
+  it("rechecks after the throttle window, not inside it", () => {
+    expect(shouldRecheckProfile(0, PROFILE_RECHECK_MS)).toBe(true);
+    expect(shouldRecheckProfile(1000, 1000 + PROFILE_RECHECK_MS - 1)).toBe(false);
+  });
+  it("rechecks when the device clock has moved backwards", () => {
+    expect(shouldRecheckProfile(100_000, 50_000)).toBe(true);
+  });
+});

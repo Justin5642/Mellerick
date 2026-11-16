@@ -1,4 +1,5 @@
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
+import { AppState } from "react-native";
 import type { Session } from "@supabase/supabase-js";
 import { supabase } from "./supabase";
 import { setOutboxOwner } from "./data/outboxOwner";
@@ -8,6 +9,7 @@ import {
   clearCachedProfile,
   decideProfileResult,
   readCachedProfile,
+  shouldRecheckProfile,
   writeCachedProfile,
   type CachedProfile,
 } from "./profileCache";
@@ -64,6 +66,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // so one user's profile can never be shown — or cached — under another's
   // session.
   const activeUserRef = useRef<string | null>(null);
+  // When the profile was last read from the server (device clock; only
+  // compared through shouldRecheckProfile, which tolerates a backward jump).
+  const lastProfileCheckRef = useRef(0);
 
   useEffect(() => {
     supabase.auth.getSession().then(
@@ -129,6 +134,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => listener.subscription.unsubscribe();
   }, []);
 
+  // A role change made on the website reaches the phone the next time the app
+  // is opened, not only at a cold start or the hourly token refresh. Quiet: no
+  // spinner; a changed role re-gates the routes and PowerSyncProvider wipes the
+  // mirror synced for the old role (e.g. office invoices on a technician's phone).
+  useEffect(() => {
+    const sub = AppState.addEventListener("change", (state) => {
+      if (state !== "active") return;
+      const id = activeUserRef.current;
+      if (!id || !profileRef.current) return;
+      if (!shouldRecheckProfile(lastProfileCheckRef.current, Date.now())) return;
+      void loadProfile(id, { quiet: true });
+    });
+    return () => sub.remove();
+  }, []);
+
   async function loadProfile(userId: string, opts: { quiet?: boolean } = {}) {
     // A different user from the one on screen: drop the old profile first, so
     // nothing about the previous person survives into this session.
@@ -137,6 +157,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setProfile(null);
     }
     activeUserRef.current = userId;
+    lastProfileCheckRef.current = Date.now();
     let quiet = opts.quiet === true || profileRef.current?.id === userId;
 
     // OPTIMISTIC START FROM THE DEVICE CACHE. Before this, a cold start held

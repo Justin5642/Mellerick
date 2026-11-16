@@ -611,6 +611,94 @@ due date (`components/invoice/payment-terms-field.tsx`, rules in
 (today on New, `created_at` on Edit, Melbourne days); only `due_date` is
 stored. The phone's New Invoice has "14 days" / "30 days" chips.
 
+**Day Works / Hire, Stage 1 (16 Nov 2026; migration `0108` DRAFT — NOT YET APPLIED).**
+Justin: hire and cartage are always their own line under a job, never part of
+the quoted value or progress claims. Each day's line is signed by the
+builder's rep on a phone or tablet, then locks; signed lines are invoiced
+weekly or monthly. Operator labour is a separate cost, not in the hire rate.
+Stage 1 is web + database + pure rules; the phone comes next.
+- **Database (`0108`):** `equipment_hire_options` (per machine: `hire_type`
+  wet/dry/cartage/float × `hire_unit` hour/day/engine_hour/km/contract/move,
+  `rate`, `fuel_included`, `whole_days_only`, float base / km included / per
+  km, `cost_centre_id` — null = the default for the type) and
+  `hire_attachments` (name, `day_rate`) are **office/admin only** (they carry
+  rates). `hire_entries` (one line per machine per day on a job — floats may
+  make several moves — quantities only: hours, days, meter open/close, km,
+  pickup/dropoff, description; draft → signed → invoiced, or void; signer
+  name, signature path, `invoice_id`) and `hire_entry_attachments` are
+  readable and writable by the job's crew (`user_can_manage_job`) and have
+  **no money column**. Seeds the four cost centres (Truck Cartage, Plant Wet
+  Hire, Plant Dry Hire, Float Moves) and Justin's rates by machine name
+  (PC88, PC18, PC35, SVL75/Bobcat, 700L, 962H wet + dry, roller, Warrior
+  screener, quad-axle and twin-steer floats; machines not matched are left
+  for the office) plus the Trencher attachment at $200/day. Not in any
+  PowerSync stream.
+- **The lock** (`hire_entries_guard` trigger): an entry is born a draft; the
+  cost centre comes from the machine's hire setup (the crew can't choose it;
+  `hire_entry_cost_centre()` is SECURITY DEFINER and returns only the id);
+  sign-off needs a name, a signature and the quantity for its unit; once
+  signed nothing about the machine, date, quantities, description or sign-off
+  can change — for anyone. Only office/admin move signed → invoiced (an
+  invoice on the same job) or void it; void is final; deleting the invoice
+  puts its lines back to signed. Attachments change only on drafts.
+- **Pricing:** `lib/hire-pricing.ts` (tested, `tests/unit/hire-pricing.test.ts`):
+  wet = hours × rate; dry day = days × rate (the roller rounds up to full
+  days); engine hour = (close − open) × rate; cartage by hour, km or contract;
+  float = base + max(0, km − included) × per km (quad, 50 km = $570);
+  attachments a full day each; clash detection (same attachment, same day,
+  two machines — a warning, not a block); totals by cost centre; invoice lines
+  from signed entries. Amounts are computed office-side only, at the rates
+  current when shown or invoiced (entries don't snapshot a rate).
+- **Fleet:** "Hire setup" on each machine (`components/fleet/
+  equipment-hire-dialog.tsx`) and an **Attachments** card with day rates
+  (`components/fleet/hire-attachments.tsx`), office/admin.
+- **Job page:** new **Day Works / Hire** tab (`components/job/
+  job-day-works.tsx`, office and the job's crew; not on view-only jobs). Pick
+  the machine from the register; the inputs follow its hire type. Office sees
+  amounts and totals by cost centre; technicians see quantities only — the tab
+  reads through `GET /api/jobs/[id]/hire-entries`, which reads the rate tables
+  with the service role after `requireOnJob` and is shaped by
+  `lib/day-works-view.ts` (`tests/unit/day-works-view.test.ts` walks the
+  technician payload for money keys and rate values). Builder sign-off = name +
+  signature drawn on screen (the pad is now shared,
+  `components/job/signature-pad.tsx`, also used by the customer sign-off),
+  stored in `job-documents` at `<job>/day-works/signature-<entry>-<ts>.png`.
+- **Invoice Day Works** (office, on the tab): pick a period (last week / last
+  month / all waiting), untick any line, Create invoice →
+  `POST /api/jobs/[id]/hire-entries/invoice`: one ordinary draft invoice
+  titled "Day Works / Hire — <period>", one line per machine-day plus one per
+  attachment, then the lines are marked invoiced. Never touches
+  `purchase_orders`, progress-claim fields, `customer_po` or Ready to Invoice.
+  Refuses a line whose machine has no rate rather than invoicing $0.
+- **Before 0108 is applied** the tab says Day Works isn't switched on and
+  Fleet hides the hire controls; nothing else changes. To apply: paste 0108,
+  then run `supabase/tests/0108_day_works_hire_test.sql` (needs an active
+  technician and an active office/admin profile) and trust only `0108 PASSED`;
+  then change 0108's header to applied. Checked on a scratch Postgres 16 with
+  the real 0059/0073/0087 functions: applies twice cleanly, seeds by name as
+  intended (PC180 and a quad-axle *tipper* not matched), the gate test passes,
+  and fails when the lock trigger is disabled.
+- **Not done in Stage 1:** the Job Ledger / Job margins don't include hire
+  yet — hire revenue is per company cost centre but plant cost is still
+  costed from `equipment_usage_log` against PO lines, and operator labour
+  would be counted against the quoted work; mixing them now would make the
+  quoted margin wrong. Next stages:
+  1. **Phone:** Day Works entry and builder sign-off on the phone (online
+     first, then the outbox; add `hire_entries` to a technician stream with
+     its columns listed — it has no money column), truck day stops, float
+     moves with a distance lookup.
+  2. **Dry hire controls:** hirer details, condition photos out/in, meter
+     readings at hand-over.
+  3. **Truck register:** body volume and cartage rates per truck.
+  4. **Operator labour not double counted:** the operator's time on a wet
+     hire is a cost against the hire line, not the quoted cost centres.
+  5. **Reports:** Day Works by cost centre per month; then hire revenue (and
+     its costs) in the Job Ledger / Job margins.
+  6. **Open items from Justin's list:** rates for the other excavators and
+     attachments, standby rates (700L dozer and others), fuel and tip-fee
+     pass-through, and confirm the twin-steer float's 30 km / $5 per km
+     (assumed equal to the quad axle).
+
 ---
 
 ## 2. The one rule that must never break
@@ -904,6 +992,19 @@ from it. The phone side (branch `feat/job-bookings-mobile`):
   (`po_cost_centers` is office-only — it carries money), so offline their
   cards show times without stage names; the IDs, and therefore the clock-in
   default, work offline.
+
+### A role change reaches the phone when the app is reopened (16 Nov 2026)
+
+Justin switched himself to technician and the phone still showed the office
+dashboard with overdue invoice amounts: the profile (and so the role) was only
+re-read at a cold start or the hourly token refresh. `lib/auth-context.tsx` now
+re-reads it quietly every time the app returns to the foreground (at most every
+30 s, `shouldRecheckProfile` in `lib/profileCache.ts`, tested; a backward clock
+jump rechecks). A changed role re-gates the routes and PowerSyncProvider wipes
+the old role's mirror, exactly as at a cold start. RLS and the sync streams were
+never at fault — they gate on the server-side role — the phone was showing data
+it had already synced while it still believed the user was office. Reaches
+devices with the next build.
 
 ### Sync reliability and sign-out (17 October 2026 audit)
 
@@ -1440,6 +1541,7 @@ a shippable release.
 | **Check `EMAIL_FROM` for supplier POs** | Justin | Supplier PO emails go from `EMAIL_FROM` — it must be on a domain verified in Resend, or suppliers never receive them. (0085 itself applied 2026-10-28.) |
 | **Xero analytics: reconnect Xero** | Justin | `0105` is applied (2026-11-14). After deploy, click **Connect Xero** once so the new read scopes are granted, then `POST /api/xero/sync-analytics` as admin (or wait for the nightly cron) to start the 24-month backfill. |
 | **Unallocated bills: set `WEEKLY_DIGEST_TO`** | Justin | `0106` is applied (2026-11-14). Set `WEEKLY_DIGEST_TO` in Vercel (Production) to the office recipients' addresses. |
+| **Day Works / Hire: apply `0108`** | Justin | Paste `supabase/migrations/0108_day_works_hire.sql` into the SQL editor, then run `supabase/tests/0108_day_works_hire_test.sql` and trust only `0108 PASSED`. Check Fleet → Hire setup for machines the name match missed, and confirm the twin-steer float's 30 km / $5 per km. |
 | **Maestro flow 02** | Avi | Needs `ADMIN_EMAIL` / `ADMIN_PASSWORD` in the environment. The login subflow deliberately skips when a session already exists, so a password never passes through a script — which is why flows 01/03/04 could be run and 02 could not. |
 
 ### QA fixture — do not delete
