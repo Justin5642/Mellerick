@@ -93,7 +93,10 @@ export type SideEffectKind =
   | "backflow-submit"
   | "assign-technicians"
   // A stage of the job's builder PO marked complete from site (0095).
-  | "stage-complete";
+  | "stage-complete"
+  // A converted quote's subtotal → the job's `<job number>-1` PO. Server-side
+  // because the job number is a serial the phone only learns after the insert.
+  | "quote-po";
 
 export interface SideEffectOperation {
   kind: "side_effect";

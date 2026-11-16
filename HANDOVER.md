@@ -308,8 +308,21 @@ that cost centre's budget. Cartage comes out of the drainage PO.
   centre (red under `min_margin_pct`; `rowMarginPct` / `rowBelowMinimum`), and
   Reports → Job margins adds a by-cost-centre total across the open jobs
   (`costCentreTotals`) and each job's per-centre margins.
-- **Quote → job** (web) creates `<job number>-1` with the quote's subtotal (ex
-  GST), unsplit, and opens the PO tab. Mobile quote conversion does not yet.
+- **Quote → job** creates `<job number>-1` with the quote's subtotal (ex
+  GST), unsplit (rule `lib/quote-job-po.ts`, tested in
+  `tests/unit/quote-job-po.test.ts`); the web then opens the PO tab. The
+  phone (16 Nov 2026) does the same offline-safely: the job number is a
+  database serial it only learns once its queued job insert syncs, so after
+  the job insert, items and quote link it queues a `quote-po` side effect →
+  `POST /api/jobs/[id]/quote-po` (office/admin; runs as the caller under RLS,
+  never the service role). The server numbers the PO against the real job
+  (next after any existing `<n>-k`), values it from the quote — which must
+  already be linked to that job — never from the request, and inserts it with
+  the phone's client UUID, so a retry finds it and adds nothing. No
+  `purchase_orders` write leaves the phone and no stream changed
+  (`office_purchase_orders` is office-gated). Needs the web deployed before
+  the phone build that carries it (a missing route would dead-letter the
+  step, reported); reaches phones with the next build.
 - **Which builder PO an invoice is for** (1 Nov 2026): on New Invoice, a job
   with more than one priced PO shows a picker; it sets the invoice's
   `customer_po` to that PO's number, and a progress claim then defaults its

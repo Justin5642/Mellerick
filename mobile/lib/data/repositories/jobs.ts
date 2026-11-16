@@ -140,8 +140,9 @@ export class JobsRepository {
   // Convert an accepted quote into a job (office/admin), mirroring the web
   // quote-detail convertToJob: create a pending service job from the quote,
   // copy the quote's line items to job_items, and link the quote back
-  // (quotes.job_id). Compound + durable: the items and the quote link are gated
-  // on the job insert (dependsOn) so they never land before the job exists.
+  // (quotes.job_id), then add the quote-value PO (quote-po side effect).
+  // Compound + durable: the items and the quote link are gated on the job
+  // insert (dependsOn) so they never land before the job exists.
   async createJobFromQuote(input: ConvertQuoteInput): Promise<string> {
     const jobId = this.ids.newId();
     const jobOpId = await this.enqueueWrite("job", "insert", "jobs", jobId, {
@@ -163,7 +164,28 @@ export class JobsRepository {
         // total is a DB GENERATED column — never sent.
       }, jobOpId);
     }
-    await this.enqueueWrite("quote", "update", "quotes", input.quoteId, { job_id: jobId }, jobOpId);
+    const linkOpId = await this.enqueueWrite("quote", "update", "quotes", input.quoteId, { job_id: jobId }, jobOpId);
+
+    // The quote's subtotal becomes the job's budget PO, `<job number>-1`, as
+    // on the web (lib/quote-job-po.ts). The job number is a database serial
+    // the phone doesn't know until the insert has synced, so this is a server
+    // side effect (/api/jobs/[id]/quote-po), not a purchase_orders write: it
+    // waits for the quote link, then numbers the PO against the real job and
+    // values it from the quote on the server. poId is a client UUID so a
+    // retry finds the PO it already made.
+    const po: SideEffectOperation = {
+      kind: "side_effect",
+      id: this.ids.newId(),
+      effect: "quote-po",
+      coalesceKey: `quote-po:${jobId}`,
+      payload: { jobId, quoteId: input.quoteId, poId: this.ids.newId() },
+      dependsOn: linkOpId,
+      status: "pending",
+      attempts: 0,
+      nextAttemptAt: 0,
+      createdAt: this.time.nowMs(),
+    };
+    await this.outbox.enqueue(po);
     return jobId;
   }
 

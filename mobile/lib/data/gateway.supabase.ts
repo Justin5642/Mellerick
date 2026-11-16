@@ -288,6 +288,7 @@ const sideEffectPath: Record<SideEffectKind, (p: Record<string, unknown>) => str
   "backflow-submit": (p) => `/api/backflow/tests/${p.testId}/submit`,
   "assign-technicians": (p) => `/api/jobs/${p.jobId}/set-assignments`,
   "stage-complete": (p) => `/api/jobs/${p.jobId}/stages/${p.stageId}/complete`,
+  "quote-po": (p) => `/api/jobs/${p.jobId}/quote-po`,
 };
 
 /**
