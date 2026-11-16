@@ -5,6 +5,7 @@ import { useRouter, type Href } from "expo-router";
 import { colors } from "../../lib/theme";
 import { useAuth } from "../../lib/auth-context";
 import { useSignOut } from "../../lib/useSignOut";
+import { LegalLinks } from "../../components/LegalLinks";
 import { useIsAdmin } from "../../design/guards/useRole";
 
 interface Item {
@@ -61,6 +62,7 @@ export default function MoreScreen() {
               <Text style={[styles.rowLabel, { color: colors.red600 }]}>Sign out</Text>
             </TouchableOpacity>
           </View>
+          <LegalLinks />
         </View>
       </ScrollView>
     </SafeAreaView>

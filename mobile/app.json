@@ -45,6 +45,38 @@
             "NSPrivacyCollectedDataTypePurposes": [
               "NSPrivacyCollectedDataTypePurposeAppFunctionality"
             ]
+          },
+          {
+            "NSPrivacyCollectedDataType": "NSPrivacyCollectedDataTypeName",
+            "NSPrivacyCollectedDataTypeLinked": true,
+            "NSPrivacyCollectedDataTypeTracking": false,
+            "NSPrivacyCollectedDataTypePurposes": [
+              "NSPrivacyCollectedDataTypePurposeAppFunctionality"
+            ]
+          },
+          {
+            "NSPrivacyCollectedDataType": "NSPrivacyCollectedDataTypeUserID",
+            "NSPrivacyCollectedDataTypeLinked": true,
+            "NSPrivacyCollectedDataTypeTracking": false,
+            "NSPrivacyCollectedDataTypePurposes": [
+              "NSPrivacyCollectedDataTypePurposeAppFunctionality"
+            ]
+          },
+          {
+            "NSPrivacyCollectedDataType": "NSPrivacyCollectedDataTypeOtherUserContent",
+            "NSPrivacyCollectedDataTypeLinked": true,
+            "NSPrivacyCollectedDataTypeTracking": false,
+            "NSPrivacyCollectedDataTypePurposes": [
+              "NSPrivacyCollectedDataTypePurposeAppFunctionality"
+            ]
+          },
+          {
+            "NSPrivacyCollectedDataType": "NSPrivacyCollectedDataTypeCrashData",
+            "NSPrivacyCollectedDataTypeLinked": false,
+            "NSPrivacyCollectedDataTypeTracking": false,
+            "NSPrivacyCollectedDataTypePurposes": [
+              "NSPrivacyCollectedDataTypePurposeAppFunctionality"
+            ]
           }
         ],
         "NSPrivacyAccessedAPITypes": [
@@ -106,12 +138,17 @@
     "plugins": [
       "./plugins/withThirdPartySQLitePod",
       "expo-router",
-      "expo-secure-store",
+      [
+        "expo-secure-store",
+        {
+          "faceIDPermission": false
+        }
+      ],
       [
         "expo-image-picker",
         {
-          "photosPermission": "Mellerick Field uses your photo library to attach job photos.",
-          "cameraPermission": "Mellerick Field uses your camera to take job photos and evidence."
+          "photosPermission": "Mellerick Field uses your photo library so you can attach existing photos to a job, such as site photos, receipts and delivery dockets.",
+          "cameraPermission": "Mellerick Field uses your camera to take job site photos, receipts, delivery dockets and backflow device data plates, which are saved to the job."
         }
       ],
       [
@@ -129,7 +166,7 @@
         "expo-speech-recognition",
         {
           "microphonePermission": "Mellerick Field uses your microphone to dictate job notes and record job completion voice reports.",
-          "speechRecognitionPermission": "Mellerick Field turns what you say into text for job notes and voice reports."
+          "speechRecognitionPermission": "Mellerick Field uses Apple speech recognition to turn what you say into text for job notes and voice reports. Your speech may be sent to Apple to be recognised."
         }
       ],
       "expo-asset",

@@ -1509,6 +1509,19 @@ listing on either store. iPhone only: `ios.supportsTablet` is `false`, so no
 iPad screenshots are needed. Apple refuses dropping iPad support on an app that
 has ever been *released* with it; this was turned off before the first release.
 
+**iPhone private release plan (16 Nov 2026): [`mobile/APPLE-PRIVATE-RELEASE.md`](mobile/APPLE-PRIVATE-RELEASE.md).**
+Plan A is now a **custom app through Apple Business Manager** (Mellerick's own
+Organisation ID, Pricing and Availability → Private — permanent), with
+Unlisted as the fallback. Step-by-step for Justin: reviewer account on QA job
+#834, review notes and video, App Privacy answers, ABM enrolment and redeem
+codes. Never press Release on a *Public* version if custom is still wanted —
+a publicly released app can't become custom. Review prep landed with it:
+in-app Privacy policy / Delete account links (`mobile/components/LegalLinks.tsx`
+→ web `/privacy`, `/delete-account`), clearer camera/photo/speech purpose
+strings, no unused Face ID string, and Name/User ID/Other User Content/Crash
+Data in the privacy manifest — pinned by `mobile/app-config.test.ts`. Reaches
+phones with the next build.
+
 **Signing key** — nothing to prepare. Let **EAS manage credentials**; the upload
 keystore is created on the first production build. The alternative, a local
 `.keystore`, means losing the file makes the app permanently un-updatable on Play.

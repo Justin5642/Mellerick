@@ -17,6 +17,7 @@ import { ScreenError } from "../../design/components/ScreenError";
 import { openNavigation } from "../../lib/open-external-url";
 import { useAuth } from "../../lib/auth-context";
 import { useSignOut } from "../../lib/useSignOut";
+import { LegalLinks } from "../LegalLinks";
 import { colors, statusColors } from "../../lib/theme";
 import { BUSINESS_TIME_ZONE } from "../../lib/date";
 import { businessTodayKey, formatScheduleSummary } from "../../lib/scheduleDisplay";
@@ -254,6 +255,7 @@ export function MyJobsScreen() {
         ListEmptyComponent={
           <Text style={styles.emptyText}>No jobs assigned right now.</Text>
         }
+        ListFooterComponent={<LegalLinks />}
       />
     </SafeAreaView>
   );

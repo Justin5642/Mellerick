@@ -14,6 +14,7 @@ import {
 import { useAuth } from "../lib/auth-context";
 import { supabase } from "../lib/supabase";
 import { colors } from "../lib/theme";
+import { LegalLinks } from "../components/LegalLinks";
 
 const API_BASE_URL = process.env.EXPO_PUBLIC_API_BASE_URL;
 
@@ -107,6 +108,9 @@ export default function LoginScreen() {
         <TouchableOpacity style={styles.forgotLink} onPress={handleForgotPassword} disabled={resetLoading}>
           <Text style={styles.forgotLinkText}>{resetLoading ? "Sending…" : "Forgot password?"}</Text>
         </TouchableOpacity>
+
+        <Text style={styles.inviteNote}>Accounts are set up by the Mellerick office.</Text>
+        <LegalLinks />
       </View>
     </KeyboardAvoidingView>
   );
@@ -144,6 +148,7 @@ const styles = StyleSheet.create({
   buttonText: { color: "#fff", fontWeight: "600", fontSize: 15 },
   forgotLink: { marginTop: 16, alignItems: "center" },
   forgotLinkText: { color: colors.blue600, fontSize: 13, fontWeight: "600" },
+  inviteNote: { marginTop: 24, fontSize: 12, color: colors.slate500, textAlign: "center" },
   errorBox: {
     backgroundColor: colors.red100,
     borderRadius: 8,
