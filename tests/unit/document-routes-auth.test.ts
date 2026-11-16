@@ -14,7 +14,7 @@ const emailSend = vi.fn(async (..._a: unknown[]) => ({ error: null }));
 vi.mock("@/lib/api/guards", () => ({ requireOfficeOrAdmin: (...a: unknown[]) => requireOfficeOrAdmin(...a) }));
 vi.mock("@/lib/api/caller-client", () => ({ callerClient: (...a: unknown[]) => callerClient(...a) }));
 vi.mock("@/lib/pdf/render", () => ({ renderDocumentPdf: (...a: unknown[]) => renderDocumentPdf(...a) }));
-vi.mock("@/lib/resend", () => ({ getResend: () => ({ emails: { send: emailSend } }), getFromAddress: () => "billing@test" }));
+vi.mock("@/lib/resend", () => ({ getResend: () => ({ emails: { send: emailSend } }), getFromAddress: () => "billing@test", getReplyTo: () => ["accounts@test"] }));
 vi.mock("@/lib/business-info", () => ({ businessInfo: { name: "Test Co" } }));
 
 import { POST as invoiceSend } from "@/app/api/invoices/[id]/send/route";

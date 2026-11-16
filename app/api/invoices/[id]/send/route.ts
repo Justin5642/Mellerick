@@ -7,7 +7,7 @@ import { businessInfo } from "@/lib/business-info";
 import { INVOICE_SITE_SELECT, invoiceJobSite } from "@/lib/job-site";
 import { invoiceProgress } from "@/lib/progress-claim";
 import { customerPoLabel } from "@/lib/customer-po";
-import { getResend, getFromAddress } from "@/lib/resend";
+import { getResend, getFromAddress, getReplyTo } from "@/lib/resend";
 import { formatDate } from "@/lib/date";
 import { formatInvoiceNumber } from "@/lib/utils";
 import { escapeHtml } from "@/lib/html";
@@ -135,6 +135,8 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
 
     const { error: sendError } = await resend.emails.send({
       from: getFromAddress(),
+      // Replies go to a monitored mailbox, not the sending address.
+      replyTo: getReplyTo(),
       to,
       // The PO in the subject: accounts inboxes file and approve by it (0083).
       subject: `Invoice ${formatInvoiceNumber(invoice.invoice_number)}${po ? ` (${po})` : ""} from ${businessInfo.name}`,

@@ -4,7 +4,7 @@ import { callerClient } from "@/lib/api/caller-client";
 import { renderDocumentPdf } from "@/lib/pdf/render";
 import { businessInfo } from "@/lib/business-info";
 import { QUOTE_SITE_SELECT, quoteJobSite } from "@/lib/job-site";
-import { getResend, getFromAddress } from "@/lib/resend";
+import { getResend, getFromAddress, getReplyTo } from "@/lib/resend";
 import { formatDate } from "@/lib/date";
 import { escapeHtml } from "@/lib/html";
 import { reportError } from "@/lib/monitoring";
@@ -72,6 +72,8 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
 
     const { error: sendError } = await resend.emails.send({
       from: getFromAddress(),
+      // Replies go to a monitored mailbox, not the sending address.
+      replyTo: getReplyTo(),
       to,
       subject: `Quote #${quote.quote_number} from ${businessInfo.name}`,
       html: `

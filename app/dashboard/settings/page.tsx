@@ -8,6 +8,8 @@ import { XeroExpenseAccountCode } from "@/components/settings/xero-expense-accou
 import { XeroSalesAccountCode } from "@/components/settings/xero-sales-account-code";
 import { XeroInvoiceSyncButton } from "@/components/settings/xero-invoice-sync-button";
 import { formatDateTime } from "@/lib/date";
+import { EmailTestButton } from "@/components/settings/email-test-button";
+import { getFromAddress, getReplyTo } from "@/lib/resend";
 
 export default async function SettingsPage({ searchParams }: { searchParams: Promise<{ xero?: string; google?: string }> }) {
   const params = await searchParams;
@@ -109,6 +111,21 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
             <p className="text-sm text-slate-500">
               Add a <code className="bg-slate-100 px-1 rounded">RESEND_API_KEY</code> environment variable in Vercel to enable emailing quotes and invoices.
             </p>
+          )}
+          {emailConfigured && (
+            <div className="mt-4 space-y-3 border-t border-slate-100 pt-4">
+              <dl className="grid grid-cols-[auto,1fr] gap-x-3 gap-y-1 text-sm">
+                <dt className="text-slate-500">Sent from</dt>
+                <dd className="font-medium text-slate-800 break-all">{getFromAddress()}</dd>
+                <dt className="text-slate-500">Replies go to</dt>
+                <dd className="font-medium text-slate-800 break-all">{getReplyTo().join(", ")}</dd>
+              </dl>
+              <p className="text-xs text-slate-400">
+                Change these in Vercel: <code className="bg-slate-100 px-1 rounded">EMAIL_FROM</code> and{" "}
+                <code className="bg-slate-100 px-1 rounded">EMAIL_REPLY_TO</code>, then redeploy.
+              </p>
+              <EmailTestButton />
+            </div>
           )}
         </CardContent>
       </Card>

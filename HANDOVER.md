@@ -534,6 +534,19 @@ On jobs they ARE on, nothing changes: they see the whole crew's bookings
   (requireUser left `role` null).
 - Phone parts reach devices with the next build.
 
+**Email replies and the sending domain (16 Nov 2026; no migration).** Every
+customer and supplier email (invoices, quotes, supplier POs) now sets
+Reply-To from `getReplyTo()` (`lib/resend.ts`): `EMAIL_REPLY_TO` (comma-separated
+allowed), else `BUSINESS_EMAIL`, else admin@mellerick.com — so replies reach a
+monitored mailbox even while `EMAIL_FROM` is an unmonitored Resend address.
+`EMAIL_FROM` stays the one setting for the sender. Settings → Email shows both
+and has **Send test invoice** (`POST /api/email/test`, admin only: sample PDF,
+same From/Reply-To; returns Resend's refusal text so a domain problem is
+visible). Moving the sender to the real .com domain is a Resend + DNS job:
+verify a sending SUBDOMAIN (e.g. `send.mellerick.com`) so the Google Workspace
+SPF/MX on the root are untouched, add the records Resend lists, then set
+`EMAIL_FROM` to e.g. `Mellerick Pty Ltd <accounts@send.mellerick.com>` and redeploy.
+
 **Xero analytics mirror (14 Nov 2026; branch `feat/xero-analytics-sync`; migration `0105`, first numbered 0098, applied 2026-11-14).**
 Renumbered 0098→0105 and 0099→0106 on merge (main already had its own 0098/0099).
 Record them in the ledger once: `insert into supabase_migrations.schema_migrations (version,name) values ('0105','xero_analytics'),('0106','xero_bill_allocations') on conflict do nothing;`
