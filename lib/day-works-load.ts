@@ -28,7 +28,7 @@ export async function loadDayWorks(request: NextRequest, jobId: string, caller: 
   const [machinesRes, attachmentsRes, entriesRes, centresRes] = await Promise.all([
     admin
       .from("equipment")
-      .select("id, name, is_active, equipment_hire_options(hire_type, hire_unit, rate, whole_days_only, fuel_included, float_base, float_km_included, float_per_km, cost_centre_id, is_active)")
+      .select("id, name, is_active, category, equipment_hire_options(hire_type, hire_unit, rate, whole_days_only, fuel_included, float_base, float_km_included, float_per_km, cost_centre_id, is_active)")
       .order("name"),
     admin.from("hire_attachments").select("id, name, day_rate, is_active").order("name"),
     supabase

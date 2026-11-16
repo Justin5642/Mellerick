@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildDayWorksView, type EntryRow, type MachineRow } from "@/lib/day-works-view";
+import { buildDayWorksView, isHireableMachine, splitMachinesByHire, type EntryRow, type MachineRow } from "@/lib/day-works-view";
 
 // The Day Works tab's payload is built from office-only rate tables read with
 // the service role. A technician must get quantities and names, never a dollar
@@ -21,6 +21,10 @@ const machines: MachineRow[] = [
   },
   { id: "pc18", name: "PC18", is_active: true, options: [{ equipment_id: "pc18", hire_type: "dry", hire_unit: "day", rate: 251.19, is_active: false }] },
   { id: "old", name: "Retired dozer", is_active: false, options: [{ equipment_id: "old", hire_type: "wet", hire_unit: "hour", rate: 209.11 }] },
+  // In the register but never priced by 0108's name match — must still be listed.
+  { id: "pc180", name: "Komatsu PC180", is_active: true, category: "machinery", options: [] },
+  // Plant & equipment (tools) are never hired out, even with a stray option.
+  { id: "saw", name: "Concrete saw", is_active: true, category: "tool", options: [{ equipment_id: "saw", hire_type: "dry", hire_unit: "day", rate: 88.88 }] },
 ];
 const attachments = [{ id: "trencher", name: "Trencher", day_rate: 203.47, is_active: true }];
 
@@ -74,19 +78,36 @@ describe("Day Works payload — the money rule", () => {
     walk(view(false), "view", out);
     expect(out.keys).toEqual([]);
     // Every rate and every amount these rates would produce, by value.
-    const rates = [115.37, 471.13, 5.17, 251.19, 209.11, 203.47];
+    const rates = [115.37, 471.13, 5.17, 251.19, 209.11, 203.47, 88.88];
     const amounts = [6.5 * 115.37, 471.13 + 22 * 5.17, 6.5 * 115.37 + 203.47].map((n) => Math.round(n * 100) / 100);
     for (const r of [...rates, ...amounts]) expect(out.numbers).not.toContain(r);
   });
 
   it("the technician still gets what they need: machines, hire options, quantities, cost centre names", () => {
     const v = view(false);
-    expect(v.machines.map((m) => m.name)).toEqual(["Kubota SVL75", "Quad axle float"]); // inactive option / machine left out
-    expect(v.machines[0].options[0]).toEqual({ hire_type: "wet", hire_unit: "hour", label: "Wet hire, per hour", whole_days_only: false, fuel_included: false });
+    // The whole active fleet; tools and retired machines left out.
+    expect(v.machines.map((m) => m.name)).toEqual(["Komatsu PC180", "Kubota SVL75", "PC18", "Quad axle float"]);
+    expect(v.machines[1].options[0]).toEqual({ hire_type: "wet", hire_unit: "hour", label: "Wet hire, per hour", whole_days_only: false, fuel_included: false });
     expect(v.entries[0]).toMatchObject({ equipment: "Kubota SVL75", hours: 6.5, cost_centre: "Plant Wet Hire", attachment_ids: ["trencher"] });
     expect(v.entries[1]).toMatchObject({ km: 52, hire_label: "Float move" });
     expect(v.attachments).toEqual([{ id: "trencher", name: "Trencher" }]);
     expect(v.pricing).toBeUndefined();
+  });
+
+  it("lists a machine with no (active) hire rate with no options, so the picker can grey it out", () => {
+    const v = view(false);
+    expect(v.machines.find((m) => m.id === "pc180")).toEqual({ id: "pc180", name: "Komatsu PC180", options: [] });
+    expect(v.machines.find((m) => m.id === "pc18")?.options).toEqual([]); // its only option is switched off
+    const { ready, noRate } = splitMachinesByHire(v.machines);
+    expect(ready.map((m) => m.id)).toEqual(["bobcat", "quad"]);
+    expect(noRate.map((m) => m.id)).toEqual(["pc180", "pc18"]);
+  });
+
+  it("isHireableMachine: active and not a tool", () => {
+    expect(isHireableMachine({ is_active: true, category: "machinery" })).toBe(true);
+    expect(isHireableMachine({ is_active: true })).toBe(true);
+    expect(isHireableMachine({ is_active: true, category: "tool" })).toBe(false);
+    expect(isHireableMachine({ is_active: false, category: "vehicle" })).toBe(false);
   });
 
   it("flags the trencher on another machine the same day, naming the other job", () => {

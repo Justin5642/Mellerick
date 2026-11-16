@@ -777,6 +777,27 @@ line and hand the phone to the builder's rep, who signs it; it then locks.
 - **Not on the phone:** office void, Invoice Day Works, truck day stops,
   float distance lookup (km typed), offline entry.
 
+**Day Works lists the whole fleet; Fleet → Hire rates (16 Nov 2026; no migration).**
+Justin: "The whole Fleet doesn't seem to be there." The picker used to list
+only machines with an active `equipment_hire_options` row, and 0108 seeded
+rates by name match only, so every other machine was invisible.
+- **Day Works picker** (web `components/job/job-day-works.tsx`, phone
+  `mobile/components/job/day-works.tsx`): every active machine that is not a
+  `tool` (0108's seed rule; `isHireableMachine` in `lib/day-works-view.ts`).
+  One with no active hire option arrives with `options: []` and is shown
+  greyed, unpickable, under "No hire rate yet — office to set up in Fleet"
+  (office on the web gets a link to Fleet → Hire rates and a count of
+  unpriced machines). Split by `splitMachinesByHire` (web lib, mirrored in
+  `mobile/lib/dayWorks.ts`). Technicians still get names, hire types and
+  flags only. The server already refused a line for a machine with no
+  option (`hireOptionFlags` → 400); now tested for an unpriced machine.
+  "No machines in the fleet register" shows only when the register is empty.
+- **Fleet → Hire rates** card (`components/fleet/fleet-hire-rates.tsx`,
+  office/admin, anchor `#hire-rates`, above Attachments): every hireable
+  machine with its options and rates (`lib/fleet-hire-overview.ts`, tested),
+  or an amber "No hire rate yet"; unpriced first with a count, each with
+  Set up / Edit opening the existing Hire setup dialog.
+
 ---
 
 ## 2. The one rule that must never break
@@ -1619,7 +1640,7 @@ a shippable release.
 | **Check `EMAIL_FROM` for supplier POs** | Justin | Supplier PO emails go from `EMAIL_FROM` — it must be on a domain verified in Resend, or suppliers never receive them. (0085 itself applied 2026-10-28.) |
 | **Xero analytics: reconnect Xero** | Justin | `0105` is applied (2026-11-14). After deploy, click **Connect Xero** once so the new read scopes are granted, then `POST /api/xero/sync-analytics` as admin (or wait for the nightly cron) to start the 24-month backfill. |
 | **Unallocated bills: set `WEEKLY_DIGEST_TO`** | Justin | `0106` is applied (2026-11-14). Set `WEEKLY_DIGEST_TO` in Vercel (Production) to the office recipients' addresses. |
-| **Day Works / Hire: check rates** | Justin | `0108` is applied (2026-11-16). Check Fleet → Hire setup for machines the name match missed, and confirm the twin-steer float's 30 km / $5 per km. |
+| **Day Works / Hire: check rates** | Justin | `0108` is applied (2026-11-16). Set rates for the machines the name match missed — Fleet → **Hire rates** lists them first — and confirm the twin-steer float's 30 km / $5 per km. |
 | **Maestro flow 02** | Avi | Needs `ADMIN_EMAIL` / `ADMIN_PASSWORD` in the environment. The login subflow deliberately skips when a session already exists, so a password never passes through a script — which is why flows 01/03/04 could be run and 02 could not. |
 
 ### QA fixture — do not delete

@@ -23,6 +23,8 @@ const PC18 = "33333333-3333-4333-8333-333333333333";
 const FLOAT = "44444444-4444-4444-8444-444444444444";
 const TRENCHER = "55555555-5555-4555-8555-555555555555";
 const ENTRY = "66666666-6666-4666-8666-666666666666";
+// In the register with no hire rate yet (0108's name match missed it).
+const PC180 = "77777777-7777-4777-8777-777777777777";
 
 // Rates chosen so each is recognisable by value in a payload.
 const RATES = [115.37, 251.19, 471.13, 5.17, 203.47];
@@ -55,6 +57,8 @@ function resolveAdmin(q: Query): Result {
           { id: BOBCAT, name: "Kubota SVL75", is_active: true, equipment_hire_options: [{ hire_type: "wet", hire_unit: "hour", rate: 115.37, cost_centre_id: "cc-wet", is_active: true }] },
           { id: PC18, name: "PC18", is_active: true, equipment_hire_options: [{ hire_type: "dry", hire_unit: "day", rate: 251.19, whole_days_only: true, is_active: true }] },
           { id: FLOAT, name: "Quad axle float", is_active: true, equipment_hire_options: [{ hire_type: "float", hire_unit: "move", rate: 0, float_base: 471.13, float_km_included: 30, float_per_km: 5.17, is_active: true }] },
+          { id: PC180, name: "Komatsu PC180", is_active: true, category: "machinery", equipment_hire_options: [] },
+          { id: "tool-1", name: "Concrete saw", is_active: true, category: "tool", equipment_hire_options: [] },
         ],
         error: null,
       };
@@ -311,6 +315,19 @@ describe("POST /hire-entries — add a draft", () => {
       const res = await POST(req("POST", body), ctx);
       expect(res.status).toBe(400);
       expect((await res.json()).error).toMatch(msg);
+    }
+    expect(writesBy("caller")).toEqual([]);
+  });
+
+  it("lists a machine with no hire rate (no options) but refuses a line for it", async () => {
+    asTech();
+    const body = await (await GET(req("GET"), ctx)).json();
+    expect(body.machines.find((m: { id: string }) => m.id === PC180)).toEqual({ id: PC180, name: "Komatsu PC180", options: [] });
+    expect(body.machines.some((m: { name: string }) => m.name === "Concrete saw")).toBe(false);
+    for (const [t, u] of [["wet", "hour"], ["dry", "day"]]) {
+      const res = await POST(req("POST", { ...wetDay, equipment_id: PC180, hire_type: t, hire_unit: u, days: 1, attachment_ids: [] }), ctx);
+      expect(res.status).toBe(400);
+      expect((await res.json()).error).toMatch(/not set up for this kind of hire|Pick the machine/);
     }
     expect(writesBy("caller")).toEqual([]);
   });

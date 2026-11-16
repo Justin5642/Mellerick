@@ -28,6 +28,7 @@ import {
   quantityProblem,
   quantityText,
   signDayWorksEntry,
+  splitMachinesByHire,
   updateDayWorksEntry,
   type DayWorksDraft,
   type DayWorksEntry,
@@ -173,7 +174,9 @@ export function JobDayWorksTab({ jobId }: { jobId: string }) {
         <Text style={styles.heading}>Day Works / Hire</Text>
         <Text style={styles.meta}>{"One line per machine per day, signed by the builder's rep. Charged separately from the quoted work."}</Text>
         {view.machines.length === 0 ? (
-          <Text style={styles.warn}>No machines are set up for hire yet. Ask the office to set them up in Fleet.</Text>
+          <Text style={styles.warn}>There are no machines in the fleet register yet. Ask the office to add them.</Text>
+        ) : splitMachinesByHire(view.machines).ready.length === 0 ? (
+          <Text style={styles.warn}>No machine in the fleet has a hire rate yet. Ask the office to set them up in Fleet.</Text>
         ) : (
           <TouchableOpacity style={styles.primary} onPress={() => setDraft(emptyDraft(localDateKey(new Date())))} accessibilityRole="button" accessibilityLabel="Add day">
             <Text style={styles.primaryText}>+ Add day</Text>
@@ -307,10 +310,16 @@ export function JobDayWorksTab({ jobId }: { jobId: string }) {
   );
 }
 
-function Chip({ label, active, onPress }: { label: string; active: boolean; onPress: () => void }) {
+function Chip({ label, active, onPress, disabled }: { label: string; active: boolean; onPress: () => void; disabled?: boolean }) {
   return (
-    <TouchableOpacity style={[styles.chip, active && styles.chipActive]} onPress={onPress} accessibilityRole="button" accessibilityState={{ selected: active }}>
-      <Text style={[styles.chipText, active && styles.chipTextActive]}>{label}</Text>
+    <TouchableOpacity
+      style={[styles.chip, active && styles.chipActive, disabled && styles.chipDisabled]}
+      onPress={onPress}
+      disabled={disabled}
+      accessibilityRole="button"
+      accessibilityState={{ selected: active, disabled: !!disabled }}
+    >
+      <Text style={[styles.chipText, active && styles.chipTextActive, disabled && styles.chipTextDisabled]}>{label}</Text>
     </TouchableOpacity>
   );
 }
@@ -345,6 +354,8 @@ function EntrySheet({ draft, setDraft, view, saving, onSave, onCancel }: {
   const set = (patch: Partial<DayWorksDraft>) => setDraft({ ...draft, ...patch });
   const machine = view.machines.find((m) => m.id === draft.equipment_id);
   const opt = draftOption(draft, view.machines);
+  // The whole fleet is listed; a machine with no hire rate is shown greyed and can't be picked.
+  const { ready, noRate } = splitMachinesByHire(view.machines);
   const today = localDateKey(new Date());
   const yesterday = localDateKey(new Date(Date.now() - 86_400_000));
 
@@ -388,10 +399,20 @@ function EntrySheet({ draft, setDraft, view, saving, onSave, onCancel }: {
         <View style={{ gap: 6 }}>
           <Text style={styles.label}>Machine</Text>
           <View style={styles.chipRow}>
-            {view.machines.map((m) => (
+            {ready.map((m) => (
               <Chip key={m.id} label={m.name} active={draft.equipment_id === m.id} onPress={() => pickMachine(m.id)} />
             ))}
           </View>
+          {noRate.length > 0 && (
+            <>
+              <Text style={styles.warn}>No hire rate yet — office to set up in Fleet:</Text>
+              <View style={styles.chipRow}>
+                {noRate.map((m) => (
+                  <Chip key={m.id} label={m.name} active={false} disabled onPress={() => {}} />
+                ))}
+              </View>
+            </>
+          )}
         </View>
 
         {machine && machine.options.length > 1 && (
@@ -562,6 +583,8 @@ const styles = StyleSheet.create({
   chipActive: { backgroundColor: colors.blue600, borderColor: colors.blue600 },
   chipText: { fontSize: 14, fontWeight: "600", color: colors.slate700 },
   chipTextActive: { color: colors.white },
+  chipDisabled: { opacity: 0.5, borderStyle: "dashed" },
+  chipTextDisabled: { color: colors.slate400 },
   actions: { flexDirection: "row", gap: 10 },
   cancel: { flex: 1, paddingVertical: 14, borderRadius: 10, alignItems: "center", backgroundColor: colors.slate100 },
   cancelText: { fontSize: 16, fontWeight: "700", color: colors.slate700 },
