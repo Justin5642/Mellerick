@@ -102,9 +102,11 @@ interface Props {
   /** False when job_bookings is not in this database yet (0079). */
   bookingsReady: boolean;
   bookingsError: string | null;
+  /** A technician on a job they are not on: no schedule shown at all. */
+  hideSchedule?: boolean;
 }
 
-export function JobDetailClient({ job, currentUserId, photos: initialPhotos, documents: initialDocuments, notes: initialNotes, stageNotes: initialStageNotes, lineItems: initialLineItems, staff, purchaseOrders: initialPOs, vendorOrders: initialVendorOrders, timeEntries: initialTimeEntries, variations: initialVariations, expenses: initialExpenses, equipmentUsage: initialEquipmentUsage, isAdmin, isOffice, techAllocatedHours, techAllocatedHoursError, staffCostProfiles, jobInvoices, minMarginPct, currentAssignedIds, bookings: loadedBookings, bookingsReady, bookingsError }: Props) {
+export function JobDetailClient({ job, currentUserId, photos: initialPhotos, documents: initialDocuments, notes: initialNotes, stageNotes: initialStageNotes, lineItems: initialLineItems, staff, purchaseOrders: initialPOs, vendorOrders: initialVendorOrders, timeEntries: initialTimeEntries, variations: initialVariations, expenses: initialExpenses, equipmentUsage: initialEquipmentUsage, isAdmin, isOffice, techAllocatedHours, techAllocatedHoursError, staffCostProfiles, jobInvoices, minMarginPct, currentAssignedIds, bookings: loadedBookings, bookingsReady, bookingsError, hideSchedule = false }: Props) {
   // Deep-links like /dashboard/jobs/[id]?tab=variations&variation=[id]
   // (used by the Approvals page's "Price & review" link) land here — read
   // them once on mount so the right tab opens and the right variation is
@@ -271,7 +273,7 @@ export function JobDetailClient({ job, currentUserId, photos: initialPhotos, doc
                     "Dave · Mon 19 – Tue 20 Oct, 7:00–15:30 daily", or
                     "Dave, Sam · Mon 19 – Thu 22 Oct (3 bookings)". The
                     Overview lists each booking. */}
-                {scheduleSummary ?? "Not scheduled"}
+                {hideSchedule ? null : scheduleSummary ?? "Not scheduled"}
               </p>
               {isOffice && jobClosed && (
                 <p className="text-xs text-amber-700 mt-1 max-w-xl" role="note">
@@ -392,6 +394,7 @@ export function JobDetailClient({ job, currentUserId, photos: initialPhotos, doc
                 readOnly={viewOnly}
                 bookings={bookings}
                 bookingsError={bookingsError}
+                hideSchedule={hideSchedule}
                 onEditSchedule={isOffice ? openSchedule : undefined}
                 canEditSite={isOffice}
               />

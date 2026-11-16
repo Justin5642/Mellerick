@@ -30,6 +30,8 @@ interface Props {
   /** The job's bookings — who, which cost centre, when. Shown to everyone. */
   bookings: JobBookingWithNames[];
   bookingsError?: string | null;
+  /** A technician on a job they are not on: the Schedule card is left out. */
+  hideSchedule?: boolean;
   /** Opens the Schedule dialog; absent for anyone who cannot change bookings (not office/admin). */
   onEditSchedule?: () => void;
   /** Office/admin: may set the site's map pin (sites are office-writable, 0064). */
@@ -41,7 +43,7 @@ interface Props {
 // "Add New Site" dialog inline, so a wrong/missing site can be fixed here
 // without a trip to the Customer page — same picker as the New Job form.
 
-export function JobOverview({ job, readOnly = false, bookings, bookingsError, onEditSchedule, canEditSite = false }: Props) {
+export function JobOverview({ job, readOnly = false, bookings, bookingsError, hideSchedule = false, onEditSchedule, canEditSite = false }: Props) {
   const [pinOpen, setPinOpen] = useState(false);
   const router = useRouter();
   const supabase = createClient();
@@ -261,6 +263,7 @@ export function JobOverview({ job, readOnly = false, bookings, bookingsError, on
 
         {/* Outside the fieldset: read-only for everyone, and the Edit button
             must stay usable for office on a view-only page too. */}
+        {!hideSchedule && (
         <Card>
           <CardHeader>
             <div className="flex items-center justify-between gap-2">
@@ -298,6 +301,7 @@ export function JobOverview({ job, readOnly = false, bookings, bookingsError, on
             )}
           </CardContent>
         </Card>
+        )}
       </div>
 
       {/* Right — customer & site info */}

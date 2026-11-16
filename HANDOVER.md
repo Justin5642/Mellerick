@@ -506,6 +506,34 @@ Pencil and bin icons on the "Currently at" banner and on each stage note
 office/admin, which is the 0074 RLS rule; a refused write shows an error. Not
 on the phone yet.
 
+**Technicians don't see other people's schedules (16 Nov 2026; migration `0107` NOT YET APPLIED).**
+Justin: technicians may look any job up for its plans, but must not watch the
+schedule or the office's work. On a job they are NOT on (web and phone):
+- no schedule anywhere — header line, Overview's Schedule card, the phone's
+  booking lines and "Scheduling note" banner; the web job page strips the
+  bookings, job dates, notes and stage notes on the server
+  (`app/dashboard/jobs/[id]/page.tsx` `hideSchedule`), so none reaches the browser;
+- tabs are Overview, Documents, Photos (+ Orders on the phone, per the 28 Oct
+  "PO on any job" rule) — **Notes is gone** (`VIEW_ONLY_TABS`, web
+  `lib/job-view-only.ts`, phone `app/job/[id].tsx`);
+- the web Jobs list shows no dates to technicians.
+On jobs they ARE on, nothing changes: they see the whole crew's bookings
+(Justin's choice). Search and opening any job still work.
+- **Database:** `0107` replaces job_bookings' `using (true)` SELECT with
+  "office/admin, or `user_can_manage_job`", dropped by enumeration and
+  asserted. Apply it, then run `supabase/tests/0107_…_test.sql` (impersonates a
+  real technician; trust only the final `0107 PASSED`). Then change its header
+  to applied. Until then the app hides bookings but a technician with the anon
+  key could still query them.
+- **Still readable at the database** (left open, hidden in the app): jobs'
+  dates, job_notes, job_stage_notes. Closing those needs column-level work on
+  `jobs` and would break job look-ups; not done.
+- `requireOnJob` (`lib/api/guards.ts`, tested): office/admin, the lead or the
+  crew. Now guards `/api/jobs/[id]/plant-usage` (who logged which truck) and
+  `/api/jobs/[id]/stages` — the latter also fixes office being refused
+  (requireUser left `role` null).
+- Phone parts reach devices with the next build.
+
 **Xero analytics mirror (14 Nov 2026; branch `feat/xero-analytics-sync`; migration `0105`, first numbered 0098, applied 2026-11-14).**
 Renumbered 0098→0105 and 0099→0106 on merge (main already had its own 0098/0099).
 Record them in the ledger once: `insert into supabase_migrations.schema_migrations (version,name) values ('0105','xero_analytics'),('0106','xero_bill_allocations') on conflict do nothing;`

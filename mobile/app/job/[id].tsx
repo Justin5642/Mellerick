@@ -48,7 +48,9 @@ type TabKey = (typeof TABS)[number]["key"];
 // all actions, so they are hidden rather than shown disabled. Orders stays:
 // any tech may raise a supplier PO on any job (Justin, 28 Oct 2026) — it goes
 // through the web API, not a job write the database would refuse.
-const VIEW_ONLY_TABS = new Set<TabKey>(["overview", "orders", "photos", "documents", "notes"]);
+// On a job they are not on, a technician looks up the plans: no Notes (office
+// chatter, scheduling notes) and no schedule anywhere (Justin, 16 Nov 2026).
+const VIEW_ONLY_TABS = new Set<TabKey>(["overview", "orders", "photos", "documents"]);
 
 const JOB_STATUSES = ["pending", "scheduled", "in_progress", "on_hold", "completed", "cancelled"] as const;
 const JOB_PRIORITIES = ["low", "normal", "high", "urgent"] as const;
@@ -320,7 +322,7 @@ export default function JobDetailScreen() {
         {job.customers?.name}
         {job.sites ? ` · ${job.sites.name}, ${job.sites.suburb}` : ""}
       </Text>
-      {bookings && bookings.length > 0 ? (
+      {viewOnly ? null : bookings && bookings.length > 0 ? (
         // One line per booking — who, when, which stage; your own in blue.
         <View style={styles.bookingList}>
           {bookings.map((b) => {
@@ -383,7 +385,7 @@ export default function JobDetailScreen() {
             onGo={setTab}
           />
         )}
-        {activeTab === "overview" && <JobOverviewTab job={job} currentUserId={userId} readOnly={viewOnly} onChanged={loadJob} />}
+        {activeTab === "overview" && <JobOverviewTab job={viewOnly ? { ...job, scheduled_start: null, scheduled_end: null } : job} currentUserId={userId} readOnly={viewOnly} onChanged={loadJob} />}
         {activeTab === "time" && userId && <AutoClockStatus />}
         {activeTab === "time" && userId && (
           <JobTimeTab

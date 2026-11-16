@@ -6,5 +6,7 @@ export function isJobViewOnly(isOffice: boolean, assignedIds: string[], userId: 
   return !isOffice && !assignedIds.includes(userId);
 }
 
-/** Tabs that still make sense without editing rights. */
-export const VIEW_ONLY_TABS = ["overview", "documents", "photos", "notes"];
+/** Tabs a technician sees on a job they are not on: the job, its plans and
+ *  photos. Not Notes (office chatter, scheduling notes) and never the schedule
+ *  (Justin, 16 Nov 2026: look up the plans, don't watch other people's work). */
+export const VIEW_ONLY_TABS = ["overview", "documents", "photos"];

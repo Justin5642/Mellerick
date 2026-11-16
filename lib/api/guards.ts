@@ -101,3 +101,29 @@ export function requireCronSecret(request: NextRequest): { ok: true } | GuardFai
   }
   return { ok: true };
 }
+
+// Require an active user who is on this job: office/admin, the job's lead
+// (jobs.assigned_to) or anyone on its crew (job_assignments). For routes that
+// use the service-role client on one job — RLS can't narrow those, so this is
+// what keeps a technician to their own work (Justin, 16 Nov 2026). An unknown
+// job answers 404 for everyone, so a technician learns nothing about it.
+export async function requireOnJob(request: NextRequest, jobId: string): Promise<GuardResult> {
+  const userId = await getCallerId(request);
+  if (!userId) return unauthenticated();
+  const { found, role } = await getActiveCallerRole(userId);
+  if (!found) return forbidden();
+  const admin = createAdminClient();
+  const { data: job } = await admin.from("jobs").select("id, assigned_to").eq("id", jobId).maybeSingle();
+  if (!job) return { ok: false, response: NextResponse.json({ error: "Job not found" }, { status: 404 }) };
+  if (role === "office" || role === "admin" || job.assigned_to === userId) return { ok: true, userId, role };
+  const { data: crew } = await admin
+    .from("job_assignments")
+    .select("job_id")
+    .eq("job_id", jobId)
+    .eq("staff_id", userId)
+    .maybeSingle();
+  if (!crew) {
+    return { ok: false, response: NextResponse.json({ error: "This job isn't one of yours." }, { status: 403 }) };
+  }
+  return { ok: true, userId, role };
+}

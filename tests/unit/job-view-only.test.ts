@@ -16,7 +16,7 @@ describe("isJobViewOnly — the web job page matches the database's write rule (
   });
 
   it("keeps only the read-only tabs, and none of the action tabs", () => {
-    expect(VIEW_ONLY_TABS).toEqual(["overview", "documents", "photos", "notes"]);
+    expect(VIEW_ONLY_TABS).toEqual(["overview", "documents", "photos"]);
     for (const action of ["time", "variations", "expenses", "equipment", "items", "signature", "po", "costing"]) {
       expect(VIEW_ONLY_TABS).not.toContain(action);
     }

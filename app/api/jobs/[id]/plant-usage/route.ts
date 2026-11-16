@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { requireUser } from "@/lib/api/guards";
+import { requireOnJob } from "@/lib/api/guards";
 import { callerClient } from "@/lib/api/caller-client";
 import { reportError } from "@/lib/monitoring";
 
@@ -29,9 +29,9 @@ async function jobLines(admin: Admin, jobId: string) {
 }
 
 export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const guard = await requireUser(request);
-  if (!guard.ok) return guard.response;
   const { id } = await params;
+  const guard = await requireOnJob(request, id);
+  if (!guard.ok) return guard.response;
   try {
     const admin = createAdminClient();
     const [equipmentRes, lines, usageRes] = await Promise.all([
@@ -82,9 +82,9 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 }
 
 export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const guard = await requireUser(request);
-  if (!guard.ok) return guard.response;
   const { id: jobId } = await params;
+  const guard = await requireOnJob(request, jobId);
+  if (!guard.ok) return guard.response;
   const b = ((await request.json().catch(() => null)) ?? {}) as Record<string, unknown>;
 
   const equipmentId = b.equipmentId;
@@ -147,9 +147,9 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
 // and hours/loads entries are not touched from here. Runs as the caller, so
 // RLS (0074: jobs you're on) decides as it does for the insert.
 export async function DELETE(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const guard = await requireUser(request);
-  if (!guard.ok) return guard.response;
   const { id: jobId } = await params;
+  const guard = await requireOnJob(request, jobId);
+  if (!guard.ok) return guard.response;
   const usageId = request.nextUrl.searchParams.get("usageId");
   if (!usageId || !UUID.test(usageId)) return NextResponse.json({ error: "Pick the tool again." }, { status: 400 });
   try {
