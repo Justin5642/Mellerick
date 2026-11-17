@@ -75,10 +75,32 @@ will see an empty screen and reject the app.
    has none, the location permission prompt never appears for the reviewer.
 5. Sign in on a phone as App Review and confirm #834 shows in My Jobs.
 
-**Please decide:** technicians can search and open any job (Search tab). So
-the reviewer could look up real customers' names and addresses. If that is
-not acceptable, tell the developer before submitting; a reviewer-only
-restriction can be added.
+6. **Limit the account to its own jobs** (migration 0110 — a draft, not
+   applied yet; do this before submitting). An ordinary technician can search
+   and open any job and their phone receives the whole backflow register, so
+   the reviewer could otherwise see real customers' names and addresses. A
+   *limited-access* account sees only the jobs it is on (#834), that job's
+   customer, site, photos, documents and notes, and no backflow register at
+   all — enforced by the database (RLS) and the phone sync rules, not just by
+   the screens. Real technicians are unaffected. In the Supabase SQL editor:
+   1. Paste `supabase/migrations/0110_limited_access_accounts.sql`, run it.
+   2. Paste `supabase/tests/0110_limited_access_accounts_test.sql`, run it.
+      Trust only a final row reading **`0110 PASSED`**; a red error means
+      nothing was changed.
+   3. Mark the reviewer account (one paste, your reviewer address in place of
+      the placeholder):
+      ```sql
+      select set_config('request.jwt.claims', '{"role":"service_role"}', true);
+      update profiles set limited_access = true where lower(email) = lower('<reviewer email>');
+      select id, email, role, limited_access from profiles where limited_access;
+      ```
+      The last line should list exactly the App Review account.
+   4. THEN redeploy the PowerSync sync streams (`docs/powersync-deploy.md`).
+      Not before step 1: the backflow streams now read
+      `profiles.limited_access`.
+   5. Sign in on a phone as App Review: My Jobs shows #834, Search finds
+      nothing else, and the Backflow tab is gone (with the next build; on an
+      older build the tab shows an empty list).
 
 ## Step 3: Record a short video of auto clock-in (recommended)
 

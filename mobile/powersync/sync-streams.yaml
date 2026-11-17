@@ -90,6 +90,15 @@ streams:
   # customers and sites of their in-window jobs, plus those that own an ACTIVE
   # backflow device (the backflow register lists every device by customer and
   # suburb). Office/admin get both tables whole, further down.
+  #
+  # LIMITED-ACCESS ACCOUNTS (migration 0110 — a draft, not applied yet; apply
+  # it BEFORE deploying this file): the four backflow_* streams join the
+  # caller's own profile row and send nothing when profiles.limited_access is
+  # true (the App Store review account). `IS NOT true`, so a profile whose flag
+  # is false — or a database without the column — keeps today's behaviour.
+  # A user with no profile row receives no backflow register (fail closed).
+  # The tech_* streams need no change: they already carry only the caller's
+  # own jobs.
   tech_customers:
     auto_subscribe: true
     query: |
@@ -100,9 +109,10 @@ streams:
   backflow_customers:
     auto_subscribe: true
     query: |
-      SELECT id, name, company, phone, email, mobile, abn, notes, is_active, is_favorite
-      FROM customers
-      WHERE sync_backflow IS NOT false
+      SELECT customers.id, customers.name, customers.company, customers.phone, customers.email,
+             customers.mobile, customers.abn, customers.notes, customers.is_active, customers.is_favorite
+      FROM customers JOIN profiles ON profiles.id = auth.user_id()
+      WHERE customers.sync_backflow IS NOT false AND profiles.limited_access IS NOT true
 
   tech_sites:
     auto_subscribe: true
@@ -114,9 +124,11 @@ streams:
   backflow_sites:
     auto_subscribe: true
     query: |
-      SELECT id, customer_id, name, address_line1, address_line2, suburb, state, postcode, site_lat, site_lng, notes, is_active, geofence_radius_m
-      FROM sites
-      WHERE sync_backflow IS NOT false
+      SELECT sites.id, sites.customer_id, sites.name, sites.address_line1, sites.address_line2,
+             sites.suburb, sites.state, sites.postcode, sites.site_lat, sites.site_lng, sites.notes,
+             sites.is_active, sites.geofence_radius_m
+      FROM sites JOIN profiles ON profiles.id = auth.user_id()
+      WHERE sites.sync_backflow IS NOT false AND profiles.limited_access IS NOT true
 
   # Backflow compliance data (no money; matches the authenticated RLS posture —
   # technicians register devices and log tests in the field).
@@ -131,13 +143,18 @@ streams:
   backflow_devices:
     auto_subscribe: true
     query: |
-      SELECT id, customer_id, site_id, water_authority, device_type, protection_type,
-             make, model, serial_number, size_mm, location_description,
-             water_authority_property_number, water_meter_number,
-             fire_service_meter_number, test_frequency_months, is_active, notes,
-             created_by, created_at, updated_at
-      FROM backflow_devices
-      WHERE is_active = true
+      SELECT backflow_devices.id, backflow_devices.customer_id, backflow_devices.site_id,
+             backflow_devices.water_authority, backflow_devices.device_type,
+             backflow_devices.protection_type, backflow_devices.make, backflow_devices.model,
+             backflow_devices.serial_number, backflow_devices.size_mm,
+             backflow_devices.location_description,
+             backflow_devices.water_authority_property_number,
+             backflow_devices.water_meter_number, backflow_devices.fire_service_meter_number,
+             backflow_devices.test_frequency_months, backflow_devices.is_active,
+             backflow_devices.notes, backflow_devices.created_by, backflow_devices.created_at,
+             backflow_devices.updated_at
+      FROM backflow_devices JOIN profiles ON profiles.id = auth.user_id()
+      WHERE backflow_devices.is_active = true AND profiles.limited_access IS NOT true
 
   # Last 24 months plus each device's latest PASS (sync_recent, 0068) — exactly
   # what computeBackflowRows needs to derive the next-due date, plus the few
@@ -148,10 +165,13 @@ streams:
   backflow_tests:
     auto_subscribe: true
     query: |
-      SELECT id, device_id, job_id, test_type, test_date, result, tester_name, tested_by,
-             submitted_to_water_authority_at, certificate_storage_path, created_at
-      FROM backflow_tests
-      WHERE sync_recent IS NOT false
+      SELECT backflow_tests.id, backflow_tests.device_id, backflow_tests.job_id,
+             backflow_tests.test_type, backflow_tests.test_date, backflow_tests.result,
+             backflow_tests.tester_name, backflow_tests.tested_by,
+             backflow_tests.submitted_to_water_authority_at,
+             backflow_tests.certificate_storage_path, backflow_tests.created_at
+      FROM backflow_tests JOIN profiles ON profiles.id = auth.user_id()
+      WHERE backflow_tests.sync_recent IS NOT false AND profiles.limited_access IS NOT true
 
   # ---- Technician: their assigned jobs + children, MONEY-STRIPPED ------------
   #

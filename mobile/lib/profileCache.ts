@@ -33,6 +33,13 @@ export interface CachedProfile {
   is_active: boolean;
   /** Auto clock-in on site arrival (0082): null = by role. See trackingGate. */
   auto_clock?: boolean | null;
+  /**
+   * Limited-access account (draft migration 0110 — not applied yet; the App
+   * Store review login). Present only when true; absent means a normal
+   * account, which is also what a database without the column gives. A UI
+   * hint only (hides the Backflow tab) — RLS and the sync streams enforce it.
+   */
+  limited_access?: true;
 }
 
 interface StoredRecord {
@@ -60,6 +67,7 @@ export function toCachedProfile(row: unknown): CachedProfile | null {
     // Only when set: absent (older caches, before 0082, or never set) means
     // "by role" — see trackingGate.decideTracking.
     ...(typeof r.auto_clock === "boolean" ? { auto_clock: r.auto_clock } : {}),
+    ...(r.limited_access === true ? { limited_access: true as const } : {}),
   };
 }
 

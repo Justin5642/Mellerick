@@ -368,10 +368,41 @@ describe("PowerSync sync windows", () => {
         const q = query(name);
         const ok =
           q.includes(`WHERE id IN (SELECT ${fk} FROM jobs WHERE sync_tech IS NOT false AND id IN (SELECT job_id FROM job_assignments WHERE staff_id = auth.user_id()))`) ||
-          q.endsWith("WHERE sync_backflow IS NOT false");
+          q.endsWith(`WHERE ${table}.sync_backflow IS NOT false AND profiles.limited_access IS NOT true`);
         expect({ name, ok }).toEqual({ name, ok: true });
       }
     }
+  });
+
+  // LIMITED-ACCESS ACCOUNTS (migration 0110, a draft — not applied yet). The
+  // backflow register goes to every role, so it is the one technician-visible
+  // set NOT already scoped to the caller's own jobs. A limited account (the
+  // App Store review login) must receive none of it: each backflow stream
+  // joins the caller's profile row and requires `limited_access IS NOT true`.
+  // `IS NOT true` (never `= false`) so a database without the column keeps
+  // today's behaviour, the same fail-open rule as the window flags.
+  it("gates every backflow stream on the caller's profile not being a limited account", () => {
+    const backflow = Object.keys(streams).filter((n) => n.startsWith("backflow_"));
+    expect(backflow.sort()).toEqual(["backflow_customers", "backflow_devices", "backflow_sites", "backflow_tests"]);
+    const ungated = backflow.filter((n) => {
+      const q = query(n);
+      return (
+        !/\bJOIN profiles ON profiles\.id = auth\.user_id\(\) WHERE /i.test(q) ||
+        !q.endsWith(" AND profiles.limited_access IS NOT true") ||
+        // An OR anywhere would let rows past the gate.
+        /\bOR\b/i.test(q.slice(q.search(/\bWHERE\b/i)))
+      );
+    });
+    expect(ungated).toEqual([]);
+  });
+
+  it("never filters on limited_access with a strict comparison", () => {
+    // `limited_access = false` reads NULL (column not deployed yet) as "out"
+    // and would empty the backflow register on every phone.
+    const strict = Object.entries(streams)
+      .filter(([, def]) => /\blimited_access\s*(=|!=|<>)/i.test(def.query ?? ""))
+      .map(([name]) => name);
+    expect(strict).toEqual([]);
   });
 
   it("ANDs any window filter onto the office role gate, never ORs it", () => {
