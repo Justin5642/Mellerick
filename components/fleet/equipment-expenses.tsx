@@ -159,7 +159,7 @@ export function EquipmentExpenses({ equipmentId, expenses: initialExpenses, onUp
     <div className="p-6 space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-base font-semibold text-slate-900">Expenses &amp; Service History</h2>
+          <h2 className="text-base font-semibold text-slate-900">Expenses</h2>
           <p className="text-sm text-slate-500">Actual spend on this vehicle — servicing, repairs, tyres, rego, insurance</p>
         </div>
         {!showForm && (

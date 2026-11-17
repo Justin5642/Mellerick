@@ -816,6 +816,37 @@ line and hand the phone to the builder's rep, who signs it; it then locks.
 - **Not on the phone:** office void, Invoice Day Works, truck day stops,
   float distance lookup (km typed), offline entry.
 
+**Fleet service history takes the invoice by drag and drop (17 Nov 2026; no migration).**
+Justin: "What happened to the drag and drop in the fleet? We drop the invoices
+for servicing … so it populates the service history." The drop zone lived on
+the old "Expenses & Service" tab; the Service history tab (0099) added on
+15 Nov had no file field, so invoices stopped reaching it. "Log a service"
+(`components/fleet/equipment-service-records.tsx`) now has a drop zone:
+dropping a file switches the cost to "Log the cost now", and the file is
+uploaded to `equipment-documents` at `serviceInvoicePath()`
+(`lib/service-due.ts`, tested — the `expense-receipt-` shape, so 0047 keeps it
+from technicians) and saved as that expense's `receipt_storage_path`. A failed
+upload saves nothing; a failed expense or service insert removes the file
+again. Each service card shows "View invoice" when its cost has a file. The
+old tab is now labelled **Expenses**.
+- **The invoice is read automatically** (Justin, 17 Nov 2026). On drop, a
+  photo is shrunk in the browser (`lib/image-resize.ts`) and the file goes to
+  `POST /api/fleet/service-invoice/read` (office/admin; ≤3 MB — it travels as
+  base64 in the request; bytes sniffed, PDF/JPEG/PNG/WebP only; rate limit
+  `service-invoice-read`, 30 per 10 min). `lib/service-invoice-read.ts` reads
+  it with `claude-opus-5-5` (structured output, effort low, server-side
+  refusal fallback): workshop, invoice number, date, amount ex GST and GST,
+  odometer / engine hours, service type, a short work-done summary, the next
+  service due if printed, and the vehicle as printed; `cleanServiceInvoice`
+  drops impossible dates, negatives and a next-due that isn't ahead. The
+  form is filled by `applyServiceInvoiceRead` (`lib/service-invoice-form.ts`):
+  only fields still empty (or on their defaults — today, "Scheduled
+  service"); typed values are never overwritten; an already-linked expense is
+  kept. A note says "check it's this machine" with the vehicle the invoice
+  names, and warns when the file isn't a service invoice. Nothing is saved
+  until the office presses Save. A failed or skipped read leaves the file
+  attached. Tests: `tests/unit/service-invoice-read.test.ts`.
+
 **Day Works lists the whole fleet; Fleet → Hire rates (16 Nov 2026; no migration).**
 Justin: "The whole Fleet doesn't seem to be there." The picker used to list
 only machines with an active `equipment_hire_options` row, and 0108 seeded

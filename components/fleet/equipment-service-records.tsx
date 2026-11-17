@@ -3,7 +3,10 @@
 import { useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { toast } from "sonner";
-import { Wrench, Plus, Trash2, Gauge, CalendarClock, AlertTriangle, Receipt } from "lucide-react";
+import { Wrench, Plus, Trash2, Gauge, CalendarClock, AlertTriangle, Receipt, ExternalLink, Sparkles, Loader2 } from "lucide-react";
+import { FileDropzone } from "@/components/ui/file-dropzone";
+import { resizeImageForUpload } from "@/lib/image-resize";
+import { applyServiceInvoiceRead, type ServiceInvoiceReadResult } from "@/lib/service-invoice-form";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -15,6 +18,7 @@ import {
   SERVICE_TYPE_LABELS,
   dueLabel,
   serviceDue,
+  serviceInvoicePath,
   sortRecords,
   type ServiceRecord,
 } from "@/lib/service-due";
@@ -37,6 +41,16 @@ const blankForm = (today: string) => ({
   gst_amount: "",
   invoice_number: "",
 });
+
+/** Read-route limit (lib/service-invoice-read.ts MAX_SERVICE_INVOICE_BYTES). */
+const MAX_READ_BYTES = 3 * 1024 * 1024;
+
+async function fileToBase64(file: File): Promise<string> {
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  let binary = "";
+  for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  return btoa(binary);
+}
 
 const num = (v: string) => (v.trim() === "" ? null : Number(v));
 
@@ -71,6 +85,9 @@ export function EquipmentServiceRecords({
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState(() => blankForm(today));
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const [invoiceFile, setInvoiceFile] = useState<File | null>(null);
+  const [reading, setReading] = useState(false);
+  const [readNote, setReadNote] = useState<{ tone: "ok" | "warn"; text: string } | null>(null);
 
   const sorted = useMemo(() => sortRecords(records ?? []), [records]);
   const due = useMemo(() => serviceDue(records ?? [], today), [records, today]);
@@ -83,7 +100,7 @@ export function EquipmentServiceRecords({
       <div className="p-6">
         <Card>
           <CardContent className="py-6 text-sm text-slate-500">
-            Service records aren&apos;t switched on in this database yet (migration 0099). Expenses and receipts still work in the Expenses &amp; Service tab.
+            Service records aren&apos;t switched on in this database yet (migration 0099). Expenses and receipts still work in the Expenses tab.
           </CardContent>
         </Card>
       </div>
@@ -115,6 +132,22 @@ export function EquipmentServiceRecords({
     if (!validate()) return;
     setSaving(true);
 
+    // 0. The invoice copy, if one was dropped. Uploaded first so a failed
+    // upload saves nothing; removed again below if a later step fails.
+    let invoicePath: string | null = null;
+    if (form.expense === NEW_EXPENSE && invoiceFile) {
+      invoicePath = serviceInvoicePath(equipmentId, invoiceFile.name, Date.now());
+      const { error: upErr } = await supabase.storage.from("equipment-documents").upload(invoicePath, invoiceFile);
+      if (upErr) {
+        toast.error("The invoice file could not be uploaded. Nothing was saved.");
+        setSaving(false);
+        return;
+      }
+    }
+    const dropInvoice = async () => {
+      if (invoicePath) await supabase.storage.from("equipment-documents").remove([invoicePath]);
+    };
+
     // 1. The cost, if it's new. Created first so the service can point at it.
     let expenseId: string | null = form.expense && form.expense !== NEW_EXPENSE ? form.expense : null;
     let createdExpense: any = null;
@@ -130,11 +163,13 @@ export function EquipmentServiceRecords({
           expense_date: form.service_date,
           amount: Number(form.amount) || 0,
           gst_amount: Number(form.gst_amount) || 0,
+          receipt_storage_path: invoicePath,
           logged_by: currentUserId,
         })
         .select()
         .single();
       if (error || !data) {
+        await dropInvoice();
         toast.error(`The cost could not be saved (${error?.message ?? "no row returned"}). Nothing was saved.`);
         setSaving(false);
         return;
@@ -169,8 +204,9 @@ export function EquipmentServiceRecords({
       if (createdExpense) {
         const { error: undoErr } = await supabase.from("equipment_expenses").delete().eq("id", createdExpense.id);
         note = undoErr
-          ? ` The cost was saved but could not be removed again (${undoErr.message}) — delete it from Expenses & Service.`
+          ? ` The cost was saved but could not be removed again (${undoErr.message}) — delete it from the Expenses tab.`
           : " The cost entered with it was not kept.";
+        if (!undoErr) await dropInvoice();
       }
       toast.error(`The service could not be saved (${recErr?.message ?? "no row returned"}).${note}`);
       setSaving(false);
@@ -181,12 +217,60 @@ export function EquipmentServiceRecords({
     onRecordsChange([record as unknown as ServiceRecord, ...(records ?? [])]);
     toast.success(createdExpense ? "Service and its cost saved" : "Service saved");
     setForm(blankForm(today));
+    setInvoiceFile(null);
+    setReadNote(null);
     setShowForm(false);
     setSaving(false);
   }
 
+  /** Drop → shrink a photo → read it → fill what is still empty. Never saves. */
+  async function onInvoiceDropped(picked: File | null) {
+    setReadNote(null);
+    if (!picked) { setInvoiceFile(null); return; }
+    const file = await resizeImageForUpload(picked);
+    setInvoiceFile(file);
+    setForm((f) => (f.expense === NEW_EXPENSE ? f : { ...f, expense: NEW_EXPENSE }));
+    if (file.size > MAX_READ_BYTES) {
+      setReadNote({ tone: "warn", text: "Too large to read automatically (over 3 MB). Fill the details in — the file is still saved with the service." });
+      return;
+    }
+    setReading(true);
+    try {
+      const res = await fetch("/api/fleet/service-invoice/read", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ fileBase64: await fileToBase64(file) }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok || !body.read) {
+        setReadNote({ tone: "warn", text: body.error ?? "The invoice could not be read. Fill the details in by hand." });
+        return;
+      }
+      const read = body.read as ServiceInvoiceReadResult;
+      setForm((f) => applyServiceInvoiceRead(f, read, today, NEW_EXPENSE).form);
+      const foundAnything = [read.provider, read.invoice_number, read.service_date, read.amount_ex_gst, read.odometer_km, read.engine_hours, read.work_done]
+        .some((v) => v !== null);
+      setErrors({});
+      const parts: string[] = [];
+      if (!read.is_service_invoice) parts.push("This doesn't look like a service invoice — check it's the right file.");
+      if (read.vehicle_text) parts.push(`Invoice is for: ${read.vehicle_text} — check it's this machine.`);
+      parts.push(foundAnything ? "Details read from the invoice — check them, then save." : "Nothing new was read from the invoice.");
+      setReadNote({ tone: read.is_service_invoice ? "ok" : "warn", text: parts.join(" ") });
+    } catch {
+      setReadNote({ tone: "warn", text: "The invoice could not be read. Fill the details in by hand." });
+    } finally {
+      setReading(false);
+    }
+  }
+
+  async function viewInvoice(path: string) {
+    const { data } = await supabase.storage.from("equipment-documents").createSignedUrl(path, 60);
+    if (data?.signedUrl) window.open(data.signedUrl, "_blank");
+    else toast.error("The invoice file could not be opened.");
+  }
+
   async function remove(r: ServiceRecord) {
-    if (!window.confirm(`Delete the ${formatDate(r.service_date)} service record? Its cost (if any) stays in Expenses & Service.`)) return;
+    if (!window.confirm(`Delete the ${formatDate(r.service_date)} service record? Its cost (if any) stays in the Expenses tab.`)) return;
     const { error, count } = await supabase.from("equipment_service_records").delete({ count: "exact" }).eq("id", r.id);
     if (error || count === 0) {
       toast.error(error?.message ?? "The service record could not be deleted.");
@@ -261,6 +345,24 @@ export function EquipmentServiceRecords({
             </div>
 
             <div className="space-y-3 border-t pt-3">
+              <Field label="Drop the service invoice here">
+                <FileDropzone
+                  file={invoiceFile}
+                  onFileChange={(f) => { void onInvoiceDropped(f); }}
+                  accept=".pdf,.png,.jpg,.jpeg,.webp"
+                  hint="PDF or photo — read automatically and saved with the service's cost"
+                  disabled={reading}
+                />
+              </Field>
+              {reading && (
+                <p className="text-xs text-blue-700 flex items-center gap-1.5"><Loader2 className="w-3.5 h-3.5 animate-spin" />Reading the invoice…</p>
+              )}
+              {readNote && (
+                <p className={`text-xs flex items-start gap-1.5 ${readNote.tone === "ok" ? "text-emerald-700" : "text-amber-700"}`}>
+                  {readNote.tone === "ok" ? <Sparkles className="w-3.5 h-3.5 mt-0.5 shrink-0" /> : <AlertTriangle className="w-3.5 h-3.5 mt-0.5 shrink-0" />}
+                  {readNote.text}
+                </p>
+              )}
               <Field label="Invoice for this service">
                 <select value={form.expense} onChange={(e) => set("expense", e.target.value)} className="h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm">
                   <option value={NO_EXPENSE}>No cost / not invoiced yet</option>
@@ -272,6 +374,9 @@ export function EquipmentServiceRecords({
                   ))}
                 </select>
               </Field>
+              {invoiceFile && form.expense !== NEW_EXPENSE && (
+                <p className="text-xs text-amber-700">The dropped invoice is saved only with &ldquo;Log the cost now&rdquo;. To keep it with an already-logged cost, attach it in the Expenses tab.</p>
+              )}
               {form.expense === NEW_EXPENSE && (
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                   <Field label="Amount ex GST *" error={errors.amount}>
@@ -283,14 +388,14 @@ export function EquipmentServiceRecords({
                   <Field label="Invoice #">
                     <Input value={form.invoice_number} onChange={(e) => set("invoice_number", e.target.value)} />
                   </Field>
-                  <p className="sm:col-span-3 text-xs text-slate-400">Saved as an expense; attach the invoice copy to it in Expenses &amp; Service.</p>
+                  <p className="sm:col-span-3 text-xs text-slate-400">Saved as an expense with the invoice copy above, so it counts once in the yearly cost.</p>
                 </div>
               )}
             </div>
 
             <div className="flex justify-end gap-2">
-              <Button variant="outline" onClick={() => { setShowForm(false); setErrors({}); }}>Cancel</Button>
-              <Button onClick={save} disabled={saving}>{saving ? "Saving..." : "Save service"}</Button>
+              <Button variant="outline" onClick={() => { setShowForm(false); setErrors({}); setInvoiceFile(null); setReadNote(null); }}>Cancel</Button>
+              <Button onClick={save} disabled={saving || reading}>{saving ? "Saving..." : "Save service"}</Button>
             </div>
           </CardContent>
         </Card>
@@ -320,6 +425,11 @@ export function EquipmentServiceRecords({
                         {r.odometer_km != null && <span className="flex items-center gap-1"><Gauge className="w-3 h-3" />{r.odometer_km.toLocaleString("en-AU")} km</span>}
                         {r.engine_hours != null && <span>{Number(r.engine_hours).toLocaleString("en-AU")} engine h</span>}
                         {exp && <span className="flex items-center gap-1"><Receipt className="w-3 h-3" />${Number(exp.amount).toFixed(2)} ex GST{exp.invoice_number ? ` · inv ${exp.invoice_number}` : ""}</span>}
+                        {exp?.receipt_storage_path && (
+                          <button type="button" onClick={() => viewInvoice(exp.receipt_storage_path)} className="flex items-center gap-1 text-blue-600 hover:underline">
+                            <ExternalLink className="w-3 h-3" />View invoice
+                          </button>
+                        )}
                       </p>
                     </div>
                     {canEdit && (

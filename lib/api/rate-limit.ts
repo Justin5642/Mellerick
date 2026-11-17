@@ -27,6 +27,8 @@ export const POLISH_NOTE_LIMIT: RateLimit = { bucket: "polish-note", max: 60, wi
 export const SUPPLIER_ORDER_LIMIT: RateLimit = { bucket: "supplier-order", max: 20, windowSeconds: 600 };
 // Each supplier PDF is one paid read. A day's batch is a few dozen.
 export const SUPPLIER_INVOICE_READ_LIMIT: RateLimit = { bucket: "supplier-invoice-read", max: 60, windowSeconds: 600 };
+// Each dropped fleet service invoice is one paid read. A busy day is a handful.
+export const SERVICE_INVOICE_READ_LIMIT: RateLimit = { bucket: "service-invoice-read", max: 30, windowSeconds: 600 };
 
 let reportedUnavailable = false;
 
