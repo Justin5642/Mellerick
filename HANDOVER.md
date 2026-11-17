@@ -958,7 +958,7 @@ windows) — all 16 technician-visible streams are money-free:
 - `tech_job_bookings` (added for build 16; 0079/0080 applied 2026-10-19,
   deployed as sync config v5 on 2026-11-14) — 10 named columns: who, when, cost-centre **id**;
   plus `note` (the booking's free-text scheduling note, 0109 applied
-  2026-11-16; YAML redeploy pending); no money column exists on `job_bookings`
+  2026-11-16; streams redeployed 2026-11-17); no money column exists on `job_bookings`
 
 **Backflow streams are gated on the caller's profile (migration 0110,
 applied 2026-11-17).** `backflow_customers`, `backflow_sites`,
@@ -968,7 +968,7 @@ applied 2026-11-17).** `backflow_customers`, `backflow_sites`,
 review login) receives none of it; everyone else exactly what they did before.
 `IS NOT true`, never `= false`, so a database without the column keeps today's
 behaviour. A user with no profile row now receives no backflow register (fail
-closed). **Apply 0110 BEFORE redeploying the YAML.**
+closed). 0110 applied and the YAML redeployed (active) on 2026-11-17.
 
 Office/admin streams gate on the caller's own profile row:
 
@@ -1783,8 +1783,8 @@ a shippable release.
 | **Xero analytics: reconnect Xero** | Justin | `0105` is applied (2026-11-14). After deploy, click **Connect Xero** once so the new read scopes are granted, then `POST /api/xero/sync-analytics` as admin (or wait for the nightly cron) to start the 24-month backfill. |
 | **Unallocated bills: set `WEEKLY_DIGEST_TO`** | Justin | `0106` is applied (2026-11-14). Set `WEEKLY_DIGEST_TO` in Vercel (Production) to the office recipients' addresses. |
 | **Day Works / Hire: check rates** | Justin | `0108` is applied (2026-11-16). Set rates for the machines the name match missed — Fleet → **Hire rates** lists them first — and confirm the twin-steer float's 30 km / $5 per km. |
-| **Booking notes: redeploy sync streams** | Justin | `0109` is applied (2026-11-16, gate test passed). Redeploy `sync-streams.yaml` (`docs/powersync-deploy.md`) — until then a phone reading bookings from its local copy shows no booking note (the device copy has no `note`). Ledger: `insert into supabase_migrations.schema_migrations (version,name) values ('0109','job_booking_note') on conflict do nothing;` |
-| **App Review account: limit it (0110)** | Justin | `0110` is applied (2026-11-17, gate test passed). Mark the reviewer in the SQL editor: `select set_config('request.jwt.claims', '{"role":"service_role"}', true); update profiles set limited_access = true where lower(email) = lower('<reviewer email>');` (expect UPDATE 1; the trigger refuses the SQL editor without the first line). THEN redeploy `sync-streams.yaml` (`docs/powersync-deploy.md`) — this one redeploy also covers the 0109 row above. Ledger: `insert into supabase_migrations.schema_migrations (version,name) values ('0110','limited_access_accounts') on conflict do nothing;` Steps in `mobile/APPLE-PRIVATE-RELEASE.md` Step 2. |
+| **Booking notes: record 0109** | Justin | `0109` applied 2026-11-16; sync streams redeployed and active 2026-11-17. Only the ledger row is left if not yet run: `insert into supabase_migrations.schema_migrations (version,name) values ('0109','job_booking_note') on conflict do nothing;` |
+| **App Review account: limit it (0110)** | Justin | `0110` applied 2026-11-17 (gate test passed); sync streams redeployed and active the same day. Mark the reviewer in the SQL editor: `select set_config('request.jwt.claims', '{"role":"service_role"}', true); update profiles set limited_access = true where lower(email) = lower('<reviewer email>');` (expect UPDATE 1). Ledger: `insert into supabase_migrations.schema_migrations (version,name) values ('0110','limited_access_accounts') on conflict do nothing;` The phone hides the Backflow tab for it from the next build. |
 | **Maestro flow 02** | Avi | Needs `ADMIN_EMAIL` / `ADMIN_PASSWORD` in the environment. The login subflow deliberately skips when a session already exists, so a password never passes through a script — which is why flows 01/03/04 could be run and 02 could not. |
 
 ### QA fixture — do not delete

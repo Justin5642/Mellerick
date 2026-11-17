@@ -18,6 +18,8 @@ dashboard. This page is that procedure.
   password reset), redeployed 2026-10-14 for 0071; **v5 (2026-11-14)** —
   job bookings streams + `geofence_radius_m`, after granting the tables to
   the real PowerSync user (below).
+  Redeployed and active **2026-11-17** — booking `note` (0109) and the
+  limited-access gate on the four backflow streams (0110).
 
 ## The database user is NOT `powersync_role`
 
