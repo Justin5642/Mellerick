@@ -92,3 +92,17 @@ describe("applyServiceInvoiceRead", () => {
     expect(applyServiceInvoiceRead(linked, cleanServiceInvoice(read()), TODAY, NEW).form.expense).toBe("exp-1");
   });
 });
+
+describe("readerFailureSentence", () => {
+  it("names status and error type, never the API's message", async () => {
+    const { readerFailureSentence } = await import("@/lib/service-invoice-read");
+    const Anthropic = (await import("@anthropic-ai/sdk")).default;
+    const e404 = Anthropic.APIError.generate(404, { type: "error", error: { type: "not_found_error", message: "secret detail" } }, "secret detail", new Headers());
+    const s = readerFailureSentence(e404);
+    expect(s).toContain("404 not_found_error");
+    expect(s).not.toContain("secret");
+    const e400 = Anthropic.APIError.generate(400, { type: "error", error: { type: "invalid_request_error", message: "x" } }, "x", new Headers());
+    expect(readerFailureSentence(e400)).toContain("400 invalid_request_error");
+    expect(readerFailureSentence(new Error("boom"))).toMatch(/could not be read/);
+  });
+});
