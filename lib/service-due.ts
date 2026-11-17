@@ -111,3 +111,12 @@ export function dueLabel(d: ServiceDue): string {
 export function isServiceTableMissing(error: { code?: string | null } | null | undefined): boolean {
   return !!error && (error.code === "42P01" || error.code === "PGRST205" || error.code === "PGRST200");
 }
+
+/**
+ * Where a service invoice copy is stored in the `equipment-documents` bucket —
+ * the same shape as the Expenses tab's receipts (`expense-receipt-` keeps it
+ * under 0047's money-file rule, hidden from technicians).
+ */
+export function serviceInvoicePath(equipmentId: string, fileName: string, now: number): string {
+  return `${equipmentId}/expense-receipt-${now}_${fileName.replace(/[^a-zA-Z0-9._-]/g, "_")}`;
+}

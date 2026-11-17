@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { dueLabel, isServiceTableMissing, serviceDue, sortRecords, type ServiceRecord } from "@/lib/service-due";
+import { dueLabel, isServiceTableMissing, serviceDue, serviceInvoicePath, sortRecords, type ServiceRecord } from "@/lib/service-due";
 
 let n = 0;
 const rec = (over: Partial<ServiceRecord>): ServiceRecord => ({
@@ -88,4 +88,12 @@ it("recognises an unapplied 0099 by PostgREST's error codes", () => {
   expect(isServiceTableMissing({ code: "42P01" })).toBe(true);
   expect(isServiceTableMissing({ code: "42501" })).toBe(false);
   expect(isServiceTableMissing(null)).toBe(false);
+});
+
+describe("serviceInvoicePath", () => {
+  it("files the invoice like an expense receipt, so 0047 hides it from technicians", () => {
+    const p = serviceInvoicePath("eq-1", "Toyota invoice #12 (final).pdf", 1700000000000);
+    expect(p).toBe("eq-1/expense-receipt-1700000000000_Toyota_invoice__12__final_.pdf");
+    expect(p).toMatch(/\/expense-receipt-/);
+  });
 });

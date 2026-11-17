@@ -816,6 +816,20 @@ line and hand the phone to the builder's rep, who signs it; it then locks.
 - **Not on the phone:** office void, Invoice Day Works, truck day stops,
   float distance lookup (km typed), offline entry.
 
+**Fleet service history takes the invoice by drag and drop (17 Nov 2026; no migration).**
+Justin: "What happened to the drag and drop in the fleet? We drop the invoices
+for servicing … so it populates the service history." The drop zone lived on
+the old "Expenses & Service" tab; the Service history tab (0099) added on
+15 Nov had no file field, so invoices stopped reaching it. "Log a service"
+(`components/fleet/equipment-service-records.tsx`) now has a drop zone:
+dropping a file switches the cost to "Log the cost now", and the file is
+uploaded to `equipment-documents` at `serviceInvoicePath()`
+(`lib/service-due.ts`, tested — the `expense-receipt-` shape, so 0047 keeps it
+from technicians) and saved as that expense's `receipt_storage_path`. A failed
+upload saves nothing; a failed expense or service insert removes the file
+again. Each service card shows "View invoice" when its cost has a file. The
+old tab is now labelled **Expenses**.
+
 **Day Works lists the whole fleet; Fleet → Hire rates (16 Nov 2026; no migration).**
 Justin: "The whole Fleet doesn't seem to be there." The picker used to list
 only machines with an active `equipment_hire_options` row, and 0108 seeded

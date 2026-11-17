@@ -86,7 +86,7 @@ export function EquipmentDetailClient({ equipment, today, services: initialServi
                 { value: "overview", label: "Overview", icon: Truck },
                 { value: "documents", label: "Documents", icon: FileText },
                 { value: "service", label: "Service history", icon: Wrench },
-                { value: "expenses", label: "Expenses & Service", icon: DollarSign },
+                { value: "expenses", label: "Expenses", icon: DollarSign },
               ].map(({ value, label, icon: Icon }) => (
                 <TabsTrigger
                   key={value}
@@ -177,7 +177,7 @@ export function EquipmentDetailClient({ equipment, today, services: initialServi
               </Card>
 
               <p className="text-xs text-slate-400">
-                The cost profile (depreciation, insurance, maintenance, fuel) that drives the $/hour figure above, plus the general usage-hours log, are edited via &ldquo;Cost Profile &amp; Usage&rdquo; above. Actual receipts and paperwork live in the Documents and Expenses &amp; Service tabs.
+                The cost profile (depreciation, insurance, maintenance, fuel) that drives the $/hour figure above, plus the general usage-hours log, are edited via &ldquo;Cost Profile &amp; Usage&rdquo; above. Actual receipts and paperwork live in the Documents, Service history and Expenses tabs.
               </p>
             </TabsContent>
 
