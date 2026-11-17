@@ -7,6 +7,8 @@ import { JobDetailClient } from "@/components/job/job-detail-client";
 import { TIME_ENTRY_SELECT_WITH_STAFF } from "@/lib/time-entry-columns";
 import { sumAllocatedHours } from "@/lib/hours-scoreboard";
 import { loadJobBookings } from "@/lib/bookings";
+import { loadScheduleLeave } from "@/lib/staff-leave-data";
+import { dateKeyInBusinessTZ, shiftDateKey } from "@/lib/date";
 import { loadTechVariations } from "@/lib/variations-public";
 
 export default async function JobDetailPage({ params }: { params: Promise<{ id: string }> }) {
@@ -55,6 +57,11 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
   // it `missingTable` is set and the client derives the list from the job's
   // own window instead.
   const bookingsPromise = staffForDisplayPromise.then((staffList) => loadJobBookings(supabase, id, staffList));
+  // Staff leave from today for a year (0112 — a draft, not applied yet, schedule_leave()): a booking on
+  // someone's leave day is flagged "Needs reassigning". The type comes back
+  // only for whoever the setting allows. [] before 0112.
+  const leaveToday = dateKeyInBusinessTZ(new Date());
+  const leavePromise = loadScheduleLeave(supabase, leaveToday, shiftDateKey(leaveToday, 366));
 
   // Role-dependent reads, chained off the viewer alone so they run alongside
   // the main batch instead of after it. The role gates are unchanged: a
@@ -123,6 +130,7 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
     staffForDisplay,
     bookingsResult,
     { user, isAdmin, isOffice, techAllocatedHours, techAllocatedHoursError, staffCostProfiles, jobInvoices, minMarginPct },
+    leave,
   ] = await Promise.all([
     // Only per-job rows load here. The shared catalogs (pricing_items,
     // variation_types, equipment) are fetched by JobDetailClient the first
@@ -147,6 +155,7 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
     staffForDisplayPromise,
     bookingsPromise,
     roleDataPromise,
+    leavePromise,
   ]);
 
   if (!job) notFound();
@@ -192,6 +201,7 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
       minMarginPct={minMarginPct}
       currentAssignedIds={currentAssignedIds}
       bookings={hideSchedule ? [] : bookingsResult.bookings}
+      leave={hideSchedule ? [] : leave}
       hideSchedule={hideSchedule}
       bookingsReady={!bookingsResult.missingTable}
       bookingsError={bookingsResult.missingTable ? null : bookingsResult.error}

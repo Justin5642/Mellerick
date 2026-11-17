@@ -22,6 +22,11 @@ import type { JobBooking } from "../../lib/data/reads/bookings";
 import { BOOKING_NOTE_MAX, bookingColumns, bookingWindow } from "../../lib/bookings";
 import { closedJobScheduleMessage, isJobClosedForScheduling } from "../../lib/jobSchedulable";
 import { KeyboardSheet, KEYBOARD_SHEET_INPUT_FONT_SIZE } from "../KeyboardSheet";
+// Staff leave (migration 0112 — a draft, not applied yet), read online: a
+// booking onto someone's leave day is asked about before it is saved.
+import { listScheduleLeave } from "../../lib/data/reads/leave";
+import { shiftDateKey } from "../../lib/date";
+import { bookingLeaveConflicts, describeLeaveConflicts, type ScheduleLeave } from "../../lib/staffLeave";
 
 interface Props {
   visible: boolean;
@@ -143,6 +148,8 @@ export function ScheduleJobModal({
   const [conflictsByTechnician, setConflictsByTechnician] = useState<Record<string, number>>({});
   const [noteText, setNoteText] = useState("");
   const [saving, setSaving] = useState(false);
+  // [] offline or before 0112: no warnings, the sheet works as before.
+  const [leave, setLeave] = useState<ScheduleLeave[]>([]);
 
   // Load the form: a new booking (blank: nobody, today), an existing one, or
   // the job's single schedule (before bookings exist).
@@ -173,6 +180,10 @@ export function ScheduleJobModal({
   useEffect(() => {
     if (!visible) return;
     listAssignableStaff().then(setStaff).catch(() => {});
+    const today = businessTodayKey();
+    void listScheduleLeave(shiftDateKey(today, -7), shiftDateKey(today, 366)).then((r) => {
+      if (r.available) setLeave(r.leave);
+    });
     if (bookings === null) openForm({ kind: "legacy" });
     else setMode({ kind: "list" });
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -307,6 +318,41 @@ export function ScheduleJobModal({
 
   function staffName(id: string | null): string | null {
     return id ? (staff.find((s) => s.id === id)?.full_name ?? null) : null;
+  }
+
+  // Who this would book on a day they're on leave (from today on). An edit
+  // that keeps the same person and window isn't re-warned — the job and the
+  // grid already flag it "Needs reassigning".
+  const leaveWarnings: string[] = [];
+  if (columns && leave.length > 0) {
+    const today = businessTodayKey();
+    for (const staffId of technicianIds) {
+      if (mode.kind === "edit") {
+        const b = mode.booking;
+        const same =
+          b.staff_id === staffId &&
+          Date.parse(b.starts_at) === Date.parse(columns.scheduled_start) &&
+          b.ends_at !== null &&
+          Date.parse(b.ends_at) === Date.parse(columns.scheduled_end) &&
+          b.daily === columns.schedule_daily;
+        if (same) continue;
+      }
+      const hits = bookingLeaveConflicts(
+        { staff_id: staffId, starts_at: columns.scheduled_start, ends_at: columns.scheduled_end, daily: columns.schedule_daily },
+        leave,
+        today
+      );
+      if (hits.length > 0) leaveWarnings.push(describeLeaveConflicts(staffName(staffId) ?? "Technician", hits));
+    }
+  }
+
+  /** Confirm, asking first when it books someone onto their leave — never silent. */
+  function confirmWithLeaveCheck() {
+    if (leaveWarnings.length === 0) return void confirm();
+    Alert.alert("Not available then", `${leaveWarnings.join("\n\n")}\n\nBook anyway?`, [
+      { text: "Cancel", style: "cancel" },
+      { text: "Book anyway", onPress: () => void confirm() },
+    ]);
   }
 
   async function confirmBooking() {
@@ -516,7 +562,7 @@ export function ScheduleJobModal({
           </TouchableOpacity>
         )}
         {step === "confirm" && (
-          <TouchableOpacity style={styles.doneBtn} onPress={confirm} disabled={saving}>
+          <TouchableOpacity style={styles.doneBtn} onPress={confirmWithLeaveCheck} disabled={saving}>
             <Text style={styles.doneText}>{saving ? "Saving…" : "Confirm"}</Text>
           </TouchableOpacity>
         )}
@@ -753,6 +799,11 @@ export function ScheduleJobModal({
               Note: {noteText.trim()}
             </Text>
           ) : null}
+          {leaveWarnings.map((w) => (
+            <Text key={w} style={styles.leaveWarn}>
+              ⚠ {w}
+            </Text>
+          ))}
           <Text style={styles.hint}>
             This sets the planned schedule block only — worked hours are still captured separately via clock-on/clock-off.
           </Text>
@@ -767,6 +818,7 @@ export function ScheduleJobModal({
 }
 
 const styles = StyleSheet.create({
+  leaveWarn: { fontSize: 13, fontWeight: "700", color: "#9f1239", backgroundColor: "#ffe4e6", borderRadius: 6, padding: 8, marginTop: 6 },
   input: { borderWidth: 1, borderColor: colors.border, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10, fontSize: KEYBOARD_SHEET_INPUT_FONT_SIZE, backgroundColor: colors.bg, color: colors.slate900 },
   inputMultiline: { minHeight: 90, textAlignVertical: "top" },
   closedBox: { padding: 12, borderRadius: 10, backgroundColor: colors.yellow100 },

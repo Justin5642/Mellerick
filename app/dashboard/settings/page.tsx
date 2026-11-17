@@ -11,13 +11,18 @@ import { formatDateTime } from "@/lib/date";
 import { EmailTestButton } from "@/components/settings/email-test-button";
 import { CartageMarginSetting } from "@/components/settings/cartage-margin";
 import { getFromAddress, getReplyTo } from "@/lib/resend";
+import { getViewer } from "@/lib/auth/viewer";
+import { loadLeaveTypeAudience } from "@/lib/staff-leave-data";
+import { LeaveVisibilitySetting } from "@/components/settings/leave-visibility-setting";
 
 export default async function SettingsPage({ searchParams }: { searchParams: Promise<{ xero?: string; google?: string }> }) {
   const params = await searchParams;
   const supabase = await createClient();
-  const [{ data: xeroToken }, { data: googleToken }] = await Promise.all([
+  const [{ data: xeroToken }, { data: googleToken }, leaveAudience, viewer] = await Promise.all([
     supabase.from("xero_tokens").select("tenant_name, updated_at, default_expense_account_code, default_sales_account_code, xero_invoice_last_synced_at").single(),
     supabase.from("google_tokens").select("google_email, updated_at, calendar_last_synced_at").single(),
+    loadLeaveTypeAudience(supabase),
+    getViewer(),
   ]);
 
   const isConnected = !!xeroToken;
@@ -128,6 +133,26 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
               <EmailTestButton />
             </div>
           )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base flex items-center gap-2">
+            <CalendarDays className="w-4 h-4" />
+            Leave on the schedule
+          </CardTitle>
+          <CardDescription className="mt-1">
+            Staff leave from Staff → Cost &amp; Leave (and the Xero Payroll import) shows on the schedule as a block on
+            those days, and bookings on them are flagged &ldquo;Needs reassigning&rdquo;.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <LeaveVisibilitySetting
+            initial={leaveAudience.audience}
+            available={leaveAudience.available}
+            canEdit={viewer?.profile?.role === "admin"}
+          />
         </CardContent>
       </Card>
 

@@ -2942,6 +2942,27 @@ export type Database = {
           },
         ]
       }
+      schedule_settings: {
+        Row: {
+          id: boolean
+          leave_type_visible_to: string
+          updated_at: string
+          updated_by: string | null
+        }
+        Insert: {
+          id?: boolean
+          leave_type_visible_to?: string
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Update: {
+          id?: boolean
+          leave_type_visible_to?: string
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Relationships: []
+      }
       staff_leave: {
         Row: {
           xero_leave_application_id: string | null
@@ -2954,6 +2975,8 @@ export type Database = {
           notes: string | null
           staff_id: string
           start_date: string
+          start_time: string | null
+          end_time: string | null
         }
         Insert: {
           xero_leave_application_id?: string | null
@@ -2966,6 +2989,8 @@ export type Database = {
           notes?: string | null
           staff_id: string
           start_date: string
+          start_time?: string | null
+          end_time?: string | null
         }
         Update: {
           xero_leave_application_id?: string | null
@@ -2978,6 +3003,8 @@ export type Database = {
           notes?: string | null
           staff_id?: string
           start_date?: string
+          start_time?: string | null
+          end_time?: string | null
         }
         Relationships: [
           {
@@ -4031,6 +4058,19 @@ export type Database = {
         Returns: boolean
       }
       user_can_manage_job: { Args: { job_id_text: string }; Returns: boolean }
+      schedule_leave: {
+        Args: { p_from: string; p_to: string }
+        Returns: {
+          id: string | null
+          staff_id: string
+          start_date: string
+          end_date: string
+          hours: number | null
+          start_time: string | null
+          end_time: string | null
+          leave_type: string | null
+        }[]
+      }
     }
     Enums: {
       [_ in never]: never

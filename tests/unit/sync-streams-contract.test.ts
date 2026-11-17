@@ -438,3 +438,19 @@ describe("PowerSync sync windows", () => {
     }
   });
 });
+
+// Staff leave on the schedule (migration 0112 — a draft, not applied yet) is
+// read ONLINE through schedule_leave(), which withholds the leave type from
+// anyone the setting excludes. It must not also reach phones through a sync
+// stream: replication bypasses that function, so a stream on staff_leave
+// would put every person's leave TYPE and notes into technicians' SQLite.
+// If leave is ever wanted offline, add a stream that lists only staff_id and
+// dates (no leave_type, no notes, no hours) and change this test deliberately.
+describe("PowerSync sync rules — staff leave stays off devices", () => {
+  it("no stream reads staff_leave, staff_leave_balances or schedule_settings", () => {
+    const offenders = Object.entries(loadStreams())
+      .filter(([, def]) => /\b(staff_leave|staff_leave_balances|schedule_settings)\b/i.test(def.query ?? ""))
+      .map(([name]) => name);
+    expect(offenders).toEqual([]);
+  });
+});

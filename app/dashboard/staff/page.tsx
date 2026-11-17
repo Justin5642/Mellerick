@@ -6,7 +6,9 @@ import { redirect } from "next/navigation";
 import { StaffClient } from "@/components/staff/staff-client";
 import type { AutoClockStatusRow } from "@/lib/auto-clock-status";
 
-export default async function StaffPage() {
+export default async function StaffPage({ searchParams }: { searchParams: Promise<{ leave?: string }> }) {
+  // ?leave=<staff id>: from a leave tile on the schedule — open their Leave Log.
+  const { leave: openLeaveFor } = await searchParams;
   const supabase = await createClient();
 
   // One parallel batch on the server, the viewer's role included — this used
@@ -34,6 +36,7 @@ export default async function StaffPage() {
       vehicles={vehicles ?? []}
       autoClockStatus={autoClockStatus}
       fetchError={error?.message ?? null}
+      openLeaveFor={typeof openLeaveFor === "string" ? openLeaveFor : null}
     />
   );
 }

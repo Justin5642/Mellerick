@@ -27,7 +27,9 @@ import {
   type BookingWriteClient,
   type JobBookingWithNames,
 } from "@/lib/bookings";
-import { dateKeyInBusinessTZ } from "@/lib/date";
+import { dateKeyInBusinessTZ, shiftDateKey } from "@/lib/date";
+import { bookingLeaveConflicts, describeLeaveConflicts, type ScheduleLeave } from "@/lib/staff-leave";
+import { loadScheduleLeave } from "@/lib/staff-leave-data";
 import { ScheduleFields } from "./schedule-fields";
 import { toast } from "sonner";
 import { Dialog, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -154,6 +156,9 @@ export function ScheduleJobDialog({
   const [editingKey, setEditingKey] = useState<string | null>(null);
   const [conflicts, setConflicts] = useState<Record<string, number>>({});
   const [saving, setSaving] = useState(false);
+  // Staff leave (0112 — a draft, not applied yet) — a booking onto someone's leave day asks first.
+  const [leave, setLeave] = useState<ScheduleLeave[]>([]);
+  const [leaveConfirm, setLeaveConfirm] = useState(false);
   const staffById = useMemo(() => new Map(staff.map((s) => [s.id, s])), [staff]);
   const costCenterName = (id: string | null) => (id ? costCenters.find((cc) => cc.id === id)?.name ?? null : null);
   // A completed or cancelled job is off the schedule board: nothing here may
@@ -179,7 +184,23 @@ export function ScheduleJobDialog({
       setEditingKey(null);
     }
     setConflicts({});
+    setLeaveConfirm(false);
   }, [open, bookings, editable]);
+
+  // Leave from last week to a year ahead, read once per opening. [] before
+  // 0112 (or on any failure): no warnings, nothing else changes.
+  useEffect(() => {
+    if (!open) return;
+    let live = true;
+    const today = dateKeyInBusinessTZ(new Date());
+    void loadScheduleLeave(supabaseClient, shiftDateKey(today, -7), shiftDateKey(today, 366)).then((rows) => {
+      if (live) setLeave(rows);
+    });
+    return () => {
+      live = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
 
   const editing = rows.find((r) => r.key === editingKey) ?? null;
 
@@ -267,6 +288,37 @@ export function ScheduleJobDialog({
     if (editingKey === key) setEditingKey(null);
   }
 
+  // Rows that would book someone on a day they're on leave, from today on.
+  // A saved booking left exactly as it was isn't re-warned on every save —
+  // the board and the job already flag it "Needs reassigning".
+  const leaveWarnings = useMemo(() => {
+    const out = new Map<string, string[]>();
+    if (leave.length === 0) return out;
+    const today = dateKeyInBusinessTZ(new Date());
+    for (const r of rows) {
+      const built = scheduleColumnsFromForm(r.schedule, { optional: false });
+      if (!built.ok) continue;
+      const window = buildBookingWindow(r.schedule);
+      const saved = r.bookingId ? bookings.find((b) => b.id === r.bookingId) : undefined;
+      const lines: string[] = [];
+      for (const staffId of r.staffIds) {
+        const unchanged =
+          saved &&
+          saved.staff_id === staffId &&
+          Date.parse(saved.starts_at) === Date.parse(window.starts_at) &&
+          (saved.ends_at === null ? window.ends_at === null : window.ends_at !== null && Date.parse(saved.ends_at) === Date.parse(window.ends_at)) &&
+          saved.daily === window.daily;
+        if (unchanged) continue;
+        const hits = bookingLeaveConflicts({ staff_id: staffId, ...window }, leave, today);
+        if (hits.length > 0) lines.push(describeLeaveConflicts(staffById.get(staffId)?.full_name ?? "Technician", hits));
+      }
+      if (lines.length > 0) out.set(r.key, lines);
+    }
+    return out;
+  }, [rows, leave, bookings, staffById]);
+  // Any edit after the warning was shown asks again.
+  useEffect(() => setLeaveConfirm(false), [rows]);
+
   // Every row must be a valid schedule before anything is written.
   const rowErrors = useMemo(() => {
     const errors = new Map<string, string>();
@@ -279,6 +331,11 @@ export function ScheduleJobDialog({
 
   async function save() {
     if (!editable || rowErrors.size > 0) return;
+    // Booking onto leave: say so and wait for "Book anyway" — never silent.
+    if (leaveWarnings.size > 0 && !leaveConfirm) {
+      setLeaveConfirm(true);
+      return;
+    }
     const plan = planBookingSave(jobId, bookings, rows);
     // New or changed booking notes also go to the job's Notes history.
     const notesToLog = scheduleNotesToLog(bookings, rows);
@@ -346,16 +403,26 @@ export function ScheduleJobDialog({
           </DialogHeader>
         }
         footer={
-          <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-between">
-            <Button variant="outline" onClick={() => onOpenChange(false)} disabled={saving}>
-              Cancel
-            </Button>
-            {editable && (
-              <Button className="gap-1.5" onClick={save} disabled={saving || rowErrors.size > 0}>
-                <Check className="w-4 h-4" />
-                {saving ? "Saving…" : "Save schedule"}
-              </Button>
+          <div className="space-y-2">
+            {leaveConfirm && leaveWarnings.size > 0 && (
+              <div role="alert" className="rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-900">
+                <p className="font-semibold">Not available then — book anyway?</p>
+                {[...leaveWarnings.values()].flat().map((line) => (
+                  <p key={line} className="text-xs">{line}</p>
+                ))}
+              </div>
             )}
+            <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-between">
+              <Button variant="outline" onClick={() => (leaveConfirm ? setLeaveConfirm(false) : onOpenChange(false))} disabled={saving}>
+                {leaveConfirm ? "Go back" : "Cancel"}
+              </Button>
+              {editable && (
+                <Button className="gap-1.5" onClick={save} disabled={saving || rowErrors.size > 0}>
+                  <Check className="w-4 h-4" />
+                  {saving ? "Saving…" : leaveConfirm ? "Book anyway" : "Save schedule"}
+                </Button>
+              )}
+            </div>
           </div>
         }
       >
@@ -418,6 +485,9 @@ export function ScheduleJobDialog({
                       {!error && row.schedule.allDay ? " · All day" : ""}
                     </p>
                     {row.note?.trim() && <p className="text-xs text-amber-700 truncate">Note: {row.note.trim()}</p>}
+                    {(leaveWarnings.get(row.key) ?? []).map((line) => (
+                      <p key={line} className="text-xs font-medium text-rose-700">{line}</p>
+                    ))}
                   </button>
                   {editable && (
                     <>

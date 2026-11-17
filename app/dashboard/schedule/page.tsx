@@ -15,6 +15,8 @@ import {
   isMissingNoteColumn,
   type JobBooking,
 } from "@/lib/bookings";
+import { getViewer } from "@/lib/auth/viewer";
+import { boardLeaveRange, loadScheduleLeave } from "@/lib/staff-leave-data";
 
 const BOARD_COLUMNS =
   "id, job_number, title, status, scheduled_start, scheduled_end, scheduled_cost_center_id, assigned_to, job_assignments(staff_id), customers(name), sites(name, address_line1, suburb, state, site_lat, site_lng)";
@@ -83,7 +85,10 @@ export default async function SchedulePage() {
     return { ...(result.error?.code === "42703" ? await run(BOARD_COLUMNS) : result), hasBookings: false };
   };
 
-  const [{ data: jobRows, hasBookings }, { data: staff }, { count: unscheduledCount }, { data: todoRows, error: todoError }] = await Promise.all([
+  // Staff leave (0112 — a draft, not applied yet's schedule_leave(): the type only for whoever the
+  // setting allows — a technician gets "Unavailable"). [] before 0112.
+  const leaveRange = boardLeaveRange();
+  const [{ data: jobRows, hasBookings }, { data: staff }, { count: unscheduledCount }, { data: todoRows, error: todoError }, leave, viewer] = await Promise.all([
     loadBoardJobs(),
     supabase
       .from("profiles")
@@ -107,6 +112,8 @@ export default async function SchedulePage() {
       .select("id, job_number, title, priority, status, todo_listed_at, estimated_hours, customers(name), sites(suburb)")
       .not("todo_listed_at", "is", null)
       .order("todo_listed_at", { ascending: true }),
+    loadScheduleLeave(supabase, leaveRange.from, leaveRange.to),
+    getViewer(),
   ]);
 
   // The select string is built at runtime (the fallbacks), so the client
@@ -212,6 +219,8 @@ export default async function SchedulePage() {
         staff={staffForDisplay}
         todoJobs={todoJobs}
         todoError={todoError?.message ?? null}
+        leave={leave}
+        viewerRole={viewer?.profile?.role ?? null}
       />
     </div>
   );

@@ -29,6 +29,8 @@ interface Props {
   /** Each phone's auto clock status by staff id (0102); null = not available. */
   autoClockStatus?: Record<string, AutoClockStatusRow> | null;
   fetchError: string | null;
+  /** Open this person's Leave Log on arrival (?leave=, from the schedule). */
+  openLeaveFor?: string | null;
 }
 
 const STATUS_TONE: Record<string, string> = {
@@ -40,7 +42,7 @@ const STATUS_TONE: Record<string, string> = {
 
 // The roster and its actions. The page (app/dashboard/staff/page.tsx) loads the
 // rows and the viewer's role on the server and hands them in.
-export function StaffClient({ role, staff: initialStaff, vehicles, autoClockStatus = null, fetchError }: Props) {
+export function StaffClient({ role, staff: initialStaff, vehicles, autoClockStatus = null, fetchError, openLeaveFor = null }: Props) {
   const supabase = createClient();
   const [staff, setStaff] = useState(initialStaff);
   const [saving, setSaving] = useState(false);
@@ -49,7 +51,13 @@ export function StaffClient({ role, staff: initialStaff, vehicles, autoClockStat
   const [errors, setErrors] = useState<Record<string, boolean>>({});
   const [resendingId, setResendingId] = useState<string | null>(null);
   const [resettingId, setResettingId] = useState<string | null>(null);
-  const [costDialogFor, setCostDialogFor] = useState<{ id: string; name: string } | null>(null);
+  // A leave tile on the schedule links here with ?leave=<staff id>: open that
+  // person's Leave Log straight away (admin only — the record is admin-only).
+  const [costDialogFor, setCostDialogFor] = useState<{ id: string; name: string; tab?: "cost" | "leave" } | null>(() => {
+    if (!openLeaveFor || role !== "admin") return null;
+    const member = initialStaff.find((m: { id: string }) => m.id === openLeaveFor) as { id: string; full_name: string } | undefined;
+    return member ? { id: member.id, name: member.full_name, tab: "leave" } : null;
+  });
   const [editingMember, setEditingMember] = useState<any>(null);
 
   // Equipment (vehicles) assigned to a staff member -- folded into that
@@ -372,6 +380,7 @@ export function StaffClient({ role, staff: initialStaff, vehicles, autoClockStat
           staffName={costDialogFor.name}
           open={!!costDialogFor}
           onOpenChange={(open) => !open && setCostDialogFor(null)}
+          initialTab={costDialogFor.tab ?? "cost"}
         />
       )}
 
