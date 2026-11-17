@@ -112,6 +112,19 @@ values ('cccccccc-0000-0000-0000-000000000001', 'aaaaaaaa-0000-0000-0000-0000000
         '11111111-1111-1111-1111-111111111111', 'CI Job')
 on conflict (id) do nothing;
 
+-- A second customer, site and job the technician is NOT on (0110). Without it
+-- every job is the technician's, so "a limited account sees only its own
+-- jobs" has nothing to hide and its gate test cannot prove anything.
+insert into customers (id, name)
+values ('aaaaaaaa-0000-0000-0000-000000000002', 'CI Other Customer')
+on conflict (id) do nothing;
+insert into sites (id, customer_id, name, address_line1, suburb, state, postcode)
+values ('bbbbbbbb-0000-0000-0000-000000000002', 'aaaaaaaa-0000-0000-0000-000000000002', 'CI Other Site', '2 Test Street', 'Testville', 'VIC', '3000')
+on conflict (id) do nothing;
+insert into jobs (id, customer_id, site_id, title)
+values ('cccccccc-0000-0000-0000-000000000002', 'aaaaaaaa-0000-0000-0000-000000000002', 'bbbbbbbb-0000-0000-0000-000000000002', 'CI Other Job')
+on conflict (id) do nothing;
+
 insert into invoices (id, customer_id, job_id, title, subtotal, tax_amount, total)
 values ('dddddddd-0000-0000-0000-000000000001', 'aaaaaaaa-0000-0000-0000-000000000001', 'cccccccc-0000-0000-0000-000000000001',
         'CI Invoice', 1000.00, 100.00, 1100.00)
