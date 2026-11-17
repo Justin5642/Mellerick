@@ -394,6 +394,8 @@ const jobs = new Table({
   schedule_daily: column.integer,
   schedule_all_day: column.integer,
   customer_po: column.text,
+  // 0111 (DRAFT, not applied): added by hand, as the generator emits it once applied.
+  quarry_included: column.integer,
 }, {
   indexes: {
     assigned_scheduled: ['assigned_to', 'scheduled_start'],

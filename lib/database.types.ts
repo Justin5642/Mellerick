@@ -303,6 +303,7 @@ export type Database = {
           apprentice_margin_pct: number
           auto_labour_lines: boolean
           call_out_fee: number
+          cartage_margin_pct: number
           double_time_multiplier: number
           id: boolean
           min_margin_pct: number
@@ -315,6 +316,7 @@ export type Database = {
           apprentice_margin_pct?: number
           auto_labour_lines?: boolean
           call_out_fee?: number
+          cartage_margin_pct?: number
           double_time_multiplier?: number
           id?: boolean
           min_margin_pct?: number
@@ -327,6 +329,7 @@ export type Database = {
           apprentice_margin_pct?: number
           auto_labour_lines?: boolean
           call_out_fee?: number
+          cartage_margin_pct?: number
           double_time_multiplier?: number
           id?: boolean
           min_margin_pct?: number
@@ -341,6 +344,185 @@ export type Database = {
             columns: ["updated_by"]
             isOneToOne: false
             referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      cartage_load_costs: {
+        Row: {
+          docket_cost_ex_gst: number | null
+          entered_at: string
+          entered_by: string | null
+          load_id: string
+          margin_pct: number | null
+        }
+        Insert: {
+          docket_cost_ex_gst?: number | null
+          entered_at?: string
+          entered_by?: string | null
+          load_id: string
+          margin_pct?: number | null
+        }
+        Update: {
+          docket_cost_ex_gst?: number | null
+          entered_at?: string
+          entered_by?: string | null
+          load_id?: string
+          margin_pct?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "cartage_load_costs_entered_by_fkey"
+            columns: ["entered_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "cartage_load_costs_load_id_fkey"
+            columns: ["load_id"]
+            isOneToOne: false
+            referencedRelation: "cartage_loads"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      cartage_loads: {
+        Row: {
+          billing: string
+          cost_centre_id: string | null
+          created_at: string
+          created_by: string | null
+          direction: string
+          docket_number: string | null
+          docket_photo_path: string | null
+          equipment_id: string
+          from_text: string | null
+          id: string
+          invoice_id: string | null
+          job_id: string
+          km: number | null
+          load_date: string
+          material: string | null
+          place: string | null
+          quantity: number | null
+          signature_path: string | null
+          signed_at: string | null
+          signed_by: string | null
+          signer_name: string | null
+          status: string
+          supplier_id: string | null
+          to_text: string | null
+          unit: string
+          updated_at: string
+          void_reason: string | null
+        }
+        Insert: {
+          billing: string
+          cost_centre_id?: string | null
+          created_at?: string
+          created_by?: string | null
+          direction: string
+          docket_number?: string | null
+          docket_photo_path?: string | null
+          equipment_id: string
+          from_text?: string | null
+          id?: string
+          invoice_id?: string | null
+          job_id: string
+          km?: number | null
+          load_date: string
+          material?: string | null
+          place?: string | null
+          quantity?: number | null
+          signature_path?: string | null
+          signed_at?: string | null
+          signed_by?: string | null
+          signer_name?: string | null
+          status?: string
+          supplier_id?: string | null
+          to_text?: string | null
+          unit?: string
+          updated_at?: string
+          void_reason?: string | null
+        }
+        Update: {
+          billing?: string
+          cost_centre_id?: string | null
+          created_at?: string
+          created_by?: string | null
+          direction?: string
+          docket_number?: string | null
+          docket_photo_path?: string | null
+          equipment_id?: string
+          from_text?: string | null
+          id?: string
+          invoice_id?: string | null
+          job_id?: string
+          km?: number | null
+          load_date?: string
+          material?: string | null
+          place?: string | null
+          quantity?: number | null
+          signature_path?: string | null
+          signed_at?: string | null
+          signed_by?: string | null
+          signer_name?: string | null
+          status?: string
+          supplier_id?: string | null
+          to_text?: string | null
+          unit?: string
+          updated_at?: string
+          void_reason?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "cartage_loads_cost_centre_id_fkey"
+            columns: ["cost_centre_id"]
+            isOneToOne: false
+            referencedRelation: "cost_centres"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "cartage_loads_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "cartage_loads_equipment_id_fkey"
+            columns: ["equipment_id"]
+            isOneToOne: false
+            referencedRelation: "equipment"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "cartage_loads_invoice_id_fkey"
+            columns: ["invoice_id"]
+            isOneToOne: false
+            referencedRelation: "invoices"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "cartage_loads_job_id_fkey"
+            columns: ["job_id"]
+            isOneToOne: false
+            referencedRelation: "jobs"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "cartage_loads_signed_by_fkey"
+            columns: ["signed_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "cartage_loads_supplier_id_fkey"
+            columns: ["supplier_id"]
+            isOneToOne: false
+            referencedRelation: "suppliers"
             referencedColumns: ["id"]
           },
         ]
@@ -2026,6 +2208,7 @@ export type Database = {
           overtime_logged_by: string | null
           overtime_reason: string | null
           priority: string
+          quarry_included: boolean | null
           ready_to_invoice: boolean
           schedule_all_day: boolean
           schedule_daily: boolean
@@ -2069,6 +2252,7 @@ export type Database = {
           overtime_logged_by?: string | null
           overtime_reason?: string | null
           priority?: string
+          quarry_included?: boolean | null
           ready_to_invoice?: boolean
           schedule_all_day?: boolean
           schedule_daily?: boolean
@@ -2112,6 +2296,7 @@ export type Database = {
           overtime_logged_by?: string | null
           overtime_reason?: string | null
           priority?: string
+          quarry_included?: boolean | null
           ready_to_invoice?: boolean
           schedule_all_day?: boolean
           schedule_daily?: boolean

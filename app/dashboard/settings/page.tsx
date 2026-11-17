@@ -9,6 +9,7 @@ import { XeroSalesAccountCode } from "@/components/settings/xero-sales-account-c
 import { XeroInvoiceSyncButton } from "@/components/settings/xero-invoice-sync-button";
 import { formatDateTime } from "@/lib/date";
 import { EmailTestButton } from "@/components/settings/email-test-button";
+import { CartageMarginSetting } from "@/components/settings/cartage-margin";
 import { getFromAddress, getReplyTo } from "@/lib/resend";
 
 export default async function SettingsPage({ searchParams }: { searchParams: Promise<{ xero?: string; google?: string }> }) {
@@ -258,6 +259,23 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
               <ExternalLink className="w-4 h-4" /> Manage Suppliers
             </Button>
           </Link>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <div>
+            <CardTitle className="text-base flex items-center gap-2">
+              <Truck className="w-4 h-4 text-blue-600" />
+              Truck loads
+            </CardTitle>
+            <CardDescription className="mt-1">
+              Extra quarry product and spoil carted on a job are charged at the docket cost plus this margin, plus km at the truck&apos;s rate. Truck rates per tonne, m³ and km are set in Fleet → Hire setup.
+            </CardDescription>
+          </div>
+        </CardHeader>
+        <CardContent>
+          <CartageMarginSetting />
         </CardContent>
       </Card>
 

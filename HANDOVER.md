@@ -920,6 +920,114 @@ rates by name match only, so every other machine was invisible.
   or an amber "No hire rate yet"; unpriced first with a count, each with
   Set up / Edit opening the existing Hire setup dialog.
 
+**Truck loads (cartage), 17 Nov 2026; migration `0111` DRAFT — not applied.**
+Justin: the truck driver logs each trip on the job as it happens — **material
+in** (quarry product, e.g. crushed rock / quarter-minus, from a quarry to the
+job) and **spoil out** (dirt carted from the job to a tip) — instead of only
+end-of-day hours and loads. His rules:
+1. "Some jobs include quarry products, some don't." Each material-in load is
+   **included** (in the quoted price — a cost only, never invoiced) or
+   **extra** (charged to the builder). `jobs.quarry_included` is the job's
+   default (null = included), set by the office on the Day Works tab (a
+   trigger refuses anyone else); the driver can change it per load.
+2. "The spoil removal is almost always an extra charge." Spoil-out loads
+   default to **extra**; the driver can switch one to included.
+3. Spoil cartage is charged per tonne or per m³ (off the tip docket) at the
+   truck's own rate: `equipment_hire_options` (0108) now takes `hire_unit`
+   `tonne` / `m3` for `hire_type = 'cartage'` (Fleet → Hire setup offers
+   them). They are never a Day Works entry's unit (hire_entries' check is
+   unchanged; the Day Works picker leaves them out).
+4. Quarry product and tip fees charged on are **cost + margin + km**. Rules in
+   `lib/cartage-pricing.ts` (pure, `tests/unit/cartage-pricing.test.ts`):
+   extra spoil = quantity × per-tonne/m³ rate + tip fee × (1 + margin) + km ×
+   per km; extra material = product cost × (1 + margin) + km × per km (+
+   quantity × per-tonne/m³ when the truck has that unit's rate). Margin =
+   the load's override (`cartage_load_costs.margin_pct`, office) else
+   `billing_rate_config.cartage_margin_pct` (Settings → Truck loads, default
+   15%). **An extra whose docket cost isn't entered, or whose truck lacks a
+   needed rate (per km when km > 0; per tonne/m³ for spoil), is not priced and
+   can't be invoiced** — never $0. Spoil as a bare "load" is refused unless
+   it's included.
+- **Database (`0111`):** `cartage_loads` — one row per trip, **no money
+  column** (the included/extra flag is named `billing`, not "charge", so the
+  money sweep's regex doesn't match it). Crew read/write via
+  `user_can_manage_job`, office everything. Same lock as 0108's Day Works
+  (`cartage_loads_guard`): born draft; cost centre from the truck's cartage
+  hire setup, else **Transport**, else Truck Cartage (crew can't choose it;
+  `cartage_load_cost_centre()` SECURITY DEFINER, also refuses a tool); the
+  `billing` default is filled in by the trigger; sign-off needs name +
+  signature + quantity; once signed nothing changes for anyone (only the
+  office may still attach a docket photo); only office moves signed →
+  invoiced (extras only, same job's invoice) or void; void is final;
+  deleting the invoice puts its loads back to signed. Included loads need no
+  signing. `cartage_load_costs` (load_id → `docket_cost_ex_gst`,
+  `margin_pct`, entered_by/at): **office/admin only**, locked once the load
+  is invoiced or void. `billing_rate_config.cartage_margin_pct` (admin table;
+  the app reads/writes that one column through the service role after
+  `requireOfficeOrAdmin`). In no PowerSync stream; `sync-streams.yaml`
+  untouched (`jobs.quarry_included` reaches office devices through
+  `office_jobs`' `jobs.*`; added to `mobile/lib/powersync/schema.ts` by
+  hand). CI's `supabase/ci/seed-roles.sql` seeds one load + cost so the money
+  sweep checks the new money table.
+- **Docket photos show prices.** Stored in `job-documents` at
+  `<job>/expense-receipt-cartage-<load>-<ts>.<ext>`, which 0047/0065's
+  `storage_object_is_money_document()` hides from technicians (0111 asserts
+  it). Technicians can't write there, so `POST …/cartage-loads/[loadId]/docket`
+  checks `requireOnJob` + reads the load as the caller (draft, or office on a
+  non-void load), sniffs JPEG/PNG/WebP ≤ 3 MB, uploads with the service role
+  and sets `docket_photo_path` with the service role (the guard keeps that
+  column out of the crew's own writes). The crew only ever see
+  `has_docket_photo`; office gets a signed URL.
+- **Routes** (`app/api/jobs/[id]/cartage-loads/**`, mirroring hire-entries;
+  `requireOnJob`, writes with `callerClient` except the docket path above,
+  fixed-sentence errors via `lib/cartage-load-entry.ts`): GET (reads in
+  `lib/cartage-load.ts`, shaped by `lib/cartage-view.ts` — trucks are active
+  non-tool vehicles or anything with a cartage rate; quarries are the
+  `suppliers` list, names only), POST add (idempotent on client id), PATCH /
+  DELETE drafts, `sign/` (several loads, one name + signature, one UPDATE so
+  all sign or none; signature at `<job>/day-works/signature-loads-<ts>.png`),
+  `[loadId]/docket`. `tests/unit/cartage-routes.test.ts` walks a technician's
+  GET/POST/docket answers for money keys, rate/cost/margin/price values and
+  docket paths.
+- **Phone** (`mobile/components/job/truck-loads.tsx`, calls/rules
+  `mobile/lib/truckLoads.ts`, tested): a "Truck loads" section at the foot of
+  the job's Day Works tab — "+ Material in" / "+ Spoil out" → KeyboardSheet:
+  date, truck, quarry (the supplier picker; "Other" types one) + material, or
+  the tip, quantity + unit (t / m³ / loads), km, docket number + photo
+  (`prepareImage`, uploaded after the load saves), included/extra with the
+  defaults above, optional from/to. "Get builder to sign (N extras)" per day
+  signs that day's draft extras at once. Online only, like Day Works. Office
+  amounts only via `MoneyText` in `RoleGate`. Reaches phones with the next
+  build (no new native module).
+- **Web** (`components/job/job-truck-loads.tsx`, on the Day Works tab): the
+  loads by day; office sets the job's quarry default, enters each load's
+  docket cost (and margin override) and sees each extra's breakdown or why it
+  isn't priced, views the docket photo, voids a signed load. **Invoice Day
+  Works** lists signed extra loads beside the Day Works lines and puts them on
+  the same invoice, one line each ("Spoil removal 12 t — 12 Smith St,
+  Craigieburn → Wollert tip, docket 1234"; quantity 1 at the load's price, the
+  margin not shown), marking them invoiced (`hire-entries/invoice` takes
+  `loadIds`). The web does not add or sign loads — that's the phone.
+- **Before 0111 is applied** nothing breaks: the section says truck loads
+  aren't switched on (GET answers `{ready:false}` on 42P01/42703/PGRST2xx),
+  Settings → Truck loads says the same, Invoice Day Works works as before.
+  Fleet → Hire setup will offer per tonne / m³ but the database refuses to
+  save them until 0111 — so don't set those rates before applying it.
+- **Not done (follow-ups):** load costs are **not** in the Job Ledger / Job
+  margins (`lib/job-ledger.ts`) — quarry product already reaches the ledger
+  through supplier PO invoices, so adding docket costs now would count it
+  twice; decide which source wins first. No report of loads by month yet.
+  No distance lookup (km typed).
+- **Apply order:** paste `0111_cartage_loads.sql` → paste
+  `supabase/tests/0111_cartage_loads_test.sql` (needs an active technician and
+  an active office/admin) and trust only `0111 PASSED` → change 0111's header
+  to applied and add the ledger row → merge (web first, then the phone
+  build). Checked on a scratch Postgres 16 with the full chain 0000–0110
+  (Supabase roles/auth/storage/pg_net shimmed): 0111 applies twice cleanly,
+  the gate test passes (35 scenarios) and fails, naming scenarios, with the
+  lock trigger disabled or the cost table's RLS off; the money boundary sweep
+  stays intact with the seeded load and cost.
+
 ---
 
 ## 2. The one rule that must never break
@@ -1785,6 +1893,7 @@ a shippable release.
 | **Day Works / Hire: check rates** | Justin | `0108` is applied (2026-11-16). Set rates for the machines the name match missed — Fleet → **Hire rates** lists them first — and confirm the twin-steer float's 30 km / $5 per km. |
 | **Booking notes: record 0109** | Justin | `0109` applied 2026-11-16; sync streams redeployed and active 2026-11-17. Only the ledger row is left if not yet run: `insert into supabase_migrations.schema_migrations (version,name) values ('0109','job_booking_note') on conflict do nothing;` |
 | **App Review account: limit it (0110)** | Justin | `0110` applied 2026-11-17 (gate test passed); sync streams redeployed and active the same day. Mark the reviewer in the SQL editor: `select set_config('request.jwt.claims', '{"role":"service_role"}', true); update profiles set limited_access = true where lower(email) = lower('<reviewer email>');` (expect UPDATE 1). Ledger: `insert into supabase_migrations.schema_migrations (version,name) values ('0110','limited_access_accounts') on conflict do nothing;` The phone hides the Backflow tab for it from the next build. |
+| **Truck loads: apply 0111, then set rates** | Justin | `0111` is a DRAFT. Paste `supabase/migrations/0111_cartage_loads.sql`, then `supabase/tests/0111_cartage_loads_test.sql`; trust only `0111 PASSED`. Mark 0111's header applied and add the ledger row: `insert into supabase_migrations.schema_migrations (version,name) values ('0111','cartage_loads') on conflict do nothing;` Then: Fleet → Hire setup on each truck, add **Cartage per tonne** and/or **per m³** and **per km** rates; Settings → Truck loads, check the margin (15% by default); on jobs where quarry product is NOT in the quote, set the Day Works tab's "Quarry product on this job" to Extra. |
 | **Maestro flow 02** | Avi | Needs `ADMIN_EMAIL` / `ADMIN_PASSWORD` in the environment. The login subflow deliberately skips when a session already exists, so a password never passes through a script — which is why flows 01/03/04 could be run and 02 could not. |
 
 ### QA fixture — do not delete

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireOfficeOrAdmin } from "@/lib/api/guards";
 import { callerClient } from "@/lib/api/caller-client";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { reportError } from "@/lib/monitoring";
 import { moneyTotals } from "@/lib/replace-line-items";
 import {
@@ -11,6 +12,8 @@ import {
   type HireOption,
   type InvoiceableEntry,
 } from "@/lib/hire-pricing";
+import { invoiceLinesFromLoads, truckRates, type InvoiceableLoad, type LoadCost } from "@/lib/cartage-pricing";
+import { siteLabelOf } from "@/lib/cartage-view";
 
 // "Invoice Day Works" (Stage 1, Nov 2026): signed, un-invoiced Day Works
 // entries on one job become one ordinary draft invoice (invoices +
@@ -23,6 +26,14 @@ import {
 // tables and invoices are theirs to read and write anyway. Not atomic, so each
 // step is checked and a failure removes the invoice it made: deleting it puts
 // any entries already marked back to "signed" (FK set null + the guard trigger).
+//
+// Truck loads (0111): signed EXTRA loads (`loadIds`) go on the same invoice,
+// one line each ("Spoil removal 12 t — site → tip, docket 1234"), priced by
+// lib/cartage-pricing.ts from the truck's cartage rates, the docket cost and
+// the margin. A load with no docket cost or a missing truck rate refuses the
+// whole invoice rather than going on at $0. The company margin lives in
+// billing_rate_config, which RLS keeps admin-only, so that one figure is read
+// with the service role after requireOfficeOrAdmin.
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
@@ -35,22 +46,26 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
 
   const b = ((await request.json().catch(() => null)) ?? {}) as Record<string, unknown>;
   const ids = Array.isArray(b.entryIds) ? [...new Set(b.entryIds.filter((x): x is string => typeof x === "string" && UUID.test(x)))] : [];
-  if (ids.length === 0) return NextResponse.json({ error: "Tick the Day Works entries to invoice." }, { status: 400 });
-  if (ids.length > 500) return NextResponse.json({ error: "Invoice at most 500 entries at a time." }, { status: 400 });
+  const loadIds = Array.isArray(b.loadIds) ? [...new Set(b.loadIds.filter((x): x is string => typeof x === "string" && UUID.test(x)))] : [];
+  if (ids.length === 0 && loadIds.length === 0) return NextResponse.json({ error: "Tick the Day Works entries to invoice." }, { status: 400 });
+  if (ids.length + loadIds.length > 500) return NextResponse.json({ error: "Invoice at most 500 entries at a time." }, { status: 400 });
 
   try {
     const supabase = await callerClient(request);
 
-    const { data: job, error: jobErr } = await supabase.from("jobs").select("id, customer_id, job_number").eq("id", jobId).maybeSingle();
+    const { data: job, error: jobErr } = await supabase.from("jobs").select("id, customer_id, job_number, sites(name, address_line1, suburb)").eq("id", jobId).maybeSingle();
     if (jobErr) throw jobErr;
     if (!job) return NextResponse.json({ error: "Job not found" }, { status: 404 });
     if (!job.customer_id) return NextResponse.json({ error: "This job has no customer to invoice." }, { status: 400 });
 
-    const { data: rows, error: entriesErr } = await supabase
-      .from("hire_entries")
-      .select("id, equipment_id, hire_type, hire_unit, work_date, hours, days, meter_open, meter_close, km, pickup, dropoff, description, signer_name, status, invoice_id, cost_centre_id, hire_entry_attachments(attachment_id)")
-      .eq("job_id", jobId)
-      .in("id", ids);
+    const { data: rows, error: entriesErr } =
+      ids.length > 0
+        ? await supabase
+            .from("hire_entries")
+            .select("id, equipment_id, hire_type, hire_unit, work_date, hours, days, meter_open, meter_close, km, pickup, dropoff, description, signer_name, status, invoice_id, cost_centre_id, hire_entry_attachments(attachment_id)")
+            .eq("job_id", jobId)
+            .in("id", ids)
+        : { data: [], error: null };
     if (entriesErr) throw entriesErr;
     type Raw = Omit<InvoiceableEntry, "attachment_ids"> & { invoice_id: string | null; hire_entry_attachments: { attachment_id: string }[] | null };
     const raw = (rows ?? []) as unknown as Raw[];
@@ -62,12 +77,27 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       attachment_ids: (hire_entry_attachments ?? []).map((a) => a.attachment_id),
     }));
 
-    const equipmentIds = [...new Set(entries.map((e) => e.equipment_id))];
+    // Truck loads: signed extras, not yet invoiced.
+    let loads: InvoiceableLoad[] = [];
+    if (loadIds.length > 0) {
+      const { data: loadRows, error: loadsErr } = await supabase
+        .from("cartage_loads")
+        .select("id, equipment_id, load_date, direction, billing, quantity, unit, km, material, place, from_text, to_text, docket_number, signer_name, status, invoice_id")
+        .eq("job_id", jobId)
+        .in("id", loadIds);
+      if (loadsErr) throw loadsErr;
+      loads = (loadRows ?? []) as unknown as InvoiceableLoad[];
+      if (loads.length !== loadIds.length || loads.some((l) => l.status !== "signed" || l.invoice_id || l.billing !== "extra")) {
+        return NextResponse.json({ error: "Some of those truck loads are no longer signed extras waiting to be invoiced. Refresh and pick again." }, { status: 409 });
+      }
+    }
+
+    const equipmentIds = [...new Set([...entries.map((e) => e.equipment_id), ...loads.map((l) => l.equipment_id)])];
     const attachmentIds = [...new Set(entries.flatMap((e) => e.attachment_ids))];
     const [optionsRes, equipmentRes, attachmentsRes] = await Promise.all([
       supabase
         .from("equipment_hire_options")
-        .select("equipment_id, hire_type, hire_unit, rate, whole_days_only, float_base, float_km_included, float_per_km, cost_centre_id")
+        .select("equipment_id, hire_type, hire_unit, rate, whole_days_only, float_base, float_km_included, float_per_km, cost_centre_id, is_active")
         .in("equipment_id", equipmentIds),
       supabase.from("equipment").select("id, name").in("id", equipmentIds),
       attachmentIds.length > 0
@@ -87,8 +117,28 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     }
 
     const lines = invoiceLinesFromEntries(entries, options, attachmentsRes.data ?? [], names);
+    if (loads.length > 0) {
+      const [costsRes, configRes] = await Promise.all([
+        supabase.from("cartage_load_costs").select("load_id, docket_cost_ex_gst, margin_pct").in("load_id", loads.map((l) => l.id)),
+        createAdminClient().from("billing_rate_config").select("cartage_margin_pct").maybeSingle(),
+      ]);
+      if (costsRes.error) throw costsRes.error;
+      if (configRes.error) throw configRes.error;
+      const costs = new Map(((costsRes.data ?? []) as (LoadCost & { load_id: string })[]).map((c) => [c.load_id, c]));
+      const margin = (configRes.data as { cartage_margin_pct: number | null } | null)?.cartage_margin_pct ?? null;
+      const siteLabel = siteLabelOf((job as unknown as { sites: { name: string | null; address_line1: string | null; suburb: string | null } | null }).sites);
+      let loadLines;
+      try {
+        loadLines = invoiceLinesFromLoads(loads, (eq) => truckRates(options, eq), costs, margin, names, siteLabel);
+      } catch (e) {
+        // The pricing's own sentence (lib/cartage-pricing.ts): a missing docket cost or truck rate, named.
+        const why = e instanceof Error ? e.message : "A truck load can't be priced.";
+        return NextResponse.json({ error: `${why} Fix it on the Day Works tab, then invoice.` }, { status: 400 });
+      }
+      lines.push(...loadLines);
+    }
     const { subtotal, tax, total } = moneyTotals(lines);
-    const dates = entries.map((e) => e.work_date).sort();
+    const dates = [...entries.map((e) => e.work_date), ...loads.map((l) => l.load_date)].sort();
     // The period chosen on screen, widened if needed so it covers every entry.
     const first = dates[0];
     const last = dates[dates.length - 1];
@@ -130,13 +180,19 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       );
     }
 
-    const { data: marked, error: markErr } = await supabase
-      .from("hire_entries")
-      .update({ status: "invoiced", invoice_id: invoice.id })
-      .in("id", ids)
-      .eq("status", "signed")
-      .select("id");
-    if (markErr || (marked ?? []).length !== ids.length) {
+    const { data: marked, error: markErr } =
+      ids.length > 0
+        ? await supabase.from("hire_entries").update({ status: "invoiced", invoice_id: invoice.id }).in("id", ids).eq("status", "signed").select("id")
+        : { data: [], error: null };
+    const { data: markedLoads, error: markLoadsErr } =
+      !markErr && (marked ?? []).length === ids.length && loadIds.length > 0
+        ? await supabase.from("cartage_loads").update({ status: "invoiced", invoice_id: invoice.id }).in("id", loadIds).eq("status", "signed").select("id")
+        : { data: [], error: null };
+    if (markErr || (marked ?? []).length !== ids.length || markLoadsErr || (markedLoads ?? []).length !== loadIds.length) {
+      if (markLoadsErr) {
+        console.error("truck loads mark invoiced error:", markLoadsErr);
+        reportError(markLoadsErr, { route: "api/jobs/hire-entries/invoice" });
+      }
       if (markErr) {
         console.error("day works mark invoiced error:", markErr);
         reportError(markErr, { route: "api/jobs/hire-entries/invoice" });
