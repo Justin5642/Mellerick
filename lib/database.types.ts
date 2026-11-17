@@ -2334,6 +2334,7 @@ export type Database = {
           full_name: string
           id: string
           is_active: boolean | null
+          limited_access: boolean
           phone: string | null
           role: string
           updated_at: string | null
@@ -2346,6 +2347,7 @@ export type Database = {
           full_name: string
           id: string
           is_active?: boolean | null
+          limited_access?: boolean
           phone?: string | null
           role: string
           updated_at?: string | null
@@ -2358,6 +2360,7 @@ export type Database = {
           full_name?: string
           id?: string
           is_active?: boolean | null
+          limited_access?: boolean
           phone?: string | null
           role?: string
           updated_at?: string | null
@@ -3801,6 +3804,12 @@ export type Database = {
       }
       is_admin: { Args: { uid: string }; Returns: boolean }
       is_office_or_admin: { Args: { uid: string }; Returns: boolean }
+      is_limited_account: { Args: never; Returns: boolean }
+      limited_account_can_see_customer: {
+        Args: { p_customer_id: string }
+        Returns: boolean
+      }
+      limited_account_can_see_site: { Args: { p_site_id: string }; Returns: boolean }
       reapply_time_entries_grants: { Args: never; Returns: undefined }
       record_login_failure: { Args: { p_user_id: string }; Returns: Json }
       replace_google_tokens: {

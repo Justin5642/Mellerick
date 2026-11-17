@@ -234,6 +234,58 @@ such note forever. Now:
   then ship the phone (the banner and sheet reach phones with the next build;
   older builds keep showing the latest `job_notes` schedule note).
 
+**Limited-access accounts for the App Store reviewer (migration `0110` applied 2026-11-17).**
+Justin, 17 Nov 2026: Apple's reviewer signs in as a technician ("App Review")
+and must see only the jobs it is on (QA job #834) — not search other jobs, not
+see other customers or sites, not receive the backflow register. Real
+technicians must be unaffected.
+- **Flag:** `profiles.limited_access boolean not null default false`. Admin-only
+  like `role` / `is_active` / `auto_clock`: 0110 adds it to
+  `prevent_unauthorised_role_change()` (service role or an active admin; a
+  technician setting or clearing their own flag is refused). Signup can't set
+  it — `handle_new_user()` (0044) never copies it, so it starts false. No UI:
+  it is set once in the SQL editor (below).
+- **Database:** `is_limited_account()` (SECURITY DEFINER, authenticated only)
+  and RESTRICTIVE `for select to authenticated` policies, so every existing
+  permissive policy is untouched and an unlimited caller passes at the first
+  term (an init-plan, once per statement). For a limited account: `jobs` →
+  `user_can_manage_job(id)`; `customers` / `sites` → those of a job they can
+  manage (`limited_account_can_see_customer/_site`, SECURITY DEFINER — no RLS
+  recursion); `job_photos`, `job_documents`, `job_notes`, `job_stage_notes` →
+  `user_can_manage_job(job_id)`; `backflow_devices`, `backflow_tests` →
+  nothing; `storage.objects` in `job-photos` / `job-documents` / `job-audio`
+  → only `<jobId>/…` keys of their jobs. The owner-run views
+  `purchase_orders_public`, `po_cost_centers_public`, `job_variations_public`
+  (RLS never reaches them) are re-created with the same columns, the same job
+  filter and `security_barrier`. Already scoped, left alone: job_assignments,
+  job_bookings, hire_entries, time_entries, equipment_usage_log, money tables.
+  **Not narrowed:** `profiles` (staff names — the phone's `profiles` stream
+  sends them to every device anyway), cost centres, variation types, fleet.
+- **Sync streams:** the four `backflow_*` streams (the only technician-visible
+  data not already scoped to the caller's jobs) join the caller's profile and
+  require `profiles.limited_access IS NOT true`; pinned by
+  `tests/unit/sync-streams-contract.test.ts`. Checked with
+  `@powersync/service-sync-rules` 0.45: 0 diagnostics with the column, 4
+  "column not found" warnings without it; a profile row with the flag set
+  yields no parameter lookup for those streams (so no backflow bucket), flag
+  false or absent yields one. The `tech_*` streams already carry only the
+  caller's own jobs.
+- **Phone:** the Backflow tab is hidden when the profile has `limited_access`
+  (`app/(tabs)/_layout.tsx`, `toCachedProfile` keeps the flag only when
+  exactly `true`; `select("*")`, so no read breaks without the column). Next
+  build; data is withheld either way.
+- **Writes:** on their own job everything works (notes, photos, time,
+  sign-off). A limited account creating a customer, site or backflow device
+  gets an RLS error (the row it would read back is hidden) — intended.
+- **Checked** on a scratch Postgres 16 with the full migration chain 0000–0109
+  (Supabase roles/auth/storage shimmed): 0110 applies twice cleanly; the gate
+  test passes (30 scenarios) and fails, naming the scenario, with the jobs,
+  customers, backflow or storage policy dropped, with the 0082 trigger body
+  restored, or with an unfiltered `purchase_orders_public`.
+- **Order:** paste 0110 → paste `supabase/tests/0110_limited_access_accounts_test.sql`,
+  trust only `0110 PASSED` → mark the reviewer (§7) → THEN redeploy the
+  PowerSync streams. Merging the web/phone code first is harmless.
+
 **Supplier POs from the phone (migration `0085` applied 2026-10-28).**
 Justin, 28 Oct 2026: any technician, on any job, can raise a purchase order to
 any supplier against a cost centre, and it is emailed straight to the supplier
@@ -907,6 +959,16 @@ windows) — all 16 technician-visible streams are money-free:
   deployed as sync config v5 on 2026-11-14) — 10 named columns: who, when, cost-centre **id**;
   plus `note` (the booking's free-text scheduling note, 0109 applied
   2026-11-16; YAML redeploy pending); no money column exists on `job_bookings`
+
+**Backflow streams are gated on the caller's profile (migration 0110,
+applied 2026-11-17).** `backflow_customers`, `backflow_sites`,
+`backflow_devices`, `backflow_tests` go to every role, so they now
+`JOIN profiles ON profiles.id = auth.user_id()` and require
+`profiles.limited_access IS NOT true`: a limited-access account (the App Store
+review login) receives none of it; everyone else exactly what they did before.
+`IS NOT true`, never `= false`, so a database without the column keeps today's
+behaviour. A user with no profile row now receives no backflow register (fail
+closed). **Apply 0110 BEFORE redeploying the YAML.**
 
 Office/admin streams gate on the caller's own profile row:
 
@@ -1722,6 +1784,7 @@ a shippable release.
 | **Unallocated bills: set `WEEKLY_DIGEST_TO`** | Justin | `0106` is applied (2026-11-14). Set `WEEKLY_DIGEST_TO` in Vercel (Production) to the office recipients' addresses. |
 | **Day Works / Hire: check rates** | Justin | `0108` is applied (2026-11-16). Set rates for the machines the name match missed — Fleet → **Hire rates** lists them first — and confirm the twin-steer float's 30 km / $5 per km. |
 | **Booking notes: redeploy sync streams** | Justin | `0109` is applied (2026-11-16, gate test passed). Redeploy `sync-streams.yaml` (`docs/powersync-deploy.md`) — until then a phone reading bookings from its local copy shows no booking note (the device copy has no `note`). Ledger: `insert into supabase_migrations.schema_migrations (version,name) values ('0109','job_booking_note') on conflict do nothing;` |
+| **App Review account: limit it (0110)** | Justin | `0110` is applied (2026-11-17, gate test passed). Mark the reviewer in the SQL editor: `select set_config('request.jwt.claims', '{"role":"service_role"}', true); update profiles set limited_access = true where lower(email) = lower('<reviewer email>');` (expect UPDATE 1; the trigger refuses the SQL editor without the first line). THEN redeploy `sync-streams.yaml` (`docs/powersync-deploy.md`) — this one redeploy also covers the 0109 row above. Ledger: `insert into supabase_migrations.schema_migrations (version,name) values ('0110','limited_access_accounts') on conflict do nothing;` Steps in `mobile/APPLE-PRIVATE-RELEASE.md` Step 2. |
 | **Maestro flow 02** | Avi | Needs `ADMIN_EMAIL` / `ADMIN_PASSWORD` in the environment. The login subflow deliberately skips when a session already exists, so a password never passes through a script — which is why flows 01/03/04 could be run and 02 could not. |
 
 ### QA fixture — do not delete

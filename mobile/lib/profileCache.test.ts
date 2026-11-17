@@ -58,6 +58,15 @@ describe("profile cache storage", () => {
     expect(raw).not.toContain("0400");
   });
 
+  it("carries limited_access only when it is exactly true (0110: absent column = normal account)", async () => {
+    expect(toCachedProfile({ ...TECH, limited_access: true })!.limited_access).toBe(true);
+    expect("limited_access" in toCachedProfile({ ...TECH, limited_access: false })!).toBe(false);
+    expect("limited_access" in toCachedProfile({ ...TECH, limited_access: "true" })!).toBe(false);
+    expect("limited_access" in toCachedProfile(TECH)!).toBe(false);
+    await writeCachedProfile(toCachedProfile({ ...TECH, limited_access: true })!);
+    expect((await readCachedProfile("u1"))!.limited_access).toBe(true);
+  });
+
   it("treats a missing is_active as inactive (fail closed)", () => {
     expect(toCachedProfile({ id: "u1", role: "technician" })!.is_active).toBe(false);
   });
