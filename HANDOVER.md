@@ -829,6 +829,23 @@ from technicians) and saved as that expense's `receipt_storage_path`. A failed
 upload saves nothing; a failed expense or service insert removes the file
 again. Each service card shows "View invoice" when its cost has a file. The
 old tab is now labelled **Expenses**.
+- **The invoice is read automatically** (Justin, 17 Nov 2026). On drop, a
+  photo is shrunk in the browser (`lib/image-resize.ts`) and the file goes to
+  `POST /api/fleet/service-invoice/read` (office/admin; ≤3 MB — it travels as
+  base64 in the request; bytes sniffed, PDF/JPEG/PNG/WebP only; rate limit
+  `service-invoice-read`, 30 per 10 min). `lib/service-invoice-read.ts` reads
+  it with `claude-opus-5-5` (structured output, effort low, server-side
+  refusal fallback): workshop, invoice number, date, amount ex GST and GST,
+  odometer / engine hours, service type, a short work-done summary, the next
+  service due if printed, and the vehicle as printed; `cleanServiceInvoice`
+  drops impossible dates, negatives and a next-due that isn't ahead. The
+  form is filled by `applyServiceInvoiceRead` (`lib/service-invoice-form.ts`):
+  only fields still empty (or on their defaults — today, "Scheduled
+  service"); typed values are never overwritten; an already-linked expense is
+  kept. A note says "check it's this machine" with the vehicle the invoice
+  names, and warns when the file isn't a service invoice. Nothing is saved
+  until the office presses Save. A failed or skipped read leaves the file
+  attached. Tests: `tests/unit/service-invoice-read.test.ts`.
 
 **Day Works lists the whole fleet; Fleet → Hire rates (16 Nov 2026; no migration).**
 Justin: "The whole Fleet doesn't seem to be there." The picker used to list

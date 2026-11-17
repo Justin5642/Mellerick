@@ -3,8 +3,10 @@
 import { useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { toast } from "sonner";
-import { Wrench, Plus, Trash2, Gauge, CalendarClock, AlertTriangle, Receipt, ExternalLink } from "lucide-react";
+import { Wrench, Plus, Trash2, Gauge, CalendarClock, AlertTriangle, Receipt, ExternalLink, Sparkles, Loader2 } from "lucide-react";
 import { FileDropzone } from "@/components/ui/file-dropzone";
+import { resizeImageForUpload } from "@/lib/image-resize";
+import { applyServiceInvoiceRead, type ServiceInvoiceReadResult } from "@/lib/service-invoice-form";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -40,6 +42,16 @@ const blankForm = (today: string) => ({
   invoice_number: "",
 });
 
+/** Read-route limit (lib/service-invoice-read.ts MAX_SERVICE_INVOICE_BYTES). */
+const MAX_READ_BYTES = 3 * 1024 * 1024;
+
+async function fileToBase64(file: File): Promise<string> {
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  let binary = "";
+  for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  return btoa(binary);
+}
+
 const num = (v: string) => (v.trim() === "" ? null : Number(v));
 
 /**
@@ -74,6 +86,8 @@ export function EquipmentServiceRecords({
   const [form, setForm] = useState(() => blankForm(today));
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [invoiceFile, setInvoiceFile] = useState<File | null>(null);
+  const [reading, setReading] = useState(false);
+  const [readNote, setReadNote] = useState<{ tone: "ok" | "warn"; text: string } | null>(null);
 
   const sorted = useMemo(() => sortRecords(records ?? []), [records]);
   const due = useMemo(() => serviceDue(records ?? [], today), [records, today]);
@@ -204,8 +218,49 @@ export function EquipmentServiceRecords({
     toast.success(createdExpense ? "Service and its cost saved" : "Service saved");
     setForm(blankForm(today));
     setInvoiceFile(null);
+    setReadNote(null);
     setShowForm(false);
     setSaving(false);
+  }
+
+  /** Drop → shrink a photo → read it → fill what is still empty. Never saves. */
+  async function onInvoiceDropped(picked: File | null) {
+    setReadNote(null);
+    if (!picked) { setInvoiceFile(null); return; }
+    const file = await resizeImageForUpload(picked);
+    setInvoiceFile(file);
+    setForm((f) => (f.expense === NEW_EXPENSE ? f : { ...f, expense: NEW_EXPENSE }));
+    if (file.size > MAX_READ_BYTES) {
+      setReadNote({ tone: "warn", text: "Too large to read automatically (over 3 MB). Fill the details in — the file is still saved with the service." });
+      return;
+    }
+    setReading(true);
+    try {
+      const res = await fetch("/api/fleet/service-invoice/read", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ fileBase64: await fileToBase64(file) }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok || !body.read) {
+        setReadNote({ tone: "warn", text: body.error ?? "The invoice could not be read. Fill the details in by hand." });
+        return;
+      }
+      const read = body.read as ServiceInvoiceReadResult;
+      setForm((f) => applyServiceInvoiceRead(f, read, today, NEW_EXPENSE).form);
+      const foundAnything = [read.provider, read.invoice_number, read.service_date, read.amount_ex_gst, read.odometer_km, read.engine_hours, read.work_done]
+        .some((v) => v !== null);
+      setErrors({});
+      const parts: string[] = [];
+      if (!read.is_service_invoice) parts.push("This doesn't look like a service invoice — check it's the right file.");
+      if (read.vehicle_text) parts.push(`Invoice is for: ${read.vehicle_text} — check it's this machine.`);
+      parts.push(foundAnything ? "Details read from the invoice — check them, then save." : "Nothing new was read from the invoice.");
+      setReadNote({ tone: read.is_service_invoice ? "ok" : "warn", text: parts.join(" ") });
+    } catch {
+      setReadNote({ tone: "warn", text: "The invoice could not be read. Fill the details in by hand." });
+    } finally {
+      setReading(false);
+    }
   }
 
   async function viewInvoice(path: string) {
@@ -293,15 +348,21 @@ export function EquipmentServiceRecords({
               <Field label="Drop the service invoice here">
                 <FileDropzone
                   file={invoiceFile}
-                  onFileChange={(f) => {
-                    setInvoiceFile(f);
-                    // Dropping an invoice means its cost is being logged now.
-                    if (f && form.expense !== NEW_EXPENSE) set("expense", NEW_EXPENSE);
-                  }}
-                  accept=".pdf,.png,.jpg,.jpeg"
-                  hint="PDF, PNG or JPG — saved with the service's cost"
+                  onFileChange={(f) => { void onInvoiceDropped(f); }}
+                  accept=".pdf,.png,.jpg,.jpeg,.webp"
+                  hint="PDF or photo — read automatically and saved with the service's cost"
+                  disabled={reading}
                 />
               </Field>
+              {reading && (
+                <p className="text-xs text-blue-700 flex items-center gap-1.5"><Loader2 className="w-3.5 h-3.5 animate-spin" />Reading the invoice…</p>
+              )}
+              {readNote && (
+                <p className={`text-xs flex items-start gap-1.5 ${readNote.tone === "ok" ? "text-emerald-700" : "text-amber-700"}`}>
+                  {readNote.tone === "ok" ? <Sparkles className="w-3.5 h-3.5 mt-0.5 shrink-0" /> : <AlertTriangle className="w-3.5 h-3.5 mt-0.5 shrink-0" />}
+                  {readNote.text}
+                </p>
+              )}
               <Field label="Invoice for this service">
                 <select value={form.expense} onChange={(e) => set("expense", e.target.value)} className="h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm">
                   <option value={NO_EXPENSE}>No cost / not invoiced yet</option>
@@ -333,8 +394,8 @@ export function EquipmentServiceRecords({
             </div>
 
             <div className="flex justify-end gap-2">
-              <Button variant="outline" onClick={() => { setShowForm(false); setErrors({}); setInvoiceFile(null); }}>Cancel</Button>
-              <Button onClick={save} disabled={saving}>{saving ? "Saving..." : "Save service"}</Button>
+              <Button variant="outline" onClick={() => { setShowForm(false); setErrors({}); setInvoiceFile(null); setReadNote(null); }}>Cancel</Button>
+              <Button onClick={save} disabled={saving || reading}>{saving ? "Saving..." : "Save service"}</Button>
             </div>
           </CardContent>
         </Card>
