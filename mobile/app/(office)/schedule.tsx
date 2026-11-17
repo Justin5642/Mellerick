@@ -21,7 +21,7 @@ import { supabase } from "../../lib/supabase";
 import { colors } from "../../lib/theme";
 import { JobListRow } from "../../design/components/JobListRow";
 import { ScreenError } from "../../design/components/ScreenError";
-import { businessDayLabel, formatBusinessTime, computeRescheduleWithTime, dateKeyInBusinessTZ, localDateKey, toBusinessInputValue } from "../../lib/date";
+import { businessDayLabel, formatBusinessTime, computeRescheduleWithTime, dateKeyInBusinessTZ, localDateKey, toBusinessInputValue, shiftDateKey } from "../../lib/date";
 import { businessDayRange, moveSchedule, scheduleDays, type ScheduleDay } from "../../lib/scheduling";
 import { businessTodayKey, dateRangeLabel, formatScheduleSummary, shortDayLabel } from "../../lib/scheduleDisplay";
 import { useSchedule } from "../../lib/data/hooks/useSchedule";
@@ -58,7 +58,6 @@ import { ScheduleGrid, type SaveState } from "../../components/schedule/Schedule
 // read-only blocks on the grid, "Needs reassigning" on bookings that sit on a
 // leave day, and a warning before a move puts someone on their leave.
 import { listScheduleLeave } from "../../lib/data/reads/leave";
-import { shiftDateKey } from "../../lib/date";
 import {
   bookingLeaveConflicts,
   bookingsNeedingReassignment,

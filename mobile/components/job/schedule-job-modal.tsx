@@ -16,7 +16,7 @@ import {
   type ScheduleInput,
 } from "../../lib/scheduling";
 import { businessTodayKey, formatScheduleSummary, shortDayLabel } from "../../lib/scheduleDisplay";
-import { localDateKey } from "../../lib/date";
+import { localDateKey, shiftDateKey } from "../../lib/date";
 import type { JobCostCentre } from "../../lib/data/reads/jobBilling";
 import type { JobBooking } from "../../lib/data/reads/bookings";
 import { BOOKING_NOTE_MAX, bookingColumns, bookingWindow } from "../../lib/bookings";
@@ -25,7 +25,6 @@ import { KeyboardSheet, KEYBOARD_SHEET_INPUT_FONT_SIZE } from "../KeyboardSheet"
 // Staff leave (migration 0112 — a draft, not applied yet), read online: a
 // booking onto someone's leave day is asked about before it is saved.
 import { listScheduleLeave } from "../../lib/data/reads/leave";
-import { shiftDateKey } from "../../lib/date";
 import { bookingLeaveConflicts, describeLeaveConflicts, type ScheduleLeave } from "../../lib/staffLeave";
 
 interface Props {

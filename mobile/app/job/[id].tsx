@@ -27,7 +27,7 @@ import { ScheduleJobModal } from "../../components/job/schedule-job-modal";
 import { isJobClosedForScheduling } from "../../lib/jobSchedulable";
 import { KeyboardSheet, KEYBOARD_SHEET_INPUT_FONT_SIZE } from "../../components/KeyboardSheet";
 import { getJobStageLabel } from "../../lib/job-stages";
-import { formatScheduleSummary } from "../../lib/scheduleDisplay";
+import { formatScheduleSummary, businessTodayKey } from "../../lib/scheduleDisplay";
 import { getJobCostCentres, type JobCostCentre } from "../../lib/data/reads/jobBilling";
 import { listJobBookings, type JobBooking } from "../../lib/data/reads/bookings";
 // Staff leave (migration 0112 — a draft, not applied yet), online only: a
@@ -35,7 +35,6 @@ import { listJobBookings, type JobBooking } from "../../lib/data/reads/bookings"
 import { listScheduleLeave } from "../../lib/data/reads/leave";
 import { bookingsNeedingReassignment, leaveDateLabel, leaveDayLabel, NEEDS_REASSIGNING, type ScheduleLeave } from "../../lib/staffLeave";
 import { shiftDateKey } from "../../lib/date";
-import { businessTodayKey } from "../../lib/scheduleDisplay";
 import { bookingWindow, mergePendingBookings } from "../../lib/bookings";
 import { useDataLayer } from "../../lib/data/DataProvider";
 
