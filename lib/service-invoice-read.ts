@@ -175,3 +175,34 @@ export function sniffServiceInvoiceMime(buf: Buffer): ServiceInvoiceMime | null 
   if (buf.subarray(0, 4).toString("latin1") === "RIFF" && buf.subarray(8, 12).toString("latin1") === "WEBP") return "image/webp";
   return null;
 }
+
+/**
+ * A fixed sentence for a failed call to the reader, naming the HTTP status and
+ * the API's error type (an enumerated value such as "invalid_request_error"),
+ * never the API's own message text — that is logged, not shown.
+ */
+export function readerFailureSentence(err: unknown): string {
+  if (err instanceof Anthropic.APIConnectionTimeoutError) {
+    return "The invoice reader took too long. Try again, or fill the details in by hand.";
+  }
+  if (err instanceof Anthropic.APIConnectionError) {
+    return "The invoice reader couldn't be reached. Try again, or fill the details in by hand.";
+  }
+  if (err instanceof Anthropic.APIError) {
+    const status = err.status ?? 0;
+    const body = err.error as { error?: { type?: unknown } } | undefined;
+    const rawType = body?.error?.type;
+    const type = typeof rawType === "string" && /^[a-z_]{1,40}$/.test(rawType) ? rawType : "unknown";
+    if (status === 401 || status === 403) {
+      return `The invoice reader's API key was refused (${status} ${type}). Check ANTHROPIC_API_KEY in Vercel.`;
+    }
+    if (status === 404) {
+      return `The invoice reader's model isn't available to this API key (${status} ${type}).`;
+    }
+    if (status === 429 || status === 529) {
+      return `The invoice reader is busy (${status} ${type}). Try again in a minute.`;
+    }
+    return `The invoice reader refused the request (${status} ${type}). Fill the details in by hand.`;
+  }
+  return "The invoice could not be read just now. Fill the details in by hand.";
+}

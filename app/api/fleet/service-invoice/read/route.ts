@@ -4,6 +4,7 @@ import { consumeRateLimit, rateLimitedResponse, SERVICE_INVOICE_READ_LIMIT } fro
 import { reportError, reportFailure } from "@/lib/monitoring";
 import {
   MAX_SERVICE_INVOICE_BYTES,
+  readerFailureSentence,
   readServiceInvoice,
   ServiceInvoiceReadError,
   sniffServiceInvoiceMime,
@@ -50,7 +51,7 @@ export async function POST(request: NextRequest) {
   } catch (err) {
     // Only ServiceInvoiceReadError carries a sentence written for the office.
     const known = err instanceof ServiceInvoiceReadError;
-    const message = known ? err.message : "The invoice could not be read just now. Fill the details in by hand.";
+    const message = known ? err.message : readerFailureSentence(err);
     if (known) return NextResponse.json({ error: message }, { status: 422 });
     console.error("service invoice read failed:", (err as { message?: string })?.message ?? err);
     reportError(err, { route: "api/fleet/service-invoice/read", integration: "anthropic" });
