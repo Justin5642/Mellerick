@@ -47,6 +47,8 @@ const UNIT_SUFFIX: Record<HireUnit, string> = {
   km: "/km",
   contract: " contract",
   move: "/move",
+  tonne: "/tonne",
+  m3: "/m³",
 };
 
 /** "$115.37/hr", "$251.19/day, full days", "$470.00 base, 30 km incl., then $5.00/km". Ex GST. */

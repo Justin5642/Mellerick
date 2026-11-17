@@ -11,6 +11,7 @@ import { KeyboardSheet, KEYBOARD_SHEET_INPUT_FONT_SIZE } from "../KeyboardSheet"
 import { MoneyText } from "../../design/components/MoneyText";
 import { RoleGate } from "../../design/guards/RoleGate";
 import { signatureWebStyle } from "./signature";
+import { TruckLoadsSection } from "./truck-loads";
 import {
   DAY_WORKS_OFFLINE,
   STATUS_LABEL,
@@ -282,6 +283,9 @@ export function JobDayWorksTab({ jobId }: { jobId: string }) {
           </View>
         ))
       )}
+
+      {/* Truck loads (0111, drafted — not applied yet): quarry product in, spoil out. */}
+      <TruckLoadsSection jobId={jobId} />
 
       {draft && (
         <EntrySheet

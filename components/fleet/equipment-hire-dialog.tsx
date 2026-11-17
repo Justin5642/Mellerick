@@ -148,7 +148,7 @@ export function EquipmentHireDialog({ equipmentId, equipmentName, options, costC
           <DialogTitle>{equipmentName} — Hire setup</DialogTitle>
         </DialogHeader>
         <p className="text-xs text-slate-500">
-          How this machine is charged as Day Works, ex GST. Operator labour is costed separately and is not in these rates.
+          How this machine is charged as Day Works, ex GST. Operator labour is costed separately and is not in these rates. For a truck, Cartage per tonne / per m³ and per km are the rates its Truck loads are charged at.
         </p>
         <div className="space-y-4">
           {rows.map((r, i) => (

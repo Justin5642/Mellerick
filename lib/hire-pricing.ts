@@ -13,14 +13,22 @@
 // office routes only. A technician's view of an entry is quantities only.
 
 export type HireType = "wet" | "dry" | "cartage" | "float";
-export type HireUnit = "hour" | "day" | "engine_hour" | "km" | "contract" | "move";
+export type HireUnit = "hour" | "day" | "engine_hour" | "km" | "contract" | "move" | "tonne" | "m3";
+/**
+ * Units a Truck load (0111, drafted — not applied yet) is charged by, at the truck's own cartage rate.
+ * Only for equipment_hire_options; a Day Works entry (hire_entries) never
+ * uses them — its check constraint refuses them and the Day Works picker
+ * leaves them out (lib/day-works-view.ts).
+ */
+export const LOAD_UNITS: HireUnit[] = ["tonne", "m3"];
+export const isLoadUnit = (u: HireUnit) => u === "tonne" || u === "m3";
 export type HireStatus = "draft" | "signed" | "invoiced" | "void";
 
 /** Which units each hire type may be charged in — mirrors the table's check constraint. */
 export const HIRE_UNITS_BY_TYPE: Record<HireType, HireUnit[]> = {
   wet: ["hour"],
   dry: ["day", "engine_hour"],
-  cartage: ["hour", "km", "contract"],
+  cartage: ["hour", "km", "contract", "tonne", "m3"],
   float: ["move"],
 };
 
@@ -38,6 +46,8 @@ export const HIRE_UNIT_LABELS: Record<HireUnit, string> = {
   km: "per km",
   contract: "contract",
   move: "per move",
+  tonne: "per tonne (truck loads)",
+  m3: "per m³ (truck loads)",
 };
 
 /** The company cost centre a hire type falls under when the setup names none. */
@@ -126,6 +136,9 @@ export function quantityProblem(e: Pick<HireEntryQuantities, "hire_unit" | "hour
       return e.km == null || e.km === "" ? "Enter the loaded kilometres (0 if none)." : null;
     case "contract":
       return null;
+    case "tonne":
+    case "m3":
+      return "Truck loads are entered under Truck loads, not as a Day Works line.";
   }
 }
 
@@ -162,6 +175,12 @@ export function machineCharge(e: HireEntryQuantities, o: HireOption): { quantity
       unitPrice = floatMoveCharge(num(e.km), o);
       break;
     }
+    case "tonne":
+    case "m3":
+      // Never a Day Works entry's unit (0111 keeps them to Truck loads, priced
+      // by lib/cartage-pricing.ts); nothing to charge here.
+      quantity = 0;
+      break;
   }
   return { quantity, unitPrice: cents(unitPrice), amount: cents(quantity * cents(unitPrice)) };
 }
@@ -268,6 +287,8 @@ const UNIT_WORDS: Record<HireUnit, [string, string]> = {
   km: ["km", "km"],
   contract: ["contract", "contract"],
   move: ["move", "moves"],
+  tonne: ["tonne", "tonnes"],
+  m3: ["m³", "m³"],
 };
 
 function fmtDate(key: string): string {

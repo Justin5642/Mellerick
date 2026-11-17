@@ -17,6 +17,7 @@ import { dateKeyInBusinessTZ, startOfWeekKey, shiftDateKey } from "@/lib/date";
 import { dayWorksPeriodLabel, quantityProblem, type HireType, type HireUnit } from "@/lib/hire-pricing";
 import { splitMachinesByHire, type DayWorksView, type DayWorksEntry } from "@/lib/day-works-view";
 import { buildHireEntryRow } from "@/lib/day-works-entry";
+import { TruckLoadsCard, loadSummary, type TruckLoadsLoaded } from "./job-truck-loads";
 
 // The job's Day Works / Hire tab (Stage 1, Nov 2026). Hire and cartage are
 // their own lines under the job — never part of the quoted value or a progress
@@ -79,6 +80,10 @@ export function quantityText(e: Pick<DayWorksEntry, "hire_unit" | "hours" | "day
       const route = [e.pickup, e.dropoff].filter(Boolean).join(" → ");
       return `${route ? `${route} · ` : ""}${e.km ?? 0} km loaded`;
     }
+    case "tonne":
+    case "m3":
+      // Truck-load units (0111, drafted — not applied yet) — never a Day Works entry's.
+      return "";
   }
 }
 
@@ -99,6 +104,10 @@ export function JobDayWorks({ jobId, readOnly = false }: Props) {
   const [draft, setDraft] = useState<Draft | null>(null);
   const [saving, setSaving] = useState(false);
   const [signingId, setSigningId] = useState<string | null>(null);
+  // Truck loads (0111): their own section, loaded separately; Invoice Day Works
+  // includes the signed extras.
+  const [truckLoads, setTruckLoads] = useState<TruckLoadsLoaded | null>(null);
+  const [loadsReloadKey, setLoadsReloadKey] = useState(0);
 
   const load = useCallback(async () => {
     try {
@@ -413,13 +422,19 @@ export function JobDayWorks({ jobId, readOnly = false }: Props) {
         </div>
       )}
 
+      <TruckLoadsCard jobId={jobId} readOnly={readOnly} onLoaded={setTruckLoads} reloadKey={loadsReloadKey} />
+
       {view.isOffice && !readOnly && (
         <InvoiceDayWorks
           jobId={jobId}
           entries={view.entries}
           pricing={view.pricing}
+          truckLoads={truckLoads}
           today={today}
-          onInvoiced={(invoiceId) => router.push(`/dashboard/invoices/${invoiceId}`)}
+          onInvoiced={(invoiceId) => {
+            setLoadsReloadKey((k) => k + 1);
+            router.push(`/dashboard/invoices/${invoiceId}`);
+          }}
         />
       )}
     </div>
@@ -652,10 +667,12 @@ function SignOff({ jobId, entry, onDone, onCancel }: { jobId: string; entry: Day
   );
 }
 
-function InvoiceDayWorks({ jobId, entries, pricing, today, onInvoiced }: {
+function InvoiceDayWorks({ jobId, entries, pricing, truckLoads, today, onInvoiced }: {
   jobId: string;
   entries: DayWorksEntry[];
   pricing: DayWorksView["pricing"];
+  /** Truck loads (0111): signed extras go on the same invoice. Null before 0111 or while loading. */
+  truckLoads: TruckLoadsLoaded | null;
   today: string;
   onInvoiced: (invoiceId: string) => void;
 }) {
@@ -670,16 +687,23 @@ function InvoiceDayWorks({ jobId, entries, pricing, today, onInvoiced }: {
   const inRange = waiting.filter((e) => e.work_date >= from && e.work_date <= to).sort((a, b) => a.work_date.localeCompare(b.work_date));
   const picked = inRange.filter((e) => !excluded.has(e.id));
   const unpriced = picked.filter((e) => pricing?.entries[e.id]?.total == null);
-  const total = picked.reduce((s, e) => s + (pricing?.entries[e.id]?.total ?? 0), 0);
+  const loadPrice = (id: string) => truckLoads?.pricing?.loads[id]?.total ?? null;
+  const waitingLoads = (truckLoads?.loads ?? []).filter((l) => l.status === "signed" && l.billing === "extra" && !l.invoice_id);
+  const loadsInRange = waitingLoads.filter((l) => l.load_date >= from && l.load_date <= to).sort((a, b) => a.load_date.localeCompare(b.load_date));
+  const pickedLoads = loadsInRange.filter((l) => !excluded.has(l.id));
+  const unpricedLoads = pickedLoads.filter((l) => loadPrice(l.id) == null);
+  const total =
+    picked.reduce((s, e) => s + (pricing?.entries[e.id]?.total ?? 0), 0) + pickedLoads.reduce((s, l) => s + (loadPrice(l.id) ?? 0), 0);
+  const allWaitingDates = [...waiting.map((e) => e.work_date), ...waitingLoads.map((l) => l.load_date)].sort();
 
   async function create() {
-    if (picked.length === 0) return;
+    if (picked.length + pickedLoads.length === 0) return;
     setBusy(true);
     try {
       const res = await fetch(`/api/jobs/${jobId}/hire-entries/invoice`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ entryIds: picked.map((e) => e.id), from, to }),
+        body: JSON.stringify({ entryIds: picked.map((e) => e.id), loadIds: pickedLoads.map((l) => l.id), from, to }),
       });
       const body = await res.json().catch(() => ({}));
       if (!res.ok) return toast.error(body.error ?? "Couldn't make the invoice.");
@@ -697,7 +721,7 @@ function InvoiceDayWorks({ jobId, entries, pricing, today, onInvoiced }: {
       </CardHeader>
       <CardContent className="space-y-3 text-sm">
         <p className="text-xs text-slate-500">
-          Signed lines not yet invoiced go on their own invoice, separate from the quoted work and progress claims. {waiting.length} waiting in all.
+          Signed lines and signed extra truck loads not yet invoiced go on their own invoice, separate from the quoted work and progress claims. {waiting.length + waitingLoads.length} waiting in all.
         </p>
         <div className="flex flex-wrap items-end gap-3">
           <div className="space-y-1">
@@ -711,12 +735,12 @@ function InvoiceDayWorks({ jobId, entries, pricing, today, onInvoiced }: {
           <div className="flex gap-2 pb-0.5">
             <Button variant="outline" size="sm" onClick={() => { setFrom(lastMonday); setTo(shiftDateKey(lastMonday, 6)); }}>Last week</Button>
             <Button variant="outline" size="sm" onClick={() => { const [y, m] = today.split("-").map(Number); const pm = m === 1 ? 12 : m - 1; const py = m === 1 ? y - 1 : y; setFrom(`${py}-${String(pm).padStart(2, "0")}-01`); setTo(shiftDateKey(`${y}-${String(m).padStart(2, "0")}-01`, -1)); }}>Last month</Button>
-            {waiting.length > 0 && (
-              <Button variant="outline" size="sm" onClick={() => { const d = waiting.map((e) => e.work_date).sort(); setFrom(d[0]); setTo(d[d.length - 1]); }}>All waiting</Button>
+            {allWaitingDates.length > 0 && (
+              <Button variant="outline" size="sm" onClick={() => { setFrom(allWaitingDates[0]); setTo(allWaitingDates[allWaitingDates.length - 1]); }}>All waiting</Button>
             )}
           </div>
         </div>
-        {inRange.length === 0 ? (
+        {inRange.length === 0 && loadsInRange.length === 0 ? (
           <p className="text-slate-500">No signed, un-invoiced lines between {dayWorksPeriodLabel(from, to)}.</p>
         ) : (
           <div className="divide-y rounded-md border">
@@ -731,12 +755,24 @@ function InvoiceDayWorks({ jobId, entries, pricing, today, onInvoiced }: {
                 <span className="tabular-nums">{pricing?.entries[e.id]?.total == null ? <span className="text-amber-700">No rate</span> : money(pricing.entries[e.id].total!)}</span>
               </label>
             ))}
+            {loadsInRange.map((l) => (
+              <label key={l.id} className="flex items-center gap-3 px-3 py-2">
+                <input
+                  type="checkbox"
+                  checked={!excluded.has(l.id)}
+                  onChange={(ev) => setExcluded((s) => { const n = new Set(s); if (ev.target.checked) n.delete(l.id); else n.add(l.id); return n; })}
+                />
+                <span className="flex-1 min-w-0">{fmtDate(l.load_date)} · {l.truck} · {loadSummary(l, truckLoads?.siteLabel ?? null)}</span>
+                <span className="tabular-nums">{loadPrice(l.id) == null ? <span className="text-amber-700">Not priced</span> : money(loadPrice(l.id)!)}</span>
+              </label>
+            ))}
           </div>
         )}
         {unpriced.length > 0 && <p className="text-xs text-amber-700">{unpriced.length} ticked line(s) have no hire rate. Set them up in Fleet → Hire setup first.</p>}
+        {unpricedLoads.length > 0 && <p className="text-xs text-amber-700">{unpricedLoads.length} ticked truck load(s) can&apos;t be priced yet — enter the docket cost, or the truck&apos;s rates in Fleet → Hire setup (see Truck loads above).</p>}
         <div className="flex items-center justify-between">
-          <span className="text-slate-600">{picked.length} line{picked.length === 1 ? "" : "s"} · {money(total)} ex GST</span>
-          <Button onClick={() => void create()} disabled={busy || picked.length === 0 || unpriced.length > 0} className="gap-1.5">
+          <span className="text-slate-600">{picked.length + pickedLoads.length} line{picked.length + pickedLoads.length === 1 ? "" : "s"} · {money(total)} ex GST</span>
+          <Button onClick={() => void create()} disabled={busy || picked.length + pickedLoads.length === 0 || unpriced.length > 0 || unpricedLoads.length > 0} className="gap-1.5">
             <Receipt className="w-4 h-4" />{busy ? "Creating…" : "Create invoice"}
           </Button>
         </div>

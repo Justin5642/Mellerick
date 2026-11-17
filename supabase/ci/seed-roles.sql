@@ -296,6 +296,23 @@ begin
 end;
 $$;
 
+-- Truck loads (0111): the load itself is crew-readable and carries no money;
+-- its docket cost is office/admin only, so one is seeded for the sweep to
+-- check. Guarded like the block above: 0111 may not be applied.
+do $$
+begin
+  if to_regclass('public.cartage_load_costs') is not null then
+    insert into cartage_loads (id, job_id, equipment_id, load_date, direction, place, quantity, unit, km, billing)
+    values ('a3a3a3a3-0000-0000-0000-000000000001', 'cccccccc-0000-0000-0000-000000000001',
+            'a1a1a1a1-0000-0000-0000-000000000001', date '2026-11-17', 'spoil_out', 'CI Tip', 12, 'tonne', 35, 'extra')
+    on conflict (id) do nothing;
+    insert into cartage_load_costs (load_id, docket_cost_ex_gst, margin_pct)
+    values ('a3a3a3a3-0000-0000-0000-000000000001', 180.00, 15)
+    on conflict (load_id) do nothing;
+  end if;
+end;
+$$;
+
 -- category is omitted so its default ('materials') applies, for the same reason
 -- jobs.status is above: the CHECK constraint is not what this fixture tests.
 insert into job_expenses (id, job_id, supplier_name, amount, gst_amount)

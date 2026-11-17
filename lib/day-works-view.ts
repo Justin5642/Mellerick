@@ -9,6 +9,7 @@
 import {
   attachmentClashes,
   hireOptionLabel,
+  isLoadUnit,
   priceEntry,
   totalsByCostCentre,
   type HireAttachmentRate,
@@ -159,7 +160,8 @@ export function buildDayWorksView(input: {
       id: m.id,
       name: m.name,
       options: m.options
-        .filter((o) => o.is_active !== false)
+        // Per tonne / m³ are a truck's Truck-load rates (0111, drafted — not applied yet), not a Day Works line.
+        .filter((o) => o.is_active !== false && !isLoadUnit(o.hire_unit))
         .map((o) => ({
           hire_type: o.hire_type,
           hire_unit: o.hire_unit,
