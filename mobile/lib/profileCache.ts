@@ -34,7 +34,7 @@ export interface CachedProfile {
   /** Auto clock-in on site arrival (0082): null = by role. See trackingGate. */
   auto_clock?: boolean | null;
   /**
-   * Limited-access account (draft migration 0110 — not applied yet; the App
+   * Limited-access account (migration 0110; the App
    * Store review login). Present only when true; absent means a normal
    * account, which is also what a database without the column gives. A UI
    * hint only (hides the Backflow tab) — RLS and the sync streams enforce it.

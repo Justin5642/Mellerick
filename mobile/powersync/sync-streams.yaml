@@ -91,7 +91,7 @@ streams:
   # backflow device (the backflow register lists every device by customer and
   # suburb). Office/admin get both tables whole, further down.
   #
-  # LIMITED-ACCESS ACCOUNTS (migration 0110 — a draft, not applied yet; apply
+  # LIMITED-ACCESS ACCOUNTS (migration 0110, applied 2026-11-17; apply
   # it BEFORE deploying this file): the four backflow_* streams join the
   # caller's own profile row and send nothing when profiles.limited_access is
   # true (the App Store review account). `IS NOT true`, so a profile whose flag

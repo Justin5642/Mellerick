@@ -374,7 +374,7 @@ describe("PowerSync sync windows", () => {
     }
   });
 
-  // LIMITED-ACCESS ACCOUNTS (migration 0110, a draft — not applied yet). The
+  // LIMITED-ACCESS ACCOUNTS (migration 0110, applied 2026-11-17). The
   // backflow register goes to every role, so it is the one technician-visible
   // set NOT already scoped to the caller's own jobs. A limited account (the
   // App Store review login) must receive none of it: each backflow stream
