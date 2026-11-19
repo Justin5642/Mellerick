@@ -286,7 +286,7 @@ technicians must be unaffected.
   trust only `0110 PASSED` → mark the reviewer (§7) → THEN redeploy the
   PowerSync streams. Merging the web/phone code first is harmless.
 
-**Staff leave on the schedule (migration `0112`, DRAFT — not applied).**
+**Staff leave on the schedule (migration `0112` applied 2026-11-19).**
 Justin, 17 Nov 2026: when someone has sick leave entered, show it on the
 schedule so nobody books them; bookings already on those days get flagged.
 - **Source — no new place to enter leave.** `staff_leave` (0014): one row per
@@ -1149,7 +1149,7 @@ review login) receives none of it; everyone else exactly what they did before.
 behaviour. A user with no profile row now receives no backflow register (fail
 closed). 0110 applied and the YAML redeployed (active) on 2026-11-17.
 
-**Staff leave is in no stream (0112, draft).** The schedule's leave comes
+**Staff leave is in no stream (0112, applied 2026-11-19).** The schedule's leave comes
 from `schedule_leave()` online, which withholds the leave type by role; a
 stream would bypass that and put leave types and notes in technicians'
 SQLite. `tests/unit/sync-streams-contract.test.ts` fails if any stream reads
@@ -1971,7 +1971,7 @@ a shippable release.
 | **Booking notes: record 0109** | Justin | `0109` applied 2026-11-16; sync streams redeployed and active 2026-11-17. Only the ledger row is left if not yet run: `insert into supabase_migrations.schema_migrations (version,name) values ('0109','job_booking_note') on conflict do nothing;` |
 | **App Review account: limit it (0110)** | Justin | `0110` applied 2026-11-17 (gate test passed); sync streams redeployed and active the same day. Mark the reviewer in the SQL editor: `select set_config('request.jwt.claims', '{"role":"service_role"}', true); update profiles set limited_access = true where lower(email) = lower('<reviewer email>');` (expect UPDATE 1). Ledger: `insert into supabase_migrations.schema_migrations (version,name) values ('0110','limited_access_accounts') on conflict do nothing;` The phone hides the Backflow tab for it from the next build. |
 | **Truck loads: apply 0111, then set rates** | Justin | `0111` is a DRAFT. Paste `supabase/migrations/0111_cartage_loads.sql`, then `supabase/tests/0111_cartage_loads_test.sql`; trust only `0111 PASSED`. Mark 0111's header applied and add the ledger row: `insert into supabase_migrations.schema_migrations (version,name) values ('0111','cartage_loads') on conflict do nothing;` Then: Fleet → Hire setup on each truck, add **Cartage per tonne** and/or **per m³** and **per km** rates; Settings → Truck loads, check the margin (15% by default); on jobs where quarry product is NOT in the quote, set the Day Works tab's "Quarry product on this job" to Extra. |
-| **Leave on the schedule: apply 0112** | Justin | Draft. Paste `0112_schedule_leave.sql`, then `supabase/tests/0112_schedule_leave_test.sql`; trust only `0112 PASSED`. Then mark its header applied and add the ledger row: `insert into supabase_migrations.schema_migrations (version,name) values ('0112','schedule_leave') on conflict do nothing;` No PowerSync redeploy. Who sees the leave type defaults to office + admin; change it in Settings → Leave on the schedule. |
+| **Leave on the schedule: record 0112** | Justin | `0112` applied 2026-11-19 (gate test passed). Ledger row: `insert into supabase_migrations.schema_migrations (version,name) values ('0112','schedule_leave') on conflict do nothing;` No PowerSync redeploy. Who sees the leave type defaults to office + admin; change it in Settings → Leave on the schedule. Part days: add From/To times on the Leave Log entry. |
 | **Maestro flow 02** | Avi | Needs `ADMIN_EMAIL` / `ADMIN_PASSWORD` in the environment. The login subflow deliberately skips when a session already exists, so a password never passes through a script — which is why flows 01/03/04 could be run and 02 could not. |
 
 ### QA fixture — do not delete
