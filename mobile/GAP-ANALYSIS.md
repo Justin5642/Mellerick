@@ -29,7 +29,7 @@ project waiting on one purchase order.
 
 | Area | Mobile status | Biggest remaining gap(s) |
 |---|---|---|
-| Dashboard | **full-parity** | — (one cosmetic empty-state link) |
+| Dashboard | **full-parity** | — ("Needs a look from yesterday" + "Variations to Invoice" added 19 Nov 2026) |
 | Pricing | **full** ✅ | ~~reactivate~~ (D49), ~~category-taxonomy picker~~ done |
 | Inventory | **full** ✅ | ~~low-stock surfacing~~ (D49), ~~margin display~~ done |
 | My Jobs | **full** ✅ | ~~submit variation offline~~ (D68); notes already outbox-backed; tech status is clock-in/sign-off-driven by design (D43) |
@@ -45,6 +45,22 @@ project waiting on one purchase order.
 | Approvals | near-full ✅ | ~~approve→auto-invoice, send-back~~ **DONE** (D40); ~~clocked-hours table, Apply hourly rate after approving, Variations to invoice~~ (19 Nov 2026); Xero auto-push after approval stays web |
 | Job Time tab (office/admin) | **full** ✅ | ~~log time for another person, edit anyone's entry, admin billing-rate override (normal / 1.5× / 2×), clock-location flag~~ (19 Nov 2026) |
 | Schedule | partial ✅ | ~~assign/unassign, reschedule~~ **DONE** (D41); day/week grid deferred |
+
+## Office/admin website bits closed on the phone (19 Nov 2026)
+
+See HANDOVER.md §1, "Small office/admin website features on the phone".
+
+- **Jobs:** admin **Delete job** (shared `DELETE /api/jobs/[id]`, online).
+- **Backflow:** office **Delete device** (deactivate, outbox).
+- **Dashboard:** "Needs a look from yesterday" and "Variations to Invoice"
+  tiles — the dashboard is now at parity with the web's.
+- **Customers / sites:** office **Set pin** — by address lookup or where you
+  stand (no map module in the binary; dragging a pin on a map stays web-only).
+- **Schedule:** **Copy to another technician or day** (the board's Shift-drop);
+  admin **Open leave record** from a leave block → Staff → that person's Leave log.
+- **Jobs → Billing:** **loads carted** on equipment usage (0091), priced as the
+  web. Left: the usage entry's cost centre on Billing, and loads in the admin
+  Costing screen.
 
 ## Remaining in-repo work — NONE closable without a crucial decision or a native dep
 

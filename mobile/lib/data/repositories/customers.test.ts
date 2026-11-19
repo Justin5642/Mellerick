@@ -100,4 +100,11 @@ describe("CustomersRepository", () => {
     await new CustomersRepository(outbox, seqIds(), fixedTime()).setSiteActive("s1", true);
     expect(ops[0].payload).toEqual({ is_active: true });
   });
+
+  it("setSitePin writes only the two coordinates (the office's map pin)", async () => {
+    const { outbox, ops } = captureOutbox();
+    await new CustomersRepository(outbox, seqIds(), fixedTime()).setSitePin("s1", -37.6512, 145.0123);
+    expect(ops[0]).toMatchObject({ table: "sites", op: "update", rowId: "s1", aggregate: "site" });
+    expect(ops[0].payload).toEqual({ site_lat: -37.6512, site_lng: 145.0123 });
+  });
 });

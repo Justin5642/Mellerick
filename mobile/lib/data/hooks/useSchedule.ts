@@ -4,6 +4,7 @@ import { useFlush } from "./useFlush";
 import type { ScheduleColumns } from "../../scheduling";
 import type { BookingInsert } from "../../bookings";
 import type { BookingPatch, RescheduleFlags } from "../repositories/schedule";
+import type { ScheduleWindowColumns } from "../../bookings";
 
 export function useSchedule() {
   const layer = useDataLayer();
@@ -21,7 +22,7 @@ export function useSchedule() {
   // The new booking ids come back so the screen can show the rows at once —
   // offline they reach the device mirror only after they have synced.
   const addBookings = useCallback(
-    async (jobId: string, staffIds: string[], columns: ScheduleColumns, costCenterId: string | null, note: string | null = null) => {
+    async (jobId: string, staffIds: string[], columns: ScheduleWindowColumns, costCenterId: string | null, note: string | null = null) => {
       if (!layer) throw new Error("Data layer not ready");
       const ids = await layer.schedule.addBookings(jobId, staffIds, columns, costCenterId, note);
       return { ids, synced: await flush() };

@@ -54,6 +54,8 @@ import {
   type GridView,
 } from "../../lib/scheduleGrid";
 import { ScheduleGrid, type SaveState } from "../../components/schedule/ScheduleGrid";
+import { copyDayChoices, planBookingCopy } from "../../lib/bookingCopy";
+import { useIsAdmin } from "../../design/guards/useRole";
 // Staff leave (migration 0112 — a draft, not applied yet), read online only:
 // read-only blocks on the grid, "Needs reassigning" on bookings that sit on a
 // leave day, and a warning before a move puts someone on their leave.
@@ -191,6 +193,13 @@ export default function ScheduleScreen() {
   const [leave, setLeave] = useState<ScheduleLeave[]>([]);
   const [refreshing, setRefreshing] = useState(false);
   const [menuItem, setMenuItem] = useState<SchedItem | null>(null);
+  // The day the menu was opened from (a grid block's day / a list row's day):
+  // "Copy to…" copies from there, as a Shift-drop does on the web board.
+  const [menuDayKey, setMenuDayKey] = useState<string | null>(null);
+  const [copyFrom, setCopyFrom] = useState<{ item: SchedItem; sourceKey: string } | null>(null);
+  const [copyStaff, setCopyStaff] = useState<string | null>(null);
+  const [copyDay, setCopyDay] = useState<string>(() => businessTodayKey());
+  const isAdmin = useIsAdmin();
   const [reassignJob, setReassignJob] = useState<SchedJob | null>(null);
   const [datePickerFor, setDatePickerFor] = useState<SchedItem | null>(null);
   const [timePickerFor, setTimePickerFor] = useState<SchedItem | null>(null);
@@ -571,6 +580,7 @@ export default function ScheduleScreen() {
       const others = othersOnJobDay(entry, bookingsByJob.get(entry.job.id) ?? [], bookingDays);
       const names = [nameOf(entry.booking.staff_id), ...others.map(nameOf)];
       setMenuNames(`${shortDayLabel(entry.day.dateKey)}: ${names.join(", ")}`);
+      setMenuDayKey(entry.day.dateKey);
       setMenuItem(itemForEntry(job, real));
     },
     [allJobs, realBookings, bookingsByJob, bookingDays, nameOf]
@@ -586,13 +596,91 @@ export default function ScheduleScreen() {
       const jobsText = affected.length
         ? `\n\n${NEEDS_REASSIGNING}: ${affected.map((b) => `#${allJobs.get(b.job_id)?.job_number ?? "?"}`).join(", ")}`
         : "";
+      // Admin, and only when the read gave the record's id (schedule_leave()
+      // returns it to an admin alone): open that person's Leave Log in Staff.
+      const canOpen = isAdmin && !!day.leave.id;
       Alert.alert(
         `${nameOf(day.leave.staff_id)} — ${leaveLabel(day.leave.leave_type)}`,
-        `${leaveRangeLabel(day.leave)}\nThis day: ${leaveDayLabel(day)}${jobsText}\n\nRead only. Leave is entered on the website (Staff → Cost & Leave) or imported from Xero.`,
+        `${leaveRangeLabel(day.leave)}\nThis day: ${leaveDayLabel(day)}${jobsText}\n\n${canOpen ? "Leave is changed in Staff → the person → Leave log, or imported from Xero." : "Read only. Leave is entered on the website (Staff → Cost & Leave) or imported from Xero."}`,
+        canOpen
+          ? [
+              { text: "Close", style: "cancel" },
+              { text: "Open leave record", onPress: () => router.push({ pathname: "/staff", params: { staff: day.leave.staff_id } }) },
+            ]
+          : undefined,
       );
     },
-    [realBookings, reassign, allJobs, nameOf]
+    [realBookings, reassign, allJobs, nameOf, isAdmin, router]
   );
+
+  // ---- Copy to… (the web board's Shift-drop) ---------------------------------
+  const openCopy = useCallback((item: SchedItem, sourceKey: string) => {
+    setCopyFrom({ item, sourceKey });
+    setCopyStaff(null);
+    setCopyDay(sourceKey >= businessTodayKey() ? sourceKey : businessTodayKey());
+  }, []);
+
+  /** Queue the copy through the outbox (ScheduleRepository.addBookings) and say what the server did. */
+  const commitCopy = useCallback(
+    async (jobId: string, plan: Extract<ReturnType<typeof planBookingCopy>, { ok: true }>, what: string) => {
+      if (!schedule.ready) {
+        Alert.alert("Not ready yet", "The app is still starting up. Try again in a moment.");
+        return;
+      }
+      showNotice({ tone: "wait", text: `Saving: ${what}…` });
+      try {
+        const { ids } = await schedule.addBookings(jobId, [plan.staffId], plan.columns, plan.costCenterId, plan.note);
+        const id = ids[0];
+        // Drawn at once; the server's copy replaces it on the next load.
+        setBookings((cur) => [...(cur ?? []), { ...plan.after, id, staff_name: staffNames.get(plan.staffId) ?? null }]);
+        const outcome = await writeOutcome(id);
+        if (outcome === "settled") {
+          showNotice({ tone: "ok", text: `Saved: ${what}.` });
+          void load();
+        } else if (outcome === "pending") {
+          setSaveState(id, "queued");
+          showNotice({ tone: "wait", text: `Not on the server yet: ${what}. It is kept on this phone and sends when you're back online.` });
+        } else {
+          setSaveState(id, "failed");
+          showNotice({ tone: "bad", text: `The server hasn't accepted: ${what}. It will retry — check the sync badge.` });
+        }
+      } catch (e) {
+        showNotice({ tone: "bad", text: `Couldn't save: ${e instanceof Error ? e.message : "please try again."}` });
+      }
+    },
+    [schedule, showNotice, staffNames, writeOutcome, load, setSaveState]
+  );
+
+  const onCopy = useCallback(() => {
+    if (!copyFrom || !copyFrom.item.booking) return;
+    const { item, sourceKey } = copyFrom;
+    const job = jobsById.get(item.job.id) ?? toBoardJob(item.job);
+    const plan = planBookingCopy(item.job, item.booking as BoardBooking, sourceKey, { staffId: copyStaff, dateKey: copyDay }, bookingsByJob.get(item.job.id) ?? [], copyStaff ? nameOf(copyStaff) : undefined);
+    if (!plan.ok) {
+      Alert.alert("Can't copy this", plan.reason);
+      return;
+    }
+    const days = scheduleDays(bookingWindow(plan.after));
+    const span = days.length > 1 ? dateRangeLabel(days[0].dateKey, days[days.length - 1].dateKey) : shortDayLabel(days[0]?.dateKey ?? copyDay);
+    const what = `book ${nameOf(plan.staffId)} on #${job.job_number} ${span} too`;
+    // Same warnings as a move (confirmChange): a clash or leave asks, never blocks.
+    const clashes = bookingClashes(plan.after, boardBookings);
+    const clashText =
+      clashes.length > 0
+        ? `\n\n⚠ ${nameOf(plan.staffId)} is already booked then: ${clashes
+            .slice(0, 3)
+            .map((c) => `#${jobsById.get(c.booking.job_id)?.job_number ?? "?"} on ${shortDayLabel(c.dateKey)}`)
+            .join(", ")}${clashes.length > 3 ? ` and ${clashes.length - 3} more` : ""}.`
+        : "";
+    const leaveHits = bookingLeaveConflicts(plan.after, leave, todayKey);
+    const leaveText = leaveHits.length > 0 ? `\n\n⚠ ${describeLeaveConflicts(nameOf(plan.staffId), leaveHits)}` : "";
+    const warned = clashes.length > 0 || leaveHits.length > 0;
+    setCopyFrom(null);
+    Alert.alert(`#${job.job_number} — ${job.title}`, `${what.charAt(0).toUpperCase()}${what.slice(1)}? Same hours, cost centre and note.${leaveText}${clashText}`, [
+      { text: "Cancel", style: "cancel" },
+      { text: warned ? "Book anyway" : "Copy", onPress: () => void commitCopy(item.job.id, plan, what) },
+    ]);
+  }, [copyFrom, copyStaff, copyDay, jobsById, bookingsByJob, nameOf, boardBookings, leave, todayKey, commitCopy]);
 
   // ---- the to-do list ---------------------------------------------------------
 
@@ -1220,6 +1308,7 @@ export default function ScheduleScreen() {
                 }
                 onPress={() => {
                   setMenuNames(null);
+                  setMenuDayKey(day.dateKey);
                   setMenuItem(item);
                 }}
               />
@@ -1251,6 +1340,19 @@ export default function ScheduleScreen() {
                   label={menuItem?.booking ? "Reschedule this booking" : "Reschedule"}
                   onPress={() => { setDatePickerFor(menuItem); setMenuItem(null); }}
                 />
+                {menuItem?.booking ? (
+                  <Action
+                    icon="copy-outline"
+                    label="Copy to another technician or day"
+                    onPress={() => {
+                      const item = menuItem;
+                      const key = menuDayKey ?? scheduleDays(item.window)[0]?.dateKey ?? businessTodayKey();
+                      setMenuItem(null);
+                      // After the menu has faded: iOS will not present one modal while another is dismissing.
+                      setTimeout(() => openCopy(item, key), 350);
+                    }}
+                  />
+                ) : null}
                 {canTodo && menuItem?.booking && bookings !== null ? (
                   <Action
                     icon="return-down-back-outline"
@@ -1263,6 +1365,61 @@ export default function ScheduleScreen() {
             <Action icon="open-outline" label="Open job details" onPress={() => { const id = menuItem?.job.id; setMenuItem(null); if (id) router.push(`/job/${id}`); }} />
           </View>
         </TouchableOpacity>
+      </Modal>
+
+      {/* Copy to… — technician + start day */}
+      <Modal visible={!!copyFrom} transparent animationType="slide" onRequestClose={() => setCopyFrom(null)}>
+        <View style={styles.overlay}>
+          <View style={styles.pickerSheet}>
+            <Text style={styles.sheetTitle} numberOfLines={1}>
+              Copy #{copyFrom?.item.job.job_number} — {copyFrom?.item.job.title}
+            </Text>
+            <Text style={styles.sheetSub}>
+              {copyFrom?.item.who ?? "Unassigned"}&apos;s booking · same hours, cost centre and note. On another day it starts there.
+            </Text>
+            <Text style={styles.copyLabel}>Starting</Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.copyDays}>
+              {(copyFrom ? copyDayChoices(copyFrom.sourceKey, todayKey) : []).map((key) => (
+                <TouchableOpacity
+                  key={key}
+                  style={[styles.copyDay, copyDay === key && styles.copyDayOn]}
+                  onPress={() => setCopyDay(key)}
+                  accessibilityRole="radio"
+                  accessibilityState={{ selected: copyDay === key }}
+                >
+                  <Text style={[styles.copyDayText, copyDay === key && styles.copyDayTextOn]}>{shortDayLabel(key)}</Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+            <Text style={styles.copyLabel}>Technician</Text>
+            <ScrollView style={{ maxHeight: 300 }}>
+              {staff.map((s) => {
+                const on = copyStaff === s.id;
+                return (
+                  <TouchableOpacity
+                    key={s.id}
+                    style={styles.staffRow}
+                    onPress={() => setCopyStaff(s.id)}
+                    accessibilityRole="radio"
+                    accessibilityState={{ selected: on }}
+                  >
+                    <Ionicons name={on ? "radio-button-on" : "radio-button-off"} size={20} color={on ? colors.blue600 : colors.slate400} />
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.staffName}>{s.full_name}</Text>
+                      <Text style={styles.staffRole}>{s.role}</Text>
+                    </View>
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
+            <TouchableOpacity style={[styles.saveCrewBtn, !copyStaff && styles.copyBtnOff]} onPress={onCopy} disabled={!copyStaff}>
+              <Text style={styles.saveCrewText}>{copyStaff ? `Copy to ${nameOf(copyStaff)} · ${shortDayLabel(copyDay)}` : "Pick a technician"}</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.cancelBtn} onPress={() => setCopyFrom(null)}>
+              <Text style={styles.cancelText}>Cancel</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
       </Modal>
 
       {/* Technician picker */}
@@ -1431,4 +1588,11 @@ const styles = StyleSheet.create({
   saveCrewText: { color: "#fff", fontWeight: "700", fontSize: 15 },
   cancelBtn: { marginTop: 12, paddingVertical: 12, borderRadius: 10, backgroundColor: colors.bg, alignItems: "center", borderWidth: 1, borderColor: colors.border },
   cancelText: { fontSize: 14, fontWeight: "600", color: colors.slate700 },
+  copyLabel: { fontSize: 12, fontWeight: "700", color: colors.slate500, textTransform: "uppercase", marginTop: 10, marginBottom: 6 },
+  copyDays: { gap: 8, paddingBottom: 4 },
+  copyDay: { minHeight: 40, paddingHorizontal: 12, justifyContent: "center", borderRadius: 999, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.bg },
+  copyDayOn: { backgroundColor: colors.blue600, borderColor: colors.blue600 },
+  copyDayText: { fontSize: 13, fontWeight: "600", color: colors.slate700 },
+  copyDayTextOn: { color: "#fff" },
+  copyBtnOff: { backgroundColor: colors.slate400 },
 });

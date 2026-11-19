@@ -104,6 +104,30 @@ export class BackflowRepository {
   }
 
   /**
+   * Remove a device from the register (office/admin — the web's "Delete" on a
+   * device, components/backflow/delete-device-button.tsx): it is deactivated,
+   * never deleted, so its test history is kept. Through the outbox like every
+   * other register write; 0068's trigger then drops it from the backflow
+   * streams on every device.
+   */
+  async deactivateDevice(deviceId: string): Promise<void> {
+    const write: WriteOperation = {
+      kind: "write",
+      id: this.ids.newId(),
+      rowId: deviceId,
+      aggregate: "backflow_device",
+      op: "update",
+      table: "backflow_devices",
+      payload: { is_active: false },
+      status: "pending",
+      attempts: 0,
+      nextAttemptAt: 0,
+      createdAt: this.time.nowMs(),
+    };
+    await this.outbox.enqueue(write);
+  }
+
+  /**
    * Log a backflow test and queue its water-authority submission. Returns the
    * client-generated test id so the screen can navigate optimistically.
    */

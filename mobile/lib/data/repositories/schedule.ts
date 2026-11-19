@@ -168,7 +168,7 @@ export class ScheduleRepository {
   async addBookings(
     jobId: string,
     staffIds: string[],
-    columns: ScheduleColumns,
+    columns: ScheduleWindowColumns,
     costCenterId: string | null,
     note: string | null = null
   ): Promise<string[]> {

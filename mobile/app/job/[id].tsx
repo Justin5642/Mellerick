@@ -9,6 +9,8 @@ import { getJob } from "../../lib/data/reads/jobs";
 import { colors, statusColors } from "../../lib/theme";
 import { ScreenError } from "../../design/components/ScreenError";
 import { useIsOfficeOrAdmin } from "../../design/guards/useRole";
+import { RoleGate } from "../../design/guards/RoleGate";
+import { deleteJob, deleteJobMessage } from "../../lib/officeActions";
 import { useJobEdit } from "../../lib/data/hooks/useJobEdit";
 import { JobOverviewTab } from "../../components/job/overview";
 import { JobNotesTab } from "../../components/job/notes";
@@ -254,6 +256,38 @@ export default function JobDetailScreen() {
     },
     [id, jobEdit, savingEdit]
   );
+
+  // Admin only (the route's requireAdmin decides; the button sits in a
+  // RoleGate): the web's Delete job, same wording and rules, through
+  // DELETE /api/jobs/[id]. Online — a refusal (a linked quote or invoice)
+  // is answered here, never left to dead-letter in the queue.
+  const [deleting, setDeleting] = useState(false);
+  const confirmDelete = useCallback(() => {
+    if (!job || deleting) return;
+    setEditing(false);
+    // After the sheet has slid away: iOS will not show an alert over a modal
+    // that is still dismissing.
+    setTimeout(() => {
+      Alert.alert(`Delete job #${job.job_number}?`, deleteJobMessage(job.title), [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Delete Job",
+          style: "destructive",
+          onPress: async () => {
+            setDeleting(true);
+            try {
+              await deleteJob(job.id);
+              router.replace("/jobs");
+            } catch (e) {
+              Alert.alert("Couldn't delete the job", e instanceof Error ? e.message : "Please try again.");
+            } finally {
+              setDeleting(false);
+            }
+          },
+        },
+      ]);
+    }, 450);
+  }, [job, deleting, router]);
 
   const openEdit = useCallback(() => {
     setDetails({ title: job?.title ?? "", description: job?.description ?? "" });
@@ -573,6 +607,13 @@ export default function JobDetailScreen() {
             />
 
             <Text style={styles.editHint}>Status, priority and type save instantly. Customer and site are edited on the web.</Text>
+
+            <RoleGate roles={["admin"]}>
+              <TouchableOpacity style={styles.deleteJobBtn} onPress={confirmDelete} disabled={deleting || savingEdit} accessibilityLabel="Delete job">
+                <Ionicons name="trash-outline" size={15} color={colors.red600} />
+                <Text style={styles.deleteJobText}>{deleting ? "Deleting…" : "Delete job"}</Text>
+              </TouchableOpacity>
+            </RoleGate>
       </KeyboardSheet>
 
       <ScheduleJobModal
@@ -645,6 +686,8 @@ const styles = StyleSheet.create({
   chipText: { fontSize: 13, fontWeight: "600", color: colors.slate700, textTransform: "capitalize" },
   chipTextActive: { color: "#fff" },
   editHint: { fontSize: 11, color: colors.slate400, marginTop: 14 },
+  deleteJobBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, marginTop: 16, paddingVertical: 10, borderRadius: 10, borderWidth: 1, borderColor: colors.red100, backgroundColor: colors.bg },
+  deleteJobText: { fontSize: 13, fontWeight: "600", color: colors.red600 },
   editActions: { flexDirection: "row", gap: 10 },
   cancelBtn: { flex: 1, paddingVertical: 12, borderRadius: 10, backgroundColor: colors.bg, alignItems: "center", borderWidth: 1, borderColor: colors.border },
   cancelText: { color: colors.slate700, fontWeight: "600", fontSize: 14 },

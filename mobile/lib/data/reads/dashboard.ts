@@ -146,6 +146,88 @@ async function getOfficeDashboardLocal(db: LocalReads): Promise<OfficeDashboard>
   };
 }
 
+// ---------------------------------------------------------------------------
+// "Needs a look from yesterday" — clocks still running (Stage 5, as the web
+// dashboard, app/dashboard/page.tsx). Every open WORK entry, oldest first; the
+// screen keeps those clocked on before today (Melbourne) — the departures a
+// phone missed (dead battery, app swiped away). Filtering by instant happens
+// in JS on both paths: SQLite holds clock_in as text in whatever offset the
+// server sent, so a string comparison against "today" could be wrong.
+//
+// Complete on the office device: an open entry is recent activity, so its job
+// and the entry itself are inside the office sync window (0068). Office/admin
+// only, like everything on this screen.
+// ---------------------------------------------------------------------------
+
+export interface OpenWorkClock {
+  id: string;
+  clock_in: string;
+  job_id: string;
+  job_number: number | null;
+  job_title: string | null;
+  staff_name: string | null;
+}
+
+export const SQL_DASHBOARD_OPEN_CLOCKS = `
+  SELECT t.id, t.clock_in, t.job_id, j.job_number, j.title AS job_title, p.full_name AS staff_name
+  FROM time_entries t
+  LEFT JOIN jobs j     ON j.id = t.job_id
+  LEFT JOIN profiles p ON p.id = t.staff_id
+  WHERE t.clock_out IS NULL AND t.entry_type = 'work'`;
+
+interface RawOpenClockRow {
+  id: string;
+  clock_in: string;
+  job_id: string;
+  job_number: number | string | null;
+  job_title: string | null;
+  staff_name: string | null;
+}
+
+const byClockIn = (a: OpenWorkClock, b: OpenWorkClock) => new Date(a.clock_in).getTime() - new Date(b.clock_in).getTime();
+
+export async function listOpenWorkClocks(): Promise<OpenWorkClock[]> {
+  return fromLocalOr(
+    async (db) =>
+      (await db.getAll<RawOpenClockRow>(SQL_DASHBOARD_OPEN_CLOCKS))
+        .map((r) => ({
+          id: r.id,
+          clock_in: r.clock_in,
+          job_id: r.job_id,
+          job_number: r.job_number == null ? null : num(r.job_number),
+          job_title: r.job_title ?? null,
+          staff_name: r.staff_name ?? null,
+        }))
+        .sort(byClockIn),
+    async () => {
+      const res = await supabase
+        .from("time_entries")
+        .select("id, clock_in, job_id, jobs!time_entries_job_id_fkey(job_number, title), profiles!time_entries_staff_id_fkey(full_name)")
+        .is("clock_out", null)
+        .eq("entry_type", "work")
+        .order("clock_in");
+      type Row = {
+        id: string;
+        clock_in: string;
+        job_id: string;
+        jobs: { job_number: number; title: string } | null;
+        profiles: { full_name: string | null } | null;
+      };
+      return (unwrapRows(res as never, "listOpenWorkClocks") as unknown as Row[])
+        .map((r) => ({
+          id: r.id,
+          clock_in: r.clock_in,
+          job_id: r.job_id,
+          job_number: r.jobs?.job_number ?? null,
+          job_title: r.jobs?.title ?? null,
+          staff_name: r.profiles?.full_name ?? null,
+        }))
+        .sort(byClockIn);
+    },
+    { roles: ["office", "admin"] }
+  );
+}
+
 export async function getOfficeDashboard(): Promise<OfficeDashboard> {
   return fromLocalOr(
     getOfficeDashboardLocal,

@@ -9,11 +9,16 @@ export interface StatCardProps {
   /** Background color of the icon chip (hex). */
   iconColor: string;
   onPress?: () => void;
+  /**
+   * A second line under the value — e.g. a dollar total, which must be a
+   * MoneyText (inside a RoleGate) so the card itself never formats money.
+   */
+  detail?: React.ReactNode;
 }
 
 // A KPI card: colored icon chip + label + big value. Mirrors the web dashboard's
 // StatCard. Pure/presentational, tappable to drill into the related area.
-export function StatCard({ title, value, icon, iconColor, onPress }: StatCardProps) {
+export function StatCard({ title, value, icon, iconColor, onPress, detail }: StatCardProps) {
   return (
     <TouchableOpacity
       style={styles.card}
@@ -30,6 +35,7 @@ export function StatCard({ title, value, icon, iconColor, onPress }: StatCardPro
       <View style={styles.body}>
         <Text style={styles.title} numberOfLines={1}>{title}</Text>
         <Text style={styles.value}>{value}</Text>
+        {detail ?? null}
       </View>
     </TouchableOpacity>
   );

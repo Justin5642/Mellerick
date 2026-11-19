@@ -1348,6 +1348,68 @@ phone. Office/admin only throughout; technicians see exactly what they saw.
   deployed first for `/api/approvals/hours`; without it the phone's hours panel
   says it couldn't load the hours and approving still works.
 
+**Small office/admin website features on the phone (19 Nov 2026; no migration, no stream change).**
+Justin: the bits of the website the office still had to open a laptop for.
+All office/admin only (office route group + `RoleGate`; the server or RLS
+decides), money only through `MoneyText`. Reach phones with the next build
+(no new native module).
+- **Delete a job (admin).** Phone: job screen → status badge (Update job) →
+  **Delete job** (`RoleGate` admin), the web dialog's wording, then the Jobs
+  tab. The web dialog (`components/job/delete-job-dialog.tsx`) used to delete
+  from the browser client; both now call **`DELETE /api/jobs/[id]`**
+  (`requireAdmin`, then the CALLER's client — never the service role — so
+  0049's "only office/admin may delete a job" still stands behind it). A
+  linked quote or invoice (23503) answers 409 with the dialog's sentence;
+  anything else a fixed sentence (`tests/unit/job-delete-route.test.ts`).
+  Online only on the phone (`mobile/lib/officeActions.ts` `deleteJob`): a
+  refusal must be seen at once, not dead-letter in the outbox. Until the
+  office mirror syncs the delete, the Jobs list may still show the job.
+- **Delete (deactivate) a backflow device.** Device screen → **Delete device**
+  (`RoleGate` office/admin), the web's confirm text; `is_active = false`
+  through the outbox (`BackflowRepository.deactivateDevice`), so it works
+  offline. History is kept, as on the web.
+- **Dashboard tiles** (`mobile/app/(office)/dashboard.tsx`, rules
+  `mobile/lib/dashboardLooseEnds.ts`, tested): **Needs a look from
+  yesterday** — open jobs booked yesterday (Melbourne) and not today, and open
+  work clocks from before today (`listOpenWorkClocks` in
+  `reads/dashboard.ts`, local-first for office/admin; filtered by instant in
+  JS, never by comparing timestamp text) — and **Variations to Invoice**
+  (count + `MoneyText` total via `StatCard`'s new `detail`, QA fixture left
+  out, from `listReadyToInvoice`; taps through to Invoices, whose "Ready to
+  invoice" lists them).
+- **Set a site's map pin from the office.** Customer → each active site →
+  **Set pin / Pin** (`mobile/components/customer/site-pin-button.tsx`). The
+  binary has no map module (no react-native-maps — none added), so: **Look up
+  the address** (`/api/geocode`, house/building matches only, the web's
+  `siteAddress()` copied into `officeActions.ts`), **Where I am now** (a fix
+  within ±50 m, as the crew's "Set site location here"), and **View on map**
+  for a pinned site (opens the maps app). Each asks before saving; the two
+  coordinates go through the outbox (`CustomersRepository.setSitePin`; sites
+  are office-writable, 0064). Dragging a pin on a map stays a website job.
+  `getCustomer` now returns `site_lat`/`site_lng` on each site.
+- **Copy a booking to another technician / day** — the web board's
+  Shift-drop. Schedule tab → tap a booking (Day, Week or List) → **Copy to
+  another technician or day** → pick the technician and the start day (the
+  tapped day or today onward, 14 days). Planned by the mirrored
+  `planBoardAdd` (`mobile/lib/bookingCopy.ts`, tested): same hours, shape,
+  cost centre and note; on another day it starts there. Same guards as a move:
+  refused on a closed job (0096) or a stand-in row; a duplicate (same tech,
+  window and cost centre) is refused; a clash or the technician's leave (0112)
+  asks "Book anyway". Written by `ScheduleRepository.addBookings` (its window
+  type widened to allow a start-only block) through the outbox, with the same
+  "Saving / Not on the server yet / Saved" notices as a drag.
+- **Loads on equipment usage** (job → Billing → Equipment usage; 0091): a
+  "Loads carted" field; hours may be 0 when loads > 0, one must be > 0
+  (`parseUsageAmounts`). `getJobEquipment` returns `loads` and prices each
+  entry as the web Equipment tab does: hours × cost/hour + loads × cost per
+  load + days × day rate. Still not on the phone: the entry's cost centre
+  (the Time tab's "Truck & plant" has it), and the admin Costing screen
+  (`reads/jobCosting.ts`) still prices usage without loads.
+- **"Open leave record"** on a leave block (Schedule tab, admin only, and
+  only when `schedule_leave()` returned the record's id): opens Staff with
+  `?staff=<id>`, which opens that person's editor where the phone's Leave log
+  is. Office users still get the read-only alert.
+
 ---
 
 ## 2. The one rule that must never break

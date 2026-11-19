@@ -157,6 +157,8 @@ export function SiteFormSheet({
         postcode: v.postcode,
         notes,
         is_active: true,
+        site_lat: null,
+        site_lng: null,
       };
       if (status === "failed") {
         Alert.alert(
