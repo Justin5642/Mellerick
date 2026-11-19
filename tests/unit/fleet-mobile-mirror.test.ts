@@ -1,8 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import * as webHire from "@/lib/hire-pricing";
-import * as phoneHire from "../../mobile/lib/hireLabels";
 
 // The phone's Fleet office screens (service history, hire setup, year cost)
 // use copies of the web's pure rules. Both must agree on when a service is
@@ -39,19 +37,6 @@ describe("Fleet mirrors on the phone", () => {
     expect(belowImports("mobile/lib/fleetCosts.ts")).toBe(belowImports("lib/fleet-costs.ts"));
   });
 
-  it("mobile/lib/hireLabels.ts has the web's hire vocabulary", () => {
-    expect(phoneHire.HIRE_UNITS_BY_TYPE).toEqual(webHire.HIRE_UNITS_BY_TYPE);
-    expect(phoneHire.HIRE_TYPE_LABELS).toEqual(webHire.HIRE_TYPE_LABELS);
-    expect(phoneHire.HIRE_UNIT_LABELS).toEqual(webHire.HIRE_UNIT_LABELS);
-    expect(phoneHire.DEFAULT_COST_CENTRE_BY_TYPE).toEqual(webHire.DEFAULT_COST_CENTRE_BY_TYPE);
-    for (const t of Object.keys(webHire.HIRE_UNITS_BY_TYPE) as webHire.HireType[]) {
-      for (const u of webHire.HIRE_UNITS_BY_TYPE[t]) {
-        expect(phoneHire.hireOptionLabel({ hire_type: t, hire_unit: u })).toBe(webHire.hireOptionLabel({ hire_type: t, hire_unit: u }));
-      }
-    }
-    for (const km of [0, 30, 50, 112.5]) {
-      const o = { float_base: 470, float_km_included: 30, float_per_km: 5 };
-      expect(phoneHire.floatMoveCharge(km, o)).toBe(webHire.floatMoveCharge(km, o as never));
-    }
-  });
+  // mobile/lib/hireLabels.ts is checked by mobile/lib/hireLabels.mirror.test.ts
+  // (importing a mobile file here needs the Expo tsconfig, which the web CI job lacks).
 });
