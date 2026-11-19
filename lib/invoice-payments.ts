@@ -99,3 +99,68 @@ export function summarizeOwed(invoices: OwedInvoice[], todayKey: string): OwedSu
     buckets,
   };
 }
+
+// ---------------------------------------------------------------------------
+// Recording a payment (web Payments card and the phone, both through
+// POST /api/invoices/[id]/payments). The database re-checks all of it (0081).
+// ---------------------------------------------------------------------------
+
+export interface PaymentInput {
+  amount: number;
+  paid_on: string;
+  method: PaymentMethod;
+  reference: string | null;
+}
+
+/** The longest reference kept — a bank reference, not a note. */
+export const PAYMENT_REFERENCE_MAX = 200;
+
+const DATE_KEY = /^\d{4}-\d{2}-\d{2}$/;
+
+/** A payment from a request body or a form, or the sentence saying why not. */
+export function parsePayment(
+  body: unknown
+): { ok: true; payment: PaymentInput } | { ok: false; error: string } {
+  const b = (body && typeof body === "object" ? body : {}) as Record<string, unknown>;
+  const raw = typeof b.amount === "string" ? b.amount.trim() : b.amount;
+  const value = raw == null || raw === "" ? NaN : Number(raw);
+  const amount = Math.round(value * 100) / 100;
+  if (!Number.isFinite(value) || !(amount > 0) || amount >= 100_000_000) {
+    return { ok: false, error: "Enter the amount received." };
+  }
+  const paidOn = typeof b.paid_on === "string" ? b.paid_on.trim() : "";
+  if (!DATE_KEY.test(paidOn) || Number.isNaN(Date.parse(`${paidOn}T00:00:00Z`))) {
+    return { ok: false, error: "Enter the date the payment was received." };
+  }
+  const method = typeof b.method === "string" && b.method ? b.method : "bank_transfer";
+  if (!PAYMENT_METHODS.some((m) => m.value === method)) return { ok: false, error: "Choose how the payment was made." };
+  const reference = typeof b.reference === "string" ? b.reference.trim().slice(0, PAYMENT_REFERENCE_MAX) : "";
+  return { ok: true, payment: { amount, paid_on: paidOn, method: method as PaymentMethod, reference: reference || null } };
+}
+
+const dollars = (n: number) => `$${n.toLocaleString("en-AU", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+/** What the office is told once a payment is saved. */
+export function paymentRecordedMessage(amount: number, balanceBefore: number): string {
+  if (amount >= balanceBefore) return "Payment recorded — invoice paid";
+  return `Payment recorded — ${dollars(Math.max(0, Math.round((balanceBefore - amount) * 100) / 100))} still owing`;
+}
+
+/** The Payments card's headline: a draft has not been sent; otherwise what is owed, or paid. */
+export function paymentStatusLabel(status: string, balance: number): string {
+  if (status === "draft") return "Not sent yet";
+  return balance > 0 ? `${dollars(balance)} owing` : "Paid in full";
+}
+
+/** Whether "Record payment" is offered: sent, money still owed, and not in Xero (Xero is the record there). */
+export function canRecordPayment(inv: {
+  status: string;
+  xero_invoice_id: string | null;
+  total: number | string | null;
+  amount_paid: number | string | null;
+}): boolean {
+  return inv.status !== "draft" && !inv.xero_invoice_id && balanceOf(inv) > 0;
+}
+
+/** The 0081 trigger's refusal for an invoice in Xero, said the same way everywhere. */
+export const PAYMENT_IN_XERO = "This invoice is in Xero — record the payment in Xero; the app picks it up from there.";

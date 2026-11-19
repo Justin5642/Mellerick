@@ -4,9 +4,9 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import * as FileSystem from "expo-file-system/legacy";
 import { colors } from "../../lib/theme";
 
-// Shows a PDF the app has in hand (the job report preview) without a native
-// PDF module: react-native-webview is already in the binary (the signature
-// pad uses it).
+// Shows a PDF the app has in hand (the job report preview, an invoice or quote
+// PDF) without a native PDF module: react-native-webview is already in the
+// binary (the signature pad uses it).
 //  - iOS: WKWebView renders a local PDF file itself.
 //  - Android: WebView cannot render PDFs, so the pages are drawn by pdf.js
 //    (from cdnjs, like the rest of the preview it needs signal anyway) from
@@ -18,7 +18,7 @@ const PDFJS = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174";
 export function pdfViewerHtml(base64: string): string {
   return `<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=4">
 <style>body{margin:0;background:#e2e8f0;font-family:sans-serif}canvas{display:block;width:100%;margin:0 0 8px;background:#fff}
-#msg{padding:24px;color:#475569;text-align:center}</style></head><body><div id="msg">Loading the report…</div>
+#msg{padding:24px;color:#475569;text-align:center}</style></head><body><div id="msg">Loading the PDF…</div>
 <script src="${PDFJS}/pdf.min.js"></script><script>
 (function(){
   var msg=document.getElementById('msg');
@@ -32,7 +32,7 @@ export function pdfViewerHtml(base64: string): string {
       var scale=(window.innerWidth*2)/page.getViewport({scale:1}).width;var vp=page.getViewport({scale:scale});
       var c=document.createElement('canvas');c.width=vp.width;c.height=vp.height;document.body.appendChild(c);
       return page.render({canvasContext:c.getContext('2d'),viewport:vp}).promise;});});})(n);
-  }).catch(function(){msg.textContent='The report could not be shown.';});
+  }).catch(function(){msg.textContent='The PDF could not be shown.';});
 })();
 </script></body></html>`;
 }

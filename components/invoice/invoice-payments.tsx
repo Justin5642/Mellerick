@@ -3,7 +3,6 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { createClient } from "@/lib/supabase/client";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -11,7 +10,14 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Trash2, Wallet } from "lucide-react";
 import { formatDate, dateKeyInBusinessTZ } from "@/lib/date";
-import { balanceOf, PAYMENT_METHODS, paymentMethodLabel } from "@/lib/invoice-payments";
+import {
+  balanceOf,
+  parsePayment,
+  PAYMENT_METHODS,
+  paymentMethodLabel,
+  paymentRecordedMessage,
+  paymentStatusLabel,
+} from "@/lib/invoice-payments";
 
 export interface InvoicePayment {
   id: string;
@@ -56,32 +62,36 @@ export function InvoicePayments({
   const [reference, setReference] = useState("");
   const [saving, setSaving] = useState(false);
 
+  // Both through the office routes the phone uses (requireOfficeOrAdmin, as
+  // the caller under RLS — 0081's triggers decide as before).
   async function record() {
-    const value = Number(amount);
-    if (!Number.isFinite(value) || value <= 0) {
-      toast.error("Enter the amount received.");
+    const parsed = parsePayment({ amount, paid_on: paidOn, method, reference });
+    if (!parsed.ok) {
+      toast.error(parsed.error);
       return;
     }
     setSaving(true);
-    const { error } = await createClient()
-      .from("invoice_payments")
-      .insert({ invoice_id: invoiceId, amount: Math.round(value * 100) / 100, paid_on: paidOn, method, reference: reference.trim() || null });
-    setSaving(false);
-    if (error) {
-      console.error("invoice-payments: insert failed", error);
-      toast.error(error.message.includes("Xero") ? error.message : "The payment could not be saved. Please try again.");
-      return;
+    try {
+      const res = await fetch(`/api/invoices/${invoiceId}/payments`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(parsed.payment),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error ?? "The payment could not be saved. Please try again.");
+      toast.success(paymentRecordedMessage(parsed.payment.amount, balance));
+      setOpen(false);
+      setReference("");
+      router.refresh();
+    } catch (e: any) {
+      toast.error(e.message ?? "The payment could not be saved. Please try again.");
     }
-    toast.success(value >= balance ? "Payment recorded — invoice paid" : `Payment recorded — ${money(Math.max(0, balance - value))} still owing`);
-    setOpen(false);
-    setReference("");
-    router.refresh();
+    setSaving(false);
   }
 
   async function remove(p: InvoicePayment) {
-    const { error, count } = await createClient().from("invoice_payments").delete({ count: "exact" }).eq("id", p.id);
-    if (error || count === 0) {
-      console.error("invoice-payments: delete failed", error);
+    const res = await fetch(`/api/invoices/${invoiceId}/payments/${p.id}`, { method: "DELETE" }).catch(() => null);
+    if (!res?.ok) {
       toast.error("That payment could not be removed.");
       return;
     }
@@ -94,7 +104,7 @@ export function InvoicePayments({
       <CardHeader className="flex flex-row items-center justify-between space-y-0">
         <CardTitle className="text-sm flex items-center gap-2"><Wallet className="w-4 h-4" />Payments</CardTitle>
         <span className={`text-sm font-semibold ${balance > 0 ? "text-amber-700" : "text-green-700"}`}>
-          {status === "draft" ? "Not sent yet" : balance > 0 ? `${money(balance)} owing` : "Paid in full"}
+          {paymentStatusLabel(status, balance)}
         </span>
       </CardHeader>
       <CardContent className="space-y-3 text-sm">

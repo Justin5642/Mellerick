@@ -828,6 +828,67 @@ due date (`components/invoice/payment-terms-field.tsx`, rules in
 (today on New, `created_at` on Edit, Melbourne days); only `due_date` is
 stored. The phone's New Invoice has "14 days" / "30 days" chips.
 
+**Office invoice and quote actions on the phone (19 Nov 2026; no migration).**
+Justin: the office should be able to run invoices and quotes from the phone,
+not only create drafts. Office/admin only on every layer: the screens are in
+the office route group (`app/_layout.tsx`) and a `RoleGate`, amounts only via
+`MoneyText` (no dollar figure in an alert), and every route checks the role.
+**Online only** — Xero, email and the PDF renderer answer while the office
+waits, and `invoice_payments` is in no sync stream; offline the buttons say
+they need signal. Calls in `mobile/lib/invoiceOffice.ts` (Bearer, tested in
+`invoiceOffice.test.ts`); errors are the routes' own sentences.
+- **Invoice screen** (`mobile/app/invoices/[id].tsx`, reloads on focus and on
+  pull): **PDF** (`GET /api/invoices/[id]/pdf` → the job-report viewer,
+  `components/finance/document-pdf-button.tsx` + `pdf-preview.tsx`), Send /
+  Resend (the existing send screen), **Push / Update in Xero** (admin — the
+  route is `requireAdmin`; asks first when the job has unpriced hours, and
+  the route's 409 asks again; "Connect Xero on the web first" when not
+  connected), the **progress claim** breakdown, the **Payments** card,
+  **Hours from the job** with **Apply hourly rate** (`GET/POST
+  /api/invoices/[id]/hours`, unchanged; one rate / per technician / per cost
+  centre; the "already in Xero / emailed" 409 asks to confirm), Customer PO,
+  and **Delete invoice** (admin, the web's confirm words incl. the Xero
+  warning). The old "PDF and Xero are managed on the web" notes are gone.
+- **Payments and delete moved to routes** (they were browser writes on the
+  web; the web now uses them too, so both behave alike):
+  `GET/POST /api/invoices/[id]/payments` (office/admin; GET also says whether
+  Xero is connected, from `xero_tokens.tenant_name` as the web page reads it;
+  `payments: null` on a database without 0081), `DELETE
+  /api/invoices/[id]/payments/[paymentId]`, and `DELETE /api/invoices/[id]`
+  — **admin only now, on the web too** (the web's Delete button shows for
+  admins only; office could delete before). All run as the CALLER, so RLS
+  and 0081's triggers decide as before; an invoice in Xero refuses a manual
+  payment (fixed sentence `PAYMENT_IN_XERO`). Validation `parsePayment` in
+  `lib/invoice-payments.ts`; tests `tests/unit/invoice-office-routes.test.ts`.
+- **Owed to us** (`components/finance/owed-to-us.tsx`) on top of the office
+  Invoices list: outstanding / overdue / not yet due and the late invoices by
+  bucket, from `listOwedInvoices` (`lib/data/reads/invoiceExtras.ts`; local —
+  unpaid invoices are always in the office window — with a Supabase fallback).
+- **New / Edit Invoice:** **Customer PO number**, and when the job has more
+  than one priced PO, a picker ("Which builder PO is this invoice for?") with
+  "Use PO n's value as the line items"; `/invoices/new?jobId=…&poId=…`
+  invoices one PO (its number, a title naming it, `poInvoiceLines`, and "this
+  PO already has an invoice"). **Progress claim** fields with the live
+  breakdown; ticking fills from the job's previous claim (on the picked PO;
+  read from Supabase — it may be outside the window; offline you type them)
+  or the job's PO value. Written through the outbox with the invoice
+  (`FinanceRepository` `customerPo` / `claim`, sent only when the form has
+  them). Nothing on the phone links to `poId` yet — the job's PO tab is a
+  separate piece of work.
+- **Quotes:** **PDF** and **Send to Customer / Resend** →
+  `mobile/app/quotes/[id]/send.tsx` (`POST /api/quotes/[id]/send`).
+- **Rules are mirrored, not re-written:** `mobile/lib/invoicePayments.ts`,
+  `progressClaim.ts`, `poInvoice.ts`, `invoiceActions.ts` (Push/Delete
+  wording, new `lib/invoice-actions.ts`), `customerPo.ts` are the web files
+  byte for byte below their header (`tests/unit/invoice-phone-mirrors.test.ts`
+  — change the web file first, then copy its body). `ClaimDraft` /
+  `claimColumns` / `claimDraftFromInvoice` moved from the web component into
+  `lib/progress-claim.ts`; the PO picker helpers (`pricedPos`,
+  `poForCustomerPo`, `claimBuilderPo`) into `lib/po-invoice.ts`.
+- `getInvoice` now also returns `amount_paid`, `customer_po` and the claim
+  columns (all already in the office mirror). No new native module — reaches
+  phones with the next build.
+
 **Day Works / Hire, Stage 1 (16 Nov 2026; migration `0108` applied 2026-11-16).**
 Justin: hire and cartage are always their own line under a job, never part of
 the quoted value or progress claims. Each day's line is signed by the

@@ -29,6 +29,7 @@ import { JobReportOptions } from "./job-report-options";
 import { attentionName, billingName } from "@/lib/customer-billing";
 import { InvoiceAttachmentsField, fileToBase64, type PickedAttachment } from "./invoice-attachments-field";
 import { InvoiceHours } from "./invoice-hours";
+import { pushedMessage, pushFailedMessage, pushToXeroLabel, unpricedPushConfirm } from "@/lib/invoice-actions";
 
 interface Props {
   invoice: any;
@@ -36,9 +37,11 @@ interface Props {
   xeroConnected: boolean;
   /** null when the invoice_payments table is not in this database yet. */
   payments: InvoicePayment[] | null;
+  /** Deleting an invoice is admin only (DELETE /api/invoices/[id]). */
+  isAdmin?: boolean;
 }
 
-export function InvoiceDetail({ invoice, jobSite, xeroConnected, payments }: Props) {
+export function InvoiceDetail({ invoice, jobSite, xeroConnected, payments, isAdmin = false }: Props) {
   const progress = invoiceProgress(invoice);
   const [pushing, setPushing] = useState(false);
   const [pushed, setPushed] = useState(!!invoice.xero_invoice_id);
@@ -111,10 +114,7 @@ export function InvoiceDetail({ invoice, jobSite, xeroConnected, payments }: Pro
   async function pushToXero() {
     if (
       unpricedHours > 0 &&
-      !window.confirm(
-        `${unpricedHours.toFixed(2)}h on this job have not been priced on this invoice. ` +
-          `Push to Xero without them? (Use "Apply hourly rate" below to bill them.)`
-      )
+      !window.confirm(unpricedPushConfirm(unpricedHours))
     ) {
       return;
     }
@@ -128,10 +128,10 @@ export function InvoiceDetail({ invoice, jobSite, xeroConnected, payments }: Pro
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
-      toast.success(data.updated ? "Invoice updated in Xero" : "Invoice pushed to Xero successfully");
+      toast.success(pushedMessage(!!data.updated));
       setPushed(true);
     } catch (err: any) {
-      toast.error(err.message ?? (pushed ? "Failed to update in Xero" : "Failed to push to Xero"));
+      toast.error(err.message ?? pushFailedMessage(pushed));
     }
     setPushing(false);
   }
@@ -249,9 +249,7 @@ export function InvoiceDetail({ invoice, jobSite, xeroConnected, payments }: Pro
               className={pushed ? "gap-2" : "gap-2 bg-blue-600 hover:bg-blue-700"}
             >
               <Send className="w-4 h-4" />
-              {pushed
-                ? (pushing ? "Updating..." : "Update in Xero")
-                : (pushing ? "Pushing to Xero..." : "Push to Xero")}
+              {pushToXeroLabel(pushed, pushing)}
             </Button>
           ) : !pushed ? (
             <Link href="/dashboard/settings">
@@ -261,14 +259,16 @@ export function InvoiceDetail({ invoice, jobSite, xeroConnected, payments }: Pro
             </Link>
           ) : null}
 
-          <Button
-            variant="outline"
-            size="sm"
-            className="gap-2 text-red-600 hover:text-red-700 hover:bg-red-50 border-red-200"
-            onClick={() => setDeleteOpen(true)}
-          >
-            <Trash2 className="w-3.5 h-3.5" />Delete
-          </Button>
+          {isAdmin && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-2 text-red-600 hover:text-red-700 hover:bg-red-50 border-red-200"
+              onClick={() => setDeleteOpen(true)}
+            >
+              <Trash2 className="w-3.5 h-3.5" />Delete
+            </Button>
+          )}
         </div>
       </div>
 

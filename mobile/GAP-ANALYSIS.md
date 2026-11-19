@@ -6,9 +6,9 @@ Companion to `HANDOVER-mobile.md` and `DECISIONS-FOR-AVI.md`.
 
 **Headline (updated after the D40–D68 run):** the in-repo feature work is now
 **complete** — every one of the 15 areas is either at **full parity** or has only
-work that is genuinely **out of repo scope**: an external backend gate (Send-email
-/ PDF / Xero via the cookie-only routes → Justin's Bearer refactor; Staff invite via
-auth-admin; integration OAuth), a native-module deferral (document *upload* needs a
+work that is genuinely **out of repo scope**: an external backend gate (Staff invite via
+auth-admin; integration OAuth — the old Send-email / PDF / Xero gate is gone: the
+routes take the phone's Bearer token and the phone uses them, 19 Nov 2026), a native-module deferral (document *upload* needs a
 file/PDF picker that can't be device-QA'd here), or the one **flagged crucial
 decision** (Q3 — backflow test-submit dedupe, so the compliance email can't
 double-send on replay). The full **technician offline-write core** (time / photos /
@@ -35,15 +35,15 @@ project waiting on one purchase order.
 | My Jobs | **full** ✅ | ~~submit variation offline~~ (D68); notes already outbox-backed; tech status is clock-in/sign-off-driven by design (D43) |
 | Customers | **full** ✅ | ~~Customer-360~~ (D47), ~~quick-create~~ (D60), ~~favourites~~ (D62); inactive lifecycle handled via deactivate |
 | Backflow | full (in-repo) ✅ | ~~register-device offline~~ (D46); test-log offline is **blocked on Q3** (water-authority submit dedupe) — flagged crucial, not deferrable in-repo |
-| Quotes | full (in-repo) ✅ | ~~convert-to-job~~ (D50); Send/PDF are the **external** Bearer gate |
 | Fleet | **full** ✅ | ~~assign~~ (D54), ~~detail + expenses~~ (D56), ~~usage log~~ (D61), ~~documents view/open~~ (D67); **19 Nov 2026 (office/admin, online):** ~~service history + Log a service with the invoice photo read automatically~~, ~~hire setup per machine + Fleet → Hire rates + attachments~~, ~~per load carted + year-cost summaries~~, ~~document upload (photos)~~. Gap: **PDF** invoices/documents still go up on the web — no document picker in the binary (adding one is a native module) |
 | Staff | **full** ✅ | ~~charge-out rate~~ (D53), ~~leave log~~ (D58); ~~invite / resend invite / edit login email, auto clock switch, leave part-day times + long service~~ (19 Nov 2026, web `/api/staff/*` routes with Bearer) |
 | Settings | near-full | ~~variation-types~~ (D57), ~~cost-centre templates~~ (D59); Xero account codes + OAuth connect (web/ext) |
 | Reports | **full (analytics)** ✅ | all 5 tables done: revenue-by-month, top-customers, jobs-by-staff (D48), staff cost/efficiency (D51), equipment utilisation (D52) |
 | Jobs | **full** ✅ | ~~reassign/reschedule~~ (D41), ~~status/priority edit~~ (D43), ~~**create job**~~ (D45), ~~equipment-usage~~ (D63), ~~title/type/description edit~~ (D64), ~~price+approve variations~~ (D65), ~~**PO tab** (builder POs, split lines, supplier invoices, Send to Xero, Invoice this PO)~~ and ~~document upload (photos) + office-only~~ (Nov 2026); customer/site reassignment left to web; PDF document upload left to web (no picker in the binary) |
-| Invoices | partial | ~~prefill-from-job + add unbilled variations~~ **DONE** (D44/Q15); Send/PDF/Xero (ext) |
 | Approvals | near-full ✅ | ~~approve→auto-invoice, send-back~~ **DONE** (D40); ~~clocked-hours table, Apply hourly rate after approving, Variations to invoice~~ (19 Nov 2026); Xero auto-push after approval stays web |
 | Job Time tab (office/admin) | **full** ✅ | ~~log time for another person, edit anyone's entry, admin billing-rate override (normal / 1.5× / 2×), clock-location flag~~ (19 Nov 2026) |
+| Quotes | **full** ✅ | ~~convert-to-job~~ (D50); ~~Send by email + open PDF~~ **DONE** (19 Nov 2026, `app/quotes/[id]/send.tsx`) |
+| Invoices | **full** ✅ | ~~prefill-from-job + add unbilled variations~~ **DONE** (D44/Q15); ~~Send~~, ~~open PDF~~, ~~push/update in Xero~~ (admin), ~~record/remove payments + balance~~, ~~delete~~ (admin), ~~Owed to us~~, ~~progress claims + builder-PO picker / invoice one PO~~, ~~job hours + Apply hourly rate~~ **DONE** (19 Nov 2026, online only — HANDOVER "Office invoice and quote actions on the phone") |
 | Schedule | partial ✅ | ~~assign/unassign, reschedule~~ **DONE** (D41); day/week grid deferred |
 
 ## Office/admin website bits closed on the phone (19 Nov 2026)
@@ -113,7 +113,7 @@ line.)
 - **On-device QA, store accounts, push credentials, PowerSync password** — hardware/accounts.
 - ~~**Staff invite / resend / edit-login-email** — Supabase auth-admin onboarding.~~ — **done 19 Nov 2026** (phone Staff screen → `/api/staff/invite`, `/resend-invite`, `/update` with Bearer).
 - **Integration OAuth connect/reconnect** (Xero, Google) — browser redirect flow.
-- ~~**Invoice/Quote Send-email, PDF view/download, Xero push** — the web API routes are cookie-only and reject a mobile Bearer token → backend refactor (Justin)~~ — **merged.** `lib/api/caller-client.ts` resolves either a mobile Bearer token or a web cookie into an RLS-scoped client, and the send/pdf/Xero/Google-sync routes use it. Wiring the mobile buttons is now in-repo work, not a gate.
+- ~~**Invoice/Quote Send-email, PDF view/download, Xero push** — the web API routes are cookie-only and reject a mobile Bearer token → backend refactor (Justin)~~ — **merged, and wired on the phone (19 Nov 2026).** `lib/api/caller-client.ts` resolves either a mobile Bearer token or a web cookie into an RLS-scoped client; the phone's invoice and quote screens call send / pdf / push-invoice / payments / hours / delete with the user's token (`mobile/lib/invoiceSend.ts`, `mobile/lib/invoiceOffice.ts`). Not a gate any more.
 
 ## What IS at parity (done) — the vast majority
 

@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import { View, Text, ScrollView, StyleSheet, ActivityIndicator, TouchableOpacity, Alert } from "react-native";
-import { Stack, useLocalSearchParams, useRouter } from "expo-router";
+import { Stack, useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { colors } from "../../lib/theme";
 import { formatQuoteNumber } from "../../lib/finance";
@@ -12,6 +12,7 @@ import { useFinance } from "../../lib/data/hooks/useFinance";
 import { useJobEdit } from "../../lib/data/hooks/useJobEdit";
 import { useWriteOutcome } from "../../lib/data/hooks/useWriteOutcome";
 import { useAuth } from "../../lib/auth-context";
+import { DocumentPdfButton } from "../../components/finance/document-pdf-button";
 
 function fmtDate(iso: string | null): string {
   return iso ? new Date(iso).toLocaleDateString("en-AU", { day: "numeric", month: "short", year: "numeric" }) : "—";
@@ -87,9 +88,12 @@ export default function QuoteDetailScreen() {
     }
   }, [quote, updating, jobEdit, profile, router, writeOutcome]);
 
-  useEffect(() => {
-    void load();
-  }, [load]);
+  // On focus, not just mount: coming back from Send shows the quote as sent.
+  useFocusEffect(
+    useCallback(() => {
+      void load();
+    }, [load])
+  );
 
   if (loading) {
     return (
@@ -138,6 +142,15 @@ export default function QuoteDetailScreen() {
           <Text style={styles.title}>{quote.title}</Text>
         </View>
         <StatusPill domain="quoteStatus" value={quote.status} />
+      </View>
+
+      {/* PDF and Send: the web routes with the user's Bearer token (office/admin, online only). */}
+      <View style={styles.actions}>
+        <DocumentPdfButton kind="quote" id={quote.id} number={quote.quote_number} title={`Quote ${formatQuoteNumber(quote.quote_number)}`} />
+        <TouchableOpacity style={styles.sendBtn} onPress={() => router.push(`/quotes/${id}/send`)} accessibilityRole="button">
+          <Ionicons name="send" size={16} color="#fff" />
+          <Text style={styles.sendText}>{quote.status === "draft" ? "Send to Customer" : "Resend"}</Text>
+        </TouchableOpacity>
       </View>
 
       {quote.status === "sent" && (
@@ -211,8 +224,6 @@ export default function QuoteDetailScreen() {
           <Text style={styles.body}>{quote.notes}</Text>
         </Card>
       )}
-
-      <Text style={styles.footnote}>Sending and PDF are managed on the web dashboard.</Text>
     </ScrollView>
   );
 }
@@ -278,5 +289,7 @@ const styles = StyleSheet.create({
   bold: { fontWeight: "700", color: colors.slate900 },
   totals: { marginTop: 10, gap: 2 },
   totalStrong: { fontSize: 16, fontWeight: "800", color: colors.slate900 },
-  footnote: { fontSize: 11, color: colors.slate400, textAlign: "center", marginTop: 4 },
+  actions: { flexDirection: "row", gap: 10 },
+  sendBtn: { flex: 2, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, backgroundColor: colors.blue600, borderRadius: 10, paddingVertical: 12 },
+  sendText: { color: "#fff", fontWeight: "700", fontSize: 15 },
 });
