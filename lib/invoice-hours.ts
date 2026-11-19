@@ -82,6 +82,45 @@ export function unbilledGroups(entries: HoursEntry[]): HoursGroup[] {
   return groupHours(entries.filter((e) => !isBilled(e)));
 }
 
+/** What approving a job will carry onto its invoice — the Approvals screen's hours panel. */
+export interface ApprovalHoursSummary {
+  groups: HoursGroup[];
+  total: number;
+  /** Set when the hours could not be read: "no hours" and "could not check" must look different. */
+  error: string | null;
+}
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+export const APPROVAL_HOURS_MAX_JOBS = 200;
+
+/** `?jobIds=a,b,c` → distinct uuids, or null when empty, too many or malformed. */
+export function parseApprovalJobIds(raw: string | null): string[] | null {
+  const ids = [...new Set((raw ?? "").split(",").map((s) => s.trim()).filter(Boolean))];
+  if (ids.length === 0 || ids.length > APPROVAL_HOURS_MAX_JOBS || !ids.every((id) => UUID.test(id))) return null;
+  return ids;
+}
+
+/**
+ * Unbilled hours for each pending job, keyed by job id. Used by the web
+ * Approvals page (on the server) and GET /api/approvals/hours (the phone). A
+ * failed read marks every job with `error` instead of throwing, so the screen
+ * says it could not check rather than showing "no hours".
+ */
+export async function approvalHoursByJob(db: SupabaseClient, jobIds: string[]): Promise<Record<string, ApprovalHoursSummary>> {
+  try {
+    const entries = await loadJobHours(db, jobIds);
+    return Object.fromEntries(
+      jobIds.map((id) => {
+        const groups = unbilledGroups(entries.get(id) ?? []);
+        return [id, { groups, total: totalHours(groups), error: null }];
+      })
+    );
+  } catch (e) {
+    console.error("approvalHoursByJob: hours read failed", e);
+    return Object.fromEntries(jobIds.map((id) => [id, { groups: [], total: 0, error: "the read failed — reload to try again" }]));
+  }
+}
+
 export async function loadRateDefaults(admin: SupabaseClient, jobId: string, groups: HoursGroup[]): Promise<RateDefaults> {
   const staffIds = [...new Set(groups.map((g) => g.staffId))];
   const [quotesRes, profilesRes, configRes] = await Promise.all([

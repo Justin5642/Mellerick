@@ -162,6 +162,7 @@ function RootNavigation() {
         <Stack.Screen name="inventory" options={{ headerShown: true }} />
         <Stack.Screen name="fleet" options={{ headerShown: true }} />
         <Stack.Screen name="fleet/[id]" options={{ headerShown: true }} />
+        <Stack.Screen name="fleet/hire-rates" options={{ headerShown: true, title: "Hire rates" }} />
         <Stack.Screen name="reports" options={{ headerShown: true }} />
         <Stack.Screen name="jobs/new" options={{ headerShown: true }} />
         <Stack.Screen name="backflow/list" options={{ headerShown: true }} />

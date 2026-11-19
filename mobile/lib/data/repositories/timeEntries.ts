@@ -68,7 +68,21 @@ export interface ManualEntryInput {
   travelFromJobId?: string | null;
   /** True when the geofence generated this entry rather than a person typing it. */
   autoClocked?: boolean;
+  /**
+   * Who typed it, when that is not the person the hours belong to — office or
+   * admin logging time for a technician. Defaults to `staffId`.
+   */
+  editorId?: string;
+  /** Admin only (the 0025 trigger drops it for anyone else). Omitted = not sent. */
+  rateOverride?: RateOverride | null;
 }
+
+/**
+ * The billing band an admin can force on a work entry (time_entries.rate_override,
+ * 0025): null = auto-detect by day and time. A money column — technicians can
+ * neither read it (0045) nor set it (0025's trigger reverts them).
+ */
+export type RateOverride = "normal" | "time_and_half" | "double_time";
 
 export interface EditEntryInput {
   entryId: string;
@@ -76,6 +90,10 @@ export interface EditEntryInput {
   clockInIso: string;
   clockOutIso: string | null;
   costCenterId: string | null;
+  /** Re-attribute the hours to another person (office/admin; RLS 0030). Omitted = unchanged. */
+  staffId?: string;
+  /** Admin only. Omitted = unchanged — the phone can't read the current value (0045), so it never sends one it didn't choose. */
+  rateOverride?: RateOverride | null;
 }
 
 // Offline-first replacement for the direct-Supabase writes in JobTimeTab. Every
@@ -146,7 +164,8 @@ export class TimeEntriesRepository {
       // manual path's payload shape is unchanged.
       auto_clocked: input.autoClocked ?? false,
       ...(input.travelFromJobId ? { travel_from_job_id: input.travelFromJobId } : {}),
-      edited_by: input.staffId,
+      ...(input.rateOverride !== undefined ? { rate_override: input.rateOverride } : {}),
+      edited_by: input.editorId ?? input.staffId,
       edited_at: this.time.nowIso(),
     });
     await this.enqueueBillingSync(rowId, opId);
@@ -161,6 +180,8 @@ export class TimeEntriesRepository {
       clock_out: input.clockOutIso,
       hours: input.clockOutIso ? hoursBetween(input.clockInIso, input.clockOutIso) : null,
       cost_center_id: input.costCenterId,
+      ...(input.staffId ? { staff_id: input.staffId } : {}),
+      ...(input.rateOverride !== undefined ? { rate_override: input.rateOverride } : {}),
       edited_by: input.editorId,
       edited_at: this.time.nowIso(),
     });

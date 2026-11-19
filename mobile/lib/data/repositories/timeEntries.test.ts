@@ -178,6 +178,45 @@ describe("TimeEntriesRepository", () => {
     expect(sides(ops)).toHaveLength(1);
   });
 
+  it("office logging for someone else: the hours are theirs, the edit is the office's", async () => {
+    const { outbox, ops } = captureOutbox();
+    const repo = new TimeEntriesRepository(outbox, seqIds(), fixedTime("2026-07-21T12:00:00.000Z"));
+    await repo.addManual({
+      jobId: "j1",
+      staffId: "tech-1",
+      editorId: "office-1",
+      entryType: "work",
+      clockInIso: "2026-07-21T08:00:00.000Z",
+      clockOutIso: "2026-07-21T10:00:00.000Z",
+      costCenterId: null,
+      rateOverride: "double_time",
+    });
+    const p = writes(ops)[0].payload;
+    expect(p.staff_id).toBe("tech-1");
+    expect(p.edited_by).toBe("office-1");
+    expect(p.rate_override).toBe("double_time");
+  });
+
+  it("rate_override is never sent unless chosen (the phone can't read the current one — 0045)", async () => {
+    const { outbox, ops } = captureOutbox();
+    const repo = new TimeEntriesRepository(outbox, seqIds(), fixedTime());
+    await repo.addManual({ jobId: "j1", staffId: "s1", entryType: "work", clockInIso: "2026-07-21T08:00:00.000Z", clockOutIso: null, costCenterId: null });
+    await repo.editEntry({ entryId: "te-3", editorId: "s1", clockInIso: "2026-07-21T08:00:00.000Z", clockOutIso: null, costCenterId: null });
+    for (const w of writes(ops)) {
+      expect("rate_override" in w.payload).toBe(false);
+      expect(w.op === "update" && "staff_id" in w.payload).toBe(false);
+    }
+  });
+
+  it("editEntry can re-attribute the hours and clear an override to auto (null)", async () => {
+    const { outbox, ops } = captureOutbox();
+    const repo = new TimeEntriesRepository(outbox, seqIds(), fixedTime());
+    await repo.editEntry({ entryId: "te-3", editorId: "admin-1", clockInIso: "2026-07-21T08:00:00.000Z", clockOutIso: null, costCenterId: null, staffId: "tech-2", rateOverride: null });
+    const p = writes(ops)[0].payload;
+    expect(p.staff_id).toBe("tech-2");
+    expect(p).toHaveProperty("rate_override", null);
+  });
+
   it("assignCostCenter updates only cost_center_id and does NOT resync billing", async () => {
     const { outbox, ops } = captureOutbox();
     const repo = new TimeEntriesRepository(outbox, seqIds(), fixedTime());

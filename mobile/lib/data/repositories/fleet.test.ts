@@ -30,6 +30,15 @@ describe("EquipmentRepository", () => {
     expect(ops[0].payload).toMatchObject({ name: "Ute", category: "vehicle", purchase_cost: 40000, estimated_life_years: 8, insurance_annual: 1200, fuel_cost_per_hour: 6, target_hours_per_year: 1200, is_active: true });
   });
 
+  it("cost_per_load (0091) is sent when given and left alone when not", async () => {
+    const b1 = captureOutbox();
+    await new EquipmentRepository(b1.outbox, seqIds(), fixedTime()).updateEquipment("e1", { ...base, costPerLoad: 45 });
+    expect(b1.ops[0].payload).toMatchObject({ cost_per_load: 45 });
+    const b2 = captureOutbox();
+    await new EquipmentRepository(b2.outbox, seqIds(), fixedTime()).updateEquipment("e1", base);
+    expect(b2.ops[0].payload).not.toHaveProperty("cost_per_load");
+  });
+
   it("updateEquipment omits is_active; deactivate soft-deletes", async () => {
     const b1 = captureOutbox();
     await new EquipmentRepository(b1.outbox, seqIds(), fixedTime()).updateEquipment("e1", base);

@@ -16,6 +16,8 @@ export interface EquipmentInput {
   otherAnnualCosts: number;
   fuelCostPerHour: number;
   targetHoursPerYear: number;
+  /** $ per load carted (0091). Omitted = left as it is on an update, 0 on a new item. */
+  costPerLoad?: number;
   notes?: string | null;
 }
 
@@ -200,6 +202,7 @@ export class EquipmentRepository {
       other_annual_costs: input.otherAnnualCosts,
       fuel_cost_per_hour: input.fuelCostPerHour,
       target_hours_per_year: input.targetHoursPerYear,
+      ...(input.costPerLoad !== undefined ? { cost_per_load: input.costPerLoad } : {}),
       notes: input.notes ?? null,
     };
   }

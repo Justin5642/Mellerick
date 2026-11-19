@@ -994,6 +994,53 @@ line and hand the phone to the builder's rep, who signs it; it then locks.
 - **Not on the phone:** truck day stops, float distance lookup (km typed),
   offline entry.
 
+**Office PO tab and job documents on the phone (19 Nov 2026; no migration).**
+Justin: the office should be able to run a job's POs from the phone. Office/admin
+only, online only ("Purchase orders need signal"), never the outbox: supplier
+orders are in no PowerSync stream, a supplier invoice becomes a Xero bill, and a
+PO's value is what the job is measured against.
+- **Phone:** a **POs** tab on the job screen (`mobile/app/job/[id].tsx`, shown only
+  to office/admin; the component is also inside a `RoleGate`, every figure through
+  `MoneyText`) — `mobile/components/job/purchase-orders.tsx`, calls in
+  `mobile/lib/jobPurchaseOrders.ts` (tested). Add / Edit / Remove a builder PO
+  (number defaults to `<job>-n`, client, site, value, split lines per company cost
+  centre with hours; "not split yet" / "over"; a line with supplier orders, time or
+  expenses can't be removed — set it to $0); **Add cost centre** (the edit form
+  with a line holding what's left); **Invoice this PO** → the phone's New Invoice
+  with `poId` (`app/invoices/new.tsx`: the PO's lines from `mobile/lib/poInvoice.ts`,
+  a title naming it, `invoices.customer_po` set — `CreateInvoiceInput.customerPo` —
+  and a note when the PO already has an invoice). Under each line its supplier
+  orders: amount ex GST, **+ Enter supplier invoice** (number, date, amount, GST
+  shown, a photo from the camera or library), **Send to Xero**
+  (`/api/xero/push-vendor-order`, unchanged), status, remove; a Xero bill's amount
+  stays locked. Rules mirrored byte-for-byte below the header: `lib/builder-po.ts`
+  → `mobile/lib/builderPo.ts`, `lib/po-invoice.ts` → `mobile/lib/poInvoice.ts`
+  (`tests/unit/builder-po-mirror.test.ts`).
+- **Routes** (all `requireOfficeOrAdmin`, every read and write as the CALLER via
+  `callerClient`, never the service role; fixed sentences; `lib/job-purchase-orders.ts`
+  holds the reads and helpers): `GET/POST /api/jobs/[id]/purchase-orders` (the tab;
+  add, idempotent on the phone's PO id), `PATCH/DELETE .../purchase-orders/[poId]`
+  (the web's `planBuilderPoEdit`, with "in use" worked out on the server from fresh
+  reads — the phone's word isn't trusted), `PATCH/DELETE
+  .../supplier-orders/[orderId]` (amount / status / remove), `POST
+  .../supplier-orders/[orderId]/invoice` (file to `job-documents` at the web's
+  `{job}/expense-receipt-{PO}-{ts}_{name}`, so 0047 hides it from technicians;
+  removed again if the row write fails). Tests: `tests/unit/job-purchase-orders.test.ts`.
+  The web PO tab still writes from the browser as before (unchanged); it could move
+  onto these routes later.
+- **Job documents (phone, office/admin):** the Documents tab gets **Take photo / Add
+  photo** (name, "Office only" switch), a lock to toggle office-only (0065) and
+  delete — `POST /api/jobs/[id]/documents` (base64 ≤ 3 MB, sniffed JPEG/PNG/WebP/PDF,
+  the web's `{job}/{ts}_{name}` path, row as the caller, file removed if the row
+  fails) and `PATCH/DELETE .../documents/[docId]` (row first, then the file).
+  **Photos only:** the binary has no document picker (`expo-document-picker` would be
+  a new native module and build), so PDFs are still uploaded on the website.
+- **Not on the phone:** pinning a typed PO site on the map (the job site's pin is
+  reused when the address is the job site's, otherwise none — pin it on the web),
+  opening the crew's docket photos from the PO card, "Mark stage complete" from the
+  PO card. Reaches phones with the next build (no new native module); needs the web
+  deployed first.
+
 **Fleet service history takes the invoice by drag and drop (17 Nov 2026; no migration).**
 Justin: "What happened to the drag and drop in the fleet? We drop the invoices
 for servicing … so it populates the service history." The drop zone lived on
@@ -1024,6 +1071,60 @@ old tab is now labelled **Expenses**.
   names, and warns when the file isn't a service invoice. Nothing is saved
   until the office presses Save. A failed or skipped read leaves the file
   attached. Tests: `tests/unit/service-invoice-read.test.ts`.
+
+**Fleet office features on the phone (19 Nov 2026; no migration, no stream change).**
+Justin: bring the website's Fleet office/admin features to the phone. All
+office/admin only, all **online only** (service records, hire rates and
+attachments are office-only tables in no PowerSync stream); every write goes
+through a web route guarded by `requireOfficeOrAdmin` that writes with
+`callerClient` (RLS runs as the caller, never the service role), with fixed
+error sentences. Rules in `lib/fleet-office.ts`; routes tested in
+`tests/unit/fleet-office-routes.test.ts`. The web screens still write
+directly as before; the routes are there for them to share.
+- **Service history** (`mobile/components/fleet/ServiceHistory.tsx` on the
+  machine screen): due banner, services with "View invoice", delete; **Log a
+  service** with the invoice as a **photo** (camera or library → `prepareImage`
+  1600px JPEG), read automatically by `POST /api/fleet/service-invoice/read`
+  and filled by `applyServiceInvoiceRead` (only empty / default fields),
+  next service due, no cost / log the cost now / link an existing expense.
+  Nothing is saved until Save → `GET/POST /api/fleet/[id]/service-records`
+  (+ `DELETE …/[recordId]`): the server uploads the invoice to
+  `equipment-documents` at `serviceInvoicePath()` (so 0047 hides it from
+  technicians), then the new cost, then the service — a failed upload saves
+  nothing; a failed service removes the cost and file again. The phone sends a
+  client id, so a retry after a lost answer is answered as saved.
+- **Hire setup per machine** (`mobile/components/fleet/HireSetupSheet.tsx`,
+  "Hire setup" on the machine screen) and **Fleet → Hire rates**
+  (`mobile/app/fleet/hire-rates.tsx`, tag icon in the Fleet header; office
+  route group): every hireable machine, unpriced first, Set up / Edit, plus
+  hire attachments (add, day rate, offered). Units include cartage per tonne /
+  m³ (0111). Routes `GET/PUT /api/fleet/[id]/hire-options` (the web dialog's
+  save rule: upsert by machine+type+unit, remove what's no longer listed),
+  `GET /api/fleet/hire-rates` (built with `lib/fleet-hire-overview.ts`),
+  `POST /api/fleet/hire-attachments`, `PATCH …/[attachmentId]`.
+- **Per load carted** (0091 `equipment.cost_per_load`) in the phone's
+  equipment edit form (outbox, as the rest of the cost profile; sent only
+  when given, so an older form never wipes it), shown on the machine's running
+  cost; **year-cost summaries**: "Costs logged — FY" per machine
+  (`components/fleet/EquipmentYearCost.tsx`) and "Fleet costs logged — FY" on
+  the Fleet list (`components/fleet/FleetYearSummary.tsx`, read
+  `listFleetExpenses`, local-first — `equipment_expenses` is unwindowed).
+- **Equipment documents upload** (photos) → `POST /api/fleet/[id]/documents`
+  (≤ 3 MB base64, bytes sniffed PDF/JPEG/PNG/WebP; file then row as the
+  caller, file removed if the row fails).
+- **Mirrors** pinned by `tests/unit/fleet-mobile-mirror.test.ts`:
+  `mobile/lib/serviceDue.ts` = `lib/service-due.ts`,
+  `mobile/lib/serviceInvoiceForm.ts` = `lib/service-invoice-form.ts`,
+  `mobile/lib/fleetCosts.ts` = `lib/fleet-costs.ts` (below the imports),
+  `mobile/lib/hireLabels.ts` = `lib/hire-pricing.ts`'s hire vocabulary. Change
+  the web file first, then copy. Calls in `mobile/lib/fleetOffice.ts` (tested).
+- **Gap:** no document picker is in the app binary (adding one is a native
+  module, so it waits for a build decision), so **PDF** invoices and documents
+  still go up on the website; the phone takes photos. Money only through
+  `MoneyText` inside `RoleGate` (Hire rates' rate lines are server-formatted
+  text, shown only inside the office-only route and a `RoleGate`). Reaches
+  phones with the next build (no new native module); the web routes must be
+  deployed first.
 
 **Day Works lists the whole fleet; Fleet → Hire rates (16 Nov 2026; no migration).**
 Justin: "The whole Fleet doesn't seem to be there." The picker used to list
@@ -1192,6 +1293,60 @@ end-of-day hours and loads. His rules:
   the gate test passes (35 scenarios) and fails, naming scenarios, with the
   lock trigger disabled or the cost table's RLS off; the money boundary sweep
   stays intact with the seeded load and cost.
+
+**Office/admin Time, Approvals and Staff on the phone (19 Nov 2026; no migration, no stream change).**
+Justin: bring the office's website tools for time, approvals and staff to the
+phone. Office/admin only throughout; technicians see exactly what they saw.
+- **Time tab** (`mobile/components/job/time.tsx`, role from `useRole` — no
+  change to `app/job/[id].tsx`): office/admin can open and correct **anyone's**
+  entry and **log time for another person** (staff picker + Work/Travel; RLS
+  0030 already allowed it; the web dialog still offers the picker to admins
+  only). `edited_by` is the office user, `staff_id` the technician
+  (`TimeEntriesRepository.addManual` `editorId`, `editEntry` `staffId`),
+  through the outbox as before. **Billing rate** chips (Normal / 1.5× / 2× /
+  Auto) are **admin only** — the 0025 trigger reverts anyone else's
+  `rate_override`. Nobody can read that column (0045), so editing opens on
+  "Leave as it is" and sends nothing unless the admin picks one
+  (`mobile/lib/timeEntryOffice.ts`, tested) — the web dialog opens on "Auto"
+  and silently clears an existing override; that web gap is unchanged. Each
+  entry shows **"In: on site / Out: 320 m from site"**, amber ⚠ outside the
+  fence allowing for accuracy — `mobile/lib/clockLocation.ts`, a byte copy of
+  `lib/clock-location.ts` pinned by `tests/unit/clock-location-mirror.test.ts`.
+  The site pin and staff list are read online (offline: no picker, no flag).
+  Technician reads are unchanged: `TIME_ENTRY_COLUMNS` still excludes
+  `rate_override`; `tech_time_entries` untouched.
+- **Approvals** (`mobile/app/(office)/approvals.tsx`): each job shows "Xh to
+  invoice" and, expanded, the hours table by cost centre × technician from the
+  new **`GET /api/approvals/hours?jobIds=…`** (office/admin, caller's client
+  under RLS, hours only — `approvalHoursByJob` in `lib/invoice-hours.ts`, which
+  the web page now uses too; `tests/unit/approval-hours-route.test.ts`). After
+  an approval that leaves hours unpriced, "Apply hourly rate" opens
+  `mobile/components/approvals/apply-hourly-rate-sheet.tsx` — the existing
+  `GET/POST /api/invoices/[id]/hours` with Bearer (one rate / per technician /
+  per cost centre, server defaults, the 409 "already in Xero / emailed"
+  confirmation; rules `mobile/lib/approvalHours.ts`, tested). **Variations to
+  invoice** (approved, not invoiced, by job, QA fixture left out) with Create
+  invoice → `/invoices/new?jobId=` or Open invoice #n; amounts via
+  `MoneyText` in `RoleGate` (`mobile/lib/unbilledVariations.ts`, tested).
+- **Staff** (`mobile/app/staff.tsx`, admin route group): **+ Invite**, **Resend
+  invite**, edit **Name / Login email** (→ `/api/staff/update`, which also moves
+  the Supabase Auth login; called only when they changed, before the rest is
+  saved), and the **Auto clock on/off** switch (`/api/staff/set-auto-clock`,
+  saved at once, shows the by-role default). Calls in `mobile/lib/staffAdmin.ts`
+  via the shared Bearer helper `mobile/lib/officeApi.ts` (tested). **Leave Log**
+  gains **Long service** and part-day **From/To** (HH:MM, `validateLeaveTimes`;
+  sent only when both given; a database without 0112's columns is told so).
+- **Staff routes hardened** (they now serve the phone too): `invite`,
+  `resend-invite`, `update` answer fixed sentences (GoTrue/DB text to the log
+  only — the `app/api/staff/` skip in `no-raw-error-responses.test.ts` is
+  gone), validate email and role, store the email lowercase on edit as on
+  invite, link invites to `appUrl()` instead of the request Host, and the
+  invite **upserts** the profile: `handle_new_user()` (0044) has already made
+  the row, so the old plain insert collided and reported a failed invite for
+  one that had been sent. Shared rules `lib/staff-invite.ts`.
+- Reaches phones with the next build (no new native module). The web must be
+  deployed first for `/api/approvals/hours`; without it the phone's hours panel
+  says it couldn't load the hours and approving still works.
 
 ---
 

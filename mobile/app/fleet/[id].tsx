@@ -3,7 +3,7 @@ import { View, Text, ScrollView, StyleSheet, ActivityIndicator, TouchableOpacity
 import { Stack, useLocalSearchParams } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import * as ImagePicker from "expo-image-picker";
-import { prepareImageForUpload } from "../../lib/imageUpload";
+import { prepareImage, prepareImageForUpload } from "../../lib/imageUpload";
 import { colors } from "../../lib/theme";
 import { MoneyText } from "../../design/components/MoneyText";
 import { ScreenError } from "../../design/components/ScreenError";
@@ -13,6 +13,13 @@ import { getEquipment, listEquipmentExpenses, listEquipmentUsage, listEquipmentD
 import { useFleet } from "../../lib/data/hooks/useFleet";
 import { useAuth } from "../../lib/auth-context";
 import type { EquipmentExpenseCategory } from "../../lib/data/repositories/fleet";
+import { RoleGate } from "../../design/guards/RoleGate";
+import { useIsOfficeOrAdmin } from "../../design/guards/useRole";
+import { dateKeyInBusinessTZ } from "../../lib/date";
+import { ServiceHistory } from "../../components/fleet/ServiceHistory";
+import { EquipmentYearCost } from "../../components/fleet/EquipmentYearCost";
+import { HireSetupSheet } from "../../components/fleet/HireSetupSheet";
+import { MAX_UPLOAD_BYTES, base64Bytes, uploadEquipmentDocument } from "../../lib/fleetOffice";
 
 const CATEGORIES: EquipmentExpenseCategory[] = ["service", "repair", "fuel", "tyres", "registration", "insurance", "other"];
 
@@ -44,6 +51,10 @@ export default function EquipmentDetailScreen() {
   const [saving, setSaving] = useState(false);
   const [usageDraft, setUsageDraft] = useState<{ usageDate: string; hours: string; notes: string } | null>(null);
   const [usageSaving, setUsageSaving] = useState(false);
+  const isOffice = useIsOfficeOrAdmin();
+  const [hireOpen, setHireOpen] = useState(false);
+  const [uploadingDoc, setUploadingDoc] = useState(false);
+  const today = dateKeyInBusinessTZ(new Date());
 
   // Four reads in one Promise.all, and these read modules throw now: a single
   // rejection took the whole load down before setLoading(false), so the screen
@@ -78,6 +89,29 @@ export default function EquipmentDetailScreen() {
       Alert.alert("Couldn't open document", e instanceof Error ? e.message : "Please try again.");
     } finally {
       setOpeningDocId(null);
+    }
+  }
+
+  // Upload a document photo (registration, insurance, compliance) through the
+  // web's /api/fleet/[id]/documents — office/admin, online only. No document
+  // picker is in the app binary, so PDFs are uploaded on the website.
+  async function uploadDocument(fromCamera: boolean) {
+    if (uploadingDoc) return;
+    const perm = fromCamera ? await ImagePicker.requestCameraPermissionsAsync() : await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!perm.granted) { Alert.alert("Permission needed", fromCamera ? "Camera access is required." : "Photo library access is required."); return; }
+    const result = fromCamera ? await ImagePicker.launchCameraAsync({ quality: 1 }) : await ImagePicker.launchImageLibraryAsync({ quality: 1 });
+    if (result.canceled || !result.assets?.length) return;
+    setUploadingDoc(true);
+    try {
+      const { base64 } = await prepareImage(result.assets[0].uri, { base64: true });
+      if (!base64) throw new Error("Couldn't use that photo. Try taking it again.");
+      if (base64Bytes(base64) > MAX_UPLOAD_BYTES) throw new Error("That photo is too large (over 3 MB). Take it again closer in.");
+      await uploadEquipmentDocument(id, base64, `document-${today}-${Date.now() % 100000}.jpg`);
+      setDocuments(await listEquipmentDocuments(id));
+    } catch (e) {
+      Alert.alert("Couldn't upload the document", e instanceof Error ? e.message : "Please try again.");
+    } finally {
+      setUploadingDoc(false);
     }
   }
 
@@ -189,14 +223,32 @@ export default function EquipmentDetailScreen() {
         <CostRow label="Depreciation / yr" amount={cost.annualDepreciation} />
         <CostRow label="Fixed costs / yr" amount={cost.annualFixedCost} />
         <CostRow label="Fuel / yr" amount={cost.annualFuelCost} />
+        {Number(equipment.cost_per_load) > 0 && <CostRow label="Per load carted" amount={Number(equipment.cost_per_load)} />}
         <View style={[styles.costRow, styles.totalRow]}>
           <Text style={styles.totalLabel}>Total / hr</Text>
           <MoneyText amount={cost.costPerHour} style={styles.totalValue} />
         </View>
       </View>
 
+      {isOffice && (
+        <TouchableOpacity style={styles.hireBtn} onPress={() => setHireOpen(true)} accessibilityLabel="Hire setup">
+          <Ionicons name="pricetags-outline" size={16} color={colors.blue600} />
+          <Text style={styles.hireBtnText}>Hire setup (Day Works rates)</Text>
+          <Ionicons name="chevron-forward" size={16} color={colors.slate400} />
+        </TouchableOpacity>
+      )}
+
+      <EquipmentYearCost
+        expenses={expenses.filter((e): e is EquipmentExpense & { expense_date: string } => !!e.expense_date)}
+        usage={usage}
+        today={today}
+        estimatedAnnualCost={cost.annualTotalCost}
+      />
+
+      <ServiceHistory equipmentId={id} today={today} onCostLogged={() => void load()} />
+
       <View style={styles.sectionHead}>
-        <Text style={styles.section}>Expenses &amp; service history</Text>
+        <Text style={styles.section}>Expenses</Text>
         <TouchableOpacity onPress={() => setDraft({ ...emptyDraft })} style={styles.addBtn}>
           <Ionicons name="add" size={16} color={colors.blue600} /><Text style={styles.addText}>Add</Text>
         </TouchableOpacity>
@@ -262,10 +314,24 @@ export default function EquipmentDetailScreen() {
       </View>
       {usage.length > 0 && !usageDraft && <Text style={styles.hint}>Long-press a usage entry to remove it.</Text>}
 
-      <Text style={styles.section}>Documents</Text>
+      <View style={styles.sectionHead}>
+        <Text style={styles.section}>Documents</Text>
+        <RoleGate roles={["office", "admin"]}>
+          {uploadingDoc ? <ActivityIndicator size="small" color={colors.blue600} /> : (
+            <View style={styles.docActions}>
+              <TouchableOpacity onPress={() => uploadDocument(true)} style={styles.addBtn} accessibilityLabel="Photograph a document">
+                <Ionicons name="camera-outline" size={16} color={colors.blue600} /><Text style={styles.addText}>Camera</Text>
+              </TouchableOpacity>
+              <TouchableOpacity onPress={() => uploadDocument(false)} style={styles.addBtn} accessibilityLabel="Upload a document photo">
+                <Ionicons name="image-outline" size={16} color={colors.blue600} /><Text style={styles.addText}>Photos</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+        </RoleGate>
+      </View>
       <View style={styles.card}>
         {documents.length === 0 ? (
-          <Text style={styles.empty}>No documents. Registration, insurance &amp; compliance files are uploaded on the web.</Text>
+          <Text style={styles.empty}>No documents yet. Photograph registration, insurance &amp; compliance papers here; PDFs are uploaded on the website.</Text>
         ) : (
           documents.map((doc) => (
             <TouchableOpacity key={doc.id} style={styles.docRow} onPress={() => openDocument(doc)} disabled={openingDocId === doc.id}>
@@ -283,6 +349,10 @@ export default function EquipmentDetailScreen() {
           ))
         )}
       </View>
+
+      {hireOpen && (
+        <HireSetupSheet equipmentId={id} equipmentName={equipment.name} visible={hireOpen} onClose={() => setHireOpen(false)} />
+      )}
 
       <Modal visible={!!draft} transparent animationType="slide" onRequestClose={() => !saving && setDraft(null)}>
         <View style={styles.overlay}>
@@ -367,6 +437,9 @@ const styles = StyleSheet.create({
   section: { fontSize: 12, fontWeight: "700", color: colors.slate500, textTransform: "uppercase", marginTop: 16, marginBottom: 8, marginLeft: 4 },
   sectionHead: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
   addBtn: { flexDirection: "row", alignItems: "center", gap: 4 },
+  docActions: { flexDirection: "row", gap: 14 },
+  hireBtn: { flexDirection: "row", alignItems: "center", gap: 8, marginTop: 12, padding: 12, borderRadius: 12, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.card },
+  hireBtnText: { flex: 1, fontSize: 14, fontWeight: "600", color: colors.slate900 },
   addText: { fontSize: 13, color: colors.blue600, fontWeight: "600" },
   card: { backgroundColor: colors.card, borderWidth: 1, borderColor: colors.border, borderRadius: 12, padding: 12 },
   costRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingVertical: 6 },

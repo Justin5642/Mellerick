@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { View, Text, StyleSheet, TouchableOpacity, FlatList, Modal, Platform, Alert } from "react-native";
+import { View, Text, StyleSheet, TouchableOpacity, FlatList, Modal, Platform, Alert, ScrollView } from "react-native";
 import DateTimePicker, { DateTimePickerEvent } from "@react-native-community/datetimepicker";
 import { Ionicons } from "@expo/vector-icons";
 import { supabase } from "../../lib/supabase";
@@ -16,6 +16,9 @@ import { useSyncSettled } from "../../lib/data/hooks/useSyncSettled";
 import { reconcileRows } from "../../lib/data/reconcile";
 import { TIME_ENTRY_SELECT_WITH_STAFF } from "../../lib/timeEntryColumns";
 import { clockInCostCentre, type BookingWindow } from "../../lib/bookings";
+import { useRole } from "../../design/guards/useRole";
+import { clockPlace } from "../../lib/clockLocation";
+import { RATE_CHOICES, canEditEntry, rateOverrideFor, type RateChoice } from "../../lib/timeEntryOffice";
 
 interface TimeEntry {
   id: string;
@@ -28,6 +31,13 @@ interface TimeEntry {
   cost_center_id: string | null;
   edited_at?: string | null;
   profiles: { full_name: string } | null;
+  // Where the phone was at clock-on/off (0092) — shown to office/admin only.
+  clock_in_lat?: number | null;
+  clock_in_lng?: number | null;
+  clock_in_accuracy?: number | null;
+  clock_out_lat?: number | null;
+  clock_out_lng?: number | null;
+  clock_out_accuracy?: number | null;
 }
 
 interface EditingEntry {
@@ -37,6 +47,21 @@ interface EditingEntry {
   clockIn: Date;
   clockOut: Date | null;
   costCenterId: string | null;
+  /** Whose hours these are. Office/admin can pick anyone; everyone else, themselves. */
+  staffId: string;
+  /** Admin only — see lib/timeEntryOffice.ts. */
+  rate: RateChoice;
+}
+
+interface StaffOption {
+  id: string;
+  full_name: string;
+}
+
+interface SitePin {
+  lat: number | null;
+  lng: number | null;
+  fenceM: number | null;
 }
 
 // The shared shape from the read layer — the Billing tab allocates expenses to
@@ -200,10 +225,66 @@ function DateTimeField({ label, value, onChange }: { label: string; value: Date;
   );
 }
 
+// Office/admin: whose hours these are (web "Staff member" picker). Same
+// bottom-sheet pattern as the stage picker.
+function StaffPicker({
+  value,
+  options,
+  currentUserId,
+  onChange,
+}: {
+  value: string;
+  options: StaffOption[];
+  currentUserId: string;
+  onChange: (id: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const current = options.find((o) => o.id === value);
+  return (
+    <>
+      <TouchableOpacity style={styles.stageField} onPress={() => setOpen(true)}>
+        <Text style={styles.stageFieldText} numberOfLines={1}>
+          {current ? `${current.full_name}${current.id === currentUserId ? " (you)" : ""}` : value === currentUserId ? "You" : "Choose who did the work"}
+        </Text>
+        <Ionicons name="chevron-down" size={14} color={colors.slate400} />
+      </TouchableOpacity>
+      <Modal visible={open} transparent animationType="fade" onRequestClose={() => setOpen(false)}>
+        <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={() => setOpen(false)}>
+          <View style={styles.modalSheet}>
+            <Text style={styles.modalTitle}>Who did the work?</Text>
+            <FlatList
+              data={options}
+              keyExtractor={(o) => o.id}
+              renderItem={({ item }) => (
+                <TouchableOpacity
+                  style={styles.modalRow}
+                  onPress={() => {
+                    onChange(item.id);
+                    setOpen(false);
+                  }}
+                >
+                  <Text style={[styles.modalRowText, value === item.id && styles.modalRowTextActive]}>
+                    {item.full_name}
+                    {item.id === currentUserId ? " (you)" : ""}
+                  </Text>
+                  {value === item.id && <Ionicons name="checkmark" size={18} color={colors.blue600} />}
+                </TouchableOpacity>
+              )}
+            />
+          </View>
+        </TouchableOpacity>
+      </Modal>
+    </>
+  );
+}
+
 function TimeEntryModal({
   visible,
   editing,
   costCenters,
+  staff,
+  currentUserId,
+  isAdmin,
   onChange,
   onCancel,
   onSave,
@@ -212,6 +293,11 @@ function TimeEntryModal({
   visible: boolean;
   editing: EditingEntry | null;
   costCenters: CostCenterOption[];
+  /** Office/admin only: the people hours can be logged for. Empty = no picker. */
+  staff: StaffOption[];
+  currentUserId: string;
+  /** Shows the billing-band picker (rate_override is admin-only — 0025). */
+  isAdmin: boolean;
   onChange: (next: EditingEntry) => void;
   onCancel: () => void;
   onSave: () => void;
@@ -230,9 +316,40 @@ function TimeEntryModal({
       <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={onCancel}>
         <TouchableOpacity activeOpacity={1} style={styles.editSheet} onPress={() => {}}>
           <Text style={styles.modalTitle}>{editing.mode === "add" ? "Add Manual Entry" : "Edit Time Entry"}</Text>
+          {/* Scrolls once the office fields (staff, type, billing rate) make it taller than the screen. */}
+          <ScrollView style={styles.editScroll} keyboardShouldPersistTaps="handled">
           <Text style={styles.editHint}>
             Use this when auto clock-in/out didn&apos;t work — set the real start/end time yourself.
           </Text>
+
+          {staff.length > 0 && (
+            <View style={styles.fieldGroup}>
+              <Text style={styles.fieldLabel}>Staff member</Text>
+              <StaffPicker
+                value={editing.staffId}
+                options={staff}
+                currentUserId={currentUserId}
+                onChange={(id) => onChange({ ...editing, staffId: id })}
+              />
+            </View>
+          )}
+
+          {editing.mode === "add" && staff.length > 0 && (
+            <View style={styles.fieldGroup}>
+              <Text style={styles.fieldLabel}>Type</Text>
+              <View style={styles.chipRow}>
+                {(["work", "travel"] as const).map((t) => (
+                  <TouchableOpacity
+                    key={t}
+                    style={[styles.chip, editing.entryType === t && styles.chipActive]}
+                    onPress={() => onChange({ ...editing, entryType: t })}
+                  >
+                    <Text style={[styles.chipText, editing.entryType === t && styles.chipTextActive]}>{t === "work" ? "Work" : "Travel"}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </View>
+          )}
 
           <DateTimeField label="Start" value={editing.clockIn} onChange={(d) => onChange({ ...editing, clockIn: d })} />
 
@@ -263,6 +380,29 @@ function TimeEntryModal({
               />
             </View>
           )}
+
+          {editing.entryType !== "travel" && isAdmin && (
+            <View style={styles.fieldGroup}>
+              <Text style={styles.fieldLabel}>Billing rate</Text>
+              <View style={styles.chipRow}>
+                {RATE_CHOICES.filter((c) => !c.editOnly || editing.mode === "edit").map((c) => (
+                  <TouchableOpacity
+                    key={c.value}
+                    style={[styles.chip, editing.rate === c.value && styles.chipActive]}
+                    onPress={() => onChange({ ...editing, rate: c.value })}
+                  >
+                    <Text style={[styles.chipText, editing.rate === c.value && styles.chipTextActive]}>{c.label}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+              <Text style={styles.editHintSmall}>
+                Overrides the automatic weekday/weekend detection — e.g. Normal for a weekend job booked for convenience.
+                {editing.mode === "edit" ? " The current setting can't be shown here; “Leave as it is” keeps it." : ""}
+              </Text>
+            </View>
+          )}
+
+          </ScrollView>
 
           <View style={styles.editActions}>
             {onDelete && (
@@ -308,6 +448,41 @@ export function JobTimeTab({
   const [costCentersFailed, setCostCentersFailed] = useState(false);
   const timeClock = useTimeClock();
   const layer = useDataLayer();
+  const role = useRole();
+  const isOffice = role === "office" || role === "admin";
+  const isAdmin = role === "admin";
+  // Office/admin only (web parity): who hours can be logged for, and the
+  // site's pin for the clock-location flag. Read online; offline they are
+  // simply absent (the picker hides, no flag shows).
+  const [staff, setStaff] = useState<StaffOption[]>([]);
+  const [sitePin, setSitePin] = useState<SitePin | null>(null);
+
+  useEffect(() => {
+    if (!isOffice) {
+      setStaff([]);
+      setSitePin(null);
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      try {
+        if (!(await netInfoConnectivity.isOnline())) return;
+        const [staffRes, jobRes] = await Promise.all([
+          supabase.from("profiles").select("id, full_name").eq("is_active", true).order("full_name"),
+          supabase.from("jobs").select("sites(site_lat, site_lng, geofence_radius_m)").eq("id", jobId).maybeSingle(),
+        ]);
+        if (cancelled) return;
+        if (!staffRes.error) setStaff((staffRes.data ?? []) as StaffOption[]);
+        const site = (jobRes.data as { sites: { site_lat: number | null; site_lng: number | null; geofence_radius_m: number | null } | null } | null)?.sites;
+        if (!jobRes.error && site) setSitePin({ lat: site.site_lat, lng: site.site_lng, fenceM: site.geofence_radius_m });
+      } catch {
+        // Extras only: the tab works without them.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [isOffice, jobId]);
 
   // Reads refresh from the server only when online. Offline, local state (which
   // includes optimistic writes queued in the outbox) is authoritative. Even
@@ -414,7 +589,8 @@ export function JobTimeTab({
   // their own entries, or add a brand-new backdated entry, for whenever the
   // auto clock-in/out (geofencing) didn't fire, or fired at the wrong time.
   function openEditEntry(entry: TimeEntry) {
-    if (entry.staff_id !== currentUserId || saving) return;
+    // Office/admin can correct anyone's entry (RLS 0030 lets them).
+    if (!canEditEntry(entry, currentUserId, isOffice) || saving) return;
     setEditing({
       mode: "edit",
       entryId: entry.id,
@@ -422,13 +598,15 @@ export function JobTimeTab({
       clockIn: new Date(entry.clock_in),
       clockOut: entry.clock_out ? new Date(entry.clock_out) : null,
       costCenterId: entry.cost_center_id,
+      staffId: entry.staff_id,
+      rate: "keep",
     });
   }
 
   function openAddManualEntry() {
     if (saving) return;
     const now = new Date();
-    setEditing({ mode: "add", entryType: "work", clockIn: now, clockOut: now, costCenterId: null });
+    setEditing({ mode: "add", entryType: "work", clockIn: now, clockOut: now, costCenterId: null, staffId: currentUserId, rate: "auto" });
   }
 
   async function saveEditing() {
@@ -438,42 +616,61 @@ export function JobTimeTab({
     const clockOutIso = editing.clockOut ? editing.clockOut.toISOString() : null;
     const hours = clockOutIso ? hoursBetween(clockInIso, clockOutIso) : null;
     const nowIso = new Date().toISOString();
+    // Only office/admin may log for someone else; anyone else always logs for themselves.
+    const staffId = isOffice ? editing.staffId : currentUserId;
+    const staffName = staffId === currentUserId ? "You" : staff.find((s) => s.id === staffId)?.full_name ?? "—";
+    const costCenterId = editing.entryType === "travel" ? null : editing.costCenterId;
+    const rateOverride = rateOverrideFor(editing.rate, { isAdmin, entryType: editing.entryType });
 
     if (editing.mode === "add") {
       const { id } = await timeClock.addManual({
         jobId,
-        staffId: currentUserId,
+        staffId,
+        editorId: currentUserId,
         entryType: editing.entryType,
         clockInIso,
         clockOutIso,
-        costCenterId: editing.costCenterId,
+        costCenterId,
+        ...(rateOverride !== undefined ? { rateOverride } : {}),
       });
       const optimistic: TimeEntry = {
         id,
-        staff_id: currentUserId,
+        staff_id: staffId,
         clock_in: clockInIso,
         clock_out: clockOutIso,
         hours,
         auto_clocked: false,
         entry_type: editing.entryType,
-        cost_center_id: editing.costCenterId,
+        cost_center_id: costCenterId,
         edited_at: nowIso,
-        profiles: { full_name: "You" },
+        profiles: { full_name: staffName },
       };
       setEntries((prev) => [optimistic, ...prev]);
     } else if (editing.entryId) {
       const entryId = editing.entryId;
+      const original = entries.find((e) => e.id === entryId);
+      const reassigned = isOffice && original && original.staff_id !== staffId;
       await timeClock.editEntry({
         entryId,
         editorId: currentUserId,
         clockInIso,
         clockOutIso,
-        costCenterId: editing.costCenterId,
+        costCenterId,
+        ...(reassigned ? { staffId } : {}),
+        ...(rateOverride !== undefined ? { rateOverride } : {}),
       });
       setEntries((prev) =>
         prev.map((e) =>
           e.id === entryId
-            ? { ...e, clock_in: clockInIso, clock_out: clockOutIso, hours, cost_center_id: editing.costCenterId, edited_at: nowIso }
+            ? {
+                ...e,
+                clock_in: clockInIso,
+                clock_out: clockOutIso,
+                hours,
+                cost_center_id: costCenterId,
+                edited_at: nowIso,
+                ...(reassigned ? { staff_id: staffId, profiles: { full_name: staffName } } : {}),
+              }
             : e
         )
       );
@@ -554,14 +751,17 @@ export function JobTimeTab({
         ListEmptyComponent={<Text style={styles.emptyText}>No time logged yet</Text>}
         renderItem={({ item }) => {
           const isTravel = item.entry_type === "travel";
-          const isMine = item.staff_id === currentUserId;
+          const canEdit = canEditEntry(item, currentUserId, isOffice);
+          // Office/admin: how far from the site each clock-on/off was (0092). A flag, never a block.
+          const on = isOffice && !isTravel ? clockPlace({ lat: item.clock_in_lat, lng: item.clock_in_lng, accuracy: item.clock_in_accuracy }, sitePin) : null;
+          const off = isOffice && !isTravel ? clockPlace({ lat: item.clock_out_lat, lng: item.clock_out_lng, accuracy: item.clock_out_accuracy }, sitePin) : null;
           return (
             <View style={[styles.entryRow, isTravel && styles.entryRowTravel]}>
               <TouchableOpacity
                 style={styles.entryTopRow}
-                activeOpacity={isMine ? 0.6 : 1}
+                activeOpacity={canEdit ? 0.6 : 1}
                 onPress={() => openEditEntry(item)}
-                disabled={!isMine}
+                disabled={!canEdit}
               >
                 <View>
                   <Text style={styles.entryName}>
@@ -576,9 +776,15 @@ export function JobTimeTab({
                     {formatTime(item.clock_in)} → {item.clock_out ? formatTime(item.clock_out) : "now"}
                     {item.hours != null ? `  ${Number(item.hours).toFixed(1)}h` : ""}
                   </Text>
-                  {isMine && <Ionicons name="pencil" size={12} color={colors.slate400} />}
+                  {canEdit && <Ionicons name="pencil" size={12} color={colors.slate400} />}
                 </View>
               </TouchableOpacity>
+              {(on || off) && (
+                <View style={styles.placeRow}>
+                  {on && <Text style={[styles.placeText, on.outside && styles.placeWarn]}>{on.outside ? "⚠ " : ""}In: {on.label}</Text>}
+                  {off && <Text style={[styles.placeText, off.outside && styles.placeWarn]}>{off.outside ? "⚠ " : ""}Out: {off.label}</Text>}
+                </View>
+              )}
               {!isTravel && costCenters.length > 0 && (
                 <CostCenterPicker
                   value={item.cost_center_id}
@@ -596,6 +802,9 @@ export function JobTimeTab({
         visible={!!editing}
         editing={editing}
         costCenters={costCenters}
+        staff={isOffice ? staff : []}
+        currentUserId={currentUserId}
+        isAdmin={isAdmin}
         onChange={setEditing}
         onCancel={() => setEditing(null)}
         onSave={saveEditing}
@@ -686,4 +895,14 @@ const styles = StyleSheet.create({
   saveButton: { flex: 1, paddingVertical: 12, borderRadius: 10, backgroundColor: colors.blue600, alignItems: "center" },
   saveButtonDisabled: { opacity: 0.5 },
   saveButtonText: { color: "#fff", fontWeight: "600", fontSize: 14 },
+  editScroll: { maxHeight: 480 },
+  editHintSmall: { fontSize: 11, color: colors.slate400, marginTop: 6 },
+  chipRow: { flexDirection: "row", flexWrap: "wrap", gap: 6 },
+  chip: { paddingHorizontal: 12, paddingVertical: 8, borderRadius: 999, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.bg },
+  chipActive: { backgroundColor: colors.blue600, borderColor: colors.blue600 },
+  chipText: { fontSize: 13, fontWeight: "600", color: colors.slate700 },
+  chipTextActive: { color: "#fff" },
+  placeRow: { flexDirection: "row", flexWrap: "wrap", gap: 12 },
+  placeText: { fontSize: 11, color: colors.slate500 },
+  placeWarn: { color: colors.orange700, fontWeight: "700" },
 });

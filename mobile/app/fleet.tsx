@@ -6,11 +6,12 @@ import { Ionicons } from "@expo/vector-icons";
 import { colors } from "../lib/theme";
 import { MoneyText } from "../design/components/MoneyText";
 import { ScreenError } from "../design/components/ScreenError";
-import { listEquipment, listInactiveEquipment, hourlyRate, type Equipment } from "../lib/data/reads/fleet";
+import { listEquipment, listInactiveEquipment, listFleetExpenses, hourlyRate, type Equipment, type FleetExpenseRow } from "../lib/data/reads/fleet";
+import { FleetYearSummary } from "../components/fleet/FleetYearSummary";
 import { listAssignableStaff, type AssignableStaff } from "../lib/data/reads/schedule";
 import { useFleet } from "../lib/data/hooks/useFleet";
 import { useWriteOutcome } from "../lib/data/hooks/useWriteOutcome";
-import { useIsAdmin } from "../design/guards/useRole";
+import { useIsAdmin, useIsOfficeOrAdmin } from "../design/guards/useRole";
 
 const CATEGORIES = ["vehicle", "machinery", "tool", "other"] as const;
 
@@ -27,6 +28,7 @@ interface Draft {
   other_annual_costs: string;
   fuel_cost_per_hour: string;
   target_hours_per_year: string;
+  cost_per_load: string;
   notes: string;
 }
 
@@ -44,6 +46,7 @@ function toDraft(e: Equipment | null): Draft {
     other_annual_costs: e ? String(e.other_annual_costs) : "0",
     fuel_cost_per_hour: e ? String(e.fuel_cost_per_hour) : "0",
     target_hours_per_year: e ? String(e.target_hours_per_year) : "1000",
+    cost_per_load: e ? String(e.cost_per_load ?? 0) : "0",
     notes: e?.notes ?? "",
   };
 }
@@ -53,6 +56,8 @@ export default function FleetScreen() {
   const writeOutcome = useWriteOutcome();
   const router = useRouter();
   const isAdmin = useIsAdmin(); // equipment writes are admin-only (RLS + web)
+  const isOffice = useIsOfficeOrAdmin(); // hire rates + the year summary (office/admin)
+  const [fleetExpenses, setFleetExpenses] = useState<FleetExpenseRow[] | null>(null);
   const [items, setItems] = useState<Equipment[]>([]);
   const [refreshing, setRefreshing] = useState(false);
   const [draft, setDraft] = useState<Draft | null>(null);
@@ -73,6 +78,8 @@ export default function FleetScreen() {
     try {
       setError(null);
       setItems(await listEquipment());
+      // The year summary is a nice-to-have: its failure never blanks the list.
+      listFleetExpenses().then(setFleetExpenses).catch(() => setFleetExpenses(null));
     } catch (e) {
       setError(e);
     } finally {
@@ -135,7 +142,7 @@ export default function FleetScreen() {
   async function save() {
     if (!draft || saving || !fleet.ready) return;
     const num = (s: string) => (s.trim() === "" ? 0 : parseFloat(s));
-    const numericKeys: (keyof Draft)[] = ["purchase_cost", "estimated_life_years", "insurance_annual", "maintenance_annual", "registration_annual", "other_annual_costs", "fuel_cost_per_hour", "target_hours_per_year"];
+    const numericKeys: (keyof Draft)[] = ["purchase_cost", "estimated_life_years", "insurance_annual", "maintenance_annual", "registration_annual", "other_annual_costs", "fuel_cost_per_hour", "target_hours_per_year", "cost_per_load"];
     if (!draft.name.trim() || numericKeys.some((k) => Number.isNaN(num(draft[k] as string)))) {
       Alert.alert("Missing details", "Name and numeric cost fields are required.");
       return;
@@ -154,6 +161,7 @@ export default function FleetScreen() {
         otherAnnualCosts: num(draft.other_annual_costs),
         fuelCostPerHour: num(draft.fuel_cost_per_hour),
         targetHoursPerYear: num(draft.target_hours_per_year),
+        costPerLoad: num(draft.cost_per_load),
         notes: draft.notes.trim() || null,
       };
       const editingId = draft.id;
@@ -163,7 +171,7 @@ export default function FleetScreen() {
         id: rowId, name: input.name, category: input.category, registration: input.registration,
         purchase_cost: input.purchaseCost, purchase_date: null, estimated_life_years: input.estimatedLifeYears,
         insurance_annual: input.insuranceAnnual, maintenance_annual: input.maintenanceAnnual, registration_annual: input.registrationAnnual,
-        other_annual_costs: input.otherAnnualCosts, fuel_cost_per_hour: input.fuelCostPerHour, target_hours_per_year: input.targetHoursPerYear, notes: input.notes,
+        other_annual_costs: input.otherAnnualCosts, fuel_cost_per_hour: input.fuelCostPerHour, target_hours_per_year: input.targetHoursPerYear, cost_per_load: input.costPerLoad, notes: input.notes,
         assigned_to: null, assigned_profile: null,
       };
       // Editing cost fields must not wipe the current assignee optimistically.
@@ -219,14 +227,18 @@ export default function FleetScreen() {
 
   return (
     <View style={styles.container}>
-      <Stack.Screen options={{ title: "Fleet & Equipment", headerRight: isAdmin ? () => (
-        <TouchableOpacity onPress={() => setDraft(toDraft(null))} accessibilityLabel="Add equipment"><Ionicons name="add" size={26} color={colors.blue600} /></TouchableOpacity>
+      <Stack.Screen options={{ title: "Fleet & Equipment", headerRight: isOffice ? () => (
+        <View style={styles.headerActions}>
+          <TouchableOpacity onPress={() => router.push("/fleet/hire-rates")} accessibilityLabel="Hire rates" hitSlop={8}><Ionicons name="pricetags-outline" size={22} color={colors.blue600} /></TouchableOpacity>
+          {isAdmin ? <TouchableOpacity onPress={() => setDraft(toDraft(null))} accessibilityLabel="Add equipment"><Ionicons name="add" size={26} color={colors.blue600} /></TouchableOpacity> : null}
+        </View>
       ) : undefined }} />
       <SectionList
         sections={sections}
         keyExtractor={(i) => i.id}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.blue600} />}
         stickySectionHeadersEnabled={false}
+        ListHeaderComponent={isOffice && fleetExpenses ? <FleetYearSummary expenses={fleetExpenses} /> : null}
         ListEmptyComponent={<Text style={styles.empty}>No equipment. Tap + to add.</Text>}
         renderSectionHeader={({ section }) => <Text style={styles.catHead}>{section.title}</Text>}
         renderItem={({ item }) => (
@@ -313,6 +325,10 @@ export default function FleetScreen() {
           <View style={{ flex: 1 }}><Field label="Fuel /hr" value={draft?.fuel_cost_per_hour ?? ""} onChange={set("fuel_cost_per_hour")} num /></View>
           <View style={{ flex: 1 }}><Field label="Target hrs/yr" value={draft?.target_hours_per_year ?? ""} onChange={set("target_hours_per_year")} num /></View>
         </View>
+        <View style={styles.twoCol}>
+          <View style={{ flex: 1 }}><Field label="Per load carted ($)" value={draft?.cost_per_load ?? ""} onChange={set("cost_per_load")} num /></View>
+          <View style={{ flex: 1 }} />
+        </View>
         <Field label="Notes" value={draft?.notes ?? ""} onChange={set("notes")} multiline />
       </KeyboardSheet>
 
@@ -353,6 +369,7 @@ function Field({ label, value, onChange, num, multiline }: { label: string; valu
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.bg },
+  headerActions: { flexDirection: "row", alignItems: "center", gap: 16 },
   center: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: colors.bg },
   catHead: { fontSize: 13, fontWeight: "700", color: colors.slate500, paddingHorizontal: 16, paddingTop: 16, paddingBottom: 4, textTransform: "capitalize" },
   row: { flexDirection: "row", alignItems: "center", gap: 12, paddingHorizontal: 16, paddingVertical: 12, backgroundColor: colors.card, borderTopWidth: 1, borderTopColor: colors.border },

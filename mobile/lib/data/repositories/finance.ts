@@ -45,6 +45,8 @@ export interface CreateInvoiceInput {
   dueDateIso?: string | null;
   notes?: string | null;
   workDescription?: string | null;
+  /** The builder's PO this invoice is for ("Invoice this PO"); printed on the invoice. Omitted = not set. */
+  customerPo?: string | null;
   items: LineItemInput[];
   /** Create-from-job reconciliation (requires jobId): mark these approved
    * variations billed (set their invoice_id) and clear the job's
@@ -116,6 +118,7 @@ export class FinanceRepository {
       due_date: input.dueDateIso ?? null,
       notes: input.notes ?? null,
       work_description: input.workDescription ?? null,
+      ...(input.customerPo ? { customer_po: input.customerPo } : {}),
       subtotal,
       tax_amount: gst,
       total,

@@ -63,6 +63,7 @@ const RAW_E1 = {
   other_annual_costs: 0,
   fuel_cost_per_hour: 18.5,
   target_hours_per_year: 600,
+  cost_per_load: 45,
   notes: "Serviced Jan",
   assigned_to: "p1",
   assigned_profile_name: "Tam Nguyen",
@@ -82,6 +83,7 @@ const RAW_E2 = {
   other_annual_costs: 0,
   fuel_cost_per_hour: 0,
   target_hours_per_year: 400,
+  cost_per_load: 0,
   notes: null,
   assigned_to: null,
   assigned_profile_name: null,
@@ -102,6 +104,7 @@ const E1: Equipment = {
   other_annual_costs: 0,
   fuel_cost_per_hour: 18.5,
   target_hours_per_year: 600,
+  cost_per_load: 45,
   notes: "Serviced Jan",
   assigned_to: "p1",
   assigned_profile: { full_name: "Tam Nguyen" },
@@ -121,6 +124,7 @@ const E2: Equipment = {
   other_annual_costs: 0,
   fuel_cost_per_hour: 0,
   target_hours_per_year: 400,
+  cost_per_load: 0,
   notes: null,
   assigned_to: null,
   assigned_profile: null, // FK null → whole embed null, not {full_name: null}
@@ -146,7 +150,7 @@ describe("fleet local reads", () => {
       "SELECT e.id, e.name, e.category, e.registration, e.purchase_cost, e.purchase_date, " +
         "e.estimated_life_years, e.insurance_annual, e.maintenance_annual, " +
         "e.registration_annual, e.other_annual_costs, e.fuel_cost_per_hour, " +
-        "e.target_hours_per_year, e.notes, e.assigned_to, " +
+        "e.target_hours_per_year, e.cost_per_load, e.notes, e.assigned_to, " +
         "p.full_name AS assigned_profile_name " +
         "FROM equipment e LEFT JOIN profiles p ON p.id = e.assigned_to " +
         "WHERE e.is_active = ? " +

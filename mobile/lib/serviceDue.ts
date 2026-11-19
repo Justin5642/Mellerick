@@ -1,0 +1,119 @@
+// MIRROR of the web's lib/service-due.ts (Fleet service history: when the
+// next service is due, the invoice copy's storage path). The body below is
+// identical, pinned by tests/unit/fleet-mobile-mirror.test.ts — change the
+// web file first, then copy its body here.
+
+export interface ServiceRecord {
+  id: string;
+  equipment_id: string;
+  service_date: string; // YYYY-MM-DD
+  service_type: string;
+  odometer_km: number | null;
+  engine_hours: number | string | null;
+  provider?: string | null;
+  work_done?: string | null;
+  expense_id?: string | null;
+  next_due_date: string | null;
+  next_due_km: number | null;
+  next_due_hours: number | string | null;
+  created_at?: string;
+}
+
+export const SERVICE_TYPE_LABELS: Record<string, string> = {
+  scheduled: "Scheduled service",
+  repair: "Repair",
+  inspection: "Inspection",
+  tyres: "Tyres",
+  other: "Other",
+};
+
+/** Which expense category a service's cost is logged under. */
+export const SERVICE_TYPE_EXPENSE_CATEGORY: Record<string, string> = {
+  scheduled: "service",
+  inspection: "service",
+  repair: "repair",
+  tyres: "tyres",
+  other: "other",
+};
+
+/** "Due soon" window. */
+export const DUE_SOON_DAYS = 30;
+
+export type DueState = "overdue" | "due_soon" | "ok" | "no_due_date" | "none";
+
+export interface ServiceDue {
+  state: DueState;
+  /** The record whose "next due" applies: the latest service. */
+  latest: ServiceRecord | null;
+  dueDate: string | null;
+  daysUntil: number | null;
+  dueKm: number | null;
+  dueHours: number | null;
+  /** Highest readings on any record — the most recent known. */
+  lastKm: number | null;
+  lastHours: number | null;
+}
+
+const toDay = (k: string) => Date.parse(`${k}T00:00:00Z`) / 86_400_000;
+
+/** Newest first: by service date, then by when it was entered. */
+export function sortRecords(records: ServiceRecord[]): ServiceRecord[] {
+  return [...records].sort(
+    (a, b) => b.service_date.localeCompare(a.service_date) || String(b.created_at ?? "").localeCompare(String(a.created_at ?? ""))
+  );
+}
+
+export function serviceDue(records: ServiceRecord[], today: string): ServiceDue {
+  const sorted = sortRecords(records);
+  const latest = sorted[0] ?? null;
+  // The due date/km/hours come from the newest record that SET one — not the
+  // newest record. Logging tyres or a repair (no "next due") used to hide the
+  // service schedule and its overdue warning (audit, 15 Nov 2026).
+  const planner = sorted.find((r) => r.next_due_date || r.next_due_km != null || r.next_due_hours != null) ?? null;
+  const kms = records.map((r) => r.odometer_km).filter((v): v is number => v != null);
+  const hrs = records.map((r) => (r.engine_hours == null ? null : Number(r.engine_hours))).filter((v): v is number => v != null);
+  const base = {
+    latest,
+    dueKm: planner?.next_due_km ?? null,
+    dueHours: planner?.next_due_hours == null ? null : Number(planner.next_due_hours),
+    lastKm: kms.length ? Math.max(...kms) : null,
+    lastHours: hrs.length ? Math.max(...hrs) : null,
+  };
+  if (!latest) return { ...base, state: "none", dueDate: null, daysUntil: null };
+  if (!planner?.next_due_date) return { ...base, state: "no_due_date", dueDate: null, daysUntil: null };
+  const daysUntil = Math.round(toDay(planner.next_due_date) - toDay(today));
+  const state: DueState = daysUntil < 0 ? "overdue" : daysUntil <= DUE_SOON_DAYS ? "due_soon" : "ok";
+  return { ...base, state, dueDate: planner.next_due_date, daysUntil };
+}
+
+export function dueLabel(d: ServiceDue): string {
+  switch (d.state) {
+    case "none":
+      return "No service recorded";
+    case "no_due_date":
+      return "Next service not set";
+    case "overdue":
+      return `Service overdue by ${-d.daysUntil!} day${d.daysUntil === -1 ? "" : "s"}`;
+    case "due_soon":
+      return d.daysUntil === 0 ? "Service due today" : `Service due in ${d.daysUntil} day${d.daysUntil === 1 ? "" : "s"}`;
+    case "ok":
+      return `Next service in ${d.daysUntil} days`;
+  }
+}
+
+/**
+ * PostgREST's answer when equipment_service_records is not in the database yet
+ * (0099 unapplied): the screens say so instead of failing the whole page.
+ */
+export function isServiceTableMissing(error: { code?: string | null } | null | undefined): boolean {
+  return !!error && (error.code === "42P01" || error.code === "PGRST205" || error.code === "PGRST200");
+}
+
+/**
+ * Where a service invoice copy is stored in the `equipment-documents` bucket —
+ * the same shape as the Expenses tab's receipts (`expense-receipt-` keeps it
+ * under 0047's money-file rule, hidden from technicians).
+ */
+export function serviceInvoicePath(equipmentId: string, fileName: string, now: number): string {
+  return `${equipmentId}/expense-receipt-${now}_${fileName.replace(/[^a-zA-Z0-9._-]/g, "_")}`;
+}
