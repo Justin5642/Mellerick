@@ -30,8 +30,16 @@
 // "Annual leave"…, or "Unavailable" when the server withheld the type). It
 // is read-only: a tap opens its details, nothing drags or resizes it.
 // Bookings on a leave day carry a "Needs reassigning" tag.
+//
+// The office to-do list (lib/todoBoard.ts, mirrored from the web board):
+// each technician's unbooked hours show as a green "3 h free" — under each
+// cell in Week view, under the name in Day view — and a tap hands the gap to
+// the screen (it opens the to-do sheet filtered to jobs that fit). While a
+// to-do job is being placed, a tap anywhere on the grid picks that
+// technician × day (Day view: the technician row) and hands it to onPlace —
+// tap-to-place, because dragging out of a sheet is awkward on a phone.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Animated, StyleSheet, Text, View, type LayoutChangeEvent } from "react-native";
+import { Animated, Pressable, StyleSheet, Text, View, type GestureResponderEvent, type LayoutChangeEvent } from "react-native";
 import { Gesture, GestureDetector, RefreshControl, ScrollView as GHScrollView } from "react-native-gesture-handler";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
@@ -63,6 +71,10 @@ import {
   type RowItem,
 } from "../../lib/scheduleGrid";
 import { leaveColour, leaveDayLabel, leaveRangeLabel, NEEDS_REASSIGNING, type LeaveConflict, type LeaveDay, type LeaveIndex } from "../../lib/staffLeave";
+import type { DayGap } from "../../lib/todoBoard";
+
+/** Week view: the strip under each technician's row that holds the "N h free" pills. */
+const GAP_STRIP = 20;
 
 const AnimatedGHScrollView = Animated.createAnimatedComponent(GHScrollView);
 
@@ -110,6 +122,13 @@ export interface ScheduleGridProps {
   reassign?: ReadonlyMap<string, LeaveConflict[]>;
   /** A leave block was tapped: show its details (read-only). */
   onOpenLeave?: (day: LeaveDay) => void;
+  /** A technician's free hours on a day (office/admin's to-do list); absent = no gaps shown. */
+  gapFor?: (staffId: string, dateKey: string) => DayGap | undefined;
+  /** A "N h free" pill was tapped. */
+  onGapPress?: (hours: number) => void;
+  /** A to-do job is being placed: the next tap on the grid picks where. */
+  placing?: boolean;
+  onPlace?: (target: BoardCell) => void;
 }
 
 export function ScheduleGrid(props: ScheduleGridProps) {
@@ -133,6 +152,18 @@ export function ScheduleGrid(props: ScheduleGridProps) {
     (staffId: string | null, key: string): BoardEntry[] =>
       (staffId ? board.byStaff.get(staffId)?.get(key) : board.unassigned.get(key)) ?? [],
     [board],
+  );
+
+  const { gapFor, onGapPress, placing, onPlace } = props;
+  const showGaps = !!gapFor;
+  /** The pill's hours, or null when there is no gap to show (booked up, on leave, weekend, past). */
+  const freeHours = useCallback(
+    (staffId: string | null, key: string): number | null => {
+      if (!staffId || !gapFor) return null;
+      const g = gapFor(staffId, key);
+      return g?.kind === "free" && g.hours > 0 ? g.hours : null;
+    },
+    [gapFor],
   );
 
   const leaveIndex = props.leave;
@@ -160,12 +191,26 @@ export function ScheduleGrid(props: ScheduleGridProps) {
       }
       placedByRow.push(placed);
       leaveByRow.push(leave);
-      heights.push(height);
+      // Week view keeps a strip under each technician's lanes for the
+      // "N h free" pills, so they never sit on a booking.
+      heights.push(height + (showGaps && view === "week" && row.staffId ? GAP_STRIP : 0));
     }
     return { placedByRow, leaveByRow, heights };
-  }, [rows, view, dayKey, dayKeys, dayRange, entriesFor, leaveFor]);
+  }, [rows, view, dayKey, dayKeys, dayRange, entriesFor, leaveFor, showGaps]);
   const tops = useMemo(() => rowOffsets(heights), [heights]);
   const bodyHeight = tops.length ? tops[tops.length - 1] + heights[heights.length - 1] : 0;
+
+  // Tap-to-place: the tap's position inside the grid body → technician × day.
+  const onPlaceTap = useCallback(
+    (e: GestureResponderEvent) => {
+      const { locationX, locationY } = e.nativeEvent;
+      const row = rowAt(tops, heights, locationY);
+      if (row < 0 || !onPlace) return;
+      const key = view === "day" ? dayKey : dayKeys[columnAt(locationX, columnWidth, columnCount)];
+      if (key) onPlace({ staffId: rows[row].staffId, dateKey: key });
+    },
+    [tops, heights, onPlace, view, dayKey, dayKeys, columnWidth, columnCount, rows],
+  );
 
   // ---- scrolling -----------------------------------------------------------
   const scrollX = useRef(new Animated.Value(0)).current;
@@ -412,18 +457,33 @@ export function ScheduleGrid(props: ScheduleGridProps) {
           <View style={styles.bodyRow}>
             {/* Pinned left column: scrolls vertically with the body, never horizontally. */}
             <View style={{ width: LEFT_COLUMN_WIDTH }}>
-              {rows.map((row, i) => (
-                <View
-                  key={row.staffId ?? "unassigned"}
-                  style={[styles.nameCell, { height: heights[i] }, hover?.row === i && styles.nameCellHover]}
-                  accessibilityRole="header"
-                >
-                  <Text style={[styles.nameText, !row.staffId && styles.unassignedText]} numberOfLines={2}>
-                    {row.name}
-                  </Text>
-                  {row.staffId ? <Text style={styles.hoursText}>{formatHours(row.hours)}</Text> : null}
-                </View>
-              ))}
+              {rows.map((row, i) => {
+                const free = view === "day" ? freeHours(row.staffId, dayKey) : null;
+                return (
+                  <Pressable
+                    key={row.staffId ?? "unassigned"}
+                    style={[styles.nameCell, { height: heights[i] }, (hover?.row === i || placing) && styles.nameCellHover]}
+                    accessibilityRole={placing ? "button" : "header"}
+                    accessibilityLabel={placing ? `Place it with ${row.name} on ${shortDayLabel(dayKey)}` : undefined}
+                    // Day view: the name is a target too while placing (Week
+                    // view needs a day, so the cells are).
+                    disabled={!placing || view !== "day"}
+                    onPress={() => onPlace?.({ staffId: row.staffId, dateKey: dayKey })}
+                  >
+                    <Text style={[styles.nameText, !row.staffId && styles.unassignedText]} numberOfLines={2}>
+                      {row.name}
+                    </Text>
+                    {row.staffId ? (
+                      <View style={styles.hoursRow}>
+                        <Text style={styles.hoursText}>{formatHours(row.hours)}</Text>
+                        {free !== null && !placing ? (
+                          <GapPill hours={free} who={row.name} dateKey={dayKey} onPress={onGapPress} disabled={dragging} />
+                        ) : null}
+                      </View>
+                    ) : null}
+                  </Pressable>
+                );
+              })}
             </View>
 
             <AnimatedGHScrollView
@@ -497,6 +557,33 @@ export function ScheduleGrid(props: ScheduleGridProps) {
                     />
                   )),
                 )}
+
+                {/* Week view: each technician's free hours, in the strip under their lanes. */}
+                {view === "week" && showGaps && !placing
+                  ? rows.map((row, i) =>
+                      row.staffId
+                        ? dayKeys.map((key, c) => {
+                            const free = freeHours(row.staffId, key);
+                            if (free === null) return null;
+                            return (
+                              <View key={`gap-${row.staffId}-${key}`} style={[styles.gapSlot, { left: c * WEEK_COLUMN_WIDTH + 4, top: tops[i] + heights[i] - GAP_STRIP }]}>
+                                <GapPill hours={free} who={row.name} dateKey={key} onPress={onGapPress} disabled={dragging} />
+                              </View>
+                            );
+                          })
+                        : null,
+                    )
+                  : null}
+
+                {/* Placing a to-do job: the whole grid is one big target. */}
+                {placing ? (
+                  <Pressable
+                    style={[StyleSheet.absoluteFill, styles.placeLayer]}
+                    onPress={onPlaceTap}
+                    accessibilityRole="button"
+                    accessibilityLabel={view === "day" ? "Tap a technician to place the job" : "Tap a technician's day to place the job"}
+                  />
+                ) : null}
               </View>
             </AnimatedGHScrollView>
           </View>
@@ -527,6 +614,35 @@ export function ScheduleGrid(props: ScheduleGridProps) {
         </Animated.View>
       ) : null}
     </View>
+  );
+}
+
+/** "3 h free" — a technician's unbooked hours that day. A tap shows the to-do jobs that fit. */
+function GapPill({
+  hours,
+  who,
+  dateKey,
+  onPress,
+  disabled,
+}: {
+  hours: number;
+  who: string;
+  dateKey: string;
+  onPress?: (hours: number) => void;
+  disabled?: boolean;
+}) {
+  return (
+    <Pressable
+      onPress={() => onPress?.(hours)}
+      disabled={disabled || !onPress}
+      hitSlop={8}
+      style={styles.gapPill}
+      accessibilityRole="button"
+      accessibilityLabel={`${who} has ${formatHours(hours)} free on ${shortDayLabel(dateKey)}`}
+      accessibilityHint="Shows the to-do jobs that fit"
+    >
+      <Text style={styles.gapText}>{formatHours(hours)} free</Text>
+    </Pressable>
   );
 }
 
@@ -768,7 +884,12 @@ const styles = StyleSheet.create({
   nameCellHover: { backgroundColor: colors.blue100 },
   nameText: { fontSize: 13, fontWeight: "700", color: colors.slate900 },
   unassignedText: { color: colors.orange700 },
-  hoursText: { fontSize: 11, color: colors.slate500, marginTop: 2 },
+  hoursText: { fontSize: 11, color: colors.slate500 },
+  hoursRow: { flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 4, marginTop: 2 },
+  gapSlot: { position: "absolute", height: GAP_STRIP - 2, justifyContent: "center" },
+  gapPill: { borderRadius: 4, borderWidth: 1, borderColor: "#a7f3d0", backgroundColor: "#ecfdf5", paddingHorizontal: 4 },
+  gapText: { fontSize: 10, lineHeight: 14, fontWeight: "700", color: "#047857" },
+  placeLayer: { backgroundColor: "rgba(79,70,229,0.06)", borderWidth: 2, borderColor: "#818cf8", borderStyle: "dashed" },
   rowLine: { position: "absolute", left: 0, borderBottomWidth: 1, borderBottomColor: colors.border },
   colLine: { position: "absolute", top: 0, borderRightWidth: 1, borderRightColor: colors.slate100 },
   colToday: { backgroundColor: "rgba(37,99,235,0.05)" },

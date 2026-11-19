@@ -222,3 +222,63 @@ describe("ScheduleRepository bookings", () => {
     expect(sides(ops)[0]).toMatchObject({ effect: "sync-calendar", dependsOn: w.id });
   });
 });
+
+describe("ScheduleRepository — the office to-do list (0067)", () => {
+  const insert = {
+    job_id: "j1",
+    staff_id: "dave",
+    cost_center_id: null,
+    starts_at: "2026-11-18T20:00:00.000Z",
+    ends_at: "2026-11-19T04:30:00.000Z",
+    daily: false,
+    all_day: true,
+  };
+
+  it("listOnTodo writes todo_listed_at (the trigger stamps the real time) and the estimate, no calendar sync", async () => {
+    const { outbox, ops } = captureOutbox();
+    await makeRepo(outbox).listOnTodo("j1", 4.5);
+    expect(ops).toHaveLength(1);
+    expect(writes(ops)[0]).toMatchObject({ table: "jobs", op: "update", rowId: "j1", dependsOn: null });
+    expect(writes(ops)[0].payload).toEqual({ todo_listed_at: "2026-07-26T00:00:00.000Z", estimated_hours: 4.5 });
+  });
+
+  it("unlistTodo clears the listing only", async () => {
+    const { outbox, ops } = captureOutbox();
+    await makeRepo(outbox).unlistTodo("j1");
+    expect(ops).toHaveLength(1);
+    expect(writes(ops)[0].payload).toEqual({ todo_listed_at: null, todo_listed_by: null });
+  });
+
+  it("placeTodo inserts the booking, THEN patches the job (waiting on the insert), then syncs the calendar", async () => {
+    const { outbox, ops } = captureOutbox();
+    const id = await makeRepo(outbox).placeTodo(insert, { todo_listed_at: null, todo_listed_by: null, status: "scheduled" });
+    const [ins, job] = writes(ops);
+    expect(ins).toMatchObject({ table: "job_bookings", op: "insert", rowId: id, aggregate: "job_booking" });
+    expect(ins.payload).toEqual(insert); // no note column named — a to-do job has none
+    expect(job).toMatchObject({ table: "jobs", op: "update", rowId: "j1", dependsOn: ins.id });
+    expect(job.payload).toEqual({ todo_listed_at: null, todo_listed_by: null, status: "scheduled" });
+    expect(sides(ops)[0]).toMatchObject({ effect: "sync-calendar", coalesceKey: "sync-calendar:j1", dependsOn: job.id });
+  });
+
+  it("backToTodo with a listing deletes THAT booking, then lists the job (back to pending) once the delete has landed", async () => {
+    const { outbox, ops } = captureOutbox();
+    await makeRepo(outbox).backToTodo("j1", "b1", { status: "pending" });
+    const [del, job] = writes(ops);
+    expect(del).toMatchObject({ table: "job_bookings", op: "delete", rowId: "b1" });
+    expect(job).toMatchObject({ table: "jobs", op: "update", rowId: "j1", dependsOn: del.id });
+    expect(job.payload).toEqual({ todo_listed_at: "2026-07-26T00:00:00.000Z", status: "pending" });
+    expect(sides(ops)[0]).toMatchObject({ effect: "sync-calendar", dependsOn: job.id });
+  });
+
+  it("backToTodo keeps an on-hold job's status, and without a listing only removes the booking", async () => {
+    const a = captureOutbox();
+    await makeRepo(a.outbox).backToTodo("j1", "b1", {});
+    expect(writes(a.ops)[1].payload).toEqual({ todo_listed_at: "2026-07-26T00:00:00.000Z" });
+
+    const b = captureOutbox();
+    await makeRepo(b.outbox).backToTodo("j1", "b1", null);
+    expect(writes(b.ops)).toHaveLength(1);
+    expect(writes(b.ops)[0]).toMatchObject({ table: "job_bookings", op: "delete", rowId: "b1" });
+    expect(sides(b.ops)[0]).toMatchObject({ effect: "sync-calendar", dependsOn: writes(b.ops)[0].id });
+  });
+});

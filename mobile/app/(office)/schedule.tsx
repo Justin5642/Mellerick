@@ -70,6 +70,17 @@ import {
   type LeaveDay,
   type ScheduleLeave,
 } from "../../lib/staffLeave";
+// The office to-do list (Justin, 19 Nov 2026 — the web board's panel, on the
+// phone): a sheet of listed jobs, tap-to-place onto a technician's day, a
+// booking's "Back to to-do list", and each technician's free hours. Rules are
+// the web's, mirrored (lib/todoBoard.ts, lib/todoList.ts).
+import { TodoSheet } from "../../components/schedule/TodoSheet";
+import { listTodoJobs, type TodoCandidate, type TodoJob } from "../../lib/data/reads/todo";
+import { describeDragOut, jobPatchAfterDrop, newBookingClashes, planDragOut, planTodoDrop, unbookedHours } from "../../lib/todoBoard";
+import { todoHours } from "../../lib/todoList";
+import { closedJobScheduleMessage, isJobClosedForScheduling } from "../../lib/jobSchedulable";
+import { crewJoinWindow, crewLeaveConflicts, describeCrewLeave } from "../../lib/crewLeave";
+import { useIsOfficeOrAdmin } from "../../design/guards/useRole";
 
 interface SchedJob {
   id: string;
@@ -84,6 +95,9 @@ interface SchedJob {
   assigned_to: string | null;
   customers: { name: string } | null;
   profiles?: { full_name: string } | null;
+  /** From select("*") — carried back onto the to-do list when a job's last booking goes. */
+  priority?: string | null;
+  estimated_hours?: number | null;
 }
 
 /**
@@ -207,6 +221,31 @@ export default function ScheduleScreen() {
   const noticeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const writeOutcome = useWriteOutcome();
 
+  // ---- the to-do list (office/admin) ---------------------------------------
+  // The (office) group only mounts for office/admin; checked again here so a
+  // stale role never shows the list or its writes (RLS is the backstop).
+  const canTodo = useIsOfficeOrAdmin();
+  // null until the first read lands; online only, like the rest of this tab.
+  const [todoJobs, setTodoJobs] = useState<TodoJob[] | null>(null);
+  const [todoError, setTodoError] = useState<string | null>(null);
+  const [todoOpen, setTodoOpen] = useState(false);
+  const [gapInput, setGapInput] = useState("");
+  // A to-do job picked to place: the next tap on the grid books it.
+  const [placing, setPlacing] = useState<TodoJob | null>(null);
+  // The crew as it was when the picker opened — only people ADDED are asked about leave.
+  const [crewBefore, setCrewBefore] = useState<string[]>([]);
+
+  const loadTodo = useCallback(async () => {
+    if (!canTodo) return;
+    try {
+      setTodoJobs(await listTodoJobs());
+      setTodoError(null);
+    } catch (e) {
+      console.warn("[schedule] to-do list unavailable:", e);
+      setTodoError("Couldn't load the to-do list — it needs signal.");
+    }
+  }, [canTodo]);
+
   // Unwrapped rather than defaulted to []: this list's empty state is "Nothing
   // scheduled.", which an office user reads as the day being clear. A failed
   // read that renders it sends nobody to site.
@@ -253,11 +292,15 @@ export default function ScheduleScreen() {
     loadStaff();
   }, [load, loadStaff]);
 
+  useEffect(() => {
+    void loadTodo();
+  }, [loadTodo]);
+
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
-    await load();
+    await Promise.all([load(), loadTodo()]);
     setRefreshing(false);
-  }, [load]);
+  }, [load, loadTodo]);
 
   const gridView: "day" | "week" = view === "week" ? "week" : "day";
   const dayKeys = useMemo(() => visibleDayKeys(gridView, selectedKey), [gridView, selectedKey]);
@@ -295,9 +338,9 @@ export default function ScheduleScreen() {
 
   const onGridRefresh = useCallback(async () => {
     setRefreshing(true);
-    await Promise.all([load(), loadDone()]);
+    await Promise.all([load(), loadDone(), loadTodo()]);
     setRefreshing(false);
-  }, [load, loadDone]);
+  }, [load, loadDone, loadTodo]);
 
   const allJobs = useMemo(() => {
     const byId = new Map<string, SchedJob>();
@@ -551,6 +594,263 @@ export default function ScheduleScreen() {
     [realBookings, reassign, allJobs, nameOf]
   );
 
+  // ---- the to-do list ---------------------------------------------------------
+
+  /** A technician's free hours on a day — the web board's "3 h free" (office/admin only). */
+  const gapFor = useCallback(
+    (staffId: string, dateKey: string) =>
+      unbookedHours({
+        dateKey,
+        todayKey,
+        bookedHours: board.hours.get(staffId)?.get(dateKey) ?? 0,
+        leaveDays: leaveIndex.get(staffId)?.get(dateKey) ?? [],
+      }),
+    [board, leaveIndex, todayKey]
+  );
+
+  /** A gap was tapped: the to-do jobs that fit it. */
+  const onGapPress = useCallback((hours: number) => {
+    setGapInput(String(hours));
+    setTodoOpen(true);
+  }, []);
+
+  /** "Place": close the sheet and wait for a tap on the grid. */
+  const pickToPlace = useCallback(
+    (job: TodoJob) => {
+      setTodoOpen(false);
+      setPlacing(job);
+      if (view === "list") setView("day");
+    },
+    [view]
+  );
+
+  /** Queue the booking and the job patch, then report what the server did (as a move does). */
+  const commitPlace = useCallback(
+    async (job: TodoJob, insert: ReturnType<typeof planTodoDrop>, target: BoardCell) => {
+      if (!schedule.ready) {
+        Alert.alert("Not ready yet", "The app is still starting up. Try again in a moment.");
+        return;
+      }
+      const patch = jobPatchAfterDrop(job.status);
+      const what = `#${job.job_number} for ${nameOf(target.staffId)} on ${shortDayLabel(target.dateKey)}`;
+      showNotice({ tone: "wait", text: `Booking ${what}…` });
+      let id: string;
+      try {
+        ({ id } = await schedule.placeTodo(insert, patch));
+      } catch (e) {
+        showNotice({ tone: "bad", text: `Couldn't book ${what}: ${e instanceof Error ? e.message : "please try again."}` });
+        return;
+      }
+      // Drawn at once, tagged until the server has it; off the to-do list.
+      setTodoJobs((cur) => (cur ? cur.filter((j) => j.id !== job.id) : cur));
+      setBookings((cur) => (cur ? [...cur, { ...insert, id, staff_name: target.staffId ? staffNames.get(target.staffId) ?? null : null }] : cur));
+      setJobs((cur) =>
+        cur.some((j) => j.id === job.id)
+          ? cur.map((j) => (j.id === job.id && patch.status ? { ...j, status: patch.status } : j))
+          : [
+              ...cur,
+              {
+                id: job.id,
+                job_number: job.job_number,
+                title: job.title,
+                status: patch.status ?? job.status,
+                scheduled_start: insert.starts_at,
+                scheduled_end: insert.ends_at,
+                schedule_daily: insert.daily,
+                schedule_all_day: insert.all_day,
+                assigned_to: target.staffId,
+                customers: job.customer_name ? { name: job.customer_name } : null,
+                priority: job.priority,
+                estimated_hours: job.estimated_hours,
+              },
+            ]
+      );
+      const outcome = await writeOutcome(id);
+      if (outcome === "settled") {
+        showNotice({ tone: "ok", text: `Booked ${what}.` });
+        void load();
+        void loadTodo();
+      } else if (outcome === "pending") {
+        setSaveState(id, "queued");
+        showNotice({ tone: "wait", text: `Not on the server yet: ${what}. It is kept on this phone and sends when you're back online.` });
+      } else {
+        setSaveState(id, "failed");
+        showNotice({ tone: "bad", text: `The server hasn't accepted ${what}. It will retry — check the sync badge.` });
+      }
+    },
+    [schedule, nameOf, showNotice, staffNames, writeOutcome, load, loadTodo, setSaveState]
+  );
+
+  /**
+   * A tap on the grid while placing: the web's drop-in. One booking
+   * (planTodoDrop), the same guards as every board write — closed jobs and a
+   * database without bookings refused — and always a confirm (a tap lands
+   * more easily on the wrong cell than a drag), which says when the
+   * technician is already booked or on leave then.
+   */
+  const onPlace = useCallback(
+    (target: BoardCell) => {
+      const job = placing;
+      setPlacing(null);
+      if (!job) return;
+      if (bookings === null) {
+        Alert.alert("Can't place it here", "Bookings aren't set up on this database yet — schedule the job from the website.");
+        return;
+      }
+      if (isJobClosedForScheduling(job.status)) {
+        Alert.alert("Can't schedule this", closedJobScheduleMessage(job.status));
+        return;
+      }
+      const estimate = todoHours(job.estimated_hours, job.po_allocated_hours).hours;
+      const dayBlocks = target.staffId
+        ? realBookings.filter((b) => b.staff_id === target.staffId).flatMap((b) => bookingDays.get(b.id) ?? [])
+        : [];
+      const insert = planTodoDrop({ jobId: job.id, staffId: target.staffId, dateKey: target.dateKey, estimateHours: estimate, dayBlocks });
+      const clashes = newBookingClashes(insert, realBookings);
+      const clashText =
+        clashes.length > 0
+          ? `\n\n⚠ ${nameOf(target.staffId)} is already booked then: ${clashes
+              .slice(0, 3)
+              .map((c) => `#${allJobs.get(c.job_id)?.job_number ?? "?"}`)
+              .join(", ")}${clashes.length > 3 ? ` and ${clashes.length - 3} more` : ""}.`
+          : "";
+      const leaveHits = target.staffId ? bookingLeaveConflicts(insert, leave, todayKey) : [];
+      const leaveText = leaveHits.length > 0 ? `\n\n⚠ ${describeLeaveConflicts(nameOf(target.staffId), leaveHits)}` : "";
+      const time = insert.all_day ? "All day" : `${formatBusinessTime(insert.starts_at)}–${insert.ends_at ? formatBusinessTime(insert.ends_at) : ""}`;
+      const warned = clashes.length > 0 || leaveHits.length > 0;
+      Alert.alert(
+        `#${job.job_number} — ${job.title}`,
+        `Book ${target.staffId ? nameOf(target.staffId) : "it unassigned"} on ${shortDayLabel(target.dateKey)}, ${time}?${
+          job.status === "pending" ? " The job becomes Scheduled and comes off the to-do list." : " It comes off the to-do list."
+        }${leaveText}${clashText}`,
+        [
+          { text: "Cancel", style: "cancel" },
+          { text: warned ? "Book anyway" : "Book", onPress: () => void commitPlace(job, insert, target) },
+        ]
+      );
+    },
+    [placing, bookings, realBookings, bookingDays, nameOf, allJobs, leave, todayKey, commitPlace]
+  );
+
+  /** A booking's "Back to to-do list": the web's drag-out, same rules and words (planDragOut). */
+  function backToTodo(item: SchedItem) {
+    const { job, booking } = item;
+    if (!booking || !schedule.ready) return;
+    const plan = planDragOut(booking, realBookings.filter((b) => b.job_id === job.id), job.status);
+    if (plan.kind === "refuse") {
+      Alert.alert("Can't take this off", plan.reason);
+      return;
+    }
+    const days = scheduleDays(bookingWindow(booking));
+    const when = days.length > 1 ? dateRangeLabel(days[0].dateKey, days[days.length - 1].dateKey) : shortDayLabel(days[0]?.dateKey ?? todayKey);
+    const words = describeDragOut(plan, { jobNumber: job.job_number, who: booking.staff_id ? nameOf(booking.staff_id) : null, when });
+    Alert.alert(words.title, `${job.title}. ${words.detail}`, [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: words.action,
+        style: plan.kind === "list" ? "default" : "destructive",
+        onPress: async () => {
+          try {
+            const { synced } = await schedule.backToTodo(job.id, booking.id, plan.kind === "list" ? (plan.status ? { status: plan.status } : {}) : null);
+            setBookings((cur) => (cur ? cur.filter((b) => b.id !== booking.id) : cur));
+            if (plan.kind === "list") {
+              setJobs((cur) => cur.filter((j) => j.id !== job.id));
+              setTodoJobs((cur) =>
+                cur && !cur.some((j) => j.id === job.id)
+                  ? [
+                      ...cur,
+                      {
+                        id: job.id,
+                        job_number: job.job_number,
+                        title: job.title,
+                        priority: job.priority ?? "normal",
+                        status: plan.status ?? job.status,
+                        todo_listed_at: new Date().toISOString(),
+                        estimated_hours: job.estimated_hours ?? null,
+                        po_allocated_hours: null,
+                        customer_name: job.customers?.name ?? null,
+                        suburb: null,
+                      },
+                    ]
+                  : cur
+              );
+            }
+            showNotice(
+              synced
+                ? { tone: "ok", text: plan.kind === "list" ? `#${job.job_number} is back on the to-do list.` : `#${job.job_number}: booking removed.` }
+                : { tone: "wait", text: `Not on the server yet: #${job.job_number} off the schedule. It sends when you're back online.` }
+            );
+            if (synced) {
+              void load();
+              void loadTodo();
+            }
+          } catch (e) {
+            showNotice({ tone: "bad", text: `Couldn't change #${job.job_number}: ${e instanceof Error ? e.message : "please try again."}` });
+          }
+        },
+      },
+    ]);
+  }
+
+  /** "Add job…": list it (with its estimate) through the outbox. */
+  const addToTodo = useCallback(
+    async (job: TodoCandidate, estimatedHours: number | null) => {
+      if (!schedule.ready) throw new Error("The app is still starting up. Try again in a moment.");
+      const { synced } = await schedule.listOnTodo(job.id, estimatedHours);
+      setTodoJobs((cur) => [
+        ...(cur ?? []).filter((j) => j.id !== job.id),
+        {
+          id: job.id,
+          job_number: job.job_number,
+          title: job.title,
+          priority: job.priority,
+          status: job.status,
+          todo_listed_at: new Date().toISOString(),
+          estimated_hours: estimatedHours,
+          po_allocated_hours: null,
+          customer_name: job.customer_name,
+          suburb: job.suburb,
+        },
+      ]);
+      showNotice(
+        synced
+          ? { tone: "ok", text: `#${job.job_number} added to the to-do list.` }
+          : { tone: "wait", text: `#${job.job_number} goes on the to-do list when you're back online.` }
+      );
+      if (synced) void loadTodo();
+    },
+    [schedule, showNotice, loadTodo]
+  );
+
+  /** The cross on a to-do row: off the list, nothing else changes. */
+  const removeFromTodo = useCallback(
+    (job: TodoJob) => {
+      Alert.alert(`Take #${job.job_number} off the to-do list?`, job.title, [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Take off",
+          style: "destructive",
+          onPress: async () => {
+            if (!schedule.ready) return;
+            setTodoJobs((cur) => (cur ? cur.filter((j) => j.id !== job.id) : cur));
+            try {
+              const { synced } = await schedule.unlistTodo(job.id);
+              showNotice(
+                synced
+                  ? { tone: "ok", text: `#${job.job_number} taken off the to-do list.` }
+                  : { tone: "wait", text: `#${job.job_number} comes off the to-do list when you're back online.` }
+              );
+            } catch (e) {
+              setTodoJobs((cur) => (cur && !cur.some((j) => j.id === job.id) ? [...cur, job] : cur));
+              showNotice({ tone: "bad", text: `Couldn't take #${job.job_number} off: ${e instanceof Error ? e.message : "please try again."}` });
+            }
+          },
+        },
+      ]);
+    },
+    [schedule, showNotice]
+  );
+
   // One row per booked DAY, not per job (migration 0071): a Mon–Wed daily job
   // appears under Monday, Tuesday and Wednesday with that day's hours, and
   // not under the weekend it skips. A single-day job is one row, as before.
@@ -601,19 +901,54 @@ export default function ScheduleScreen() {
   // person through assigned_to, which collapsed any existing crew to them.
   function openReassign(job: SchedJob) {
     setReassignJob(job);
-    setCrew(job.assigned_to ? [job.assigned_to] : []);
+    const seed = job.assigned_to ? [job.assigned_to] : [];
+    setCrew(seed);
+    setCrewBefore(seed);
     supabase
       .from("job_assignments")
       .select("staff_id")
       .eq("job_id", job.id)
       .then(({ data, error: crewError }) => {
         // Offline / failed read: keep the primary-assignee seed above.
-        if (!crewError && data) setCrew(data.map((r: { staff_id: string }) => r.staff_id));
+        if (!crewError && data) {
+          const ids = data.map((r: { staff_id: string }) => r.staff_id);
+          setCrew(ids);
+          setCrewBefore(ids);
+        }
       });
   }
 
+  // Leave on the window a newly added crew member would be booked on (0079
+  // books a newcomer on the job's one shared window; none when the bookings
+  // differ). Leave is read online only — offline nothing is flagged, as
+  // everywhere else on the phone. Labels follow 0112's "who sees the leave
+  // type" setting (a withheld type reads "Unavailable").
+  const crewLeave = useMemo(() => {
+    const out = new Map<string, ReturnType<typeof crewLeaveConflicts>>();
+    if (!reassignJob || leave.length === 0) return out;
+    const window = crewJoinWindow(bookings === null ? null : realBookings.filter((b) => b.job_id === reassignJob.id), reassignJob);
+    for (const s of staff) {
+      if (crewBefore.includes(s.id)) continue;
+      const hits = crewLeaveConflicts(s.id, window, leave, todayKey);
+      if (hits.length > 0) out.set(s.id, hits);
+    }
+    return out;
+  }, [reassignJob, leave, bookings, realBookings, staff, crewBefore, todayKey]);
+
   function toggleCrew(staffId: string) {
-    setCrew((cur) => (cur.includes(staffId) ? cur.filter((id) => id !== staffId) : [...cur, staffId]));
+    if (crew.includes(staffId)) {
+      setCrew((cur) => cur.filter((id) => id !== staffId));
+      return;
+    }
+    const hits = crewLeave.get(staffId);
+    if (!hits) {
+      setCrew((cur) => (cur.includes(staffId) ? cur : [...cur, staffId]));
+      return;
+    }
+    Alert.alert("Not available", `${describeCrewLeave(nameOf(staffId), hits)} Book anyway?`, [
+      { text: "Cancel", style: "cancel" },
+      { text: "Book anyway", onPress: () => setCrew((cur) => (cur.includes(staffId) ? cur : [...cur, staffId])) },
+    ]);
   }
 
   async function onSaveCrew() {
@@ -802,6 +1137,26 @@ export default function ScheduleScreen() {
           </TouchableOpacity>
         </View>
       ) : null}
+      {canTodo ? (
+        <View style={styles.todoBar}>
+          {placing ? (
+            <View style={styles.placingBar} accessibilityLiveRegion="polite">
+              <Ionicons name="hand-left-outline" size={18} color="#fff" />
+              <Text style={styles.placingText} numberOfLines={2}>
+                Tap {view === "week" ? "a technician's day" : "a technician"} to place #{placing.job_number} {placing.title}
+              </Text>
+              <TouchableOpacity onPress={() => setPlacing(null)} hitSlop={10} accessibilityRole="button" accessibilityLabel="Stop placing">
+                <Text style={styles.placingCancel}>Cancel</Text>
+              </TouchableOpacity>
+            </View>
+          ) : (
+            <TouchableOpacity style={styles.todoBtn} onPress={() => setTodoOpen(true)} accessibilityRole="button" accessibilityLabel="Open the to-do list">
+              <Ionicons name="list" size={16} color="#4338ca" />
+              <Text style={styles.todoBtnText}>To-do ({todoJobs?.length ?? "…"})</Text>
+            </TouchableOpacity>
+          )}
+        </View>
+      ) : null}
       {staffError && view !== "list" ? (
         <TouchableOpacity style={[styles.staffErrorRow, { marginHorizontal: 12, marginBottom: 6 }]} onPress={loadStaff}>
           <Ionicons name="alert-circle-outline" size={18} color={colors.orange700} />
@@ -828,6 +1183,10 @@ export default function ScheduleScreen() {
           leave={leaveIndex}
           reassign={reassign}
           onOpenLeave={onOpenLeave}
+          gapFor={canTodo ? gapFor : undefined}
+          onGapPress={onGapPress}
+          placing={canTodo && !!placing}
+          onPlace={onPlace}
         />
       ) : (
         <SectionList
@@ -892,6 +1251,13 @@ export default function ScheduleScreen() {
                   label={menuItem?.booking ? "Reschedule this booking" : "Reschedule"}
                   onPress={() => { setDatePickerFor(menuItem); setMenuItem(null); }}
                 />
+                {canTodo && menuItem?.booking && bookings !== null ? (
+                  <Action
+                    icon="return-down-back-outline"
+                    label="Back to to-do list"
+                    onPress={() => { const item = menuItem; setMenuItem(null); if (item) backToTodo(item); }}
+                  />
+                ) : null}
               </>
             )}
             <Action icon="open-outline" label="Open job details" onPress={() => { const id = menuItem?.job.id; setMenuItem(null); if (id) router.push(`/job/${id}`); }} />
@@ -930,6 +1296,11 @@ export default function ScheduleScreen() {
                     <View style={{ flex: 1 }}>
                       <Text style={styles.staffName}>{s.full_name}</Text>
                       <Text style={styles.staffRole}>{s.role}</Text>
+                      {crewLeave.has(s.id) ? (
+                        <Text style={styles.staffLeave} numberOfLines={2}>
+                          ⚠ {describeCrewLeave(s.full_name, crewLeave.get(s.id)!)}
+                        </Text>
+                      ) : null}
                     </View>
                   </TouchableOpacity>
                 );
@@ -946,6 +1317,21 @@ export default function ScheduleScreen() {
           </View>
         </View>
       </Modal>
+
+      {canTodo ? (
+        <TodoSheet
+          visible={todoOpen}
+          onClose={() => setTodoOpen(false)}
+          jobs={todoJobs}
+          loadError={todoError}
+          onRetry={() => void loadTodo()}
+          gapInput={gapInput}
+          onGapInput={setGapInput}
+          onPlace={pickToPlace}
+          onRemove={removeFromTodo}
+          onAdd={addToTodo}
+        />
+      ) : null}
 
       {datePickerFor && (
         <DateTimePicker
@@ -1015,6 +1401,32 @@ const styles = StyleSheet.create({
   staffErrorText: { flex: 1, fontSize: 12, color: colors.orange700, lineHeight: 16 },
   staffName: { fontSize: 15, fontWeight: "600", color: colors.slate900 },
   staffRole: { fontSize: 12, color: colors.slate400, textTransform: "capitalize", marginTop: 1 },
+  staffLeave: { fontSize: 12, color: "#9f1239", fontWeight: "600", marginTop: 2 },
+  todoBar: { flexDirection: "row", alignItems: "center", gap: 8, marginHorizontal: 12, marginBottom: 6 },
+  todoBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    minHeight: 40,
+    paddingHorizontal: 12,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: "#c7d2fe",
+    backgroundColor: "#eef2ff",
+  },
+  todoBtnText: { fontSize: 13, fontWeight: "700", color: "#4338ca" },
+  placingBar: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    minHeight: 44,
+    paddingHorizontal: 12,
+    borderRadius: 10,
+    backgroundColor: "#4f46e5",
+  },
+  placingText: { flex: 1, fontSize: 13, fontWeight: "600", color: "#fff", lineHeight: 17 },
+  placingCancel: { fontSize: 13, fontWeight: "800", color: "#fff" },
   saveCrewBtn: { marginTop: 12, paddingVertical: 12, borderRadius: 10, alignItems: "center", backgroundColor: colors.blue600 },
   saveCrewText: { color: "#fff", fontWeight: "700", fontSize: 15 },
   cancelBtn: { marginTop: 12, paddingVertical: 12, borderRadius: 10, backgroundColor: colors.bg, alignItems: "center", borderWidth: 1, borderColor: colors.border },

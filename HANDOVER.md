@@ -354,8 +354,16 @@ schedule so nobody books them; bookings already on those days get flagged.
   changed. Web and phone may merge/ship before or after.
 - **Not done:** leave isn't on the phone offline (deliberate); a part day of
   unknown time can't be placed on the Day timeline, so it covers the whole
-  day; the phone crew picker (Reassign) doesn't warn; "Needs reassigning" is
-  a flag, not a task list.
+  day; "Needs reassigning" is a flag, not a task list.
+- **Phone crew picker (Reassign technician) warns too** (19 Nov 2026):
+  ticking someone NEW into a job's crew asks "<name> isn't available then —
+  Sick Tue 18 Nov. Book anyway?", and the picker row shows the clash. The
+  window checked is the one 0079 would book them on (`crewJoinWindow`,
+  `mobile/lib/crewLeave.ts`, tested): the job's bookings' one shared window,
+  none when they differ (the newcomer joins without a booking), the job's own
+  window before 0079. Uses the mirrored `bookingLeaveConflicts` and the same
+  online leave read, so offline it says nothing; a withheld type reads
+  "Unavailable".
 
 **Supplier POs from the phone (migration `0085` applied 2026-10-28).**
 Justin, 28 Oct 2026: any technician, on any job, can raise a purchase order to
@@ -2454,9 +2462,9 @@ Jobs list retries without `todo_listed_at` on `42703`, and the Schedule tab
 shows a load error on its own panel only. `mobile/lib/powersync/schema.ts` gained
 the three columns by hand (exactly what the generator emits after the apply —
 `office_jobs` syncs `jobs.*`); regenerating it is optional now that `0067` is live.
-No mobile UI yet.
+The phone's office Schedule tab has the list too (19 Nov 2026 — below).
 
-**To-do list beside the board — drag in and out (19 Nov 2026; no migration; web only).**
+**To-do list beside the board — drag in and out (19 Nov 2026; no migration; web, and the phone's office Schedule tab).**
 Justin: "drag and drop jobs that either weren't ready or jobs that can be done
 anytime … Should a job fall over at last minute, we can drag and populate the
 schedule from the to-do list. So we need to drag in and out of the to-do list,
@@ -2524,7 +2532,47 @@ of unbilled labour hours."
   data at 1600 px and iPhone size: drag in (placed after the existing booking),
   leave confirm, drag out (last booking and with other bookings), cut → panel,
   add by search, gap → Fits-in, tap-to-place on a phone.
-- **Not on the phone** (the office Schedule tab has no to-do list yet).
+- **On the phone too** (19 Nov 2026; office/admin — the `(office)` route
+  group, re-checked with `useIsOfficeOrAdmin`; no migration, no stream change).
+  Office Schedule tab (`mobile/app/(office)/schedule.tsx`):
+  - **"To-do (N)"** under the header opens `components/schedule/TodoSheet.tsx`
+    (a `KeyboardSheet`): rows as on the web (number/title, customer · suburb,
+    priority, hours — estimate, else "(PO)" — days on list, status), "Fits in
+    [__] h", **Place**, ✕ (confirms, then off the list), and **Add job…** (the
+    web's server search, online only) with the optional estimate.
+  - **Place = tap-to-place** (dragging out of a sheet is awkward on a phone):
+    the sheet closes, a banner says "Tap a technician's day to place #123"
+    (Cancel), and the next tap on the Day/Week grid (Day view: a technician's
+    row or name) picks technician × day; from List view it switches to Day.
+    Same rules as the web drop: `planTodoDrop` (the phone's estimate is
+    estimate else PO hours, as the web), closed jobs and a database without
+    bookings refused, and it ALWAYS confirms (a tap misses more easily than a
+    drag), adding "already booked then" (`newBookingClashes`) and the 0112
+    leave warning → "Book anyway". Writes through the outbox
+    (`ScheduleRepository.placeTodo`): the booking insert, then the
+    `jobPatchAfterDrop` jobs update **depending on the insert** (a refused
+    booking never leaves a job "scheduled" with nothing booked), then the
+    calendar sync. The block shows at once, tagged until the server has it.
+  - **"Back to to-do list"** in a booking's menu: `planDragOut` +
+    `describeDragOut`, the web's words. `ScheduleRepository.backToTodo`
+    deletes THAT booking, and for the last booking queues the listing (and
+    scheduled → pending) **after the delete** — 0067 only keeps the listing
+    once 0079 has cleared `scheduled_start`.
+  - **Free hours**: a green "N h free" under each Week cell (rows grow a
+    20 px strip so it never covers a booking) and beside the hours under each
+    name in Day view (`unbookedHours`, the grid's own booked hours and the
+    online leave); a tap sets Fits-in and opens the sheet.
+  - Rules mirrored: `mobile/lib/todoBoard.ts` (identical to `lib/todo-board.ts`
+    below the imports) and `mobile/lib/todoList.ts` (identical to
+    `lib/todo-list.ts` from the first export), pinned by
+    `tests/unit/todo-board-mirror.test.ts` — change the web file first.
+    Reads: `mobile/lib/data/reads/todo.ts` (remote, like the rest of the tab;
+    PO hours from `purchase_orders_public.total_hours` only, best-effort).
+    Tests: `todoBoard.test.ts`, `reads/todo.test.ts`, the to-do block of
+    `repositories/schedule.test.ts`. Not yet checked on a device.
+  - Listing / unlisting from the phone are outbox writes, so offline they
+    wait; the 0067 trigger still decides (a job scheduled meanwhile stays
+    unlisted). Reaches phones with the next build (no native module).
 
 All 21 other open questions are resolved, each with its reasoning recorded in
 `mobile/DECISIONS-FOR-AVI.md`.
