@@ -7,6 +7,8 @@ import {
   DragOverlay,
   PointerSensor,
   closestCenter,
+  pointerWithin,
+  type CollisionDetection,
   useDraggable,
   useDroppable,
   useSensor,
@@ -15,6 +17,7 @@ import {
   type DragStartEvent,
 } from "@dnd-kit/core";
 import { toast } from "sonner";
+import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 // Every move writes ONE booking row (lib/bookings.ts) and then pushes the job
 // to Google Calendar (pushJobToCalendar — a move the calendar never hears
@@ -23,12 +26,26 @@ import { createClient } from "@/lib/supabase/client";
 // (triggers in 0079 yet), so nothing here writes
 // assigned_to, job_assignments or jobs.scheduled_* any more.
 import { pushJobToCalendar } from "@/lib/schedule-dispatch";
-import { bookingWindow, insertBookings, updateBooking, type BookingWriteClient } from "@/lib/bookings";
+import { bookingWindow, deleteBooking, insertBookings, updateBooking, type BookingWriteClient } from "@/lib/bookings";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { TodoListPanel, type TodoJob } from "./todo-list-panel";
+import { TodoBoardPanel, TodoDragCard } from "./todo-board-panel";
+// The to-do list beside the board (drag in, drag out, unbooked hours) — rules
+// in lib/todo-board.ts, web only.
+import {
+  describeDragOut,
+  jobPatchAfterDrop,
+  newBookingClashes,
+  planDragOut,
+  planTodoDrop,
+  TODO_PANEL_DROP_ID,
+  unbookedHours,
+  type DayGap,
+} from "@/lib/todo-board";
+import { todoHours } from "@/lib/todo-list";
 import { BoardJobLink } from "./board-job-link";
 import {
   applyBoardMove,
@@ -639,6 +656,8 @@ function DroppableWeekCell({
   id,
   isToday,
   hours,
+  gap,
+  onGapClick,
   onPick,
   children,
 }: {
@@ -646,6 +665,9 @@ function DroppableWeekCell({
   isToday?: boolean;
   /** Booked hours for this technician on this day; omitted for Unassigned. */
   hours?: number;
+  /** Unbooked hours (office/admin only — the to-do list's gap). */
+  gap?: DayGap;
+  onGapClick?: (hours: number) => void;
   onPick?: (id: string) => void;
   children: React.ReactNode;
 }) {
@@ -662,13 +684,53 @@ function DroppableWeekCell({
         onPick && "cursor-copy hover:ring-2 hover:ring-inset hover:ring-amber-400"
       )}
     >
-      {hours !== undefined && hours > 0 && (
-        <p className="text-[10px] font-semibold text-slate-500 text-right leading-none">{formatHours(hours)}</p>
+      {((hours !== undefined && hours > 0) || (gap?.kind === "free" && gap.hours > 0)) && (
+        <div className="flex items-center justify-between gap-1 leading-none">
+          {gap?.kind === "free" && gap.hours > 0 ? <GapButton hours={gap.hours} onClick={onGapClick} compact /> : <span />}
+          {hours !== undefined && hours > 0 && <p className="text-[10px] font-semibold text-slate-500">{formatHours(hours)}</p>}
+        </div>
       )}
       {children}
     </div>
   );
 }
+
+/**
+ * A technician's unbooked hours on a day ("3 h free"). A click sets the to-do
+ * panel's "Fits in" to it, so the office sees what can fill the gap. Never
+ * reaches the cell (no paste, no drop).
+ */
+function GapButton({ hours, onClick, compact }: { hours: number; onClick?: (hours: number) => void; compact?: boolean }) {
+  return (
+    <button
+      type="button"
+      data-gap-hours={hours}
+      title="Unbooked hours — click to show to-do jobs that fit"
+      onPointerDown={(e) => e.stopPropagation()}
+      onClick={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        onClick?.(hours);
+      }}
+      className={cn(
+        "rounded bg-emerald-50 font-semibold text-emerald-700 hover:bg-emerald-100 border border-emerald-200",
+        compact ? "px-1 text-[10px] leading-4" : "px-1.5 text-xs"
+      )}
+    >
+      {formatHours(hours)} free
+    </button>
+  );
+}
+
+/**
+ * Board drops: the droppable under the pointer wins (so the to-do panel,
+ * which is tall, can't steal a drop aimed at a cell next to it — or the other
+ * way round); with the pointer over nothing, the nearest, as before.
+ */
+const boardCollision: CollisionDetection = (args) => {
+  const within = pointerWithin(args);
+  return within.length > 0 ? within : closestCenter(args);
+};
 
 /** Everyone booked on a job, in booking order, once each. */
 function bookedNames(bookings: readonly BoardBooking[], staffById: Map<string, StaffMember>) {
@@ -723,7 +785,38 @@ export function TeamScheduleView({
   // until someone schedules them, rather than flooding this board's
   // Unassigned column. The cards are their bookings.
   const [bookings, setBookings] = useState<BoardBooking[]>(initialBookings);
-  const jobsById = useMemo(() => new Map(jobs.map((j) => [j.id, j])), [jobs]);
+  // The board's jobs and the to-do list are local too: a to-do job dropped on
+  // the board joins the board's jobs before the server confirms (and a booking
+  // dragged back puts its job on the list). After each such write the page is
+  // refreshed, and new props replace all three — what's shown is then what
+  // the database holds.
+  const [boardJobs, setBoardJobs] = useState<BoardJob[]>(jobs);
+  const [todoList, setTodoList] = useState<TodoJob[]>(todoJobs);
+  const [seenProps, setSeenProps] = useState({ jobs, initialBookings, todoJobs });
+  if (seenProps.jobs !== jobs || seenProps.initialBookings !== initialBookings || seenProps.todoJobs !== todoJobs) {
+    setSeenProps({ jobs, initialBookings, todoJobs });
+    setBoardJobs(jobs);
+    setBookings(initialBookings);
+    setTodoList(todoJobs);
+  }
+  const router = useRouter();
+  // Jobs-table writes (to-do listing, status). Its own handle: `supabase`
+  // above is narrowed to job_bookings.
+  const db = useMemo(() => createClient(), []);
+  // The to-do panel beside the board is the office's; technicians never see it.
+  const canTodo = viewerRole === "office" || viewerRole === "admin";
+  // Open beside the board on a wide screen; behind a toggle on a phone.
+  const [todoOpen, setTodoOpen] = useState(false);
+  useEffect(() => {
+    if (typeof window !== "undefined" && window.matchMedia?.("(min-width: 1024px)").matches) setTodoOpen(true);
+  }, []);
+  // "Fits in [__] h" — typed, or set by clicking a technician's free hours.
+  const [gapInput, setGapInput] = useState("");
+  // A to-do job picked to place by tapping a cell (the touch path for drag-in).
+  const [placing, setPlacing] = useState<TodoJob | null>(null);
+  // The to-do job being dragged, for the overlay.
+  const [activeTodo, setActiveTodo] = useState<TodoJob | null>(null);
+  const jobsById = useMemo(() => new Map(boardJobs.map((j) => [j.id, j])), [boardJobs]);
   // The card being dragged, for the overlay.
   const [activeEntry, setActiveEntry] = useState<BoardEntry | null>(null);
   // The job double-clicked for cut & paste; the next cell clicked receives it.
@@ -762,9 +855,9 @@ export function TeamScheduleView({
   // The List tab's days for each job: the union of its bookings' days.
   const jobDays = useMemo(() => {
     const map = new Map<string, ReturnType<typeof jobDaysFromBookings>>();
-    for (const job of jobs) map.set(job.id, jobDaysFromBookings(bookingsByJob.get(job.id) ?? [], bookingDays));
+    for (const job of boardJobs) map.set(job.id, jobDaysFromBookings(bookingsByJob.get(job.id) ?? [], bookingDays));
     return map;
-  }, [jobs, bookingsByJob, bookingDays]);
+  }, [boardJobs, bookingsByJob, bookingDays]);
 
   // Read every render, as isTodayInBusinessTZ did, so a board left open past
   // midnight still re-splits today/upcoming on its next render. "Today" is
@@ -774,7 +867,7 @@ export function TeamScheduleView({
   const { todayJobsLive, upcomingJobsLive } = useMemo(() => {
     const today: BoardJob[] = [];
     const upcoming: BoardJob[] = [];
-    for (const job of jobs) {
+    for (const job of boardJobs) {
       const days = jobDays.get(job.id) ?? [];
       if (days.length === 0) continue;
       (days.some((d) => d.dateKey === liveTodayKey) ? today : upcoming).push(job);
@@ -783,7 +876,7 @@ export function TeamScheduleView({
     // the page's scheduled_start order once a booking has been moved here.
     upcoming.sort((a, b) => (jobDays.get(a.id)![0].startIso < jobDays.get(b.id)![0].startIso ? -1 : 1));
     return { todayJobsLive: today, upcomingJobsLive: upcoming };
-  }, [jobs, jobDays, liveTodayKey]);
+  }, [boardJobs, jobDays, liveTodayKey]);
 
   // Week grid — staff (rows) x the 7 days (Mon-Sun) containing
   // selectedDateKey. The day board is the same index over one day.
@@ -1007,20 +1100,250 @@ export function TeamScheduleView({
 
   function handleDragStart(event: DragStartEvent) {
     setCut(null);
-    setActiveEntry((event.active.data.current?.entry as BoardEntry | undefined) ?? null);
+    setPlacing(null);
+    const data = event.active.data.current as { kind?: string; job?: TodoJob; entry?: BoardEntry } | undefined;
+    if (data?.kind === "todo") {
+      setActiveTodo(data.job ?? null);
+      return;
+    }
+    setActiveEntry(data?.entry ?? null);
   }
 
   function handleDragEnd(event: DragEndEvent) {
     setActiveEntry(null);
+    setActiveTodo(null);
     const { active, over } = event;
     if (!over) return;
-    const pickup = active.data.current as Pickup | undefined;
+    const data = active.data.current as ({ kind?: string; job?: TodoJob } & Partial<Pickup>) | undefined;
+    if (data?.kind === "todo") {
+      const target = parseBoardTarget(over.id as string, selectedDateKey);
+      if (data.job && target) void dropTodo(data.job, target);
+      return;
+    }
+    if (over.id === TODO_PANEL_DROP_ID) {
+      if (data?.bookingId && data.source) void dragOut({ bookingId: data.bookingId, source: data.source });
+      return;
+    }
     const target = parseBoardTarget(over.id as string, selectedDateKey);
-    if (!pickup || !target) return;
-    void moveBooking(pickup.bookingId, pickup.source, target, shiftHeld.current ? "add" : "move");
+    if (!data?.bookingId || !data.source || !target) return;
+    void moveBooking(data.bookingId, data.source, target, shiftHeld.current ? "add" : "move");
   }
 
-  const onPick = cut ? placeCut : undefined;
+  // -------------------------------------------------------------------------
+  // The to-do list beside the board
+  // -------------------------------------------------------------------------
+
+  /** A to-do job as a board job, until the refresh brings the real row. */
+  function boardJobFromTodo(job: TodoJob): BoardJob {
+    return {
+      id: job.id,
+      job_number: job.job_number,
+      title: job.title,
+      status: job.status,
+      scheduled_start: null,
+      scheduled_end: null,
+      assigned_to: null,
+      crew: [],
+      customers: job.customer_name ? { name: job.customer_name } : null,
+      sites: job.suburb ? { suburb: job.suburb } : null,
+    };
+  }
+
+  /**
+   * Drag in: a to-do job dropped (or placed by tap) on a technician's day —
+   * or Unassigned. One booking (planTodoDrop), the same guards as every other
+   * board write: closed jobs and a read-only board refused, "already booked
+   * then" and leave asked first, the card shown as pending until the insert
+   * returns, and taken back off on a refusal. Then the job comes off the
+   * list (and a pending job becomes scheduled) and Google hears.
+   */
+  async function dropTodo(job: TodoJob, target: BoardCell) {
+    setPlacing(null);
+    if (bookingsReadOnly) {
+      toast.error("Bookings aren't set up in this database yet — schedule this job from its Schedule dialog.");
+      return;
+    }
+    if (isClosedJob(job)) {
+      toast.error(`#${job.job_number} is ${job.status} — it can't be scheduled.`);
+      return;
+    }
+    const estimate = todoHours(job.estimated_hours, job.po_allocated_hours).hours;
+    const dayBlocks = target.staffId
+      ? bookings.filter((b) => b.staff_id === target.staffId).flatMap((b) => bookingDays.get(b.id) ?? [])
+      : [];
+    const insert = planTodoDrop({ jobId: job.id, staffId: target.staffId, dateKey: target.dateKey, estimateHours: estimate, dayBlocks });
+    const asBoardJob = jobsById.get(job.id) ?? boardJobFromTodo(job);
+    const clashes = newBookingClashes(insert, bookings);
+    if (clashes.length > 0) {
+      const ok = await askConfirm(
+        `${nameOf(target.staffId)} is already booked then`,
+        [
+          `#${job.job_number} — ${job.title}`,
+          ...clashes.map((c) => {
+            const j = jobsById.get(c.job_id);
+            return `Already on #${j?.job_number ?? "?"} ${j?.title ?? ""}`.trim();
+          }),
+        ],
+        "Book anyway",
+      );
+      if (!ok) return;
+    }
+    if (!(await okToBookOverLeave(asBoardJob, insert))) return;
+
+    const tempId = `pending:todo:${job.id}:${Date.now()}`;
+    setBoardJobs((prev) => (prev.some((j) => j.id === job.id) ? prev : [...prev, asBoardJob]));
+    setBookings((prev) => [...prev, { ...insert, id: tempId, cost_center_name: null }]);
+    setTodoList((prev) => prev.filter((j) => j.id !== job.id));
+    const inserted = await insertBookings(supabase, [insert]);
+    if (!inserted.ok) {
+      setBookings((prev) => prev.filter((b) => b.id !== tempId));
+      setTodoList((prev) => (prev.some((j) => j.id === job.id) ? prev : [...prev, job]));
+      toast.error(`#${job.job_number} was not booked — ${inserted.error}`);
+      return;
+    }
+    const real = inserted.rows[0];
+    setBookings((prev) => prev.map((b) => (b.id === tempId ? { ...real, note: null, cost_center_name: null } : b)));
+    // 0067's trigger already took it off the list when 0079 derived the new
+    // scheduled_start; this also covers a job listed while it had a start,
+    // and moves a pending job to scheduled (the Schedule dialog's rule).
+    const patch = jobPatchAfterDrop(job.status);
+    const { error: jobError, count } = await db.from("jobs").update(patch, { count: "exact" }).eq("id", job.id);
+    if (jobError || count === 0) toast.warning(`#${job.job_number} booked — but its status/to-do flag could not be updated`);
+    if (patch.status) setBoardJobs((prev) => prev.map((j) => (j.id === job.id ? { ...j, status: patch.status! } : j)));
+    const when = formatDate(anchorForDateKey(target.dateKey), { weekday: "short", day: "numeric", month: "short" });
+    announce(`#${job.job_number} booked for ${nameOf(target.staffId)} on ${when}`, await pushJobToCalendar(job.id));
+    router.refresh();
+  }
+
+  /**
+   * Drag out: a booking dropped on the to-do panel (or cut, then the panel
+   * clicked). Deletes THAT booking only — never the rest of the crew's — and,
+   * when it was the job's last, puts the job back on the list (planDragOut).
+   * Always asks first.
+   */
+  async function dragOut(pickup: Pickup) {
+    setCut(null);
+    const booking = bookings.find((b) => b.id === pickup.bookingId);
+    const job = booking ? jobsById.get(booking.job_id) : undefined;
+    if (!booking || !job) return;
+    if (resize?.booking.id === booking.id) return;
+    if (bookingsReadOnly) {
+      toast.error("Bookings aren't set up in this database yet — change this job from its Schedule dialog.");
+      return;
+    }
+    const plan = planDragOut(booking, bookingsByJob.get(job.id) ?? [], job.status);
+    if (plan.kind === "refuse") {
+      toast.error(plan.reason);
+      return;
+    }
+    const days = bookingDays.get(booking.id) ?? [];
+    const when =
+      days.length > 1
+        ? formatDateKeyRange(days[0].dateKey, days[days.length - 1].dateKey)
+        : formatDate(anchorForDateKey(days[0]?.dateKey ?? pickup.source.dateKey), { weekday: "long" });
+    const words = describeDragOut(plan, { jobNumber: job.job_number, who: booking.staff_id ? nameOf(booking.staff_id) : null, when });
+    if (!(await askConfirm(words.title, [`${job.title}. ${words.detail}`], words.action))) return;
+
+    setBookings((prev) => prev.filter((b) => b.id !== booking.id));
+    const removed = await deleteBooking(supabase, booking.id);
+    if (!removed.ok) {
+      setBookings((prev) => (prev.some((b) => b.id === booking.id) ? prev : [...prev, booking]));
+      toast.error(`#${job.job_number} was not changed — ${removed.error}`);
+      return;
+    }
+    const calendar = pushJobToCalendar(job.id);
+    if (plan.kind === "list") {
+      // One statement: back to pending (when it was scheduled) and listed.
+      // 0079 already cleared the job's scheduled_start with the delete, so
+      // 0067's trigger lets the listing stand; it stamps the time and lister.
+      const { data, error: listError, count } = await db
+        .from("jobs")
+        .update({ todo_listed_at: new Date().toISOString(), ...(plan.status ? { status: plan.status } : null) }, { count: "exact" })
+        .eq("id", job.id)
+        .select("todo_listed_at, estimated_hours, priority");
+      const row = data?.[0];
+      if (listError || count === 0 || !row?.todo_listed_at) {
+        announce(`#${job.job_number} taken off the board — but it could not be put on the to-do list`, await calendar);
+      } else {
+        const listedAt = row.todo_listed_at;
+        setTodoList((prev) => [
+          ...prev.filter((j) => j.id !== job.id),
+          {
+            id: job.id,
+            job_number: job.job_number,
+            title: job.title,
+            priority: row.priority ?? "normal",
+            status: plan.status ?? job.status,
+            todo_listed_at: listedAt,
+            estimated_hours: row.estimated_hours,
+            po_allocated_hours: null,
+            customer_name: job.customers?.name ?? null,
+            suburb: job.sites?.suburb ?? null,
+          },
+        ]);
+        if (plan.status) setBoardJobs((prev) => prev.map((j) => (j.id === job.id ? { ...j, status: plan.status! } : j)));
+        announce(`#${job.job_number} is back on the to-do list`, await calendar);
+      }
+    } else {
+      announce(`#${job.job_number}: ${booking.staff_id ? `${nameOf(booking.staff_id)}'s` : "the unassigned"} booking removed`, await calendar);
+    }
+    router.refresh();
+  }
+
+  /** The ✕ on a to-do row: off the list, nothing else changes. */
+  async function removeFromTodo(job: TodoJob) {
+    setTodoList((prev) => prev.filter((j) => j.id !== job.id));
+    if (placing?.id === job.id) setPlacing(null);
+    const { error: removeError, count } = await db
+      .from("jobs")
+      .update({ todo_listed_at: null, todo_listed_by: null }, { count: "exact" })
+      .eq("id", job.id);
+    if (removeError || count === 0) {
+      setTodoList((prev) => (prev.some((j) => j.id === job.id) ? prev : [...prev, job]));
+      toast.error(`Couldn't take #${job.job_number} off the to-do list`);
+      return;
+    }
+    toast.success(`#${job.job_number} taken off the to-do list`);
+    router.refresh();
+  }
+
+  // Tap-to-place: a click on any cell while a to-do job is picked.
+  function placeTodo(targetId: string) {
+    if (!placing) return;
+    const job = placing;
+    setPlacing(null);
+    const target = parseBoardTarget(targetId, selectedDateKey);
+    if (target) void dropTodo(job, target);
+  }
+
+  // Esc stops placing.
+  useEffect(() => {
+    if (!placing) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setPlacing(null);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [placing]);
+
+  /** A technician's free hours on a day (office/admin only). */
+  function gapFor(staffId: string, dateKey: string): DayGap | undefined {
+    if (!canTodo) return undefined;
+    return unbookedHours({
+      dateKey,
+      todayKey,
+      bookedHours: savedBoard.hours.get(staffId)?.get(dateKey) ?? 0,
+      leaveDays: leaveOn(staffId, dateKey),
+    });
+  }
+
+  /** Clicking a gap: show the to-do jobs that fit it. */
+  function filterToGap(hours: number) {
+    setGapInput(String(hours));
+    setTodoOpen(true);
+  }
+
+  const onPick = cut ? placeCut : placing ? placeTodo : undefined;
 
   /** The name tag for a tile: its row's technician, plus whoever else is on that job that day. */
   function tagFor(entry: BoardEntry): TileTag {
@@ -1246,7 +1569,7 @@ export function TeamScheduleView({
         <TabsTrigger value="day" className="gap-1.5"><CalendarDays className="w-3.5 h-3.5" />Day</TabsTrigger>
         <TabsTrigger value="list" className="gap-1.5"><LayoutList className="w-3.5 h-3.5" />List</TabsTrigger>
         <TabsTrigger value="todo" className="gap-1.5">
-          <ListTodo className="w-3.5 h-3.5" />To-do list{todoJobs.length > 0 ? ` (${todoJobs.length})` : ""}
+          <ListTodo className="w-3.5 h-3.5" />To-do list{todoList.length > 0 ? ` (${todoList.length})` : ""}
         </TabsTrigger>
       </TabsList>
 
@@ -1282,6 +1605,19 @@ export function TeamScheduleView({
               </Button>
             )}
           </div>
+          {canTodo && (
+            <Button
+              variant={todoOpen ? "secondary" : "outline"}
+              size="sm"
+              className="gap-1.5"
+              aria-expanded={todoOpen}
+              onClick={() => setTodoOpen((o) => !o)}
+            >
+              <ListTodo className="w-4 h-4" />
+              {todoOpen ? "Hide to-do list" : "To-do list"}
+              {todoList.length > 0 && <span className="rounded-full bg-indigo-600 px-1.5 text-[10px] font-bold text-white">{todoList.length}</span>}
+            </Button>
+          )}
 
         </div>
 
@@ -1323,10 +1659,27 @@ export function TeamScheduleView({
             <p className="flex items-center gap-2 min-w-0">
               <Scissors className="w-4 h-4 flex-shrink-0" />
               <span className="truncate">
-                Moving <span className="font-semibold">#{cutJob.job_number}</span> — click a technician&apos;s day to place it, Esc to cancel
+                Moving <span className="font-semibold">#{cutJob.job_number}</span> — click a technician&apos;s day to place it
+                {canTodo && todoOpen ? ", or the to-do list to take it off the board" : ""}, Esc to cancel
               </span>
             </p>
             <Button size="sm" variant="ghost" className="h-7 gap-1 flex-shrink-0" onClick={() => setCut(null)}>
+              <X className="w-3.5 h-3.5" />
+              Cancel
+            </Button>
+          </div>
+        ) : placing ? (
+          <div
+            role="status"
+            className="sticky top-0 z-20 mb-3 flex items-center justify-between gap-3 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900"
+          >
+            <p className="flex items-center gap-2 min-w-0">
+              <ListTodo className="w-4 h-4 flex-shrink-0" />
+              <span className="truncate">
+                Placing <span className="font-semibold">#{placing.job_number}</span> from the to-do list — tap a technician&apos;s day to book it, Esc to cancel
+              </span>
+            </p>
+            <Button size="sm" variant="ghost" className="h-7 gap-1 flex-shrink-0" onClick={() => setPlacing(null)}>
               <X className="w-3.5 h-3.5" />
               Cancel
             </Button>
@@ -1336,11 +1689,15 @@ export function TeamScheduleView({
             {viewMode === "day"
               ? "Each card is one technician's booking. Press and hold it and drag it onto a technician — or double-click it, then click the technician — to move that booking to them. Hold Shift as you drop to book them on the same time as well."
               : "Each card is one technician's booking. Press and hold it and drag it onto another technician and/or day — or double-click it, then click the cell — to move that booking. Hold Shift as you drop on a technician to book them as well. Drag a booking's left or right edge to change its first or last day."}
+            {canTodo && " Drag a to-do job onto a day to book it; drag a booking onto the to-do list to take it off."}
           </p>
         )}
 
+        <DndContext sensors={sensors} collisionDetection={boardCollision} onDragStart={handleDragStart} onDragEnd={handleDragEnd} onDragCancel={() => { setActiveEntry(null); setActiveTodo(null); }}>
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-start">
+        <div className="min-w-0 flex-1">
         {viewMode === "day" ? (
-          <DndContext sensors={sensors} collisionDetection={closestCenter} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
+          <>
             <div className="flex gap-4 overflow-x-auto pb-2">
               {(() => {
                 const unassigned = board.unassigned.get(selectedDateKey) ?? [];
@@ -1414,6 +1771,12 @@ export function TeamScheduleView({
                                 </>
                               )}
                             </p>
+                            {(() => {
+                              const gap = gapFor(member.id, selectedDateKey);
+                              return gap?.kind === "free" && gap.hours > 0 ? (
+                                <div className="mt-1"><GapButton hours={gap.hours} onClick={filterToGap} /></div>
+                              ) : null;
+                            })()}
                           </div>
                         </div>
                       </CardHeader>
@@ -1440,19 +1803,9 @@ export function TeamScheduleView({
                 <p className="text-slate-400 text-sm py-8">No active staff found.</p>
               )}
             </div>
-
-            <DragOverlay>
-              {activeEntry ? (
-                <div className="w-72 shadow-lg rounded-lg rotate-1 bg-white">
-                  <div className={JOB_CARD_CLASS}>
-                    <JobCardBody entry={activeEntry} tag={tagFor(activeEntry)} reassign={reassignOn(activeEntry)} />
-                  </div>
-                </div>
-              ) : null}
-            </DragOverlay>
-          </DndContext>
+          </>
         ) : (
-          <DndContext sensors={sensors} collisionDetection={closestCenter} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
+          <>
             {/* Names stay pinned on the left as you scroll across the days, and
                 the days stay pinned on top as you scroll down the team — the
                 way the phone's schedule grid works (Justin, 15 Nov 2026). The
@@ -1524,6 +1877,8 @@ export function TeamScheduleView({
                           id={weekCellId(member.id, key)}
                           isToday={key === todayKey}
                           hours={memberHours?.get(key) ?? 0}
+                          gap={gapFor(member.id, key)}
+                          onGapClick={filterToGap}
                           onPick={onPick}
                         >
                           {leaveOn(member.id, key).map((day) => (
@@ -1554,18 +1909,61 @@ export function TeamScheduleView({
                 <p className="text-slate-400 text-sm py-4">No active staff found.</p>
               )}
             </div>
-
-            <DragOverlay>
-              {activeEntry ? (
-                <div className="w-48 shadow-lg rounded-lg rotate-1 bg-white">
-                  <div className={WEEK_CHIP_CLASS}>
-                    <WeekJobChipBody entry={activeEntry} tag={tagFor(activeEntry)} reassign={reassignOn(activeEntry)} />
-                  </div>
-                </div>
-              ) : null}
-            </DragOverlay>
-          </DndContext>
+          </>
         )}
+        </div>
+
+        {canTodo && todoOpen && (
+          <div className="w-full max-h-[70vh] lg:w-72 lg:flex-shrink-0 order-first lg:order-last lg:sticky lg:top-2 lg:max-h-[calc(100vh_-_10rem)] flex">
+            <TodoBoardPanel
+              jobs={todoList}
+              error={todoError}
+              gapInput={gapInput}
+              onGapInput={setGapInput}
+              placingJobId={placing?.id ?? null}
+              onPlace={(job) => {
+                setCut(null);
+                setPlacing(job);
+                // On a phone the panel sits above the board: fold it away so
+                // the day to tap is on screen (the banner says what's picked).
+                if (job && !window.matchMedia?.("(min-width: 1024px)").matches) setTodoOpen(false);
+              }}
+              onRemove={(job) => void removeFromTodo(job)}
+              onAdded={(job) => {
+                setTodoList((prev) => [...prev.filter((j) => j.id !== job.id), job]);
+                router.refresh();
+              }}
+              bookingDragActive={!!activeEntry}
+              cutActive={!!cut}
+              onCutDrop={() => {
+                if (cut) void dragOut(cut);
+              }}
+              onClose={() => setTodoOpen(false)}
+            />
+          </div>
+        )}
+        </div>
+
+        <DragOverlay>
+          {activeTodo ? (
+            <TodoDragCard job={activeTodo} />
+          ) : activeEntry ? (
+            viewMode === "day" ? (
+              <div className="w-72 shadow-lg rounded-lg rotate-1 bg-white">
+                <div className={JOB_CARD_CLASS}>
+                  <JobCardBody entry={activeEntry} tag={tagFor(activeEntry)} reassign={reassignOn(activeEntry)} />
+                </div>
+              </div>
+            ) : (
+              <div className="w-48 shadow-lg rounded-lg rotate-1 bg-white">
+                <div className={WEEK_CHIP_CLASS}>
+                  <WeekJobChipBody entry={activeEntry} tag={tagFor(activeEntry)} reassign={reassignOn(activeEntry)} />
+                </div>
+              </div>
+            )
+          ) : null}
+        </DragOverlay>
+        </DndContext>
       </div>
       )}
 
@@ -1646,7 +2044,7 @@ export function TeamScheduleView({
       </TabsContent>
 
       <TabsContent value="todo" className="mt-4">
-        <TodoListPanel jobs={todoJobs} error={todoError} />
+        <TodoListPanel jobs={todoList} error={todoError} />
       </TabsContent>
 
       {/* A resize released onto days the technician is already booked:
