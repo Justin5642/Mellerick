@@ -2,7 +2,8 @@
 -- Truck loads (cartage): the driver logs each trip on the job as it happens —
 -- quarry product IN, spoil OUT to a tip — instead of only end-of-day hours.
 --
--- STATUS: DRAFT — NOT APPLIED. Paste it into the Supabase SQL editor, then
+-- STATUS: ✅ APPLIED IN PRODUCTION (2026-11-19, via SQL editor; gate test passed).
+-- Was: paste it into the Supabase SQL editor, then
 -- paste supabase/tests/0111_cartage_loads_test.sql and trust only its final
 -- "0111 PASSED" row. Then change this line to applied and record it in the
 -- ledger.
