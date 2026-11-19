@@ -4,17 +4,15 @@ import { createClient } from "@/lib/supabase/server";
 import { notFound } from "next/navigation";
 import { InvoiceDetail } from "@/components/invoice/invoice-detail";
 import { INVOICE_SITE_SELECT, invoiceJobSite } from "@/lib/job-site";
-import { getViewer } from "@/lib/auth/viewer";
 
 export default async function InvoiceDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const supabase = await createClient();
 
-  const [{ data: invoice }, { data: xeroToken }, paymentsRes, viewer] = await Promise.all([
+  const [{ data: invoice }, { data: xeroToken }, paymentsRes] = await Promise.all([
     supabase.from("invoices").select(`*, customers(name, company, email, phone), invoice_items(*), ${INVOICE_SITE_SELECT}`).eq("id", id).single(),
     supabase.from("xero_tokens").select("tenant_name").single(),
     supabase.from("invoice_payments").select("id, amount, paid_on, method, reference").eq("invoice_id", id).order("paid_on"),
-    getViewer(),
   ]);
 
   if (!invoice) notFound();
@@ -31,7 +29,6 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<{ 
       jobSite={invoiceJobSite(invoice)}
       xeroConnected={!!xeroToken}
       payments={payments}
-      isAdmin={viewer?.profile?.role === "admin"}
     />
   );
 }

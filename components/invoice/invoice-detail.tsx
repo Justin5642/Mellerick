@@ -37,11 +37,9 @@ interface Props {
   xeroConnected: boolean;
   /** null when the invoice_payments table is not in this database yet. */
   payments: InvoicePayment[] | null;
-  /** Deleting an invoice is admin only (DELETE /api/invoices/[id]). */
-  isAdmin?: boolean;
 }
 
-export function InvoiceDetail({ invoice, jobSite, xeroConnected, payments, isAdmin = false }: Props) {
+export function InvoiceDetail({ invoice, jobSite, xeroConnected, payments }: Props) {
   const progress = invoiceProgress(invoice);
   const [pushing, setPushing] = useState(false);
   const [pushed, setPushed] = useState(!!invoice.xero_invoice_id);
@@ -259,7 +257,7 @@ export function InvoiceDetail({ invoice, jobSite, xeroConnected, payments, isAdm
             </Link>
           ) : null}
 
-          {isAdmin && (
+          {(
             <Button
               variant="outline"
               size="sm"

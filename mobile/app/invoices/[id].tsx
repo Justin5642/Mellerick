@@ -21,7 +21,7 @@ import { InvoiceHours } from "../../components/finance/invoice-hours";
 // The office's invoice screen. Office/admin only: the route is registered for
 // the office group alone (app/_layout.tsx) and the screen sits in a RoleGate;
 // every action's route checks the role again (requireOfficeOrAdmin, or
-// requireAdmin for Xero and Delete). The invoice reads locally when it can;
+// requireAdmin for Xero). The invoice reads locally when it can;
 // PDF, Xero, payments, hours and delete go to the web routes and need signal
 // (lib/invoiceOffice.ts).
 
@@ -317,7 +317,7 @@ function InvoiceScreen() {
         </Card>
       )}
 
-      <RoleGate roles={["admin"]}>
+      <RoleGate roles={["admin", "office"]}>
         <TouchableOpacity style={[styles.deleteBtn, deleting && styles.disabled]} onPress={confirmDelete} disabled={deleting} accessibilityRole="button">
           <Ionicons name="trash-outline" size={16} color={colors.red600} />
           <Text style={styles.deleteText}>{deleting ? "Deleting..." : "Delete invoice"}</Text>

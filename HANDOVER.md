@@ -847,7 +847,7 @@ they need signal. Calls in `mobile/lib/invoiceOffice.ts` (Bearer, tested in
   **Hours from the job** with **Apply hourly rate** (`GET/POST
   /api/invoices/[id]/hours`, unchanged; one rate / per technician / per cost
   centre; the "already in Xero / emailed" 409 asks to confirm), Customer PO,
-  and **Delete invoice** (admin, the web's confirm words incl. the Xero
+  and **Delete invoice** (office/admin, the web's confirm words incl. the Xero
   warning). The old "PDF and Xero are managed on the web" notes are gone.
 - **Payments and delete moved to routes** (they were browser writes on the
   web; the web now uses them too, so both behave alike):
@@ -855,8 +855,7 @@ they need signal. Calls in `mobile/lib/invoiceOffice.ts` (Bearer, tested in
   Xero is connected, from `xero_tokens.tenant_name` as the web page reads it;
   `payments: null` on a database without 0081), `DELETE
   /api/invoices/[id]/payments/[paymentId]`, and `DELETE /api/invoices/[id]`
-  — **admin only now, on the web too** (the web's Delete button shows for
-  admins only; office could delete before). All run as the CALLER, so RLS
+  — office/admin, as the web's Delete button always was. All run as the CALLER, so RLS
   and 0081's triggers decide as before; an invoice in Xero refuses a manual
   payment (fixed sentence `PAYMENT_IN_XERO`). Validation `parsePayment` in
   `lib/invoice-payments.ts`; tests `tests/unit/invoice-office-routes.test.ts`.

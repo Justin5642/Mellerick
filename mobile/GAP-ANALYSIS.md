@@ -43,7 +43,7 @@ project waiting on one purchase order.
 | Approvals | near-full ✅ | ~~approve→auto-invoice, send-back~~ **DONE** (D40); ~~clocked-hours table, Apply hourly rate after approving, Variations to invoice~~ (19 Nov 2026); Xero auto-push after approval stays web |
 | Job Time tab (office/admin) | **full** ✅ | ~~log time for another person, edit anyone's entry, admin billing-rate override (normal / 1.5× / 2×), clock-location flag~~ (19 Nov 2026) |
 | Quotes | **full** ✅ | ~~convert-to-job~~ (D50); ~~Send by email + open PDF~~ **DONE** (19 Nov 2026, `app/quotes/[id]/send.tsx`) |
-| Invoices | **full** ✅ | ~~prefill-from-job + add unbilled variations~~ **DONE** (D44/Q15); ~~Send~~, ~~open PDF~~, ~~push/update in Xero~~ (admin), ~~record/remove payments + balance~~, ~~delete~~ (admin), ~~Owed to us~~, ~~progress claims + builder-PO picker / invoice one PO~~, ~~job hours + Apply hourly rate~~ **DONE** (19 Nov 2026, online only — HANDOVER "Office invoice and quote actions on the phone") |
+| Invoices | **full** ✅ | ~~prefill-from-job + add unbilled variations~~ **DONE** (D44/Q15); ~~Send~~, ~~open PDF~~, ~~push/update in Xero~~ (admin), ~~record/remove payments + balance~~, ~~delete~~, ~~Owed to us~~, ~~progress claims + builder-PO picker / invoice one PO~~, ~~job hours + Apply hourly rate~~ **DONE** (19 Nov 2026, online only — HANDOVER "Office invoice and quote actions on the phone") |
 | Schedule | partial ✅ | ~~assign/unassign, reschedule~~ **DONE** (D41); day/week grid deferred |
 
 ## Office/admin website bits closed on the phone (19 Nov 2026)

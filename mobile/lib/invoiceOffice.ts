@@ -8,7 +8,7 @@ import type { PaymentInput } from "./invoicePayments";
 //   PDF            GET    /api/invoices/[id]/pdf, /api/quotes/[id]/pdf
 //   Xero           POST   /api/xero/push-invoice            (admin)
 //   Payments       GET/POST /api/invoices/[id]/payments, DELETE …/payments/[paymentId]
-//   Delete         DELETE /api/invoices/[id]                (admin)
+//   Delete         DELETE /api/invoices/[id]                (office/admin)
 //   Job hours      GET/POST /api/invoices/[id]/hours
 //   Send a quote   POST   /api/quotes/[id]/send
 //

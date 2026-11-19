@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { requireUser } from "@/lib/api/guards";
+import { requireRole } from "@/lib/api/guards";
 import { reportError } from "@/lib/monitoring";
 
 // "Set site location here" (clock extras, 31 Oct 2026): standing on site, a
@@ -14,7 +14,7 @@ import { reportError } from "@/lib/monitoring";
 const MAX_PIN_ACCURACY_METRES = 50;
 
 export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const guard = await requireUser(request);
+  const guard = await requireRole(request, ["admin", "office", "technician"]);
   if (!guard.ok) return guard.response;
   const { id: jobId } = await params;
   const b = ((await request.json().catch(() => null)) ?? {}) as Record<string, unknown>;

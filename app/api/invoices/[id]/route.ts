@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireAdmin } from "@/lib/api/guards";
+import { requireOfficeOrAdmin } from "@/lib/api/guards";
 import { callerClient } from "@/lib/api/caller-client";
 
-// Delete an invoice — admin only (Justin, 19 Nov 2026), on the web and the
-// phone. It used to be a browser delete open to office too.
+// Delete an invoice — office/admin, as it always was on the web (it used to be
+// a browser delete); the phone uses the same route.
 //
 // The delete cascades to invoice_items; job variations billed on it go back
 // to un-invoiced (0011: on delete set null); recorded payments go with it
@@ -12,7 +12,7 @@ import { callerClient } from "@/lib/api/caller-client";
 // remind them to void it there.
 export async function DELETE(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const guard = await requireAdmin(request);
+  const guard = await requireOfficeOrAdmin(request);
   if (!guard.ok) return guard.response;
   const supabase = await callerClient(request);
 

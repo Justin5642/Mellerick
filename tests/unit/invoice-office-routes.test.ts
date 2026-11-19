@@ -7,7 +7,7 @@ import { DELETE_IN_XERO_WARNING, deleteInvoiceMessage, pushToXeroLabel } from "@
 
 // The office invoice actions the web did straight from the browser — record /
 // remove a payment, delete an invoice — are now routes the web and the phone
-// share (Justin, 19 Nov 2026). Office/admin (delete: admin), as the CALLER so
+// share (Justin, 19 Nov 2026). Office/admin, as the CALLER so
 // RLS and 0081's triggers still decide; fixed-sentence errors.
 
 const requireOfficeOrAdmin = vi.fn();
@@ -208,8 +208,8 @@ describe("DELETE /api/invoices/[id]/payments/[paymentId]", () => {
 });
 
 describe("DELETE /api/invoices/[id]", () => {
-  it("is admin only", async () => {
-    requireAdmin.mockResolvedValue(forbidden);
+  it("is office/admin only", async () => {
+    requireOfficeOrAdmin.mockResolvedValue(forbidden);
     const res = await deleteInvoice(req("DELETE"), params);
     expect(res.status).toBe(403);
     expect(writes).toHaveLength(0);
