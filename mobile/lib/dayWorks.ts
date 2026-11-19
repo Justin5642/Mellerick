@@ -155,6 +155,29 @@ export function signDayWorksEntry(jobId: string, entryId: string, signerName: st
 }
 
 // ---------------------------------------------------------------------------
+// Office/admin only (the routes refuse anyone else): void a signed line, and
+// Invoice Day Works — the same routes the web tab uses.
+// ---------------------------------------------------------------------------
+
+/** Void a SIGNED line (final). Answers with the fresh tab. */
+export function voidDayWorksEntry(jobId: string, entryId: string, reason: string | null): Promise<DayWorksState> {
+  return call(`${base(jobId)}/${encodeURIComponent(entryId)}/void`, { method: "POST", body: JSON.stringify({ reason }) });
+}
+
+export interface DayWorksInvoiceRequest {
+  entryIds: string[];
+  /** Signed extra truck loads (0111) that go on the same invoice. */
+  loadIds: string[];
+  from: string;
+  to: string;
+}
+
+/** One ordinary DRAFT invoice from the ticked signed lines and loads. */
+export function invoiceDayWorks(jobId: string, req: DayWorksInvoiceRequest): Promise<{ ok: true; invoiceId: string; invoiceNumber: number | string | null }> {
+  return call(`${base(jobId)}/invoice`, { method: "POST", body: JSON.stringify(req) });
+}
+
+// ---------------------------------------------------------------------------
 // Pure helpers for the tab.
 // ---------------------------------------------------------------------------
 

@@ -1,8 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
-import { createClient } from "@/lib/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -18,8 +17,10 @@ import type { TruckLoad, TruckLoadsView } from "@/lib/cartage-view";
 // signed load. Signed extras are invoiced with the Day Works below.
 //
 // Reads come from GET /api/jobs/[id]/cartage-loads (quantities for the crew;
-// costs and prices only for office/admin). The office's writes go straight to
-// cartage_load_costs / cartage_loads / jobs under RLS and 0111's triggers.
+// costs and prices only for office/admin). The office's writes go through the
+// office-only routes the phone uses too (lib/day-works-office.ts): .../quarry,
+// .../[loadId]/void and .../[loadId]/cost — the caller's own session, so RLS
+// and 0111's triggers decide as before.
 
 export type TruckLoadsLoaded = TruckLoadsView & { ready: true; isOffice: boolean; userId: string };
 type State = { status: "loading" } | { status: "error" } | { status: "not-ready" } | ({ status: "ok" } & TruckLoadsLoaded);
@@ -29,6 +30,18 @@ const fmtDate = (key: string) => {
   const [y, m, d] = key.split("-").map(Number);
   return new Date(Date.UTC(y, m - 1, d)).toLocaleDateString("en-AU", { weekday: "short", day: "numeric", month: "short", year: "numeric", timeZone: "UTC" });
 };
+
+/** An office write through its route; the route's own sentence on refusal. */
+async function officeWrite(url: string, method: "PUT" | "POST", body: unknown): Promise<{ ok: boolean; error?: string }> {
+  try {
+    const res = await fetch(url, { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    if (res.ok) return { ok: true };
+    const b = await res.json().catch(() => ({}));
+    return { ok: false, error: typeof b.error === "string" ? b.error : undefined };
+  } catch {
+    return { ok: false };
+  }
+}
 
 const STATUS_STYLE: Record<string, string> = {
   draft: "bg-slate-100 text-slate-700",
@@ -54,7 +67,6 @@ export function JobTruckLoads({ jobId, readOnly = false, onLoaded, reloadKey = 0
   /** Bump to reload (after an invoice is made). */
   reloadKey?: number;
 }) {
-  const supabase = useMemo(() => createClient(), []);
   const [state, setState] = useState<State>({ status: "loading" });
 
   const load = useCallback(async () => {
@@ -95,8 +107,8 @@ export function JobTruckLoads({ jobId, readOnly = false, onLoaded, reloadKey = 0
 
   async function setQuarryDefault(value: string) {
     const next = value === "extra" ? false : value === "included" ? true : null;
-    const { error, count } = await supabase.from("jobs").update({ quarry_included: next }, { count: "exact" }).eq("id", jobId);
-    if (error || count === 0) return toast.error("Couldn't change it. Only the office can.");
+    const res = await officeWrite(`/api/jobs/${jobId}/cartage-loads/quarry`, "PUT", { quarry_included: next });
+    if (!res.ok) return toast.error(res.error ?? "Couldn't change it. Only the office can.");
     toast.success("Saved — new quarry loads on this job will default to that.");
     await load();
   }
@@ -104,8 +116,8 @@ export function JobTruckLoads({ jobId, readOnly = false, onLoaded, reloadKey = 0
   async function voidLoad(l: TruckLoad) {
     const reason = window.prompt(`Void the signed load of ${fmtDate(l.load_date)}? Say why:`);
     if (reason === null) return;
-    const { error, count } = await supabase.from("cartage_loads").update({ status: "void", void_reason: reason.trim() || null }, { count: "exact" }).eq("id", l.id);
-    if (error || count === 0) return toast.error("Couldn't void it. Take it off its invoice first if it's on one.");
+    const res = await officeWrite(`/api/jobs/${jobId}/cartage-loads/${l.id}/void`, "POST", { reason });
+    if (!res.ok) return toast.error(res.error ?? "Couldn't void it. Take it off its invoice first if it's on one.");
     toast.success("Load voided");
     await load();
   }
@@ -153,7 +165,7 @@ export function JobTruckLoads({ jobId, readOnly = false, onLoaded, reloadKey = 0
           <div key={date} className="space-y-2">
             <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">{fmtDate(date)}</h3>
             {list.map((l) => (
-              <LoadCard key={l.id} load={l} view={view} readOnly={readOnly} onSaved={load} onVoid={() => void voidLoad(l)} />
+              <LoadCard key={l.id} jobId={jobId} load={l} view={view} readOnly={readOnly} onSaved={load} onVoid={() => void voidLoad(l)} />
             ))}
           </div>
         ))
@@ -162,8 +174,7 @@ export function JobTruckLoads({ jobId, readOnly = false, onLoaded, reloadKey = 0
   );
 }
 
-function LoadCard({ load: l, view, readOnly, onSaved, onVoid }: { load: TruckLoad; view: TruckLoadsLoaded; readOnly: boolean; onSaved: () => Promise<void>; onVoid: () => void }) {
-  const supabase = useMemo(() => createClient(), []);
+function LoadCard({ jobId, load: l, view, readOnly, onSaved, onVoid }: { jobId: string; load: TruckLoad; view: TruckLoadsLoaded; readOnly: boolean; onSaved: () => Promise<void>; onVoid: () => void }) {
   const price = view.pricing?.loads[l.id];
   const [cost, setCost] = useState(price?.docketCost?.toString() ?? "");
   const [margin, setMargin] = useState(price?.marginOverride?.toString() ?? "");
@@ -178,12 +189,10 @@ function LoadCard({ load: l, view, readOnly, onSaved, onVoid }: { load: TruckLoa
     }
     setSaving(true);
     try {
-      const { error } = await supabase.from("cartage_load_costs").upsert({ load_id: l.id, docket_cost_ex_gst: c, margin_pct: m }, { onConflict: "load_id" });
-      if (error) throw error;
+      const res = await officeWrite(`/api/jobs/${jobId}/cartage-loads/${l.id}/cost`, "PUT", { docket_cost_ex_gst: c, margin_pct: m });
+      if (!res.ok) return toast.error(res.error ?? "Couldn't save the docket cost. It's locked once the load is invoiced.");
       toast.success("Docket cost saved");
       await onSaved();
-    } catch {
-      toast.error("Couldn't save the docket cost. It's locked once the load is invoiced.");
     } finally {
       setSaving(false);
     }

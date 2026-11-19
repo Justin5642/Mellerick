@@ -2,6 +2,7 @@ import { useCallback } from "react";
 import { useDataLayer } from "../DataProvider";
 import { useFlush } from "./useFlush";
 import type { ScheduleColumns } from "../../scheduling";
+import type { BookingInsert } from "../../bookings";
 import type { BookingPatch, RescheduleFlags } from "../repositories/schedule";
 
 export function useSchedule() {
@@ -28,6 +29,17 @@ export function useSchedule() {
     [layer, flush]
   );
 
+  // The new booking's id comes back, like addBookings', so the grid can track
+  // whether the server has it.
+  const placeTodo = useCallback(
+    async (insert: BookingInsert, jobPatch: Record<string, unknown>) => {
+      if (!layer) throw new Error("Data layer not ready");
+      const id = await layer.schedule.placeTodo(insert, jobPatch);
+      return { id, synced: await flush() };
+    },
+    [layer, flush]
+  );
+
   return {
     ready: !!layer,
     reassign: useCallback((jobId: string, assignedTo: string | null) => run((r) => r.reassign(jobId, assignedTo)), [run]),
@@ -47,6 +59,14 @@ export function useSchedule() {
     schedule: useCallback(
       (jobId: string, staffIds: string[], columns: ScheduleColumns, costCenterId: string | null = null) =>
         run((r) => r.schedule(jobId, staffIds, columns, costCenterId)),
+      [run]
+    ),
+    // The office to-do list (0067) — see ScheduleRepository.
+    listOnTodo: useCallback((jobId: string, estimatedHours: number | null) => run((r) => r.listOnTodo(jobId, estimatedHours)), [run]),
+    unlistTodo: useCallback((jobId: string) => run((r) => r.unlistTodo(jobId)), [run]),
+    placeTodo,
+    backToTodo: useCallback(
+      (jobId: string, bookingId: string, list: { status?: "pending" } | null) => run((r) => r.backToTodo(jobId, bookingId, list)),
       [run]
     ),
   };

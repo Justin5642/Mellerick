@@ -3,7 +3,7 @@ import type { IdGen } from "../ids";
 import type { WriteOperation, SideEffectOperation } from "../outbox/types";
 import { systemTime, type TimeSource } from "../time";
 import type { ScheduleColumns } from "../../scheduling";
-import { bookingColumns, type ScheduleWindowColumns } from "../../bookings";
+import { bookingColumns, type BookingInsert, type ScheduleWindowColumns } from "../../bookings";
 
 /**
  * How a moved schedule's two flags change (migration 0071). Omitted fields are
@@ -206,6 +206,89 @@ export class ScheduleRepository {
   async deleteBooking(jobId: string, bookingId: string): Promise<void> {
     const opId = await this.writeBooking("delete", bookingId, {});
     await this.syncCalendar(jobId, opId);
+  }
+
+  // -------------------------------------------------------------------------
+  // The office to-do list (0067), as on the web board's to-do panel
+  // (components/schedule/team-schedule-view.tsx). The rules — what booking a
+  // placed job becomes, what taking a booking back does — are lib/todoBoard.ts
+  // (mirrored from the web); these only queue the writes, in the order the
+  // database needs them.
+  // -------------------------------------------------------------------------
+
+  /**
+   * Put a job on the to-do list with an optional hours estimate. The 0067
+   * trigger stamps todo_listed_at / todo_listed_by with the database clock
+   * and the caller; the value sent only says "list it". A job that is
+   * scheduled by the time this lands stays unlisted (the trigger clears it).
+   */
+  async listOnTodo(jobId: string, estimatedHours: number | null): Promise<void> {
+    await this.writeJob(jobId, { todo_listed_at: this.time.nowIso(), estimated_hours: estimatedHours });
+  }
+
+  /** The cross on a to-do row: off the list, nothing else changes. */
+  async unlistTodo(jobId: string): Promise<void> {
+    await this.writeJob(jobId, { todo_listed_at: null, todo_listed_by: null });
+  }
+
+  /**
+   * A to-do job placed on a technician's day: the one booking planTodoDrop
+   * made, THEN the job patch from jobPatchAfterDrop (off the list; pending →
+   * scheduled) — after the insert, so a refused booking never leaves a job
+   * "scheduled" with nothing booked (a dead insert kills what depends on it).
+   * Then Google Calendar. Returns the new booking's id.
+   */
+  async placeTodo(insert: BookingInsert, jobPatch: Record<string, unknown>): Promise<string> {
+    const rowId = this.ids.newId();
+    const insertOp = await this.writeBooking("insert", rowId, {
+      job_id: insert.job_id,
+      staff_id: insert.staff_id,
+      cost_center_id: insert.cost_center_id,
+      starts_at: insert.starts_at,
+      ends_at: insert.ends_at,
+      daily: insert.daily,
+      all_day: insert.all_day,
+    });
+    const jobOp = await this.writeJob(insert.job_id, jobPatch, insertOp);
+    await this.syncCalendar(insert.job_id, jobOp);
+    return rowId;
+  }
+
+  /**
+   * A booking taken back to the to-do list (planDragOut). Deletes THAT
+   * booking only. With `list` (it was the job's last booking) the job is then
+   * listed — and a scheduled job goes back to pending — in one jobs write that
+   * waits for the delete: 0079 clears the job's scheduled_start with the
+   * delete, and only then will 0067's trigger let the listing stand.
+   */
+  async backToTodo(jobId: string, bookingId: string, list: { status?: "pending" } | null): Promise<void> {
+    const deleteOp = await this.writeBooking("delete", bookingId, {});
+    let last = deleteOp;
+    if (list) {
+      last = await this.writeJob(jobId, { todo_listed_at: this.time.nowIso(), ...(list.status ? { status: list.status } : null) }, deleteOp);
+    }
+    await this.syncCalendar(jobId, last);
+  }
+
+  /** A jobs update with no calendar resync of its own. */
+  private async writeJob(jobId: string, payload: Record<string, unknown>, dependsOn: string | null = null): Promise<string> {
+    const opId = this.ids.newId();
+    const op: WriteOperation = {
+      kind: "write",
+      id: opId,
+      rowId: jobId,
+      aggregate: "job",
+      op: "update",
+      table: "jobs",
+      payload,
+      dependsOn,
+      status: "pending",
+      attempts: 0,
+      nextAttemptAt: 0,
+      createdAt: this.time.nowMs(),
+    };
+    await this.outbox.enqueue(op);
+    return opId;
   }
 
   private async writeBooking(op: "insert" | "update" | "delete", rowId: string, payload: Record<string, unknown>): Promise<string> {

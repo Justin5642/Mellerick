@@ -42,6 +42,21 @@ describe("the calls", () => {
     expect(JSON.parse(mockFetch.mock.calls[5][1].body)).toEqual({ load_ids: ["l1", "l2"], signer_name: "Sam", signature: "data:image/png;base64,AAA" });
   });
 
+  it("office: quarry default, void and docket cost on their routes", async () => {
+    mockFetch.mockResolvedValue(jsonResponse(200, { ready: true }));
+    await tl.setQuarryDefault("job-1", false);
+    await tl.voidTruckLoad("job-1", "l1", null);
+    await tl.setTruckLoadCost("job-1", "l1", " 181.13 ", "");
+    expect(mockFetch.mock.calls.map(([url, init]) => [url, init.method])).toEqual([
+      ["https://office.example/api/jobs/job-1/cartage-loads/quarry", "PUT"],
+      ["https://office.example/api/jobs/job-1/cartage-loads/l1/void", "POST"],
+      ["https://office.example/api/jobs/job-1/cartage-loads/l1/cost", "PUT"],
+    ]);
+    expect(JSON.parse(mockFetch.mock.calls[0][1].body)).toEqual({ quarry_included: false });
+    expect(JSON.parse(mockFetch.mock.calls[1][1].body)).toEqual({ reason: null });
+    expect(JSON.parse(mockFetch.mock.calls[2][1].body)).toEqual({ docket_cost_ex_gst: "181.13", margin_pct: null });
+  });
+
   it("says it needs signal when the request can't be made", async () => {
     mockFetch.mockRejectedValue(new Error("Network request failed"));
     await expect(tl.loadTruckLoads("job-1")).rejects.toThrow(tl.TRUCK_LOADS_OFFLINE);

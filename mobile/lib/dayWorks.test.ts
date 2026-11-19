@@ -72,6 +72,21 @@ describe("the calls", () => {
   });
 });
 
+describe("office calls", () => {
+  it("voids a signed line and invoices Day Works on the office routes", async () => {
+    mockFetch.mockResolvedValue(jsonResponse(200, { ready: true, ok: true, invoiceId: "inv-1", invoiceNumber: 1042 }));
+    await dw.voidDayWorksEntry("job-1", "e1", "wrong day");
+    const res = await dw.invoiceDayWorks("job-1", { entryIds: ["e1"], loadIds: ["l1"], from: "2026-11-09", to: "2026-11-15" });
+    expect(res.invoiceNumber).toBe(1042);
+    expect(mockFetch.mock.calls.map(([url, init]) => [url, init.method])).toEqual([
+      ["https://office.example/api/jobs/job-1/hire-entries/e1/void", "POST"],
+      ["https://office.example/api/jobs/job-1/hire-entries/invoice", "POST"],
+    ]);
+    expect(JSON.parse(mockFetch.mock.calls[0][1].body)).toEqual({ reason: "wrong day" });
+    expect(JSON.parse(mockFetch.mock.calls[1][1].body)).toEqual({ entryIds: ["e1"], loadIds: ["l1"], from: "2026-11-09", to: "2026-11-15" });
+  });
+});
+
 describe("machines with no hire rate yet", () => {
   // The server now lists the whole fleet; an unpriced machine comes with no options.
   const all = [...machines, { id: "pc180", name: "Komatsu PC180", options: [] }];

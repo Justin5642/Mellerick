@@ -25,6 +25,7 @@ import { listMyJobBookings } from "../../lib/data/reads/bookings";
 import { getJobCostCentres } from "../../lib/data/reads/jobBilling";
 import { myJobEntries, splitMyJobEntries, type Booking, type MyJobEntry } from "../../lib/bookings";
 import type { ScheduledJobWindow } from "../../lib/scheduling";
+import { loadTodaysRunCount, runCardTitle } from "../../lib/todaysRun";
 
 interface Job {
   id: string;
@@ -53,6 +54,10 @@ export function MyJobsScreen() {
   // the server (po_cost_centers is not in their stream — it carries money),
   // so offline the cards simply show no stage name.
   const [stageNames, setStageNames] = useState<Record<string, string>>({});
+  // "Today's run (N jobs)": open jobs the user is booked on for CARTAGE today.
+  // The server decides (cost-centre names are office-only data), so it needs
+  // signal; offline or on any failure the card is simply not shown.
+  const [runCount, setRunCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<unknown>(null);
@@ -69,6 +74,8 @@ export function MyJobsScreen() {
         data: { user },
       } = await supabase.auth.getUser();
       if (!user) return;
+
+      loadTodaysRunCount().then(setRunCount, () => setRunCount(0));
 
       const data = await listMyJobs(user.id);
       setJobs(data);
@@ -252,6 +259,14 @@ export function MyJobsScreen() {
           }
           return <JobCard entry={(item as any).entry} />;
         }}
+        ListHeaderComponent={
+          runCount > 0 ? (
+            <TouchableOpacity style={styles.runCard} onPress={() => router.push("/run/today")} accessibilityRole="button">
+              <Text style={styles.runCardTitle}>🚚 {runCardTitle(runCount)}</Text>
+              <Text style={styles.runCardMeta}>Log each load in one tap — material in, spoil out — and get the extras signed.</Text>
+            </TouchableOpacity>
+          ) : null
+        }
         ListEmptyComponent={
           <Text style={styles.emptyText}>No jobs assigned right now.</Text>
         }
@@ -312,5 +327,8 @@ const styles = StyleSheet.create({
     borderRadius: 8,
   },
   wazeButtonText: { color: colors.blue600, fontSize: 12, fontWeight: "600" },
+  runCard: { backgroundColor: colors.blue600, borderRadius: 12, padding: 16, marginTop: 4, marginBottom: 6, gap: 4 },
+  runCardTitle: { fontSize: 17, fontWeight: "700", color: colors.white },
+  runCardMeta: { fontSize: 13, color: colors.blue100 },
   emptyText: { textAlign: "center", color: colors.slate400, marginTop: 60, fontSize: 14 },
 });
