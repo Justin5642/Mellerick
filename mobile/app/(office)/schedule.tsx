@@ -55,7 +55,6 @@ import {
 } from "../../lib/scheduleGrid";
 import { ScheduleGrid, type SaveState } from "../../components/schedule/ScheduleGrid";
 import { copyDayChoices, planBookingCopy } from "../../lib/bookingCopy";
-import { useIsAdmin } from "../../design/guards/useRole";
 // Staff leave (migration 0112 — a draft, not applied yet), read online only:
 // read-only blocks on the grid, "Needs reassigning" on bookings that sit on a
 // leave day, and a warning before a move puts someone on their leave.
@@ -82,7 +81,7 @@ import { describeDragOut, jobPatchAfterDrop, newBookingClashes, planDragOut, pla
 import { todoHours } from "../../lib/todoList";
 import { closedJobScheduleMessage, isJobClosedForScheduling } from "../../lib/jobSchedulable";
 import { crewJoinWindow, crewLeaveConflicts, describeCrewLeave } from "../../lib/crewLeave";
-import { useIsOfficeOrAdmin } from "../../design/guards/useRole";
+import { useIsAdmin, useIsOfficeOrAdmin } from "../../design/guards/useRole";
 
 interface SchedJob {
   id: string;

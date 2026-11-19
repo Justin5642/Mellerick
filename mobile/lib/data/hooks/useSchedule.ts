@@ -2,9 +2,8 @@ import { useCallback } from "react";
 import { useDataLayer } from "../DataProvider";
 import { useFlush } from "./useFlush";
 import type { ScheduleColumns } from "../../scheduling";
-import type { BookingInsert } from "../../bookings";
+import type { BookingInsert, ScheduleWindowColumns } from "../../bookings";
 import type { BookingPatch, RescheduleFlags } from "../repositories/schedule";
-import type { ScheduleWindowColumns } from "../../bookings";
 
 export function useSchedule() {
   const layer = useDataLayer();
