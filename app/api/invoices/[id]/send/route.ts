@@ -89,7 +89,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     });
 
     // Optional customer job report (Send Invoice dialog). Callers that don't
-    // send `jobReport` — the phone's invoice send — get exactly the old email.
+    // send `jobReport` (the report unticked, on the web or the phone) get exactly the old email.
     // If it was asked for and can't be made, NOTHING is sent: the office
     // retries or unticks it, rather than the customer silently getting the
     // invoice alone.

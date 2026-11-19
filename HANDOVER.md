@@ -644,14 +644,30 @@ approved: the web **Send Invoice** dialog has "Include job report and photos"
   job's eligible photos; the client list is never trusted. **If a requested
   report can't be made, nothing is sent** (500 with a fixed sentence; reported
   to Sentry by tag). `maxDuration` 60 on send and preview. A send without
-  `jobReport` (the phone's) is unchanged.
+  `jobReport` is unchanged.
 - "Preview report" posts the same selection to
   `/api/invoices/[id]/job-report/preview` and opens the PDF in a new tab.
 - Files: rules `lib/job-report.ts` (tested in `tests/unit/job-report.test.ts`),
   loading/rendering `lib/job-report-data.ts`, PDF
   `lib/pdf/job-report-template.tsx` + `render-job-report.ts`, dialog panel
   `components/invoice/job-report-options.tsx`; route behaviour in
-  `tests/unit/invoice-send-job-report.test.ts`. Not yet on the phone.
+  `tests/unit/invoice-send-job-report.test.ts`.
+- **Phone (19 Nov 2026; no migration):** the invoice detail screen has
+  **Send to Customer / Resend** → `mobile/app/invoices/[id]/send.tsx`
+  (office group route + `RoleGate`; the route's `requireOfficeOrAdmin` is the
+  authority): send to, message, attachments (below) and, when the invoice has
+  a job, "Include job report and photos"
+  (`mobile/components/finance/job-report-options.tsx`) — the same draft, dates
+  attended, work text edited in a `KeyboardSheet`, photo tick boxes (server
+  signed thumbnails through expo-image), sign-off tickbox, and **Preview
+  report** (`mobile/components/finance/pdf-preview.tsx`: the PDF is saved to
+  the app cache; iOS shows it in react-native-webview, Android draws it with
+  pdf.js from cdnjs, since Android's WebView can't render a PDF — no new
+  native module). The unpriced-hours 409 asks "Send anyway". Calls and checks
+  in `mobile/lib/invoiceSend.ts` (Bearer, online only — not the outbox; tested
+  in `invoiceSend.test.ts`); errors are the routes' own sentences. The phone
+  had no invoice send before this; `getInvoice` now also returns `job_id`.
+  Reaches phones with the next build.
 
 **Attach files to the invoice email (16 Nov 2026; no migration).** The web
 Send Invoice dialog has an "Attachments" drop zone: drag files on (or browse)
@@ -662,7 +678,17 @@ Photos are shrunk in the browser first (`lib/image-resize.ts`). Not stored
 anywhere; the email names them ("Also attached: …"). A bad file refuses the
 whole send. Rules `lib/invoice-attachments.ts` (tested), field
 `components/invoice/invoice-attachments-field.tsx`. Bigger files would need a
-Storage upload first (a new office-only bucket + migration). Not on the phone.
+Storage upload first (a new office-only bucket + migration).
+- **Phone (19 Nov 2026):** the Send screen's Attachments take photos from the
+  library or camera (shrunk by `mobile/lib/imageUpload.ts`, sent as `.jpg`)
+  and the job's own **documents** (from Storage, any allowed type), with the
+  same limits and checks: `mobile/lib/invoiceAttachments.ts` is the web file
+  byte for byte below its header (`tests/unit/invoice-attachments-mirror.test.ts`),
+  and the size used shows under the list. **Gap:** any other file on the
+  phone (a PDF in Files / Downloads) needs `expo-document-picker`, a native
+  module not in the binary — attach those on the web, or add the module in a
+  new build and a third source button in
+  `mobile/components/finance/invoice-attachments-field.tsx`.
 
 **Invoices are made out to the Company (16 Nov 2026; no migration).**
 Invoice and quote PDFs, their detail pages and the Xero contact used

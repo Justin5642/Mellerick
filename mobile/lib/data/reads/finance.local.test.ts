@@ -110,7 +110,7 @@ describe("getInvoice (local)", () => {
       new Map<string, unknown>([
         [
           SQL_GET_INVOICE,
-          { id: "inv1", invoice_number: 7, title: "Reline stage 2", status: "sent", subtotal: "100.50", tax_amount: 10.05, total: 110.55, due_date: null, created_at: "2026-07-01T00:00:00Z", notes: null, work_description: "CIPP reline", xero_invoice_id: null, customer_name: "Acme", customer_email: null, customer_phone: "03 9123 4567" },
+          { id: "inv1", invoice_number: 7, title: "Reline stage 2", status: "sent", subtotal: "100.50", tax_amount: 10.05, total: 110.55, due_date: null, created_at: "2026-07-01T00:00:00Z", notes: null, work_description: "CIPP reline", xero_invoice_id: null, job_id: "job-9", customer_name: "Acme", customer_email: null, customer_phone: "03 9123 4567" },
         ],
         // row shaped as the SQL produces it: total is the ROUND() alias, not the (NULL) generated column
         [SQL_GET_INVOICE_ITEMS, [{ id: "li1", name: "Valve", description: null, quantity: 3, unit_price: 33.5, total: 100.5 }]],
@@ -131,6 +131,7 @@ describe("getInvoice (local)", () => {
       notes: null,
       work_description: "CIPP reline",
       xero_invoice_id: null,
+      job_id: "job-9",
       customers: { name: "Acme", email: null, phone: "03 9123 4567" },
       invoice_items: [{ id: "li1", name: "Valve", description: null, quantity: 3, unit_price: 33.5, total: 100.5 }],
     });

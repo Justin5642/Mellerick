@@ -143,7 +143,16 @@ export default function InvoiceDetailScreen() {
         </Card>
       )}
 
-      <Text style={styles.footnote}>Sending, PDF and Xero are managed on the web dashboard.</Text>
+      <TouchableOpacity
+        style={styles.sendBtn}
+        onPress={() => router.push(`/invoices/${id}/send`)}
+        accessibilityRole="button"
+      >
+        <Ionicons name="send" size={16} color={colors.white} />
+        <Text style={styles.sendText}>{invoice.status === "draft" ? "Send to Customer" : "Resend"}</Text>
+      </TouchableOpacity>
+
+      <Text style={styles.footnote}>PDF download and Xero are managed on the web dashboard.</Text>
     </ScrollView>
   );
 }
@@ -200,5 +209,15 @@ const styles = StyleSheet.create({
   bold: { fontWeight: "700", color: colors.slate900 },
   totals: { marginTop: 10, gap: 2 },
   totalStrong: { fontSize: 16, fontWeight: "800", color: colors.slate900 },
+  sendBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    backgroundColor: colors.blue600,
+    borderRadius: 10,
+    paddingVertical: 13,
+  },
+  sendText: { fontSize: 15, fontWeight: "700", color: colors.white },
   footnote: { fontSize: 11, color: colors.slate400, textAlign: "center", marginTop: 4 },
 });

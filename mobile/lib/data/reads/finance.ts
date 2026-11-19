@@ -69,6 +69,8 @@ export interface InvoiceDetail {
   notes: string | null;
   work_description: string | null;
   xero_invoice_id: string | null;
+  /** The job it bills, if any — the phone's Send offers a job report only then. */
+  job_id: string | null;
   customers: { name: string; email: string | null; phone: string | null } | null;
   invoice_items: InvoiceItem[];
 }
@@ -152,7 +154,7 @@ export const SQL_LIST_QUOTES = `
 
 export const SQL_GET_INVOICE = `
   SELECT id, invoice_number, title, status, subtotal, tax_amount, total, due_date,
-         created_at, notes, work_description, xero_invoice_id,
+         created_at, notes, work_description, xero_invoice_id, job_id,
          (SELECT name  FROM customers WHERE id = invoices.customer_id) AS customer_name,
          (SELECT email FROM customers WHERE id = invoices.customer_id) AS customer_email,
          (SELECT phone FROM customers WHERE id = invoices.customer_id) AS customer_phone
@@ -267,6 +269,7 @@ type RawInvoiceDetailRow = {
   notes: string | null;
   work_description: string | null;
   xero_invoice_id: string | null;
+  job_id: string | null;
   customer_name: string | null;
   customer_email: string | null;
   customer_phone: string | null;
@@ -426,6 +429,7 @@ export async function getInvoice(id: string): Promise<InvoiceDetail | null> {
         notes: inv.notes,
         work_description: inv.work_description,
         xero_invoice_id: inv.xero_invoice_id,
+        job_id: inv.job_id ?? null,
         customers: nestOne(inv.customer_name, {
           name: inv.customer_name as string,
           email: inv.customer_email,
