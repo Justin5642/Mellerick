@@ -76,6 +76,7 @@ import {
 // booking's "Back to to-do list", and each technician's free hours. Rules are
 // the web's, mirrored (lib/todoBoard.ts, lib/todoList.ts).
 import { TodoSheet } from "../../components/schedule/TodoSheet";
+import { PlaceTodoSheet, type PlaceRequest } from "../../components/schedule/PlaceTodoSheet";
 import { listTodoJobs, type TodoCandidate, type TodoJob } from "../../lib/data/reads/todo";
 import { describeDragOut, jobPatchAfterDrop, newBookingClashes, planDragOut, planTodoDrop, unbookedHours } from "../../lib/todoBoard";
 import { todoHours } from "../../lib/todoList";
@@ -240,6 +241,8 @@ export default function ScheduleScreen() {
   const [gapInput, setGapInput] = useState("");
   // A to-do job picked to place: the next tap on the grid books it.
   const [placing, setPlacing] = useState<TodoJob | null>(null);
+  // The place confirm, waiting for its cost centre (every booking asks — 19 Nov 2026).
+  const [placeAsk, setPlaceAsk] = useState<(PlaceRequest & { job: TodoJob; insert: ReturnType<typeof planTodoDrop>; target: BoardCell }) | null>(null);
   // The crew as it was when the picker opened — only people ADDED are asked about leave.
   const [crewBefore, setCrewBefore] = useState<string[]>([]);
 
@@ -805,18 +808,20 @@ export default function ScheduleScreen() {
       const leaveText = leaveHits.length > 0 ? `\n\n⚠ ${describeLeaveConflicts(nameOf(target.staffId), leaveHits)}` : "";
       const time = insert.all_day ? "All day" : `${formatBusinessTime(insert.starts_at)}–${insert.ends_at ? formatBusinessTime(insert.ends_at) : ""}`;
       const warned = clashes.length > 0 || leaveHits.length > 0;
-      Alert.alert(
-        `#${job.job_number} — ${job.title}`,
-        `Book ${target.staffId ? nameOf(target.staffId) : "it unassigned"} on ${shortDayLabel(target.dateKey)}, ${time}?${
+      // A sheet, not an alert: it asks for the booking's cost centre too.
+      setPlaceAsk({
+        jobId: job.id,
+        title: `#${job.job_number} — ${job.title}`,
+        message: `Book ${target.staffId ? nameOf(target.staffId) : "it unassigned"} on ${shortDayLabel(target.dateKey)}, ${time}?${
           job.status === "pending" ? " The job becomes Scheduled and comes off the to-do list." : " It comes off the to-do list."
         }${leaveText}${clashText}`,
-        [
-          { text: "Cancel", style: "cancel" },
-          { text: warned ? "Book anyway" : "Book", onPress: () => void commitPlace(job, insert, target) },
-        ]
-      );
+        warned,
+        job,
+        insert,
+        target,
+      });
     },
-    [placing, bookings, realBookings, bookingDays, nameOf, allJobs, leave, todayKey, commitPlace]
+    [placing, bookings, realBookings, bookingDays, nameOf, allJobs, leave, todayKey]
   );
 
   /** A booking's "Back to to-do list": the web's drag-out, same rules and words (planDragOut). */
@@ -1486,6 +1491,18 @@ export default function ScheduleScreen() {
           onPlace={pickToPlace}
           onRemove={removeFromTodo}
           onAdd={addToTodo}
+        />
+      ) : null}
+
+      {canTodo ? (
+        <PlaceTodoSheet
+          request={placeAsk}
+          onCancel={() => setPlaceAsk(null)}
+          onBook={(costCentre) => {
+            const ask = placeAsk;
+            setPlaceAsk(null);
+            if (ask) void commitPlace(ask.job, { ...ask.insert, cost_center_id: costCentre.id }, ask.target);
+          }}
         />
       ) : null}
 

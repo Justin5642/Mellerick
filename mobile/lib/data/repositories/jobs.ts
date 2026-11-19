@@ -29,6 +29,13 @@ export interface CreateJobInput {
   scheduledStartIso?: string | null;
   scheduledEndIso?: string | null;
   description?: string | null;
+  /**
+   * The COMPANY cost centre (cost_centres) the new job's bookings are for —
+   * every booking asks for one (19 Nov 2026). The job has no PO lines yet, so
+   * a booking-cost-centre side effect finds or adds the line on the server
+   * and tags the bookings the insert made.
+   */
+  bookingCostCentreId?: string | null;
 }
 
 export interface ConvertQuoteInput {
@@ -117,6 +124,24 @@ export class JobsRepository {
       };
       await this.outbox.enqueue(assign);
       lastId = assign.id;
+    }
+
+    if (input.scheduledStartIso && input.bookingCostCentreId) {
+      const cc: SideEffectOperation = {
+        kind: "side_effect",
+        id: this.ids.newId(),
+        effect: "booking-cost-centre",
+        coalesceKey: `booking-cost-centre:${rowId}`,
+        // poId: a client UUID, so a retry finds the PO it already made.
+        payload: { jobId: rowId, costCentreId: input.bookingCostCentreId, poId: this.ids.newId(), applyToBookings: true },
+        dependsOn: lastId,
+        status: "pending",
+        attempts: 0,
+        nextAttemptAt: 0,
+        createdAt: this.time.nowMs(),
+      };
+      await this.outbox.enqueue(cc);
+      lastId = cc.id;
     }
 
     if (input.scheduledStartIso) {

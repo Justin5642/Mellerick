@@ -26,6 +26,10 @@ import { KeyboardSheet, KEYBOARD_SHEET_INPUT_FONT_SIZE } from "../KeyboardSheet"
 // booking onto someone's leave day is asked about before it is saved.
 import { listScheduleLeave } from "../../lib/data/reads/leave";
 import { bookingLeaveConflicts, describeLeaveConflicts, type ScheduleLeave } from "../../lib/staffLeave";
+// Every booking asks for a cost centre (19 Nov 2026).
+import { bookingCostCentreProblem, defaultBookingCostCentre, type BookingLineOption, type CompanyCostCentreOption } from "../../lib/bookingCostCentre";
+import { loadCompanyCostCentres } from "../../lib/bookingCostCentreOptions";
+import { CostCentrePicker } from "../schedule/CostCentrePicker";
 
 interface Props {
   visible: boolean;
@@ -52,6 +56,8 @@ interface Props {
   onBookingsChanged?: (next: JobBooking[]) => void;
   /** Open the job's status editor — offered when the job is completed or cancelled. */
   onReopen?: () => void;
+  /** A company cost centre was added to the job as a PO line from the picker — re-read the job's cost centres. */
+  onCostCentreAdded?: () => void;
   onScheduled: (patch: {
     scheduled_start: string;
     scheduled_end: string;
@@ -122,6 +128,7 @@ export function ScheduleJobModal({
   bookings = null,
   onBookingsChanged,
   onReopen,
+  onCostCentreAdded,
   onScheduled,
 }: Props) {
   const { schedule, addBookings, updateBooking, deleteBooking, ready } = useSchedule();
@@ -149,6 +156,15 @@ export function ScheduleJobModal({
   const [saving, setSaving] = useState(false);
   // [] offline or before 0112: no warnings, the sheet works as before.
   const [leave, setLeave] = useState<ScheduleLeave[]>([]);
+  // The cost centre choice: the job's PO lines (plus any added from the
+  // picker while open) and the company list for "Add to this job" (online).
+  const [addedLines, setAddedLines] = useState<BookingLineOption[]>([]);
+  const [company, setCompany] = useState<CompanyCostCentreOption[]>([]);
+  const [companyOnline, setCompanyOnline] = useState(false);
+  const lines: BookingLineOption[] = [
+    ...costCenters.map((c) => ({ id: c.id, name: c.name, po_number: c.po_number ?? null })),
+    ...addedLines.filter((a) => !costCenters.some((c) => c.id === a.id)),
+  ];
 
   // Load the form: a new booking (blank: nobody, today), an existing one, or
   // the job's single schedule (before bookings exist).
@@ -158,7 +174,7 @@ export function ScheduleJobModal({
     const editing = next.kind === "edit" ? next.booking : null;
     if (next.kind === "legacy") {
       setTechnicianIds(currentAssignedIds);
-      setCostCenterId(currentScheduledCostCenterId ?? null);
+      setCostCenterId(defaultBookingCostCentre({ previous: currentScheduledCostCenterId, lines }));
       loadWindow(currentScheduledStart, currentScheduledEnd, currentScheduleDaily, currentScheduleAllDay);
     } else if (editing) {
       setTechnicianIds(editing.staff_id ? [editing.staff_id] : []);
@@ -166,7 +182,10 @@ export function ScheduleJobModal({
       loadWindow(editing.starts_at, editing.ends_at, editing.daily, editing.all_day);
     } else {
       setTechnicianIds([]);
-      setCostCenterId(null);
+      // The latest booking's cost centre (the next one is usually the second
+      // technician on the same stage), else the job's, else its only line.
+      const last = bookings && bookings.length > 0 ? bookings[bookings.length - 1] : null;
+      setCostCenterId(defaultBookingCostCentre({ previous: last?.cost_center_id, scheduled: currentScheduledCostCenterId, lines }));
       loadWindow(null, null, false, false);
     }
     setShowDatePicker(null);
@@ -179,6 +198,10 @@ export function ScheduleJobModal({
   useEffect(() => {
     if (!visible) return;
     listAssignableStaff().then(setStaff).catch(() => {});
+    void loadCompanyCostCentres().then((r) => {
+      setCompany(r.list);
+      setCompanyOnline(r.online);
+    });
     const today = businessTodayKey();
     void listScheduleLeave(shiftDateKey(today, -7), shiftDateKey(today, 366)).then((r) => {
       if (r.available) setLeave(r.leave);
@@ -301,7 +324,8 @@ export function ScheduleJobModal({
   const columns = windowError ? null : buildScheduleColumns(input);
   // "Mon 19 – Wed 21 Oct, 7:00–15:30 each weekday · 3 days"
   const summary = columns ? formatScheduleSummary(columns) : null;
-  const hasCostCenters = costCenters.length > 0;
+  const costCentreProblem = bookingCostCentreProblem(costCenterId);
+  const costCentreName = (id: string | null) => (id ? lines.find((l) => l.id === id)?.name ?? null : null);
 
   function timeAsDate(hhmm: string): Date {
     const [h, m] = hhmm.split(":").map(Number);
@@ -355,7 +379,7 @@ export function ScheduleJobModal({
   }
 
   async function confirmBooking() {
-    if (!columns || saving || !ready || !bookings || isJobClosedForScheduling(jobStatus)) return;
+    if (!columns || costCentreProblem || saving || !ready || !bookings || isJobClosedForScheduling(jobStatus)) return;
     setSaving(true);
     // The note is this booking's (0109): it shows on the technician's Overview
     // only while the booking is current or upcoming.
@@ -433,7 +457,7 @@ export function ScheduleJobModal({
 
   async function confirm() {
     if (isBookings) return confirmBooking();
-    if (technicianIds.length === 0 || !columns || saving || !ready || isJobClosedForScheduling(jobStatus)) return;
+    if (technicianIds.length === 0 || !columns || costCentreProblem || saving || !ready || isJobClosedForScheduling(jobStatus)) return;
     setSaving(true);
     try {
       await schedule(jobId, technicianIds, columns, costCenterId);
@@ -516,7 +540,7 @@ export function ScheduleJobModal({
                   step === "confirm"
                     ? "notes"
                     : step === "notes"
-                    ? (hasCostCenters ? "stage" : "time")
+                    ? "stage"
                     : step === "stage"
                     ? "time"
                     : "technician"
@@ -538,14 +562,18 @@ export function ScheduleJobModal({
         {step === "time" && (
           <TouchableOpacity
             style={[styles.doneBtn, !!windowError && styles.doneBtnDisabled]}
-            onPress={() => setStep(hasCostCenters ? "stage" : "notes")}
+            onPress={() => setStep("stage")}
             disabled={!!windowError}
           >
             <Text style={styles.doneText}>Next</Text>
           </TouchableOpacity>
         )}
         {step === "stage" && (
-          <TouchableOpacity style={styles.doneBtn} onPress={() => setStep("notes")}>
+          <TouchableOpacity
+            style={[styles.doneBtn, !!costCentreProblem && styles.doneBtnDisabled]}
+            onPress={() => setStep("notes")}
+            disabled={!!costCentreProblem}
+          >
             <Text style={styles.doneText}>Next</Text>
           </TouchableOpacity>
         )}
@@ -598,10 +626,10 @@ export function ScheduleJobModal({
                   {formatScheduleSummary(bookingWindow(b))}
                   {b.all_day ? " · All day" : ""}
                 </Text>
-                {b.cost_center_id && (
-                  <Text style={styles.bookingSub}>
-                    Stage: {costCenters.find((cc) => cc.id === b.cost_center_id)?.name ?? "—"}
-                  </Text>
+                {b.cost_center_id ? (
+                  <Text style={styles.bookingSub}>Cost centre: {costCentreName(b.cost_center_id) ?? "—"}</Text>
+                ) : (
+                  <Text style={styles.problemSub}>No cost centre — edit to pick one</Text>
                 )}
                 {b.note ? (
                   <Text style={styles.bookingSub} numberOfLines={2}>
@@ -732,31 +760,22 @@ export function ScheduleJobModal({
 
       {step === "stage" && (
         <View style={{ gap: 6 }}>
-          <Text style={styles.label}>Cost centre (optional)</Text>
-          <TouchableOpacity
-            style={[styles.row, costCenterId === null && styles.rowActive]}
-            onPress={() => setCostCenterId(null)}
-          >
-            <Text style={styles.rowText}>No stage selected</Text>
-            {costCenterId === null && <Ionicons name="checkmark" size={18} color={colors.blue600} />}
-          </TouchableOpacity>
-          {costCenters.map((cc) => {
-            const active = costCenterId === cc.id;
-            return (
-              <TouchableOpacity
-                key={cc.id}
-                style={[styles.row, active && styles.rowActive]}
-                onPress={() => setCostCenterId(cc.id)}
-              >
-                <Text style={styles.rowText}>
-                  {cc.name}{cc.po_number ? ` (PO #${cc.po_number})` : ""}
-                </Text>
-                {active && <Ionicons name="checkmark" size={18} color={colors.blue600} />}
-              </TouchableOpacity>
-            );
-          })}
+          <Text style={styles.label}>Cost centre</Text>
+          <CostCentrePicker
+            jobId={jobId}
+            value={costCenterId}
+            lines={lines}
+            company={company}
+            online={companyOnline}
+            onChange={setCostCenterId}
+            onLineAdded={(line) => {
+              setAddedLines((prev) => (prev.some((l) => l.id === line.id) ? prev : [...prev, line]));
+              onCostCentreAdded?.();
+            }}
+            showProblem
+          />
           <Text style={styles.hint}>
-            Time logged on this job defaults to this stage at clock-in — the technician can still change it per entry.
+            What this booking&apos;s work is costed to. Time logged on this job defaults to it at clock-in — the technician can still change it per entry.
           </Text>
         </View>
       )}
@@ -788,11 +807,7 @@ export function ScheduleJobModal({
             {summary}
             {allDay ? " · All day" : ""}
           </Text>
-          {hasCostCenters && (
-            <Text style={styles.confirmLine}>
-              Stage: {costCenters.find((cc) => cc.id === costCenterId)?.name ?? "None"}
-            </Text>
-          )}
+          <Text style={styles.confirmLine}>Cost centre: {costCentreName(costCenterId) ?? "—"}</Text>
           {isBookings && noteText.trim() ? (
             <Text style={styles.confirmLine} numberOfLines={3}>
               Note: {noteText.trim()}
@@ -846,5 +861,6 @@ const styles = StyleSheet.create({
   doneText: { color: "#fff", fontWeight: "700", fontSize: 14 },
   bookingRow: { flexDirection: "row", alignItems: "center", gap: 4, padding: 12, borderRadius: 10, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.bg },
   bookingSub: { fontSize: 12, color: colors.slate500, marginTop: 2 },
+  problemSub: { fontSize: 12, fontWeight: "700", color: colors.red600, marginTop: 2 },
   iconBtn: { padding: 8 },
 });

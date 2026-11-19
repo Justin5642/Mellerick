@@ -47,6 +47,7 @@ import {
 } from "@/lib/todo-board";
 import { todoHours } from "@/lib/todo-list";
 import { BoardJobLink } from "./board-job-link";
+import { BookingCostCentreDialog, type CostCentreRequest, type PickedCostCentre } from "./booking-cost-centre-dialog";
 import {
   applyBoardMove,
   buildBoardIndex,
@@ -924,6 +925,15 @@ export function TeamScheduleView({
   const [confirm, setConfirm] = useState<{ title: string; lines: string[]; action: string; resolve: (ok: boolean) => void } | null>(null);
   const askConfirm = (title: string, lines: string[], action: string) =>
     new Promise<boolean>((resolve) => setConfirm({ title, lines, action, resolve }));
+  // A to-do job dropped on a day asks which cost centre the booking is for
+  // (19 Nov 2026 — every booking asks).
+  const [costCentreAsk, setCostCentreAsk] = useState<(CostCentreRequest & { resolve: (p: PickedCostCentre | null) => void }) | null>(null);
+  const askCostCentre = (req: CostCentreRequest) =>
+    new Promise<PickedCostCentre | null>((resolve) => setCostCentreAsk({ ...req, resolve }));
+  const closeCostCentre = (picked: PickedCostCentre | null) => {
+    costCentreAsk?.resolve(picked);
+    setCostCentreAsk(null);
+  };
   const closeConfirm = (ok: boolean) => {
     confirm?.resolve(ok);
     setConfirm(null);
@@ -1171,7 +1181,16 @@ export function TeamScheduleView({
     const dayBlocks = target.staffId
       ? bookings.filter((b) => b.staff_id === target.staffId).flatMap((b) => bookingDays.get(b.id) ?? [])
       : [];
-    const insert = planTodoDrop({ jobId: job.id, staffId: target.staffId, dateKey: target.dateKey, estimateHours: estimate, dayBlocks });
+    const planned = planTodoDrop({ jobId: job.id, staffId: target.staffId, dateKey: target.dateKey, estimateHours: estimate, dayBlocks });
+    const whenText = formatDate(anchorForDateKey(target.dateKey), { weekday: "short", day: "numeric", month: "short" });
+    const timeText = planned.all_day ? "All day" : `${formatTime(planned.starts_at)}–${planned.ends_at ? formatTime(planned.ends_at) : ""}`;
+    const costCentre = await askCostCentre({
+      jobId: job.id,
+      title: `Book #${job.job_number} — ${job.title}`,
+      detail: `${target.staffId ? nameOf(target.staffId) : "Unassigned"} on ${whenText}, ${timeText}. Which cost centre is this booking for?`,
+    });
+    if (!costCentre) return;
+    const insert = { ...planned, cost_center_id: costCentre.id };
     const asBoardJob = jobsById.get(job.id) ?? boardJobFromTodo(job);
     const clashes = newBookingClashes(insert, bookings);
     if (clashes.length > 0) {
@@ -1192,7 +1211,7 @@ export function TeamScheduleView({
 
     const tempId = `pending:todo:${job.id}:${Date.now()}`;
     setBoardJobs((prev) => (prev.some((j) => j.id === job.id) ? prev : [...prev, asBoardJob]));
-    setBookings((prev) => [...prev, { ...insert, id: tempId, cost_center_name: null }]);
+    setBookings((prev) => [...prev, { ...insert, id: tempId, cost_center_name: costCentre.name }]);
     setTodoList((prev) => prev.filter((j) => j.id !== job.id));
     const inserted = await insertBookings(supabase, [insert]);
     if (!inserted.ok) {
@@ -1202,7 +1221,7 @@ export function TeamScheduleView({
       return;
     }
     const real = inserted.rows[0];
-    setBookings((prev) => prev.map((b) => (b.id === tempId ? { ...real, note: null, cost_center_name: null } : b)));
+    setBookings((prev) => prev.map((b) => (b.id === tempId ? { ...real, note: null, cost_center_name: costCentre.name } : b)));
     // 0067's trigger already took it off the list when 0079 derived the new
     // scheduled_start; this also covers a job listed while it had a start,
     // and moves a pending job to scheduled (the Schedule dialog's rule).
@@ -2098,6 +2117,7 @@ export function TeamScheduleView({
           )}
         </DialogContent>
       </Dialog>
+      <BookingCostCentreDialog request={costCentreAsk} onDone={closeCostCentre} />
       {/* Booking someone onto their leave: asked, never silent. */}
       <Dialog open={!!confirm} onOpenChange={(open) => { if (!open) closeConfirm(false); }}>
         <DialogContent>

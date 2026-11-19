@@ -153,6 +153,33 @@ describe("JobsRepository.createJob", () => {
     expect(cal).toMatchObject({ effect: "sync-calendar", dependsOn: assign.id });
   });
 
+  it("a scheduled job with a cost centre: crew, then the bookings' cost centre (server side), then the calendar", async () => {
+    const { outbox, ops } = captureOutbox();
+    await makeRepo(outbox).createJob({
+      customerId: "c1",
+      title: "T",
+      crewIds: ["tech-1", "tech-2"],
+      scheduledStartIso: "2026-08-01T00:00:00.000Z",
+      bookingCostCentreId: "cc-civil",
+    });
+    const [assign, cc, cal] = sides(ops);
+    expect(assign.effect).toBe("assign-technicians");
+    expect(cc).toMatchObject({
+      effect: "booking-cost-centre",
+      coalesceKey: "booking-cost-centre:id-1",
+      payload: { jobId: "id-1", costCentreId: "cc-civil", applyToBookings: true },
+      dependsOn: assign.id,
+    });
+    expect(typeof cc.payload.poId).toBe("string");
+    expect(cal).toMatchObject({ effect: "sync-calendar", dependsOn: cc.id });
+  });
+
+  it("no cost centre step without a schedule", async () => {
+    const { outbox, ops } = captureOutbox();
+    await makeRepo(outbox).createJob({ customerId: "c1", title: "T", bookingCostCentreId: "cc-civil" });
+    expect(sides(ops)).toHaveLength(0);
+  });
+
   it("has no dependency when the customer and site are already on the server", async () => {
     const { outbox, ops } = captureOutbox();
     await makeRepo(outbox).createJob({ customerId: "c1", siteId: "s1", title: "T" });
