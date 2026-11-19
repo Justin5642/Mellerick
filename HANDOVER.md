@@ -1025,6 +1025,60 @@ old tab is now labelled **Expenses**.
   until the office presses Save. A failed or skipped read leaves the file
   attached. Tests: `tests/unit/service-invoice-read.test.ts`.
 
+**Fleet office features on the phone (19 Nov 2026; no migration, no stream change).**
+Justin: bring the website's Fleet office/admin features to the phone. All
+office/admin only, all **online only** (service records, hire rates and
+attachments are office-only tables in no PowerSync stream); every write goes
+through a web route guarded by `requireOfficeOrAdmin` that writes with
+`callerClient` (RLS runs as the caller, never the service role), with fixed
+error sentences. Rules in `lib/fleet-office.ts`; routes tested in
+`tests/unit/fleet-office-routes.test.ts`. The web screens still write
+directly as before; the routes are there for them to share.
+- **Service history** (`mobile/components/fleet/ServiceHistory.tsx` on the
+  machine screen): due banner, services with "View invoice", delete; **Log a
+  service** with the invoice as a **photo** (camera or library → `prepareImage`
+  1600px JPEG), read automatically by `POST /api/fleet/service-invoice/read`
+  and filled by `applyServiceInvoiceRead` (only empty / default fields),
+  next service due, no cost / log the cost now / link an existing expense.
+  Nothing is saved until Save → `GET/POST /api/fleet/[id]/service-records`
+  (+ `DELETE …/[recordId]`): the server uploads the invoice to
+  `equipment-documents` at `serviceInvoicePath()` (so 0047 hides it from
+  technicians), then the new cost, then the service — a failed upload saves
+  nothing; a failed service removes the cost and file again. The phone sends a
+  client id, so a retry after a lost answer is answered as saved.
+- **Hire setup per machine** (`mobile/components/fleet/HireSetupSheet.tsx`,
+  "Hire setup" on the machine screen) and **Fleet → Hire rates**
+  (`mobile/app/fleet/hire-rates.tsx`, tag icon in the Fleet header; office
+  route group): every hireable machine, unpriced first, Set up / Edit, plus
+  hire attachments (add, day rate, offered). Units include cartage per tonne /
+  m³ (0111). Routes `GET/PUT /api/fleet/[id]/hire-options` (the web dialog's
+  save rule: upsert by machine+type+unit, remove what's no longer listed),
+  `GET /api/fleet/hire-rates` (built with `lib/fleet-hire-overview.ts`),
+  `POST /api/fleet/hire-attachments`, `PATCH …/[attachmentId]`.
+- **Per load carted** (0091 `equipment.cost_per_load`) in the phone's
+  equipment edit form (outbox, as the rest of the cost profile; sent only
+  when given, so an older form never wipes it), shown on the machine's running
+  cost; **year-cost summaries**: "Costs logged — FY" per machine
+  (`components/fleet/EquipmentYearCost.tsx`) and "Fleet costs logged — FY" on
+  the Fleet list (`components/fleet/FleetYearSummary.tsx`, read
+  `listFleetExpenses`, local-first — `equipment_expenses` is unwindowed).
+- **Equipment documents upload** (photos) → `POST /api/fleet/[id]/documents`
+  (≤ 3 MB base64, bytes sniffed PDF/JPEG/PNG/WebP; file then row as the
+  caller, file removed if the row fails).
+- **Mirrors** pinned by `tests/unit/fleet-mobile-mirror.test.ts`:
+  `mobile/lib/serviceDue.ts` = `lib/service-due.ts`,
+  `mobile/lib/serviceInvoiceForm.ts` = `lib/service-invoice-form.ts`,
+  `mobile/lib/fleetCosts.ts` = `lib/fleet-costs.ts` (below the imports),
+  `mobile/lib/hireLabels.ts` = `lib/hire-pricing.ts`'s hire vocabulary. Change
+  the web file first, then copy. Calls in `mobile/lib/fleetOffice.ts` (tested).
+- **Gap:** no document picker is in the app binary (adding one is a native
+  module, so it waits for a build decision), so **PDF** invoices and documents
+  still go up on the website; the phone takes photos. Money only through
+  `MoneyText` inside `RoleGate` (Hire rates' rate lines are server-formatted
+  text, shown only inside the office-only route and a `RoleGate`). Reaches
+  phones with the next build (no new native module); the web routes must be
+  deployed first.
+
 **Day Works lists the whole fleet; Fleet → Hire rates (16 Nov 2026; no migration).**
 Justin: "The whole Fleet doesn't seem to be there." The picker used to list
 only machines with an active `equipment_hire_options` row, and 0108 seeded

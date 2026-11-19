@@ -36,7 +36,7 @@ project waiting on one purchase order.
 | Customers | **full** ✅ | ~~Customer-360~~ (D47), ~~quick-create~~ (D60), ~~favourites~~ (D62); inactive lifecycle handled via deactivate |
 | Backflow | full (in-repo) ✅ | ~~register-device offline~~ (D46); test-log offline is **blocked on Q3** (water-authority submit dedupe) — flagged crucial, not deferrable in-repo |
 | Quotes | full (in-repo) ✅ | ~~convert-to-job~~ (D50); Send/PDF are the **external** Bearer gate |
-| Fleet | **full** ✅ | ~~assign~~ (D54), ~~detail + expenses~~ (D56), ~~usage log~~ (D61), ~~documents view/open~~ (D67); document *upload* stays a web action (matches job docs) |
+| Fleet | **full** ✅ | ~~assign~~ (D54), ~~detail + expenses~~ (D56), ~~usage log~~ (D61), ~~documents view/open~~ (D67); **19 Nov 2026 (office/admin, online):** ~~service history + Log a service with the invoice photo read automatically~~, ~~hire setup per machine + Fleet → Hire rates + attachments~~, ~~per load carted + year-cost summaries~~, ~~document upload (photos)~~. Gap: **PDF** invoices/documents still go up on the web — no document picker in the binary (adding one is a native module) |
 | Staff | near-full | ~~charge-out rate~~ (D53), ~~leave log~~ (D58); invite/resend/edit-email (ext) |
 | Settings | near-full | ~~variation-types~~ (D57), ~~cost-centre templates~~ (D59); Xero account codes + OAuth connect (web/ext) |
 | Reports | **full (analytics)** ✅ | all 5 tables done: revenue-by-month, top-customers, jobs-by-staff (D48), staff cost/efficiency (D51), equipment utilisation (D52) |

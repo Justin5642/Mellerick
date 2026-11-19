@@ -19,13 +19,15 @@ export interface Equipment {
   other_annual_costs: number;
   fuel_cost_per_hour: number;
   target_hours_per_year: number;
+  /** $ per load carted (0091) — the truck's cartage is costed per hour AND per load. */
+  cost_per_load: number;
   notes: string | null;
   assigned_to: string | null;
   assigned_profile: { full_name: string } | null;
 }
 
 const SELECT =
-  "id, name, category, registration, purchase_cost, purchase_date, estimated_life_years, insurance_annual, maintenance_annual, registration_annual, other_annual_costs, fuel_cost_per_hour, target_hours_per_year, notes, assigned_to, assigned_profile:profiles!equipment_assigned_to_fkey(full_name)";
+  "id, name, category, registration, purchase_cost, purchase_date, estimated_life_years, insurance_annual, maintenance_annual, registration_annual, other_annual_costs, fuel_cost_per_hour, target_hours_per_year, cost_per_load, notes, assigned_to, assigned_profile:profiles!equipment_assigned_to_fkey(full_name)";
 
 // Fleet screens are office/admin surfaces; the equipment tables ride the
 // office-only streams, so a technician's local DB is empty. The role gate
@@ -40,7 +42,7 @@ const EQUIPMENT_PROJECTION = `
   SELECT e.id, e.name, e.category, e.registration, e.purchase_cost, e.purchase_date,
          e.estimated_life_years, e.insurance_annual, e.maintenance_annual,
          e.registration_annual, e.other_annual_costs, e.fuel_cost_per_hour,
-         e.target_hours_per_year, e.notes, e.assigned_to,
+         e.target_hours_per_year, e.cost_per_load, e.notes, e.assigned_to,
          p.full_name AS assigned_profile_name
   FROM equipment e LEFT JOIN profiles p ON p.id = e.assigned_to`;
 
@@ -65,6 +67,7 @@ interface RawEquipmentRow {
   other_annual_costs: number;
   fuel_cost_per_hour: number;
   target_hours_per_year: number;
+  cost_per_load: number | null;
   notes: string | null;
   assigned_to: string | null;
   assigned_profile_name: string | null;
@@ -85,6 +88,7 @@ function mapEquipment(r: RawEquipmentRow): Equipment {
     other_annual_costs: num(r.other_annual_costs),
     fuel_cost_per_hour: num(r.fuel_cost_per_hour),
     target_hours_per_year: num(r.target_hours_per_year),
+    cost_per_load: num(r.cost_per_load),
     notes: r.notes,
     assigned_to: r.assigned_to,
     assigned_profile: nestOne(r.assigned_to, { full_name: r.assigned_profile_name as string }),
@@ -186,6 +190,53 @@ export async function listEquipmentExpenses(equipmentId: string): Promise<Equipm
         .order("expense_date", { ascending: false })
         .order("created_at", { ascending: false });
       return unwrapRows(res as never, "listEquipmentExpenses") as unknown as EquipmentExpense[];
+    },
+    FLEET_ROLES
+  );
+}
+
+// Every logged expense across the fleet, for the "Fleet costs logged" year
+// summary (lib/fleetCosts.ts summariseExpenses — the web's FleetYearSummary).
+// equipment_expenses rides the office stream whole (no sync window), so the
+// local read is complete; the remote one pages past PostgREST's row cap.
+export interface FleetExpenseRow {
+  equipment_id: string;
+  category: string;
+  amount: number;
+  gst_amount: number;
+  expense_date: string;
+}
+
+export const SQL_LIST_FLEET_EXPENSES = `
+  SELECT equipment_id, category, amount, gst_amount, expense_date
+  FROM equipment_expenses WHERE expense_date IS NOT NULL`;
+
+const FLEET_EXPENSE_PAGE = 1000;
+
+export async function listFleetExpenses(): Promise<FleetExpenseRow[]> {
+  return fromLocalOr(
+    async (db) =>
+      (await db.getAll<FleetExpenseRow>(SQL_LIST_FLEET_EXPENSES, [])).map((r) => ({
+        equipment_id: r.equipment_id,
+        category: r.category,
+        amount: num(r.amount),
+        gst_amount: num(r.gst_amount),
+        expense_date: r.expense_date,
+      })),
+    async () => {
+      const out: FleetExpenseRow[] = [];
+      for (let from = 0; ; from += FLEET_EXPENSE_PAGE) {
+        const res = await supabase
+          .from("equipment_expenses")
+          .select("equipment_id, category, amount, gst_amount, expense_date")
+          .not("expense_date", "is", null)
+          .order("id")
+          .range(from, from + FLEET_EXPENSE_PAGE - 1);
+        const page = unwrapRows(res as never, "listFleetExpenses") as unknown as FleetExpenseRow[];
+        out.push(...page.map((r) => ({ ...r, amount: num(r.amount), gst_amount: num(r.gst_amount) })));
+        if (page.length < FLEET_EXPENSE_PAGE) break;
+      }
+      return out;
     },
     FLEET_ROLES
   );
