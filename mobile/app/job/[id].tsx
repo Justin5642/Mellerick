@@ -27,9 +27,14 @@ import { ScheduleJobModal } from "../../components/job/schedule-job-modal";
 import { isJobClosedForScheduling } from "../../lib/jobSchedulable";
 import { KeyboardSheet, KEYBOARD_SHEET_INPUT_FONT_SIZE } from "../../components/KeyboardSheet";
 import { getJobStageLabel } from "../../lib/job-stages";
-import { formatScheduleSummary } from "../../lib/scheduleDisplay";
+import { formatScheduleSummary, businessTodayKey } from "../../lib/scheduleDisplay";
 import { getJobCostCentres, type JobCostCentre } from "../../lib/data/reads/jobBilling";
 import { listJobBookings, type JobBooking } from "../../lib/data/reads/bookings";
+// Staff leave (migration 0112 — a draft, not applied yet), online only: a
+// booking on its technician's leave day is flagged "Needs reassigning".
+import { listScheduleLeave } from "../../lib/data/reads/leave";
+import { bookingsNeedingReassignment, leaveDateLabel, leaveDayLabel, NEEDS_REASSIGNING, type ScheduleLeave } from "../../lib/staffLeave";
+import { shiftDateKey } from "../../lib/date";
 import { bookingWindow, mergePendingBookings } from "../../lib/bookings";
 import { useDataLayer } from "../../lib/data/DataProvider";
 
@@ -124,6 +129,7 @@ export default function JobDetailScreen() {
   // when they could not be read) — the header then shows the job-level
   // schedule as before.
   const [bookings, setBookings] = useState<JobBooking[] | null>(null);
+  const [leave, setLeave] = useState<ScheduleLeave[]>([]);
   const layer = useDataLayer();
 
   // Best-effort like the crew and cost centres: bookings are detail on top of
@@ -139,6 +145,13 @@ export default function JobDetailScreen() {
       }
       const pending = layer ? await layer.outbox.pendingRowIds() : new Set<string>();
       setBookings((shown) => mergePendingBookings(shown ?? [], read, pending));
+      // Leave from today for a year, only when there are bookings to check.
+      // Offline or before 0112: nothing flagged, nothing else changes.
+      if (read.length > 0) {
+        const today = businessTodayKey();
+        const res = await listScheduleLeave(today, shiftDateKey(today, 366));
+        if (res.available) setLeave(res.leave);
+      }
     } catch (e) {
       console.warn("[job] bookings unavailable; showing the job's own schedule:", e);
     }
@@ -369,16 +382,27 @@ export default function JobDetailScreen() {
       {viewOnly ? null : bookings && bookings.length > 0 ? (
         // One line per booking — who, when, which stage; your own in blue.
         <View style={styles.bookingList}>
-          {bookings.map((b) => {
-            const mine = !!userId && b.staff_id === userId;
-            const stage = b.cost_center_id ? costCenters.find((cc) => cc.id === b.cost_center_id)?.name : null;
-            return (
-              <Text key={b.id} style={[styles.scheduleSubtitle, mine && styles.myBooking]} numberOfLines={2}>
-                {mine ? "You" : (b.staff_name ?? "Unassigned")} · {formatScheduleSummary(bookingWindow(b))}
-                {stage ? ` · ${stage}` : ""}
-              </Text>
-            );
-          })}
+          {(() => {
+            const flagged = bookingsNeedingReassignment(bookings, leave, businessTodayKey());
+            return bookings.map((b) => {
+              const mine = !!userId && b.staff_id === userId;
+              const stage = b.cost_center_id ? costCenters.find((cc) => cc.id === b.cost_center_id)?.name : null;
+              const clash = flagged.get(b.id);
+              return (
+                <View key={b.id}>
+                  <Text style={[styles.scheduleSubtitle, mine && styles.myBooking]} numberOfLines={2}>
+                    {mine ? "You" : (b.staff_name ?? "Unassigned")} · {formatScheduleSummary(bookingWindow(b))}
+                    {stage ? ` · ${stage}` : ""}
+                  </Text>
+                  {clash ? (
+                    <Text style={styles.reassignLine} numberOfLines={2} accessibilityLabel={`${NEEDS_REASSIGNING}: on leave`}>
+                      {NEEDS_REASSIGNING} · {clash.map((c) => `${leaveDayLabel(c.leaveDay)} ${leaveDateLabel(c.dateKey)}`).join(", ")}
+                    </Text>
+                  ) : null}
+                </View>
+              );
+            });
+          })()}
         </View>
       ) : (
         <Text style={styles.scheduleSubtitle}>
@@ -580,6 +604,7 @@ export default function JobDetailScreen() {
 }
 
 const styles = StyleSheet.create({
+  reassignLine: { fontSize: 12, fontWeight: "800", color: "#be123c", marginTop: 1 },
   container: { flex: 1, backgroundColor: colors.bg },
   headerBack: { flexDirection: "row", alignItems: "center", paddingRight: 8, marginLeft: -6 },
   headerBackText: { fontSize: 17, color: colors.blue600 },

@@ -13,6 +13,7 @@ import { Trash2 } from "lucide-react";
 import { computeLoadedCost, LEAVE_TYPE_LABELS, type StaffCostInputs } from "@/lib/staff-cost";
 import { costPerHourOf } from "@/lib/fleet-costs";
 import { formatDate } from "@/lib/date";
+import { validateLeaveTimes } from "@/lib/staff-leave";
 
 interface LeaveEntry {
   id: string;
@@ -21,6 +22,9 @@ interface LeaveEntry {
   end_date: string;
   hours: number;
   notes: string | null;
+  /** Part-day hours (0112 — a draft, not applied yet); absent on a database without them. */
+  start_time?: string | null;
+  end_time?: string | null;
 }
 
 const emptyCostForm: StaffCostInputs = {
@@ -32,16 +36,18 @@ const emptyCostForm: StaffCostInputs = {
   target_hours_per_week: 38,
 };
 
-const emptyLeaveForm = { leave_type: "sick", start_date: "", end_date: "", hours: "", notes: "" };
+const emptyLeaveForm = { leave_type: "sick", start_date: "", end_date: "", hours: "", notes: "", start_time: "", end_time: "" };
 
 interface Props {
   staffId: string;
   staffName: string;
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  /** Open on this tab — "leave" when arriving from a leave tile on the schedule. */
+  initialTab?: "cost" | "leave";
 }
 
-export function StaffCostDialog({ staffId, staffName, open, onOpenChange }: Props) {
+export function StaffCostDialog({ staffId, staffName, open, onOpenChange, initialTab = "cost" }: Props) {
   const supabase = createClient();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -148,6 +154,13 @@ export function StaffCostDialog({ staffId, staffName, open, onOpenChange }: Prop
       toast.error("Start date, end date and hours are required");
       return;
     }
+    // Part day (0112): optional From/To, Melbourne time, the same on each day.
+    // The schedule then marks only those hours unavailable.
+    const timeError = validateLeaveTimes(leaveForm.start_time, leaveForm.end_time);
+    if (timeError) {
+      toast.error(timeError);
+      return;
+    }
     setAddingLeave(true);
     const {
       data: { user },
@@ -162,12 +175,15 @@ export function StaffCostDialog({ staffId, staffName, open, onOpenChange }: Prop
         hours: parseFloat(leaveForm.hours),
         notes: leaveForm.notes || null,
         created_by: user?.id ?? null,
+        // Only sent when given, so leave still logs on a database without 0112.
+        ...(leaveForm.start_time && leaveForm.end_time ? { start_time: leaveForm.start_time, end_time: leaveForm.end_time } : {}),
       })
       .select()
       .single();
     setAddingLeave(false);
     if (error || !data) {
-      toast.error("Failed to log leave");
+      const noColumns = error?.code === "PGRST204" || error?.code === "42703";
+      toast.error(noColumns ? "Part-day times aren't switched on yet (0112) — log it without From/To." : "Failed to log leave");
       return;
     }
     setLeaveEntries((prev) => [data as LeaveEntry, ...prev]);
@@ -197,7 +213,7 @@ export function StaffCostDialog({ staffId, staffName, open, onOpenChange }: Prop
         {loading ? (
           <p className="text-sm text-slate-400 py-8 text-center">Loading...</p>
         ) : (
-          <Tabs defaultValue="cost">
+          <Tabs defaultValue={initialTab}>
             <TabsList>
               <TabsTrigger value="cost">Cost Profile</TabsTrigger>
               <TabsTrigger value="leave">Leave Log</TabsTrigger>
@@ -314,6 +330,17 @@ export function StaffCostDialog({ staffId, staffName, open, onOpenChange }: Prop
                   <Label>End Date</Label>
                   <Input type="date" value={leaveForm.end_date} onChange={(e) => setLeaveForm((p) => ({ ...p, end_date: e.target.value }))} />
                 </div>
+                <div className="space-y-1.5">
+                  <Label>From (part day)</Label>
+                  <Input type="time" value={leaveForm.start_time} onChange={(e) => setLeaveForm((p) => ({ ...p, start_time: e.target.value }))} />
+                </div>
+                <div className="space-y-1.5">
+                  <Label>To (part day)</Label>
+                  <Input type="time" value={leaveForm.end_time} onChange={(e) => setLeaveForm((p) => ({ ...p, end_time: e.target.value }))} />
+                </div>
+                <p className="col-span-2 text-xs text-slate-500 -mt-1">
+                  Leave From/To empty for whole days. Shown on the schedule: office and admin see the type; others see &ldquo;Unavailable&rdquo;.
+                </p>
                 <div className="space-y-1.5 col-span-2">
                   <Label>Notes</Label>
                   <Input value={leaveForm.notes} onChange={(e) => setLeaveForm((p) => ({ ...p, notes: e.target.value }))} placeholder="Optional" />
@@ -333,6 +360,9 @@ export function StaffCostDialog({ staffId, staffName, open, onOpenChange }: Prop
                           {formatDate(l.start_date)} – {formatDate(l.end_date)}
                         </span>
                         <span className="ml-2 font-semibold text-slate-800">{Number(l.hours).toFixed(1)}h</span>
+                        {l.start_time && l.end_time && (
+                          <span className="ml-2 text-xs text-slate-500">{l.start_time.slice(0, 5)}–{l.end_time.slice(0, 5)}</span>
+                        )}
                         {l.notes && <p className="text-xs text-slate-400 mt-0.5">{l.notes}</p>}
                       </div>
                       <button onClick={() => deleteLeave(l.id)} className="text-slate-300 hover:text-red-500">

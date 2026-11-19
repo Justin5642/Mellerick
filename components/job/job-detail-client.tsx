@@ -16,6 +16,8 @@ import { JobHoursScoreboard } from "./job-hours-scoreboard";
 import { JobTodoControl } from "./job-todo-control";
 import { sumAllocatedHours } from "@/lib/hours-scoreboard";
 import { bookingsFromJobWindow, nameBookings, summariseBookings, type JobBookingWithNames } from "@/lib/bookings";
+import { bookingsNeedingReassignment, NEEDS_REASSIGNING, type ScheduleLeave } from "@/lib/staff-leave";
+import { dateKeyInBusinessTZ } from "@/lib/date";
 import { closedJobScheduleMessage, isJobClosedForScheduling } from "@/lib/job-schedulable";
 
 // Overview is the default tab, so it ships in the page bundle. Every other
@@ -103,11 +105,13 @@ interface Props {
   /** False when job_bookings is not in this database yet (0079). */
   bookingsReady: boolean;
   bookingsError: string | null;
+  /** Staff leave from today (0112 — a draft, not applied yet) — flags bookings on someone's leave day. */
+  leave?: ScheduleLeave[];
   /** A technician on a job they are not on: no schedule shown at all. */
   hideSchedule?: boolean;
 }
 
-export function JobDetailClient({ job, currentUserId, photos: initialPhotos, documents: initialDocuments, notes: initialNotes, stageNotes: initialStageNotes, lineItems: initialLineItems, staff, purchaseOrders: initialPOs, vendorOrders: initialVendorOrders, timeEntries: initialTimeEntries, variations: initialVariations, expenses: initialExpenses, equipmentUsage: initialEquipmentUsage, isAdmin, isOffice, techAllocatedHours, techAllocatedHoursError, staffCostProfiles, jobInvoices, minMarginPct, currentAssignedIds, bookings: loadedBookings, bookingsReady, bookingsError, hideSchedule = false }: Props) {
+export function JobDetailClient({ job, currentUserId, photos: initialPhotos, documents: initialDocuments, notes: initialNotes, stageNotes: initialStageNotes, lineItems: initialLineItems, staff, purchaseOrders: initialPOs, vendorOrders: initialVendorOrders, timeEntries: initialTimeEntries, variations: initialVariations, expenses: initialExpenses, equipmentUsage: initialEquipmentUsage, isAdmin, isOffice, techAllocatedHours, techAllocatedHoursError, staffCostProfiles, jobInvoices, minMarginPct, currentAssignedIds, bookings: loadedBookings, bookingsReady, bookingsError, leave, hideSchedule = false }: Props) {
   // Deep-links like /dashboard/jobs/[id]?tab=variations&variation=[id]
   // (used by the Approvals page's "Price & review" link) land here — read
   // them once on mount so the right tab opens and the right variation is
@@ -225,6 +229,11 @@ export function JobDetailClient({ job, currentUserId, photos: initialPhotos, doc
     [bookingsReady, loadedBookings, job, currentAssignedIds, staff, purchaseOrders],
   );
   const scheduleSummary = summariseBookings(bookings);
+  // Bookings on a day their technician is on leave, from today on.
+  const leaveClashes = useMemo(
+    () => bookingsNeedingReassignment(bookings, leave ?? [], dateKeyInBusinessTZ(new Date())),
+    [bookings, leave],
+  );
   const openSchedule = () => {
     setScheduleMounted(true);
     setScheduleOpen(true);
@@ -276,6 +285,19 @@ export function JobDetailClient({ job, currentUserId, photos: initialPhotos, doc
                     Overview lists each booking. */}
                 {hideSchedule ? null : scheduleSummary ?? "Not scheduled"}
               </p>
+              {!hideSchedule && leaveClashes.size > 0 && (
+                <p className="mt-1">
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab("overview")}
+                    className="inline-block rounded bg-rose-600 px-1.5 py-0.5 text-xs font-bold text-white"
+                    title="A technician booked on this job is on leave that day"
+                  >
+                    {NEEDS_REASSIGNING}
+                    {leaveClashes.size > 1 ? ` (${leaveClashes.size} bookings)` : ""}
+                  </button>
+                </p>
+              )}
               {isOffice && jobClosed && (
                 <p className="text-xs text-amber-700 mt-1 max-w-xl" role="note">
                   {closedJobScheduleMessage(job.status)}{" "}
@@ -396,6 +418,7 @@ export function JobDetailClient({ job, currentUserId, photos: initialPhotos, doc
                 readOnly={viewOnly}
                 bookings={bookings}
                 bookingsError={bookingsError}
+                leaveClashes={leaveClashes}
                 hideSchedule={hideSchedule}
                 onEditSchedule={isOffice ? openSchedule : undefined}
                 canEditSite={isOffice}

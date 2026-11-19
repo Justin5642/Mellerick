@@ -286,6 +286,77 @@ technicians must be unaffected.
   trust only `0110 PASSED` → mark the reviewer (§7) → THEN redeploy the
   PowerSync streams. Merging the web/phone code first is harmless.
 
+**Staff leave on the schedule (migration `0112`, DRAFT — not applied).**
+Justin, 17 Nov 2026: when someone has sick leave entered, show it on the
+schedule so nobody books them; bookings already on those days get flagged.
+- **Source — no new place to enter leave.** `staff_leave` (0014): one row per
+  period, `start_date..end_date`, total `hours`, `leave_type` (sick / annual /
+  public_holiday / long_service / other), `notes`. Entered by an admin in
+  Staff → Cost & Leave → **Leave Log**, or imported from Xero Payroll leave
+  applications (0101, `lib/xero-payroll-import.ts`). Admin-only by RLS, and
+  it stays that way. 0112 adds optional `start_time`/`end_time` (Melbourne
+  wall-clock, both or neither) for a **part day**, set from the same Leave
+  Log form ("From / To (part day)"); Xero imports leave them null.
+- **Day rules** (`lib/staff-leave.ts`, mirrored byte-identical below the
+  imports at `mobile/lib/staffLeave.ts`, pinned by
+  `tests/unit/staff-leave.test.ts`): leave covers the WEEKDAYS of its range
+  (a weekend-only range covers those days); with times, those hours each day;
+  without, the hours are spread evenly — ≥ 6 h a day (or unknown hours) is a
+  full day, less is a part day of unknown time, which still blocks the whole
+  day for clash checks. A booking day clashes when it overlaps a leave span
+  (`bookingLeaveConflicts`); `bookingsNeedingReassignment` lists bookings on
+  leave days from today on (past days are never flagged).
+- **Who sees the type** — `schedule_settings.leave_type_visible_to`
+  (one row; `office_admin` default, or `admin`, or `everyone`; Settings →
+  **Leave on the schedule**, admin-only by RLS). Enforced in the database:
+  the schedule reads leave ONLY through `schedule_leave(p_from, p_to)`
+  (SECURITY DEFINER, ≤ 400 days): staff, dates, hours, part-day times, and
+  `leave_type` — NULL for anyone outside the setting, shown as
+  "Unavailable". `id` only for an admin; `notes` never; nothing for an
+  inactive or limited-access (0110) caller.
+- **Web board** (`components/schedule/team-schedule-view.tsx`, data from
+  `app/dashboard/schedule/page.tsx` via `lib/staff-leave-data.ts`, 60 days
+  back to 300 ahead): a striped tile per leave day in the person's cell / Day
+  column, coloured by type (rose Sick, teal Annual, violet Public holiday,
+  sky Long service, amber other, slate Unavailable — `LEAVE_COLOURS`).
+  Read-only: not draggable, no handles, a click opens a details dialog (admin
+  gets **Open leave record** → `/dashboard/staff?leave=<id>`, which opens that
+  person's Leave Log). Bookings on a leave day get a rose ring and a **Needs
+  reassigning** tag. Drag, cut/paste and Shift-copy onto a leave day ask
+  "isn't available then — Book anyway?"; a resize asks when it GAINS a leave
+  day (same dialog as booking clashes).
+- **Web Schedule dialog** (`components/job/schedule-job-dialog.tsx`): reads
+  leave on open; rows that would book someone onto leave say so inline and
+  Save turns into **Book anyway** (an unchanged saved booking isn't re-warned).
+- **Web job page**: Overview's bookings list shows **Needs reassigning** with
+  the leave days; the header shows the tag (with a count) and jumps to Overview.
+- **Phone** (online only — see §2): office Schedule tab Day/Week draws leave
+  blocks in the person's row (`layoutDayRow` / `layoutWeekRow` in
+  `mobile/lib/scheduleGrid.ts`, tested in `scheduleGridLeave.test.ts`; a leave
+  block takes its own lane), tap → read-only alert; List shows "Off: …" under
+  each day and prefixes flagged rows. Moves/resizes warn in the existing
+  confirm (`Book anyway`). The Add/Edit booking sheet warns on its confirm
+  step and asks before saving. The job screen header flags booked lines.
+  Read: `mobile/lib/data/reads/leave.ts` (tested). Offline → no leave shown.
+- **Before 0112 is applied nothing breaks**: every reader treats a missing
+  function/column (42883/PGRST202/42703/PGRST204/42P01/PGRST205) as "no
+  leave"; the Leave Log only sends From/To when given and says why if the
+  columns aren't there; Settings says it isn't switched on.
+- **Apply order:** paste `0112_schedule_leave.sql`, then
+  `supabase/tests/0112_schedule_leave_test.sql` (needs an active technician
+  and admin; office checks skip without an office user), trust only
+  `0112 PASSED`. Checked on a scratch Postgres 16 with a minimal Supabase
+  shim (roles, `auth.uid()`, profiles, `is_admin`, staff_leave as of 0101):
+  applies twice cleanly, passes, and fails naming the scenarios when the
+  function returns the type unconditionally. Mark the header applied, add the
+  ledger row, regenerate types (`lib/database.types.ts` has the columns,
+  table and function added by hand). No PowerSync redeploy — no stream
+  changed. Web and phone may merge/ship before or after.
+- **Not done:** leave isn't on the phone offline (deliberate); a part day of
+  unknown time can't be placed on the Day timeline, so it covers the whole
+  day; the phone crew picker (Reassign) doesn't warn; "Needs reassigning" is
+  a flag, not a task list.
+
 **Supplier POs from the phone (migration `0085` applied 2026-10-28).**
 Justin, 28 Oct 2026: any technician, on any job, can raise a purchase order to
 any supplier against a cost centre, and it is emailed straight to the supplier
@@ -1077,6 +1148,12 @@ review login) receives none of it; everyone else exactly what they did before.
 `IS NOT true`, never `= false`, so a database without the column keeps today's
 behaviour. A user with no profile row now receives no backflow register (fail
 closed). 0110 applied and the YAML redeployed (active) on 2026-11-17.
+
+**Staff leave is in no stream (0112, draft).** The schedule's leave comes
+from `schedule_leave()` online, which withholds the leave type by role; a
+stream would bypass that and put leave types and notes in technicians'
+SQLite. `tests/unit/sync-streams-contract.test.ts` fails if any stream reads
+`staff_leave`, `staff_leave_balances` or `schedule_settings`.
 
 Office/admin streams gate on the caller's own profile row:
 
@@ -1894,6 +1971,7 @@ a shippable release.
 | **Booking notes: record 0109** | Justin | `0109` applied 2026-11-16; sync streams redeployed and active 2026-11-17. Only the ledger row is left if not yet run: `insert into supabase_migrations.schema_migrations (version,name) values ('0109','job_booking_note') on conflict do nothing;` |
 | **App Review account: limit it (0110)** | Justin | `0110` applied 2026-11-17 (gate test passed); sync streams redeployed and active the same day. Mark the reviewer in the SQL editor: `select set_config('request.jwt.claims', '{"role":"service_role"}', true); update profiles set limited_access = true where lower(email) = lower('<reviewer email>');` (expect UPDATE 1). Ledger: `insert into supabase_migrations.schema_migrations (version,name) values ('0110','limited_access_accounts') on conflict do nothing;` The phone hides the Backflow tab for it from the next build. |
 | **Truck loads: apply 0111, then set rates** | Justin | `0111` is a DRAFT. Paste `supabase/migrations/0111_cartage_loads.sql`, then `supabase/tests/0111_cartage_loads_test.sql`; trust only `0111 PASSED`. Mark 0111's header applied and add the ledger row: `insert into supabase_migrations.schema_migrations (version,name) values ('0111','cartage_loads') on conflict do nothing;` Then: Fleet → Hire setup on each truck, add **Cartage per tonne** and/or **per m³** and **per km** rates; Settings → Truck loads, check the margin (15% by default); on jobs where quarry product is NOT in the quote, set the Day Works tab's "Quarry product on this job" to Extra. |
+| **Leave on the schedule: apply 0112** | Justin | Draft. Paste `0112_schedule_leave.sql`, then `supabase/tests/0112_schedule_leave_test.sql`; trust only `0112 PASSED`. Then mark its header applied and add the ledger row: `insert into supabase_migrations.schema_migrations (version,name) values ('0112','schedule_leave') on conflict do nothing;` No PowerSync redeploy. Who sees the leave type defaults to office + admin; change it in Settings → Leave on the schedule. |
 | **Maestro flow 02** | Avi | Needs `ADMIN_EMAIL` / `ADMIN_PASSWORD` in the environment. The login subflow deliberately skips when a session already exists, so a password never passes through a script — which is why flows 01/03/04 could be run and 02 could not. |
 
 ### QA fixture — do not delete

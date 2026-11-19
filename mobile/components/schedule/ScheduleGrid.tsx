@@ -24,6 +24,12 @@
 //   on a chip's right      booking by whole days; onResize confirms it
 //   edge, then drag
 // Completed jobs and stand-in (no-bookings) rows never move.
+//
+// Staff leave (migration 0112 — a draft, not applied yet) is drawn in the
+// technician's row as a striped block in the leave type's colour ("Sick",
+// "Annual leave"…, or "Unavailable" when the server withheld the type). It
+// is read-only: a tap opens its details, nothing drags or resizes it.
+// Bookings on a leave day carry a "Needs reassigning" tag.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Animated, StyleSheet, Text, View, type LayoutChangeEvent } from "react-native";
 import { Gesture, GestureDetector, RefreshControl, ScrollView as GHScrollView } from "react-native-gesture-handler";
@@ -39,24 +45,24 @@ import {
   LANE_HEIGHT,
   LEFT_COLUMN_WIDTH,
   MIN_TOUCH,
-  ROW_PADDING,
   WEEK_COLUMN_WIDTH,
   bookingEndKey,
   canResizeByDays,
   columnAt,
-  dayBlockGeometry,
   dayTimelineHours,
   isCompletedJob,
   minutesIntoDay,
   moveBlockedReason,
   othersOnJobDay,
-  packLanes,
   rowAt,
-  rowHeight,
   rowOffsets,
   techShortLabel,
+  layoutDayRow,
+  layoutWeekRow,
   type GridRow,
+  type RowItem,
 } from "../../lib/scheduleGrid";
+import { leaveColour, leaveDayLabel, leaveRangeLabel, NEEDS_REASSIGNING, type LeaveConflict, type LeaveDay, type LeaveIndex } from "../../lib/staffLeave";
 
 const AnimatedGHScrollView = Animated.createAnimatedComponent(GHScrollView);
 
@@ -98,6 +104,12 @@ export interface ScheduleGridProps {
   onBlocked: (message: string) => void;
   onMove: (entry: BoardEntry, source: BoardCell, target: BoardCell) => void;
   onResize: (entry: BoardEntry, newEndKey: string) => void;
+  /** Staff leave on the days shown (0112 — a draft, not applied yet); absent = none. */
+  leave?: LeaveIndex;
+  /** Booking id → the days its technician is on leave. */
+  reassign?: ReadonlyMap<string, LeaveConflict[]>;
+  /** A leave block was tapped: show its details (read-only). */
+  onOpenLeave?: (day: LeaveDay) => void;
 }
 
 export function ScheduleGrid(props: ScheduleGridProps) {
@@ -123,32 +135,35 @@ export function ScheduleGrid(props: ScheduleGridProps) {
     [board],
   );
 
-  // Every block's position inside its row, and each row's height.
-  const { placedByRow, heights } = useMemo(() => {
+  const leaveIndex = props.leave;
+  const leaveFor = useCallback(
+    (staffId: string | null, key: string): LeaveDay[] => (staffId ? leaveIndex?.get(staffId)?.get(key) ?? [] : []),
+    [leaveIndex],
+  );
+
+  // Every block's position inside its row (bookings and leave — lib/scheduleGrid.ts
+  // layoutDayRow / layoutWeekRow), and each row's height.
+  const { placedByRow, leaveByRow, heights } = useMemo(() => {
     const placedByRow: Placed[][] = [];
+    const leaveByRow: Extract<RowItem, { kind: "leave" }>[][] = [];
     const heights: number[] = [];
     for (const row of rows) {
+      const { items, height } =
+        view === "day"
+          ? layoutDayRow(entriesFor(row.staffId, dayKey), leaveFor(row.staffId, dayKey), dayRange!)
+          : layoutWeekRow(dayKeys, (k) => entriesFor(row.staffId, k), (k) => leaveFor(row.staffId, k));
       const placed: Placed[] = [];
-      if (view === "day") {
-        const geo = entriesFor(row.staffId, dayKey).map((entry) => ({ entry, id: entry.booking.id, ...dayBlockGeometry(entry.day, dayRange!) }));
-        const { lane, lanes } = packLanes(geo);
-        for (const g of geo) placed.push({ entry: g.entry, left: g.left, width: g.width, top: ROW_PADDING + (lane.get(g.id) ?? 0) * LANE_HEIGHT });
-        heights.push(rowHeight(lanes));
-      } else {
-        let lanes = 0;
-        dayKeys.forEach((key, col) => {
-          const list = entriesFor(row.staffId, key);
-          lanes = Math.max(lanes, list.length);
-          list.forEach((entry, i) =>
-            placed.push({ entry, left: col * WEEK_COLUMN_WIDTH + 3, width: WEEK_COLUMN_WIDTH - 6, top: ROW_PADDING + i * LANE_HEIGHT }),
-          );
-        });
-        heights.push(rowHeight(lanes));
+      const leave: Extract<RowItem, { kind: "leave" }>[] = [];
+      for (const it of items) {
+        if (it.kind === "booking") placed.push({ entry: it.entry, left: it.left, top: it.top, width: it.width });
+        else leave.push(it);
       }
       placedByRow.push(placed);
+      leaveByRow.push(leave);
+      heights.push(height);
     }
-    return { placedByRow, heights };
-  }, [rows, view, dayKey, dayKeys, dayRange, entriesFor]);
+    return { placedByRow, leaveByRow, heights };
+  }, [rows, view, dayKey, dayKeys, dayRange, entriesFor, leaveFor]);
   const tops = useMemo(() => rowOffsets(heights), [heights]);
   const bodyHeight = tops.length ? tops[tops.length - 1] + heights[heights.length - 1] : 0;
 
@@ -329,13 +344,14 @@ export function ScheduleGrid(props: ScheduleGridProps) {
   // the whole drag: a new function would rebuild the block's gesture, and
   // RNGH drops a gesture that is replaced mid-flight. So the blocks get these
   // stable wrappers, and the wrappers call whatever the latest render made.
-  const latest = useRef({ beginDragNow, moveDragNow, endDragNow, tickAutoScroll, onOpen: props.onOpen, onBlocked: props.onBlocked });
-  latest.current = { beginDragNow, moveDragNow, endDragNow, tickAutoScroll, onOpen: props.onOpen, onBlocked: props.onBlocked };
+  const latest = useRef({ beginDragNow, moveDragNow, endDragNow, tickAutoScroll, onOpen: props.onOpen, onBlocked: props.onBlocked, onOpenLeave: props.onOpenLeave });
+  latest.current = { beginDragNow, moveDragNow, endDragNow, tickAutoScroll, onOpen: props.onOpen, onBlocked: props.onBlocked, onOpenLeave: props.onOpenLeave };
   const beginDrag = useCallback((d: Drag, x: number, y: number) => latest.current.beginDragNow(d, x, y), []);
   const moveDrag = useCallback((x: number, y: number) => latest.current.moveDragNow(x, y), []);
   const endDrag = useCallback((commit: boolean) => latest.current.endDragNow(commit), []);
   const onOpen = useCallback((e: BoardEntry) => latest.current.onOpen(e), []);
   const onBlocked = useCallback((m: string) => latest.current.onBlocked(m), []);
+  const onOpenLeave = useCallback((d: LeaveDay) => latest.current.onOpenLeave?.(d), []);
 
   // Leaving the screen mid-drag must not leave the auto-scroll timer running.
   useEffect(() => () => stopAutoScroll(), []);
@@ -454,6 +470,12 @@ export function ScheduleGrid(props: ScheduleGridProps) {
                   />
                 ) : null}
 
+                {leaveByRow.map((items, i) =>
+                  items.map((it) => (
+                    <LeaveBlock key={`${rows[i].staffId}:${it.id}`} item={it} top={tops[i] + it.top} onOpen={onOpenLeave} />
+                  )),
+                )}
+
                 {placedByRow.map((placed, i) =>
                   placed.map((p) => (
                     <Block
@@ -465,6 +487,7 @@ export function ScheduleGrid(props: ScheduleGridProps) {
                       staffNames={staffNames}
                       others={othersOnJobDay(p.entry, bookingsByJob.get(p.entry.booking.job_id) ?? [], bookingDays)}
                       saveState={saveStates.get(p.entry.booking.id)}
+                      reassign={props.reassign?.get(p.entry.booking.id)?.some((c) => c.dateKey === p.entry.day.dateKey) ?? false}
                       lifted={drag?.entry.booking.id === p.entry.booking.id}
                       onOpen={onOpen}
                       onBlocked={onBlocked}
@@ -514,6 +537,51 @@ function NowLine({ dayKey, startHour, height, width }: { dayKey: string; startHo
   return <View pointerEvents="none" style={[styles.nowLine, { left: x, height }]} />;
 }
 
+/**
+ * A day of leave: striped in its type's colour, labelled, read-only. A tap
+ * opens its details; there is no drag gesture at all, so it can't be moved
+ * or resized, and it never takes a drop.
+ */
+function LeaveBlock({ item, top, onOpen }: { item: Extract<RowItem, { kind: "leave" }>; top: number; onOpen: (day: LeaveDay) => void }) {
+  const { day, left, width } = item;
+  const c = leaveColour(day.leave.leave_type);
+  const tap = useMemo(
+    () =>
+      Gesture.Tap()
+        .runOnJS(true)
+        .onEnd((_e, ok) => {
+          if (ok) onOpen(day);
+        }),
+    [day, onOpen],
+  );
+  const label = leaveDayLabel(day);
+  return (
+    <GestureDetector gesture={tap}>
+      <View
+        accessible
+        accessibilityRole="button"
+        accessibilityLabel={`${label}, ${leaveRangeLabel(day.leave)}. Not available. Read only.`}
+        accessibilityHint="Shows the leave details"
+        onAccessibilityTap={() => onOpen(day)}
+        style={[styles.leave, { left, top, width, height: LANE_HEIGHT - 6, backgroundColor: c.bg, borderColor: c.border }]}
+      >
+        {/* Diagonal stripes, so leave never reads as a job tile. */}
+        <View pointerEvents="none" style={styles.leaveStripes}>
+          {Array.from({ length: Math.ceil(width / 12) + 4 }, (_, i) => (
+            <View key={i} style={[styles.leaveStripe, { left: i * 12 - 24 }]} />
+          ))}
+        </View>
+        <Text style={[styles.leaveText, { color: c.text }]} numberOfLines={1}>
+          {label}
+        </Text>
+        <Text style={[styles.leaveSub, { color: c.text }]} numberOfLines={1}>
+          {day.fullDay ? "Not available" : "Part day"}
+        </Text>
+      </View>
+    </GestureDetector>
+  );
+}
+
 interface BlockProps {
   placed: Placed;
   top: number;
@@ -522,6 +590,8 @@ interface BlockProps {
   staffNames: ReadonlyMap<string, string>;
   others: string[];
   saveState: SaveState | undefined;
+  /** Booked on a day this technician is on leave. */
+  reassign: boolean;
   lifted: boolean;
   onOpen: (entry: BoardEntry) => void;
   onBlocked: (message: string) => void;
@@ -530,7 +600,7 @@ interface BlockProps {
   onEnd: (commit: boolean) => void;
 }
 
-function Block({ placed, top, view, rowStaffId, staffNames, others, saveState, lifted, onOpen, onBlocked, onBegin, onMove, onEnd }: BlockProps) {
+function Block({ placed, top, view, rowStaffId, staffNames, others, saveState, reassign, lifted, onOpen, onBlocked, onBegin, onMove, onEnd }: BlockProps) {
   const { entry, left, width } = placed;
   const { job, booking, day } = entry;
   const completed = isCompletedJob(job);
@@ -618,6 +688,7 @@ function Block({ placed, top, view, rowStaffId, staffNames, others, saveState, l
     dayOfLabel(entry),
     names.join(", "),
     completed ? "completed" : null,
+    reassign ? NEEDS_REASSIGNING : null,
     saveState === "saving" ? "saving" : saveState === "queued" ? "not on the server yet" : saveState === "failed" ? "not saved" : null,
   ]
     .filter(Boolean)
@@ -638,6 +709,7 @@ function Block({ placed, top, view, rowStaffId, staffNames, others, saveState, l
           completed && styles.blockDone,
           lifted && styles.blockLifted,
           saveState === "failed" && styles.blockFailed,
+          reassign && styles.blockReassign,
         ]}
       >
         <View style={styles.blockTop}>
@@ -653,6 +725,7 @@ function Block({ placed, top, view, rowStaffId, staffNames, others, saveState, l
         </View>
         <Text style={[styles.blockTitle, completed && styles.doneText]} numberOfLines={1}>
           {completed ? "Completed · " : ""}
+          {reassign ? <Text style={styles.reassignText}>{NEEDS_REASSIGNING} · </Text> : null}
           {saveState === "saving" ? "Saving… · " : saveState === "queued" ? "Not synced yet · " : saveState === "failed" ? "Not saved · " : ""}
           {view === "week" ? `${shortTime(day.startIso)} ` : ""}
           {job.title}
@@ -717,6 +790,23 @@ const styles = StyleSheet.create({
   blockDone: { backgroundColor: colors.slate100, borderColor: colors.slate400, borderStyle: "dashed", opacity: 0.85 },
   blockLifted: { opacity: 0.35 },
   blockFailed: { borderColor: colors.red600, borderWidth: 2 },
+  blockReassign: { borderColor: "#e11d48", borderWidth: 2, borderLeftWidth: 4 },
+  reassignText: { color: "#be123c", fontWeight: "800" },
+  leave: {
+    position: "absolute",
+    borderRadius: 8,
+    borderWidth: 1,
+    borderLeftWidth: 4,
+    paddingHorizontal: 6,
+    paddingVertical: 3,
+    overflow: "hidden",
+    minHeight: MIN_TOUCH,
+    minWidth: MIN_TOUCH,
+  },
+  leaveStripes: { ...StyleSheet.absoluteFillObject, overflow: "hidden" },
+  leaveStripe: { position: "absolute", top: -20, width: 4, height: 100, backgroundColor: "rgba(255,255,255,0.55)", transform: [{ rotate: "45deg" }] },
+  leaveText: { fontSize: 12, fontWeight: "800" },
+  leaveSub: { fontSize: 10, fontWeight: "600", opacity: 0.85 },
   blockTop: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 4 },
   blockNumber: { fontSize: 12, fontWeight: "800", color: colors.slate900, flexShrink: 1 },
   blockTitle: { fontSize: 11, color: colors.slate700, marginTop: 1, paddingRight: 12 },

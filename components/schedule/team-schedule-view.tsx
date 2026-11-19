@@ -63,6 +63,24 @@ import {
 } from "./board-model";
 import { scheduleDays } from "@/lib/scheduling";
 import { formatDateKeyRange } from "@/lib/schedule-form";
+// Staff leave (0112 — a draft, not applied yet): read-only tiles, "Needs reassigning" flags and the
+// confirm before booking someone onto a leave day. The rules are shared with
+// the phone (lib/staff-leave.ts ↔ mobile/lib/staffLeave.ts).
+import {
+  NEEDS_REASSIGNING,
+  bookingDaysForLeave,
+  bookingLeaveConflicts,
+  bookingsNeedingReassignment,
+  buildLeaveIndex,
+  describeLeaveConflicts,
+  leaveColour,
+  leaveDayLabel,
+  leaveLabel,
+  leaveRangeLabel,
+  type LeaveConflict,
+  type LeaveDay,
+  type ScheduleLeave,
+} from "@/lib/staff-leave";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Navigation, LayoutList, ListTodo, ChevronLeft, ChevronRight, GripVertical, CalendarDays, CalendarRange, Scissors, StickyNote, X } from "lucide-react";
 import {
@@ -100,6 +118,8 @@ type ResizeState = {
   delta: number;
   phase: "dragging" | "confirm" | "saving";
   conflicts: ResizeConflict[];
+  /** Days the stretched booking gains that its technician is on leave. */
+  leaveConflicts: LeaveConflict[];
 };
 
 /** The pointer side of a resize: where it started and how wide a day column is. */
@@ -279,6 +299,50 @@ function TileStaffTag({ tag }: { tag: TileTag }) {
   );
 }
 
+/**
+ * A day of staff leave in a technician's cell: striped, in the leave type's
+ * colour, labelled "Sick" / "Annual leave" / … (or "Unavailable" when the
+ * database withheld the type from this viewer). Read-only — not draggable,
+ * no resize handles, never a drop of its own; a click opens the leave
+ * details and never reaches the cell (so it can't paste a cut booking).
+ */
+function LeaveTile({ day, compact, onOpen }: { day: LeaveDay; compact?: boolean; onOpen: (day: LeaveDay) => void }) {
+  const c = leaveColour(day.leave.leave_type);
+  return (
+    <button
+      type="button"
+      data-leave-tile
+      title={`${leaveDayLabel(day)} — ${leaveRangeLabel(day.leave)} (read only)`}
+      onPointerDown={(e) => e.stopPropagation()}
+      onClick={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        onOpen(day);
+      }}
+      onDoubleClick={stopEvent}
+      className={cn("block w-full text-left rounded-md border border-l-4 font-semibold cursor-pointer", compact ? "px-2 py-1" : "px-3 py-2")}
+      style={{
+        background: `repeating-linear-gradient(135deg, ${c.bg} 0 7px, #ffffff 7px 10px)`,
+        borderColor: c.border,
+        color: c.text,
+      }}
+    >
+      <span className={cn("block truncate", compact ? "text-[11px]" : "text-sm")}>{leaveDayLabel(day)}</span>
+      <span className={cn("block truncate font-medium opacity-80", compact ? "text-[10px]" : "text-xs")}>
+        {day.fullDay ? "Not available" : "Part day"}
+      </span>
+    </button>
+  );
+}
+
+function NeedsReassigningBadge() {
+  return (
+    <span className="inline-block rounded bg-rose-600 px-1 text-[10px] font-bold leading-4 text-white" title="This technician is on leave this day">
+      {NEEDS_REASSIGNING}
+    </span>
+  );
+}
+
 /** Props every placed card shares: where it sits, who it belongs to, and the cut-mode wiring. */
 type PlacedProps = {
   entry: BoardEntry;
@@ -286,17 +350,20 @@ type PlacedProps = {
   tag: TileTag;
   cut: Pickup | null;
   onCut: (pickup: Pickup) => void;
+  /** Booked on a day this technician is on leave (0112). */
+  reassign: boolean;
 };
 
 function isCutHere(cut: Pickup | null, bookingId: string, source: BoardCell) {
   return !!cut && cut.bookingId === bookingId && cut.source.staffId === source.staffId && cut.source.dateKey === source.dateKey;
 }
 
-function JobCardBody({ entry, tag }: { entry: BoardEntry; tag: TileTag }) {
+function JobCardBody({ entry, tag, reassign }: { entry: BoardEntry; tag: TileTag; reassign?: boolean }) {
   const { job, booking } = entry;
   const dayOf = dayOfLabel(entry);
   return (
     <>
+      {reassign && <div className="mb-1"><NeedsReassigningBadge /></div>}
       <div className="flex items-center justify-between gap-2 pr-4">
         <p className="text-xs font-bold text-blue-600 min-w-0 truncate">
           <EntryTime entry={entry} />
@@ -337,7 +404,7 @@ const JOB_CARD_CLASS =
 // The draggable id is per PLACEMENT, not per booking: a multi-day booking
 // sits in several day cells at once and dnd-kit needs each node's id to be
 // unique.
-function DraggableJobCard({ entry, source, tag, cut, onCut }: PlacedProps) {
+function DraggableJobCard({ entry, source, tag, cut, onCut, reassign }: PlacedProps) {
   const { job, booking } = entry;
   const { setNodeRef, listeners, isDragging } = useDraggable({
     id: `${booking.id}@${weekCellId(source.staffId, source.dateKey)}`,
@@ -357,7 +424,8 @@ function DraggableJobCard({ entry, source, tag, cut, onCut }: PlacedProps) {
       className={cn(
         "relative cursor-grab active:cursor-grabbing select-none rounded-lg",
         isDragging && "opacity-30",
-        isCut && "ring-2 ring-amber-400 bg-amber-50/60"
+        isCut && "ring-2 ring-amber-400 bg-amber-50/60",
+        reassign && !isCut && "ring-2 ring-rose-500"
       )}
     >
       <GripVertical className="w-3.5 h-3.5 text-slate-300 absolute top-2 right-2 pointer-events-none" />
@@ -367,7 +435,7 @@ function DraggableJobCard({ entry, source, tag, cut, onCut }: PlacedProps) {
         cutActive={!!cut}
         onCut={() => onCut({ bookingId: booking.id, source })}
       >
-        <JobCardBody entry={entry} tag={tag} />
+        <JobCardBody entry={entry} tag={tag} reassign={reassign} />
       </BoardJobLink>
     </div>
   );
@@ -415,11 +483,12 @@ function BookingNoteLine({ note, className }: { note?: string | null; className:
 // Compact job entry for a single day cell in the week grid — the grid is
 // staff (rows) x day (columns), so each cell is narrow; this trades the
 // full job card's detail for a glanceable time + job + customer stack.
-function WeekJobChipBody({ entry, tag }: { entry: BoardEntry; tag: TileTag }) {
+function WeekJobChipBody({ entry, tag, reassign }: { entry: BoardEntry; tag: TileTag; reassign?: boolean }) {
   const { job, booking } = entry;
   const dayOf = dayOfLabel(entry);
   return (
     <>
+      {reassign && <NeedsReassigningBadge />}
       <div className="flex items-start justify-between gap-1">
         <p className="text-[10px] font-bold text-blue-600 truncate min-w-0">
           {formatTime(entry.day.startIso)}
@@ -512,6 +581,7 @@ function DraggableWeekJobChip({
   tag,
   cut,
   onCut,
+  reassign,
   handles,
   onResizeStart,
   resizeState,
@@ -541,6 +611,7 @@ function DraggableWeekJobChip({
         "group/chip relative select-none rounded-md",
         isDragging && "opacity-30",
         isCut && "ring-2 ring-amber-400 bg-amber-50/60",
+        reassign && !isCut && !resizeState && "ring-2 ring-rose-500",
         resizeState === "preview" && "ring-2 ring-blue-400 bg-blue-50/60",
         resizeState === "removing" && "opacity-40 outline-2 outline-dashed outline-slate-400 line-through",
         resizeState === "saving" && "ring-2 ring-blue-300 bg-blue-50/60 animate-pulse"
@@ -552,7 +623,7 @@ function DraggableWeekJobChip({
         cutActive={!!cut}
         onCut={() => onCut({ bookingId: booking.id, source })}
       >
-        <WeekJobChipBody entry={entry} tag={tag} />
+        <WeekJobChipBody entry={entry} tag={tag} reassign={reassign} />
       </BoardJobLink>
       {/* Two fixed slots, so a handle that stays keeps its DOM node (and its pointer capture). */}
       {handles?.start ? <ResizeHandle edge="start" onStart={start} /> : null}
@@ -614,6 +685,8 @@ function bookedNames(bookings: readonly BoardBooking[], staffById: Map<string, S
 const PINNED_NAME =
   "bg-white p-2 flex items-center gap-2 min-w-0 sticky left-0 z-10 shadow-[4px_0_6px_-4px_rgba(0,0,0,0.12)]";
 
+const NO_LEAVE: ScheduleLeave[] = [];
+
 export function TeamScheduleView({
   jobs,
   bookings: initialBookings,
@@ -621,6 +694,8 @@ export function TeamScheduleView({
   staff,
   todoJobs,
   todoError,
+  leave = NO_LEAVE,
+  viewerRole = null,
 }: {
   jobs: BoardJob[];
   bookings: BoardBooking[];
@@ -629,6 +704,9 @@ export function TeamScheduleView({
   staff: StaffMember[];
   todoJobs: TodoJob[];
   todoError: string | null;
+  /** Staff leave around the board's dates (0112); leave_type null = withheld from this viewer. */
+  leave?: ScheduleLeave[];
+  viewerRole?: string | null;
 }) {
   // Narrowed to the methods lib/bookings.ts uses. Not cosmetic: matching the
   // fully-generic typed client against a structural parameter makes
@@ -740,6 +818,23 @@ export function TeamScheduleView({
     () => (resize && preview ? new Map(bookingDays).set(resize.booking.id, preview.previewDays) : bookingDays),
     [resize, preview, bookingDays],
   );
+
+  // Leave on the days showing, and the bookings that sit on someone's leave
+  // (from today on — past days need no reassigning). Leave never moves, so
+  // the resize preview doesn't change it.
+  const leaveIndex = useMemo(() => buildLeaveIndex(leave, visibleKeys), [leave, visibleKeys]);
+  const reassign = useMemo(() => bookingsNeedingReassignment(bookings, leave, todayKey), [bookings, leave, todayKey]);
+  const reassignOn = (entry: BoardEntry) => reassign.get(entry.booking.id)?.some((c) => c.dateKey === entry.day.dateKey) ?? false;
+  const leaveOn = (staffId: string, dateKey: string) => leaveIndex.get(staffId)?.get(dateKey) ?? [];
+  // The leave day whose details are open, and a pending "book anyway?" question.
+  const [openLeave, setOpenLeave] = useState<LeaveDay | null>(null);
+  const [confirm, setConfirm] = useState<{ title: string; lines: string[]; action: string; resolve: (ok: boolean) => void } | null>(null);
+  const askConfirm = (title: string, lines: string[], action: string) =>
+    new Promise<boolean>((resolve) => setConfirm({ title, lines, action, resolve }));
+  const closeConfirm = (ok: boolean) => {
+    confirm?.resolve(ok);
+    setConfirm(null);
+  };
 
   // Booked hours per technician over the period showing — one day, or the
   // week's total. `periodHours` is what's drawn (preview included);
@@ -855,6 +950,7 @@ export function TeamScheduleView({
     if (mode === "add") {
       const copy = planBoardAdd(booking, source, target, bookingsByJob.get(job.id) ?? []);
       if (!copy) return; // Unassigned, or they already have exactly this booking
+      if (!(await okToBookOverLeave(job, copy))) return;
       // A stand-in until the insert returns the real row (and its id).
       const tempId = `pending:${bookingId}:${target.staffId}:${Date.now()}`;
       setBookings((prev) => [...prev, { ...copy, id: tempId, cost_center_name: booking.cost_center_name }]);
@@ -873,6 +969,7 @@ export function TeamScheduleView({
 
     const patch = planBoardMove(booking, source, target);
     if (!patch) return; // dropped back where it came from
+    if (!(await okToBookOverLeave(job, applyBoardMove(booking, patch)))) return;
 
     setBookings((prev) => prev.map((b) => (b.id === bookingId ? applyBoardMove(b, patch) : b)));
     const result = await updateBooking(supabase, bookingId, patch);
@@ -885,6 +982,18 @@ export function TeamScheduleView({
     // technician (lib/calendar-event.ts), and see "WHY BOTH DRAG KINDS PUSH"
     // in lib/schedule-dispatch.ts.
     announce(describeMove(job, patch, source, target), await pushJobToCalendar(job.id));
+  }
+
+  /**
+   * Booking someone on a day they are on leave is the office's call, but
+   * never silent: ask first. True when no leave is in the way or the office
+   * chose "Book anyway".
+   */
+  async function okToBookOverLeave(job: BoardJob, after: { staff_id: string | null; starts_at: string; ends_at: string | null; daily: boolean }) {
+    const hits = bookingLeaveConflicts(after, leave, dateKeyInBusinessTZ(new Date()));
+    if (hits.length === 0) return true;
+    const name = nameOf(after.staff_id);
+    return askConfirm(`${name} isn't available then`, [`#${job.job_number} — ${job.title}`, describeLeaveConflicts(name, hits)], "Book anyway");
   }
 
   // Paste: a click on any cell while a booking is cut.
@@ -952,7 +1061,7 @@ export function TeamScheduleView({
       startScroll: scroller?.scrollLeft ?? 0,
     };
     setCut(null);
-    setResize({ booking: entry.booking, job: entry.job, edge, delta: 0, phase: "dragging", conflicts: [] });
+    setResize({ booking: entry.booking, job: entry.job, edge, delta: 0, phase: "dragging", conflicts: [], leaveConflicts: [] });
   }
 
   /** Release: nothing changed → nothing; a clash → ask; otherwise save. */
@@ -968,8 +1077,11 @@ export function TeamScheduleView({
       return;
     }
     const conflicts = resizeConflicts(current.booking, plan.window, bookings, jobsById);
-    if (conflicts.length > 0) {
-      setResize({ ...current, delta, phase: "confirm", conflicts });
+    // Leave on a day the stretch ADDS (days it already had are flagged on the board already).
+    const had = new Set(bookingDaysForLeave(current.booking).map((d) => d.dateKey));
+    const leaveConflicts = bookingLeaveConflicts({ ...current.booking, ...plan.window }, leave, todayKey).filter((c) => !had.has(c.dateKey));
+    if (conflicts.length > 0 || leaveConflicts.length > 0) {
+      setResize({ ...current, delta, phase: "confirm", conflicts, leaveConflicts });
       return;
     }
     void saveResize({ ...current, delta });
@@ -987,7 +1099,7 @@ export function TeamScheduleView({
       setResize(null);
       return;
     }
-    setResize({ ...current, phase: "saving", conflicts: [] });
+    setResize({ ...current, phase: "saving", conflicts: [], leaveConflicts: [] });
     const result = await updateBooking(supabase, current.booking.id, plan.window);
     if (!result.ok) {
       setResize(null);
@@ -1267,7 +1379,7 @@ export function TeamScheduleView({
                           </p>
                         ) : (
                           unassigned.map((entry) => (
-                            <DraggableJobCard key={entry.booking.id} entry={entry} source={source} tag={tagFor(entry)} cut={cut} onCut={setCut} />
+                            <DraggableJobCard key={entry.booking.id} entry={entry} source={source} tag={tagFor(entry)} cut={cut} onCut={setCut} reassign={reassignOn(entry)} />
                           ))
                         )}
                       </CardContent>
@@ -1294,7 +1406,7 @@ export function TeamScheduleView({
                             <CardTitle className="text-sm truncate">{member.full_name}</CardTitle>
                             <p className="text-xs text-slate-400">
                               {memberEntries.length === 0 ? (
-                                "Free"
+                                leaveOn(member.id, selectedDateKey).length > 0 ? leaveLabel(leaveOn(member.id, selectedDateKey)[0].leave.leave_type) : "Free"
                               ) : (
                                 <>
                                   <span className="font-semibold text-slate-600">{formatHours(hours)}</span>
@@ -1306,13 +1418,16 @@ export function TeamScheduleView({
                         </div>
                       </CardHeader>
                       <CardContent className="space-y-2">
+                        {leaveOn(member.id, selectedDateKey).map((day) => (
+                          <LeaveTile key={`leave-${day.leave.start_date}-${day.startIso}`} day={day} onOpen={setOpenLeave} />
+                        ))}
                         {memberEntries.length === 0 ? (
                           <p className="text-slate-400 text-xs text-center py-6 border border-dashed border-slate-200 rounded-lg">
                             No jobs scheduled
                           </p>
                         ) : (
                           memberEntries.map((entry) => (
-                            <DraggableJobCard key={entry.booking.id} entry={entry} source={source} tag={tagFor(entry)} cut={cut} onCut={setCut} />
+                            <DraggableJobCard key={entry.booking.id} entry={entry} source={source} tag={tagFor(entry)} cut={cut} onCut={setCut} reassign={reassignOn(entry)} />
                           ))
                         )}
                       </CardContent>
@@ -1330,7 +1445,7 @@ export function TeamScheduleView({
               {activeEntry ? (
                 <div className="w-72 shadow-lg rounded-lg rotate-1 bg-white">
                   <div className={JOB_CARD_CLASS}>
-                    <JobCardBody entry={activeEntry} tag={tagFor(activeEntry)} />
+                    <JobCardBody entry={activeEntry} tag={tagFor(activeEntry)} reassign={reassignOn(activeEntry)} />
                   </div>
                 </div>
               ) : null}
@@ -1377,6 +1492,7 @@ export function TeamScheduleView({
                         tag={tagFor(entry)}
                         cut={cut}
                         onCut={setCut}
+                        reassign={reassignOn(entry)}
                         handles={handlesFor(entry)}
                         onResizeStart={startResize}
                         resizeState={resizeStateFor(entry)}
@@ -1410,6 +1526,9 @@ export function TeamScheduleView({
                           hours={memberHours?.get(key) ?? 0}
                           onPick={onPick}
                         >
+                          {leaveOn(member.id, key).map((day) => (
+                            <LeaveTile key={`leave-${day.leave.start_date}-${day.startIso}`} day={day} compact onOpen={setOpenLeave} />
+                          ))}
                           {(memberDays?.get(key) ?? []).map((entry) => (
                             <DraggableWeekJobChip
                               key={entry.booking.id}
@@ -1418,6 +1537,7 @@ export function TeamScheduleView({
                               tag={tagFor(entry)}
                               cut={cut}
                               onCut={setCut}
+                              reassign={reassignOn(entry)}
                               handles={handlesFor(entry)}
                               onResizeStart={startResize}
                               resizeState={resizeStateFor(entry)}
@@ -1439,7 +1559,7 @@ export function TeamScheduleView({
               {activeEntry ? (
                 <div className="w-48 shadow-lg rounded-lg rotate-1 bg-white">
                   <div className={WEEK_CHIP_CLASS}>
-                    <WeekJobChipBody entry={activeEntry} tag={tagFor(activeEntry)} />
+                    <WeekJobChipBody entry={activeEntry} tag={tagFor(activeEntry)} reassign={reassignOn(activeEntry)} />
                   </div>
                 </div>
               ) : null}
@@ -1542,12 +1662,22 @@ export function TeamScheduleView({
           {resize?.phase === "confirm" && (
             <>
               <DialogHeader>
-                <DialogTitle>{nameOf(resize.booking.staff_id)} is already booked then</DialogTitle>
+                <DialogTitle>
+                  {resize.conflicts.length > 0
+                    ? `${nameOf(resize.booking.staff_id)} is already booked then`
+                    : `${nameOf(resize.booking.staff_id)} isn't available then`}
+                </DialogTitle>
                 <DialogDescription>
                   Stretching #{resize.job.job_number}
-                  {resizePlan?.ok && <> to {formatDateKeyRange(resizePlan.startKey, resizePlan.endKey)}</>} overlaps:
+                  {resizePlan?.ok && <> to {formatDateKeyRange(resizePlan.startKey, resizePlan.endKey)}</>}
+                  {resize.conflicts.length > 0 ? " overlaps:" : ":"}
                 </DialogDescription>
               </DialogHeader>
+              {resize.leaveConflicts.length > 0 && (
+                <p className="rounded-md border border-rose-200 bg-rose-50 px-2.5 py-1.5 text-sm text-rose-900">
+                  {describeLeaveConflicts(nameOf(resize.booking.staff_id), resize.leaveConflicts)}
+                </p>
+              )}
               <ul className="space-y-1.5 text-sm max-h-60 overflow-y-auto">
                 {resize.conflicts.map((c) => (
                   <li key={c.booking.id} className="rounded-md border border-amber-200 bg-amber-50 px-2.5 py-1.5">
@@ -1565,6 +1695,68 @@ export function TeamScheduleView({
               <DialogFooter>
                 <Button variant="outline" onClick={() => setResize(null)}>Cancel</Button>
                 <Button onClick={() => void saveResize(resize)}>Book anyway</Button>
+              </DialogFooter>
+            </>
+          )}
+        </DialogContent>
+      </Dialog>
+      {/* Booking someone onto their leave: asked, never silent. */}
+      <Dialog open={!!confirm} onOpenChange={(open) => { if (!open) closeConfirm(false); }}>
+        <DialogContent>
+          {confirm && (
+            <>
+              <DialogHeader>
+                <DialogTitle>{confirm.title}</DialogTitle>
+                <DialogDescription>{confirm.lines[0]}</DialogDescription>
+              </DialogHeader>
+              {confirm.lines.slice(1).map((line) => (
+                <p key={line} className="rounded-md border border-rose-200 bg-rose-50 px-2.5 py-1.5 text-sm text-rose-900">{line}</p>
+              ))}
+              <DialogFooter>
+                <Button variant="outline" onClick={() => closeConfirm(false)}>Cancel</Button>
+                <Button onClick={() => closeConfirm(true)}>{confirm.action}</Button>
+              </DialogFooter>
+            </>
+          )}
+        </DialogContent>
+      </Dialog>
+      {/* A leave tile's details. Read-only: leave is entered (or imported from
+          Xero) in Staff → Cost & Leave, which only an admin can open. */}
+      <Dialog open={!!openLeave} onOpenChange={(open) => { if (!open) setOpenLeave(null); }}>
+        <DialogContent>
+          {openLeave && (
+            <>
+              <DialogHeader>
+                <DialogTitle>{nameOf(openLeave.leave.staff_id)} — {leaveLabel(openLeave.leave.leave_type)}</DialogTitle>
+                <DialogDescription>{leaveRangeLabel(openLeave.leave)}</DialogDescription>
+              </DialogHeader>
+              <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-sm">
+                <dt className="text-slate-500">This day</dt>
+                <dd className="font-medium">{leaveDayLabel(openLeave)}</dd>
+                {openLeave.leave.hours !== null && (
+                  <>
+                    <dt className="text-slate-500">Hours in total</dt>
+                    <dd>{formatHours(openLeave.leave.hours)}</dd>
+                  </>
+                )}
+              </dl>
+              {(() => {
+                const affected = bookings.filter((b) => reassign.get(b.id)?.some((c) => c.leaveDay.leave === openLeave.leave));
+                return affected.length > 0 ? (
+                  <p className="rounded-md border border-rose-200 bg-rose-50 px-2.5 py-1.5 text-sm text-rose-900">
+                    {affected.length === 1 ? "1 booking on these days needs" : `${affected.length} bookings on these days need`} reassigning:{" "}
+                    {affected.map((b) => `#${jobsById.get(b.job_id)?.job_number ?? "?"}`).join(", ")}
+                  </p>
+                ) : null;
+              })()}
+              <p className="text-xs text-slate-500">Read only. Leave is entered in Staff → Cost &amp; Leave, or imported from Xero Payroll.</p>
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setOpenLeave(null)}>Close</Button>
+                {viewerRole === "admin" && (
+                  <Link href={`/dashboard/staff?leave=${openLeave.leave.staff_id}`} prefetch={false}>
+                    <Button>Open leave record</Button>
+                  </Link>
+                )}
               </DialogFooter>
             </>
           )}

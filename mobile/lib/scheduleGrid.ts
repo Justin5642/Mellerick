@@ -11,6 +11,7 @@ import { dateKeyInBusinessTZ, shiftDateKey, withDateKeyPreservingTime } from "./
 import { businessDayRange, scheduleDays, type ScheduleDay } from "./scheduling";
 import { bookingWindow, type Booking } from "./bookings";
 import type { BoardBooking, BoardEntry, BoardJob, BookingPatch } from "./boardModel";
+import type { LeaveDay } from "./staffLeave";
 
 export type GridView = "day" | "week" | "list";
 
@@ -329,4 +330,69 @@ export function bookingClashes(after: BoardBooking, all: readonly BoardBooking[]
     }
   }
   return clashes;
+}
+
+// ---------------------------------------------------------------------------
+// Rows with staff leave (migration 0112 — a draft, not applied yet)
+// ---------------------------------------------------------------------------
+// Leave sits in the technician's row as its own block — read-only, never
+// dragged — so it takes a lane like a booking does: on the Day timeline it
+// spans its hours (a whole-day leave the whole timeline), and in a Week cell
+// it is the first chip. Bookings that overlap it stack below it, still
+// visible and flagged "Needs reassigning".
+
+/** One thing drawn in a row: a booking's day, or a day of leave. */
+export type RowItem =
+  | { kind: "booking"; id: string; entry: BoardEntry; left: number; top: number; width: number }
+  | { kind: "leave"; id: string; day: LeaveDay; left: number; top: number; width: number };
+
+/** A leave day as a timeline block. */
+export function leaveSpan(day: LeaveDay): ScheduleDay {
+  return { dateKey: day.dateKey, startIso: day.startIso, endIso: day.endIso };
+}
+
+// Leave sorts ahead of a booking that starts at the same point, so a
+// whole-day leave always takes the top lane.
+const LEAVE_FIRST = 0.001;
+
+/** Day view: a row's bookings and leave on one day, packed into lanes. */
+export function layoutDayRow(
+  entries: readonly BoardEntry[],
+  leave: readonly LeaveDay[],
+  range: { startHour: number; endHour: number },
+): { items: RowItem[]; height: number } {
+  const leaveGeo = leave.map((day, i) => ({ kind: "leave" as const, id: `leave:${day.dateKey}:${i}`, day, ...dayBlockGeometry(leaveSpan(day), range) }));
+  const bookingGeo = entries.map((entry) => ({ kind: "booking" as const, id: entry.booking.id, entry, ...dayBlockGeometry(entry.day, range) }));
+  const { lane, lanes } = packLanes([
+    ...leaveGeo.map((g) => ({ id: g.id, left: g.left - LEAVE_FIRST, width: g.width + LEAVE_FIRST })),
+    ...bookingGeo.map((g) => ({ id: g.id, left: g.left, width: g.width })),
+  ]);
+  const top = (id: string) => ROW_PADDING + (lane.get(id) ?? 0) * LANE_HEIGHT;
+  const items: RowItem[] = [
+    ...leaveGeo.map((g) => ({ ...g, top: top(g.id) })),
+    ...bookingGeo.map((g) => ({ ...g, top: top(g.id) })),
+  ];
+  return { items, height: rowHeight(lanes) };
+}
+
+/** Week view: per day column, the leave chips first, then the bookings. */
+export function layoutWeekRow(
+  dayKeys: readonly string[],
+  entriesFor: (dateKey: string) => readonly BoardEntry[],
+  leaveFor: (dateKey: string) => readonly LeaveDay[],
+): { items: RowItem[]; height: number } {
+  const items: RowItem[] = [];
+  let lanes = 0;
+  dayKeys.forEach((key, col) => {
+    const leave = leaveFor(key);
+    const entries = entriesFor(key);
+    lanes = Math.max(lanes, leave.length + entries.length);
+    const left = col * WEEK_COLUMN_WIDTH + 3;
+    const width = WEEK_COLUMN_WIDTH - 6;
+    leave.forEach((day, i) => items.push({ kind: "leave", id: `leave:${key}:${i}`, day, left, width, top: ROW_PADDING + i * LANE_HEIGHT }));
+    entries.forEach((entry, i) =>
+      items.push({ kind: "booking", id: entry.booking.id, entry, left, width, top: ROW_PADDING + (leave.length + i) * LANE_HEIGHT }),
+    );
+  });
+  return { items, height: rowHeight(lanes) };
 }

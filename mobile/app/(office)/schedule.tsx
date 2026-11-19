@@ -21,7 +21,7 @@ import { supabase } from "../../lib/supabase";
 import { colors } from "../../lib/theme";
 import { JobListRow } from "../../design/components/JobListRow";
 import { ScreenError } from "../../design/components/ScreenError";
-import { businessDayLabel, formatBusinessTime, computeRescheduleWithTime, dateKeyInBusinessTZ, localDateKey, toBusinessInputValue } from "../../lib/date";
+import { businessDayLabel, formatBusinessTime, computeRescheduleWithTime, dateKeyInBusinessTZ, localDateKey, toBusinessInputValue, shiftDateKey } from "../../lib/date";
 import { businessDayRange, moveSchedule, scheduleDays, type ScheduleDay } from "../../lib/scheduling";
 import { businessTodayKey, dateRangeLabel, formatScheduleSummary, shortDayLabel } from "../../lib/scheduleDisplay";
 import { useSchedule } from "../../lib/data/hooks/useSchedule";
@@ -54,6 +54,22 @@ import {
   type GridView,
 } from "../../lib/scheduleGrid";
 import { ScheduleGrid, type SaveState } from "../../components/schedule/ScheduleGrid";
+// Staff leave (migration 0112 — a draft, not applied yet), read online only:
+// read-only blocks on the grid, "Needs reassigning" on bookings that sit on a
+// leave day, and a warning before a move puts someone on their leave.
+import { listScheduleLeave } from "../../lib/data/reads/leave";
+import {
+  bookingLeaveConflicts,
+  bookingsNeedingReassignment,
+  buildLeaveIndex,
+  describeLeaveConflicts,
+  leaveDayLabel,
+  leaveLabel,
+  leaveRangeLabel,
+  NEEDS_REASSIGNING,
+  type LeaveDay,
+  type ScheduleLeave,
+} from "../../lib/staffLeave";
 
 interface SchedJob {
   id: string;
@@ -156,6 +172,9 @@ export default function ScheduleScreen() {
   // NULL before 0079 is applied: one row per job.
   const [bookings, setBookings] = useState<JobBooking[] | null>(null);
   const [staff, setStaff] = useState<AssignableStaff[]>([]);
+  // Two months back to ten ahead, refreshed with the schedule. [] offline or
+  // before 0112 — the schedule then shows no leave, nothing else changes.
+  const [leave, setLeave] = useState<ScheduleLeave[]>([]);
   const [refreshing, setRefreshing] = useState(false);
   const [menuItem, setMenuItem] = useState<SchedItem | null>(null);
   const [reassignJob, setReassignJob] = useState<SchedJob | null>(null);
@@ -213,6 +232,10 @@ export default function ScheduleScreen() {
       console.warn("[schedule] bookings unavailable; listing jobs:", e);
       setBookings(null);
     }
+    const today = businessTodayKey();
+    const leaveRes = await listScheduleLeave(shiftDateKey(today, -60), shiftDateKey(today, 300));
+    // A failed read keeps what was shown (offline after an earlier load).
+    if (leaveRes.available) setLeave(leaveRes.leave);
   }, []);
 
   // The staff read is kept OUT of `error` on purpose: it only feeds the reassign
@@ -317,6 +340,9 @@ export default function ScheduleScreen() {
     return map;
   }, [boardBookings]);
   const board = useMemo(() => buildBoardIndex(boardBookings, jobsById, dayKeys, bookingDays), [boardBookings, jobsById, dayKeys, bookingDays]);
+  const leaveIndex = useMemo(() => buildLeaveIndex(leave, dayKeys), [leave, dayKeys]);
+  // Bookings on their technician's leave day, from today on.
+  const reassign = useMemo(() => bookingsNeedingReassignment(realBookings, leave, todayKey), [realBookings, leave, todayKey]);
   const staffNames = useMemo(() => {
     const names = new Map<string, string>();
     for (const b of realBookings) if (b.staff_id && b.staff_name) names.set(b.staff_id, b.staff_name);
@@ -445,12 +471,16 @@ export default function ScheduleScreen() {
               .map((c) => `#${jobsById.get(c.booking.job_id)?.job_number ?? "?"} on ${shortDayLabel(c.dateKey)}`)
               .join(", ")}${clashes.length > 3 ? ` and ${clashes.length - 3} more` : ""}.`
           : "";
-      Alert.alert(`#${job.job_number} — ${job.title}`, `${what.charAt(0).toUpperCase()}${what.slice(1)}?${clashText}`, [
+      // A move or stretch onto someone's leave day is asked about, never silent.
+      const leaveHits = bookingLeaveConflicts(after, leave, todayKey);
+      const leaveText = leaveHits.length > 0 ? `\n\n⚠ ${describeLeaveConflicts(nameOf(after.staff_id), leaveHits)}` : "";
+      const warned = clashes.length > 0 || leaveHits.length > 0;
+      Alert.alert(`#${job.job_number} — ${job.title}`, `${what.charAt(0).toUpperCase()}${what.slice(1)}?${leaveText}${clashText}`, [
         { text: "Cancel", style: "cancel" },
-        { text: clashes.length > 0 ? "Book anyway" : "Save", onPress: () => void commitBookingChange(before, after, what) },
+        { text: warned ? "Book anyway" : "Save", onPress: () => void commitBookingChange(before, after, what) },
       ]);
     },
-    [boardBookings, nameOf, jobsById, commitBookingChange]
+    [boardBookings, nameOf, jobsById, commitBookingChange, leave, todayKey]
   );
 
   const onGridMove = useCallback(
@@ -505,6 +535,22 @@ export default function ScheduleScreen() {
 
   const onGridBlocked = useCallback((message: string) => Alert.alert("Can't move this", message), []);
 
+  // A leave block: its details, read-only (the record is entered on the
+  // website — Staff → Cost & Leave — or imported from Xero Payroll).
+  const onOpenLeave = useCallback(
+    (day: LeaveDay) => {
+      const affected = realBookings.filter((b) => reassign.get(b.id)?.some((c) => c.leaveDay.leave === day.leave));
+      const jobsText = affected.length
+        ? `\n\n${NEEDS_REASSIGNING}: ${affected.map((b) => `#${allJobs.get(b.job_id)?.job_number ?? "?"}`).join(", ")}`
+        : "";
+      Alert.alert(
+        `${nameOf(day.leave.staff_id)} — ${leaveLabel(day.leave.leave_type)}`,
+        `${leaveRangeLabel(day.leave)}\nThis day: ${leaveDayLabel(day)}${jobsText}\n\nRead only. Leave is entered on the website (Staff → Cost & Leave) or imported from Xero.`,
+      );
+    },
+    [realBookings, reassign, allJobs, nameOf]
+  );
+
   // One row per booked DAY, not per job (migration 0071): a Mon–Wed daily job
   // appears under Monday, Tuesday and Wednesday with that day's hours, and
   // not under the weekend it skips. A single-day job is one row, as before.
@@ -530,12 +576,24 @@ export default function ScheduleScreen() {
       if (arr) arr.push(r);
       else map.set(r.day.dateKey, [r]);
     }
-    const ahead = Array.from(map, ([, data]) => ({ title: businessDayLabel(data[0].day.startIso), data, earlier: false }));
+    const ahead = Array.from(map, ([dateKey, data]) => ({ title: businessDayLabel(data[0].day.startIso), data, earlier: false, dateKey }));
     const earlier = rows.filter(isPast).reverse();
     return earlier.length > 0
-      ? [...ahead, { title: `Earlier — not finished (${earlier.length})`, data: earlier, earlier: true }]
+      ? [...ahead, { title: `Earlier — not finished (${earlier.length})`, data: earlier, earlier: true, dateKey: null as string | null }]
       : ahead;
   }, [items]);
+  // Who is on leave on each listed day ("Sick: Dave · Unavailable: Sam").
+  const listLeave = useMemo(() => {
+    const keys = sections.map((sec) => sec.dateKey).filter((k): k is string => !!k);
+    const index = buildLeaveIndex(leave, keys);
+    const byDay = new Map<string, string>();
+    for (const key of keys) {
+      const parts: string[] = [];
+      for (const [staffId, days] of index) for (const d of days.get(key) ?? []) parts.push(`${leaveDayLabel(d)}: ${nameOf(staffId)}`);
+      if (parts.length) byDay.set(key, parts.join(" · "));
+    }
+    return byDay;
+  }, [sections, leave, nameOf]);
 
   // Jobs are often done in pairs or more (job_assignments, migration 0059).
   // The sheet opens with the job's current crew ticked; tapping toggles a
@@ -767,6 +825,9 @@ export default function ScheduleScreen() {
           onBlocked={onGridBlocked}
           onMove={onGridMove}
           onResize={onGridResize}
+          leave={leaveIndex}
+          reassign={reassign}
+          onOpenLeave={onOpenLeave}
         />
       ) : (
         <SectionList
@@ -775,7 +836,14 @@ export default function ScheduleScreen() {
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.blue600} />}
           stickySectionHeadersEnabled={false}
           ListEmptyComponent={<Text style={styles.empty}>Nothing scheduled.</Text>}
-          renderSectionHeader={({ section }) => <Text style={styles.dayHead}>{section.title}</Text>}
+          renderSectionHeader={({ section }) => (
+            <View>
+              <Text style={styles.dayHead}>{section.title}</Text>
+              {section.dateKey && listLeave.get(section.dateKey) ? (
+                <Text style={styles.leaveHead}>Off: {listLeave.get(section.dateKey)}</Text>
+              ) : null}
+            </View>
+          )}
           renderItem={({ item: { item, day, index, count }, section }) => (
             <View style={styles.card}>
               <JobListRow
@@ -783,7 +851,7 @@ export default function ScheduleScreen() {
                 title={item.job.title}
                 // Rows under "Earlier" have no day heading above them, so they
                 // carry their own date.
-                subtitle={`${section.earlier ? `${businessDayLabel(day.startIso)} · ` : ""}${item.job.customers?.name ?? "—"} · ${item.who ?? "Unassigned"}${count > 1 ? ` · Day ${index + 1} of ${count}` : ""}`}
+                subtitle={`${item.booking && reassign.get(item.booking.id)?.some((c) => c.dateKey === day.dateKey) ? `${NEEDS_REASSIGNING} · ` : ""}${section.earlier ? `${businessDayLabel(day.startIso)} · ` : ""}${item.job.customers?.name ?? "—"} · ${item.who ?? "Unassigned"}${count > 1 ? ` · Day ${index + 1} of ${count}` : ""}`}
                 status={item.job.status}
                 leading={
                   <View style={styles.timeCol}>
@@ -927,6 +995,7 @@ const styles = StyleSheet.create({
   sheetDone: { fontSize: 13, color: colors.slate500, paddingVertical: 10 },
   h1: { fontSize: 22, fontWeight: "800", color: colors.slate900 },
   sub: { fontSize: 13, color: colors.slate500, marginTop: 2 },
+  leaveHead: { fontSize: 12, fontWeight: "700", color: "#9f1239", paddingHorizontal: 16, paddingBottom: 4 },
   dayHead: { fontSize: 13, fontWeight: "700", color: colors.slate500, paddingHorizontal: 16, paddingTop: 16, paddingBottom: 4, textTransform: "uppercase" },
   card: { backgroundColor: colors.card, marginHorizontal: 12, borderWidth: 1, borderColor: colors.border, borderRadius: 12, overflow: "hidden", marginTop: 6 },
   empty: { textAlign: "center", color: colors.slate400, marginTop: 40, fontSize: 13 },
