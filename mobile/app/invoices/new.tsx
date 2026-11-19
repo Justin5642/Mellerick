@@ -14,6 +14,8 @@ import { describeReadFailure } from "../../design/components/ScreenError";
 import { getInvoiceJobPrefill } from "../../lib/data/reads/finance";
 import { getCustomer } from "../../lib/data/reads/customers";
 import type { CustomerListRow } from "../../lib/data/reads/customers";
+import { loadJobPurchaseOrders } from "../../lib/jobPurchaseOrders";
+import { poInvoiceLines } from "../../lib/poInvoice";
 
 interface UnbilledVariation { id: string; name: string; description: string; unitPrice: number }
 
@@ -21,7 +23,11 @@ export default function NewInvoiceScreen() {
   const router = useRouter();
   const finance = useFinance();
   const writeOutcome = useWriteOutcome();
-  const { jobId, customerId } = useLocalSearchParams<{ jobId?: string; customerId?: string }>();
+  // poId: "Invoice this PO" from the job's PO tab (office) — that PO's number,
+  // a title naming it and its value as the lines (lib/poInvoice.ts, the web's rule).
+  const { jobId, customerId, poId } = useLocalSearchParams<{ jobId?: string; customerId?: string; poId?: string }>();
+  const [customerPo, setCustomerPo] = useState<string | null>(null);
+  const [poNote, setPoNote] = useState<string | null>(null);
   const [customer, setCustomer] = useState<CustomerListRow | null>(null);
   const [pickCustomer, setPickCustomer] = useState(false);
   const [title, setTitle] = useState("");
@@ -59,6 +65,28 @@ export default function NewInvoiceScreen() {
           setItems(p.items.map((i) => newItem({ name: i.name, description: i.description ?? "", quantity: String(i.quantity), unit_price: String(i.unitPrice) })));
         }
         setUnbilled(p.unbilledVariations);
+        if (poId) {
+          // Online (the PO tab is online only). A failed read keeps the job's
+          // prefill and says so, rather than leaving the PO's lines off silently.
+          try {
+            const pos = await loadJobPurchaseOrders(jobId);
+            const po = pos.pos.find((x) => x.id === poId);
+            if (cancelled) return;
+            if (!po) throw new Error("That PO isn't on the job any more.");
+            setCustomerPo(po.po_number);
+            setTitle(`${p.title} — PO ${po.po_number}`);
+            setItems(poInvoiceLines(po).map((l) => newItem(l)));
+            const existing = pos.invoicedPos[po.po_number];
+            setPoNote(
+              existing
+                ? `PO ${po.po_number} already has an invoice on this job${existing !== "yes" ? ` (${existing})` : ""}.`
+                : `For PO ${po.po_number} — its value is on the lines.`
+            );
+          } catch (e) {
+            if (cancelled) return;
+            setPoNote(`Couldn't load the PO (${e instanceof Error ? e.message : "try again"}). The job's items are shown instead.`);
+          }
+        }
         setPrefilling(false);
       } catch (e) {
         if (cancelled) return;
@@ -67,7 +95,7 @@ export default function NewInvoiceScreen() {
       }
     })();
     return () => { cancelled = true; };
-  }, [jobId, prefillAttempt]);
+  }, [jobId, poId, prefillAttempt]);
 
   function retryPrefill() {
     setPrefillError(null);
@@ -120,6 +148,7 @@ export default function NewInvoiceScreen() {
         dueDateIso: dueDate ? localDateKey(dueDate) : null,
         notes: notes.trim() || null,
         workDescription: workDescription.trim() || null,
+        customerPo,
         items: lineItems,
         reconcile: jobId ? { markVariationIds } : null,
       });
@@ -147,6 +176,7 @@ export default function NewInvoiceScreen() {
 
       {prefilling && <Text style={styles.prefill}>Loading job details…</Text>}
       {jobId && !prefilling && !prefillFailure && <Text style={styles.prefill}>Prefilled from the job — review before creating.</Text>}
+      {poNote && !prefilling && <Text style={styles.prefill}>{poNote}</Text>}
 
       {/* Stays on the form rather than replacing it: the invoice can still be
           written by hand, but only if the reader knows nothing was filled in. */}

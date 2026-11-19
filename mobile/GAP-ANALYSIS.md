@@ -40,7 +40,7 @@ project waiting on one purchase order.
 | Staff | near-full | ~~charge-out rate~~ (D53), ~~leave log~~ (D58); invite/resend/edit-email (ext) |
 | Settings | near-full | ~~variation-types~~ (D57), ~~cost-centre templates~~ (D59); Xero account codes + OAuth connect (web/ext) |
 | Reports | **full (analytics)** ✅ | all 5 tables done: revenue-by-month, top-customers, jobs-by-staff (D48), staff cost/efficiency (D51), equipment utilisation (D52) |
-| Jobs | **full** ✅ | ~~reassign/reschedule~~ (D41), ~~status/priority edit~~ (D43), ~~**create job**~~ (D45), ~~equipment-usage~~ (D63), ~~title/type/description edit~~ (D64), ~~price+approve variations~~ (D65); customer/site reassignment left to web |
+| Jobs | **full** ✅ | ~~reassign/reschedule~~ (D41), ~~status/priority edit~~ (D43), ~~**create job**~~ (D45), ~~equipment-usage~~ (D63), ~~title/type/description edit~~ (D64), ~~price+approve variations~~ (D65), ~~**PO tab** (builder POs, split lines, supplier invoices, Send to Xero, Invoice this PO)~~ and ~~document upload (photos) + office-only~~ (Nov 2026); customer/site reassignment left to web; PDF document upload left to web (no picker in the binary) |
 | Invoices | partial | ~~prefill-from-job + add unbilled variations~~ **DONE** (D44/Q15); Send/PDF/Xero (ext) |
 | Approvals | partial ✅ | ~~approve→auto-invoice, send-back~~ **DONE** (D40); Xero auto-push (ext) |
 | Schedule | partial ✅ | ~~assign/unassign, reschedule~~ **DONE** (D41); day/week grid deferred |
@@ -63,12 +63,19 @@ out of in-repo scope:
   Avi/Justin to confirm the dedupe contract — the one genuinely-open in-repo item.
 
 **Deferred to web by design (native-module / dependent-field cascade):**
-- Document **upload** (job + equipment *view/open* done, D67) — needs a native
-  file/PDF picker that can't be device-QA'd in this environment.
+- Document **upload** — job documents: ~~photos from the phone + office-only
+  toggle + delete~~ **done (Nov 2026, office/admin, online via
+  `/api/jobs/[id]/documents/**`)**. Still web-only: **PDFs and other files**
+  (no `expo-document-picker` in the binary — adding it is a native module and a
+  new build), and equipment document upload.
 - Jobs **customer/site reassignment** on an existing job (title/type/description
   editable D64) — clears the site + assignee and re-runs calendar sync; the web
   already handles that cascade.
-- PO / cost-centre **editing** on the job billing screen (read + display done).
+- ~~PO / cost-centre **editing**~~ — **done (Nov 2026):** the job screen's office-only **POs** tab
+  (`mobile/components/job/purchase-orders.tsx`). Billing still shows them read-only.
+  Not on the phone: pinning a typed PO site address on the map (no geocoder — the job
+  site's pin is reused when the address is the job site's), opening tech docket photos,
+  marking a stage complete from the PO card.
 
 **Not a gap (intentional):**
 - **Technician status-edit** — a tech setting `completed` would bypass the

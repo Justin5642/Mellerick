@@ -23,6 +23,7 @@ import { JobDocumentsTab } from "../../components/job/documents";
 import { JobVariationsTab } from "../../components/job/variations";
 import { JobSupplierOrdersTab } from "../../components/job/supplier-orders";
 import { JobDayWorksTab } from "../../components/job/day-works";
+import { JobPurchaseOrdersTab } from "../../components/job/purchase-orders";
 import { ScheduleJobModal } from "../../components/job/schedule-job-modal";
 import { isJobClosedForScheduling } from "../../lib/jobSchedulable";
 import { KeyboardSheet, KEYBOARD_SHEET_INPUT_FONT_SIZE } from "../../components/KeyboardSheet";
@@ -44,6 +45,7 @@ const TABS = [
   { key: "dayworks", label: "Day Works" },
   { key: "variations", label: "Variations" },
   { key: "orders", label: "Orders" },
+  { key: "pos", label: "POs" },
   { key: "photos", label: "Photos" },
   { key: "documents", label: "Documents" },
   { key: "notes", label: "Notes" },
@@ -328,7 +330,7 @@ export default function JobDetailScreen() {
   const onJob =
     isOfficeOrAdmin || (!!userId && (job.assigned_to === userId || assignedStaff.some((a) => a.id === userId)));
   const visibleTabs = (viewOnly ? TABS.filter((t) => VIEW_ONLY_TABS.has(t.key)) : TABS).filter(
-    (t) => t.key !== "dayworks" || onJob
+    (t) => (t.key !== "dayworks" || onJob) && (t.key !== "pos" || isOfficeOrAdmin)
   );
   const activeTab: TabKey = visibleTabs.some((t) => t.key === tab) ? tab : "overview";
 
@@ -484,6 +486,7 @@ export default function JobDetailScreen() {
             readOnly={viewOnly}
           />
         )}
+        {activeTab === "pos" && isOfficeOrAdmin && <JobPurchaseOrdersTab jobId={job.id} />}
         {activeTab === "documents" && <JobDocumentsTab jobId={job.id} />}
         {activeTab === "notes" && userId && <JobNotesTab jobId={job.id} currentUserId={userId} readOnly={viewOnly} canEditAll={isOfficeOrAdmin} />}
         {activeTab === "signature" && userId && (

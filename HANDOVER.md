@@ -994,6 +994,53 @@ line and hand the phone to the builder's rep, who signs it; it then locks.
 - **Not on the phone:** truck day stops, float distance lookup (km typed),
   offline entry.
 
+**Office PO tab and job documents on the phone (19 Nov 2026; no migration).**
+Justin: the office should be able to run a job's POs from the phone. Office/admin
+only, online only ("Purchase orders need signal"), never the outbox: supplier
+orders are in no PowerSync stream, a supplier invoice becomes a Xero bill, and a
+PO's value is what the job is measured against.
+- **Phone:** a **POs** tab on the job screen (`mobile/app/job/[id].tsx`, shown only
+  to office/admin; the component is also inside a `RoleGate`, every figure through
+  `MoneyText`) — `mobile/components/job/purchase-orders.tsx`, calls in
+  `mobile/lib/jobPurchaseOrders.ts` (tested). Add / Edit / Remove a builder PO
+  (number defaults to `<job>-n`, client, site, value, split lines per company cost
+  centre with hours; "not split yet" / "over"; a line with supplier orders, time or
+  expenses can't be removed — set it to $0); **Add cost centre** (the edit form
+  with a line holding what's left); **Invoice this PO** → the phone's New Invoice
+  with `poId` (`app/invoices/new.tsx`: the PO's lines from `mobile/lib/poInvoice.ts`,
+  a title naming it, `invoices.customer_po` set — `CreateInvoiceInput.customerPo` —
+  and a note when the PO already has an invoice). Under each line its supplier
+  orders: amount ex GST, **+ Enter supplier invoice** (number, date, amount, GST
+  shown, a photo from the camera or library), **Send to Xero**
+  (`/api/xero/push-vendor-order`, unchanged), status, remove; a Xero bill's amount
+  stays locked. Rules mirrored byte-for-byte below the header: `lib/builder-po.ts`
+  → `mobile/lib/builderPo.ts`, `lib/po-invoice.ts` → `mobile/lib/poInvoice.ts`
+  (`tests/unit/builder-po-mirror.test.ts`).
+- **Routes** (all `requireOfficeOrAdmin`, every read and write as the CALLER via
+  `callerClient`, never the service role; fixed sentences; `lib/job-purchase-orders.ts`
+  holds the reads and helpers): `GET/POST /api/jobs/[id]/purchase-orders` (the tab;
+  add, idempotent on the phone's PO id), `PATCH/DELETE .../purchase-orders/[poId]`
+  (the web's `planBuilderPoEdit`, with "in use" worked out on the server from fresh
+  reads — the phone's word isn't trusted), `PATCH/DELETE
+  .../supplier-orders/[orderId]` (amount / status / remove), `POST
+  .../supplier-orders/[orderId]/invoice` (file to `job-documents` at the web's
+  `{job}/expense-receipt-{PO}-{ts}_{name}`, so 0047 hides it from technicians;
+  removed again if the row write fails). Tests: `tests/unit/job-purchase-orders.test.ts`.
+  The web PO tab still writes from the browser as before (unchanged); it could move
+  onto these routes later.
+- **Job documents (phone, office/admin):** the Documents tab gets **Take photo / Add
+  photo** (name, "Office only" switch), a lock to toggle office-only (0065) and
+  delete — `POST /api/jobs/[id]/documents` (base64 ≤ 3 MB, sniffed JPEG/PNG/WebP/PDF,
+  the web's `{job}/{ts}_{name}` path, row as the caller, file removed if the row
+  fails) and `PATCH/DELETE .../documents/[docId]` (row first, then the file).
+  **Photos only:** the binary has no document picker (`expo-document-picker` would be
+  a new native module and build), so PDFs are still uploaded on the website.
+- **Not on the phone:** pinning a typed PO site on the map (the job site's pin is
+  reused when the address is the job site's, otherwise none — pin it on the web),
+  opening the crew's docket photos from the PO card, "Mark stage complete" from the
+  PO card. Reaches phones with the next build (no new native module); needs the web
+  deployed first.
+
 **Fleet service history takes the invoice by drag and drop (17 Nov 2026; no migration).**
 Justin: "What happened to the drag and drop in the fleet? We drop the invoices
 for servicing … so it populates the service history." The drop zone lived on
