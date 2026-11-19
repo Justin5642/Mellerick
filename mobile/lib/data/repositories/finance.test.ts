@@ -156,6 +156,29 @@ describe("FinanceRepository.editInvoice", () => {
     expect(inserts).toHaveLength(1);
     for (const o of itemOps) expect(o.dependsOn).toBe(upd.id); // never run before the invoice update
   });
+
+  it("leaves the builder PO and progress-claim columns alone unless the form sends them", async () => {
+    const { outbox, ops } = captureOutbox();
+    const repo = new FinanceRepository(outbox, seqIds(), fixedTime());
+    await repo.editInvoice({ invoiceId: "inv-9", title: "T", existingItemIds: [], items: [{ name: "a", quantity: 1, unitPrice: 1 }] });
+    const payload = byTable(ops, "invoices")[0].payload;
+    for (const col of ["customer_po", "is_progress_claim", "claim_number", "claim_contract_value", "claim_previous"]) {
+      expect(payload).not.toHaveProperty(col);
+    }
+  });
+
+  it("writes the customer PO and the claim columns when given (null clears the PO)", async () => {
+    const { outbox, ops } = captureOutbox();
+    const repo = new FinanceRepository(outbox, seqIds(), fixedTime());
+    const claim = { is_progress_claim: true, claim_number: 3, claim_contract_value: 9200, claim_previous: 4000 };
+    await repo.editInvoice({ invoiceId: "inv-9", title: "T", existingItemIds: [], items: [], customerPo: null, claim });
+    expect(byTable(ops, "invoices")[0].payload).toMatchObject({ customer_po: null, ...claim });
+
+    await repo.createInvoice({ customerId: "c1", title: "N", items: [], customerPo: "S-1", claim });
+    const created = byTable(ops, "invoices")[1];
+    expect(created.op).toBe("insert");
+    expect(created.payload).toMatchObject({ customer_po: "S-1", ...claim, status: "draft" });
+  });
 });
 
 describe("FinanceRepository quotes + pricing", () => {

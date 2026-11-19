@@ -77,7 +77,7 @@ export const SQL_JOB_BILLING_PO_COST_CENTERS = `
   FROM po_cost_centers WHERE po_id IN (SELECT id FROM purchase_orders WHERE job_id = ?)`;
 
 export const SQL_JOB_EQUIPMENT_USAGE = `
-  SELECT u.id, u.equipment_id, u.usage_date, u.hours, u.days, u.notes,
+  SELECT u.id, u.equipment_id, u.usage_date, u.hours, u.days, u.loads, u.notes,
          e.name AS equipment_name, e.category AS equipment_category
   FROM equipment_usage_log u LEFT JOIN equipment e ON e.id = u.equipment_id
   WHERE u.job_id = ? ORDER BY u.usage_date DESC, u.created_at DESC`;
@@ -85,7 +85,7 @@ export const SQL_JOB_EQUIPMENT_USAGE = `
 export const SQL_JOB_EQUIPMENT_OPTIONS = `
   SELECT id, name, category, purchase_cost, estimated_life_years, insurance_annual,
          maintenance_annual, registration_annual, other_annual_costs,
-         fuel_cost_per_hour, target_hours_per_year, day_rate
+         fuel_cost_per_hour, target_hours_per_year, day_rate, cost_per_load
   FROM equipment WHERE is_active = 1 ORDER BY category COLLATE NOCASE, name COLLATE NOCASE`;
 
 // SQLite-shaped rows: numerics may arrive as strings (schema drift guard),
@@ -138,6 +138,7 @@ interface RawEquipUsageRow {
   usage_date: string;
   hours: number | string | null;
   days: number | string | null;
+  loads: number | string | null;
   notes: string | null;
   equipment_name: string | null;
   equipment_category: string | null;
@@ -155,6 +156,7 @@ interface RawEquipOptionRow {
   fuel_cost_per_hour: number | string | null;
   target_hours_per_year: number | string | null;
   day_rate: number | string | null;
+  cost_per_load: number | string | null;
 }
 
 // The job's PO cost-centre stages, flattened across its purchase orders. Shared
@@ -284,7 +286,7 @@ export async function getJobBilling(jobId: string): Promise<JobBilling | null> {
 // technician (this screen is office/admin-only).
 
 const EQUIP_COST_COLS =
-  "purchase_cost, estimated_life_years, insurance_annual, maintenance_annual, registration_annual, other_annual_costs, fuel_cost_per_hour, target_hours_per_year, day_rate";
+  "purchase_cost, estimated_life_years, insurance_annual, maintenance_annual, registration_annual, other_annual_costs, fuel_cost_per_hour, target_hours_per_year, day_rate, cost_per_load";
 
 export interface JobEquipmentUsage {
   id: string;
@@ -295,6 +297,8 @@ export interface JobEquipmentUsage {
   hours: number;
   /** Tool days (0100), costed at the item's day rate. */
   days: number;
+  /** Loads carted (0091), costed at the item's cost per load. Hours may be 0 when loads > 0. */
+  loads: number;
   notes: string | null;
   cost_per_hour: number;
   total_cost: number;
@@ -339,10 +343,12 @@ export async function getJobEquipment(jobId: string): Promise<JobEquipment> {
       }));
       const costById = new Map(inputs.map((e) => [e.id, computeEquipmentCost(e).costPerHour]));
       const dayRateById = new Map(inputs.map((e) => [e.id, e.day_rate]));
+      const perLoadById = new Map(optionRaw.map((e) => [e.id, num(e.cost_per_load)]));
 
       const usage: JobEquipmentUsage[] = usageRows.map((r) => {
         const hours = num(r.hours);
         const days = num(r.days);
+        const loads = num(r.loads);
         const costPerHour = costById.get(r.equipment_id) ?? 0;
         return {
           id: r.id,
@@ -352,9 +358,12 @@ export async function getJobEquipment(jobId: string): Promise<JobEquipment> {
           usage_date: r.usage_date,
           hours,
           days,
+          loads,
           notes: r.notes,
           cost_per_hour: costPerHour,
-          total_cost: hours * costPerHour + days * (dayRateById.get(r.equipment_id) ?? 0),
+          // As the web Equipment tab (components/job/job-equipment.tsx costOf):
+          // hours × cost/hour + loads × cost/load (0091) + days × day rate (0100).
+          total_cost: hours * costPerHour + loads * (perLoadById.get(r.equipment_id) ?? 0) + days * (dayRateById.get(r.equipment_id) ?? 0),
         };
       });
 
@@ -372,7 +381,7 @@ export async function getJobEquipment(jobId: string): Promise<JobEquipment> {
       const [usageRes, optRes] = await Promise.all([
         supabase
           .from("equipment_usage_log")
-          .select("id, equipment_id, usage_date, hours, days, notes, equipment:equipment_id(name, category)")
+          .select("id, equipment_id, usage_date, hours, days, loads, notes, equipment:equipment_id(name, category)")
           .eq("job_id", jobId)
           .order("usage_date", { ascending: false })
           .order("created_at", { ascending: false }),
@@ -384,15 +393,17 @@ export async function getJobEquipment(jobId: string): Promise<JobEquipment> {
       // deactivated item costs $0 and matches both the web and the mobile Costing
       // screen (jobCosting.ts also filters is_active). The name is still shown from
       // the join (better than the web's "Unknown equipment"; a name is not money).
-      type OptRow = { id: string; name: string; category: string; day_rate?: number | null } & EquipmentCostInputs;
+      type OptRow = { id: string; name: string; category: string; day_rate?: number | null; cost_per_load?: number | null } & EquipmentCostInputs;
       const optionRows = unwrapRows(optRes as never, "getJobEquipment(options)") as unknown as OptRow[];
       const costById = new Map(optionRows.map((e) => [e.id, computeEquipmentCost(e).costPerHour]));
       const dayRateById = new Map(optionRows.map((e) => [e.id, Number(e.day_rate ?? 0)]));
+      const perLoadById = new Map(optionRows.map((e) => [e.id, Number(e.cost_per_load ?? 0)]));
 
-      type UsageRow = { id: string; equipment_id: string; usage_date: string; hours: number; days: number | null; notes: string | null; equipment: { name: string; category: string } | null };
+      type UsageRow = { id: string; equipment_id: string; usage_date: string; hours: number; days: number | null; loads: number | null; notes: string | null; equipment: { name: string; category: string } | null };
       const usage: JobEquipmentUsage[] = (unwrapRows(usageRes as never, "getJobEquipment(usage)") as unknown as UsageRow[]).map((r) => {
         const hours = Number(r.hours);
         const days = Number(r.days ?? 0);
+        const loads = Number(r.loads ?? 0);
         const costPerHour = costById.get(r.equipment_id) ?? 0;
         return {
           id: r.id,
@@ -402,9 +413,12 @@ export async function getJobEquipment(jobId: string): Promise<JobEquipment> {
           usage_date: r.usage_date,
           hours,
           days,
+          loads,
           notes: r.notes,
           cost_per_hour: costPerHour,
-          total_cost: hours * costPerHour + days * (dayRateById.get(r.equipment_id) ?? 0),
+          // As the web Equipment tab (components/job/job-equipment.tsx costOf):
+          // hours × cost/hour + loads × cost/load (0091) + days × day rate (0100).
+          total_cost: hours * costPerHour + loads * (perLoadById.get(r.equipment_id) ?? 0) + days * (dayRateById.get(r.equipment_id) ?? 0),
         };
       });
 

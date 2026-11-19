@@ -6,6 +6,8 @@ import { Ionicons } from "@expo/vector-icons";
 import { supabase } from "../../lib/supabase";
 import { colors } from "../../lib/theme";
 import { ScreenError } from "../../design/components/ScreenError";
+import { RoleGate } from "../../design/guards/RoleGate";
+import { useBackflow } from "../../lib/data/hooks/useBackflow";
 import {
   getBackflowDeviceWithTests,
   type BackflowDeviceDetail,
@@ -30,6 +32,8 @@ export default function BackflowDeviceScreen() {
   const [loading, setLoading] = useState(true);
   const [openingId, setOpeningId] = useState<string | null>(null);
   const [error, setError] = useState<unknown>(null);
+  const backflow = useBackflow();
+  const [removing, setRemoving] = useState(false);
 
   // setLoading(false) lives in `finally` for a specific reason: it used to be the
   // last statement of the happy path, so a thrown read never reached it and the
@@ -77,6 +81,42 @@ export default function BackflowDeviceScreen() {
     } finally {
       setOpeningId(null);
     }
+  }
+
+  // Office/admin: take the device off the register (the web's "Delete" on a
+  // device). Deactivated, not deleted — its test history is kept — through
+  // the outbox, so it works offline and syncs like any register write.
+  function confirmRemove() {
+    if (!device || removing) return;
+    const customerName = device.customers?.name ?? "this customer";
+    Alert.alert(
+      "Delete device",
+      `Delete this backflow device for ${customerName}? Its test history is kept, but it will no longer appear in the active devices list.`,
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Delete",
+          style: "destructive",
+          onPress: async () => {
+            if (!backflow.ready) {
+              Alert.alert("Not ready yet", "The app is still starting up. Try again in a moment.");
+              return;
+            }
+            setRemoving(true);
+            try {
+              const { synced } = await backflow.deactivateDevice(device.id);
+              if (!synced) Alert.alert("Saved on this phone", "The device comes off the register when the phone is back online.");
+              if (router.canGoBack()) router.back();
+              else router.replace("/backflow/list");
+            } catch (e) {
+              Alert.alert("Couldn't delete the device", e instanceof Error ? e.message : "Please try again.");
+            } finally {
+              setRemoving(false);
+            }
+          },
+        },
+      ]
+    );
   }
 
   function formatDate(d: string | Date) {
@@ -149,6 +189,13 @@ export default function BackflowDeviceScreen() {
             <DetailItem label="Water Meter No." value={device.water_meter_number ?? "—"} />
           </View>
         </View>
+
+        <RoleGate roles={["office", "admin"]}>
+          <TouchableOpacity style={styles.removeBtn} onPress={confirmRemove} disabled={removing} accessibilityLabel="Delete this device">
+            <Ionicons name="trash-outline" size={15} color={colors.red600} />
+            <Text style={styles.removeText}>{removing ? "Deleting…" : "Delete device"}</Text>
+          </TouchableOpacity>
+        </RoleGate>
 
         <View style={styles.card}>
           <Text style={styles.cardTitle}>Test History</Text>
@@ -259,4 +306,6 @@ const styles = StyleSheet.create({
   notSubmittedText: { fontSize: 11, color: "#d97706", textAlign: "right" },
   pdfLink: { flexDirection: "row", alignItems: "center", gap: 3, marginTop: 4 },
   pdfLinkText: { fontSize: 11, color: colors.blue600, fontWeight: "600" },
+  removeBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, marginHorizontal: 16, marginBottom: 14, paddingVertical: 10, borderRadius: 10, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.card },
+  removeText: { fontSize: 13, fontWeight: "600", color: colors.red600 },
 });

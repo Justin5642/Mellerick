@@ -71,3 +71,45 @@ export function nextClaimDefaults(
   }
   return { claimNumber: 1, contractValue: simproJobValue && simproJobValue > 0 ? simproJobValue : null, previous: 0 };
 }
+
+// The New / Edit Invoice form's claim fields (web components/invoice/
+// progress-claim-fields.tsx and the phone), as typed, and the invoice columns
+// they save to.
+
+export interface ClaimDraft {
+  on: boolean;
+  number: string;
+  contract: string;
+  previous: string;
+}
+
+export const emptyClaimDraft: ClaimDraft = { on: false, number: "", contract: "", previous: "" };
+
+export function claimDraftFromInvoice(inv: {
+  is_progress_claim?: boolean | null;
+  claim_number?: number | null;
+  claim_contract_value?: number | string | null;
+  claim_previous?: number | string | null;
+}): ClaimDraft {
+  if (!inv.is_progress_claim) return emptyClaimDraft;
+  return {
+    on: true,
+    number: inv.claim_number != null ? String(inv.claim_number) : "",
+    contract: inv.claim_contract_value != null ? String(Number(inv.claim_contract_value)) : "",
+    previous: inv.claim_previous != null ? String(Number(inv.claim_previous)) : "0",
+  };
+}
+
+/** The invoice columns for a draft, or the reason it cannot be saved. */
+export function claimColumns(d: ClaimDraft):
+  | { ok: true; columns: { is_progress_claim: boolean; claim_number: number | null; claim_contract_value: number | null; claim_previous: number | null } }
+  | { ok: false; error: string } {
+  if (!d.on) return { ok: true, columns: { is_progress_claim: false, claim_number: null, claim_contract_value: null, claim_previous: null } };
+  const number = parseInt(d.number, 10);
+  const contract = parseFloat(d.contract);
+  const previous = d.previous.trim() === "" ? 0 : parseFloat(d.previous);
+  if (!Number.isInteger(number) || number < 1) return { ok: false, error: "Enter the progress claim number" };
+  if (!(contract > 0)) return { ok: false, error: "Enter the contract value (ex GST) for the progress claim" };
+  if (Number.isNaN(previous) || previous < 0) return { ok: false, error: "Previously claimed must be 0 or more" };
+  return { ok: true, columns: { is_progress_claim: true, claim_number: number, claim_contract_value: contract, claim_previous: previous } };
+}

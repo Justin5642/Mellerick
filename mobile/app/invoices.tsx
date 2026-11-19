@@ -8,6 +8,10 @@ import { FinanceListRow } from "../design/components/FinanceListRow";
 import { MoneyText } from "../design/components/MoneyText";
 import { ScreenError } from "../design/components/ScreenError";
 import { listInvoices, listReadyToInvoice, type InvoiceListRow as Invoice, type ReadyJob, type ReadyVariation } from "../lib/data/reads/finance";
+import { listOwedInvoices } from "../lib/data/reads/invoiceExtras";
+import { summarizeOwed, type OwedSummary } from "../lib/invoicePayments";
+import { dateKeyInBusinessTZ } from "../lib/date";
+import { OwedToUs } from "../components/finance/owed-to-us";
 
 const PAGE = 50;
 
@@ -20,6 +24,8 @@ export default function InvoicesScreen() {
   const [loadingMore, setLoadingMore] = useState(false);
   const [hasMore, setHasMore] = useState(true);
   const [error, setError] = useState<unknown>(null);
+  // "Owed to us" is a summary on top: if it alone fails, the list still shows.
+  const [owed, setOwed] = useState<OwedSummary | null>(null);
 
   const loadFirst = useCallback(async () => {
     // listInvoices / listReadyToInvoice now THROW on a failed query instead of
@@ -29,7 +35,12 @@ export default function InvoicesScreen() {
     // never actually ran.
     try {
       setError(null);
-      const [rows, ready] = await Promise.all([listInvoices(0, PAGE), listReadyToInvoice()]);
+      const [rows, ready, owedRows] = await Promise.all([
+        listInvoices(0, PAGE),
+        listReadyToInvoice(),
+        listOwedInvoices().catch(() => null),
+      ]);
+      setOwed(owedRows ? summarizeOwed(owedRows, dateKeyInBusinessTZ(new Date())) : null);
       setInvoices(rows);
       setHasMore(rows.length === PAGE);
       setReadyJobs(ready.jobs);
@@ -76,7 +87,7 @@ export default function InvoicesScreen() {
   }
 
   const readyCount = readyJobs.length + readyVars.length;
-  const ListHeader = readyCount === 0 ? null : (
+  const ReadyCard = readyCount === 0 ? null : (
     <View style={styles.readyCard}>
       <View style={styles.readyHead}>
         <Ionicons name="cash-outline" size={16} color={colors.orange700} />
@@ -103,6 +114,12 @@ export default function InvoicesScreen() {
         </TouchableOpacity>
       ))}
     </View>
+  );
+  const ListHeader = (
+    <>
+      {owed && <OwedToUs summary={owed} />}
+      {ReadyCard}
+    </>
   );
 
   // Checked BEFORE the list renders, so a failed load can never fall through to

@@ -71,6 +71,15 @@ export interface InvoiceDetail {
   xero_invoice_id: string | null;
   /** The job it bills, if any — the phone's Send offers a job report only then. */
   job_id: string | null;
+  /** Paid so far (0081 payments, or the Xero poll). */
+  amount_paid: number | null;
+  /** The builder's PO number on the invoice (0083). */
+  customer_po: string | null;
+  /** Progress claim figures (0084), all ex GST. */
+  is_progress_claim: boolean;
+  claim_number: number | null;
+  claim_contract_value: number | null;
+  claim_previous: number | null;
   customers: { name: string; email: string | null; phone: string | null } | null;
   invoice_items: InvoiceItem[];
 }
@@ -155,6 +164,7 @@ export const SQL_LIST_QUOTES = `
 export const SQL_GET_INVOICE = `
   SELECT id, invoice_number, title, status, subtotal, tax_amount, total, due_date,
          created_at, notes, work_description, xero_invoice_id, job_id,
+         amount_paid, customer_po, is_progress_claim, claim_number, claim_contract_value, claim_previous,
          (SELECT name  FROM customers WHERE id = invoices.customer_id) AS customer_name,
          (SELECT email FROM customers WHERE id = invoices.customer_id) AS customer_email,
          (SELECT phone FROM customers WHERE id = invoices.customer_id) AS customer_phone
@@ -270,6 +280,12 @@ type RawInvoiceDetailRow = {
   work_description: string | null;
   xero_invoice_id: string | null;
   job_id: string | null;
+  amount_paid: number | string | null;
+  customer_po: string | null;
+  is_progress_claim: number | boolean | null;
+  claim_number: number | string | null;
+  claim_contract_value: number | string | null;
+  claim_previous: number | string | null;
   customer_name: string | null;
   customer_email: string | null;
   customer_phone: string | null;
@@ -430,6 +446,12 @@ export async function getInvoice(id: string): Promise<InvoiceDetail | null> {
         work_description: inv.work_description,
         xero_invoice_id: inv.xero_invoice_id,
         job_id: inv.job_id ?? null,
+        amount_paid: numOrNull(inv.amount_paid),
+        customer_po: inv.customer_po ?? null,
+        is_progress_claim: !!inv.is_progress_claim,
+        claim_number: numOrNull(inv.claim_number),
+        claim_contract_value: numOrNull(inv.claim_contract_value),
+        claim_previous: numOrNull(inv.claim_previous),
         customers: nestOne(inv.customer_name, {
           name: inv.customer_name as string,
           email: inv.customer_email,

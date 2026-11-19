@@ -15,7 +15,7 @@ import { ArrowLeft, Plus, Trash2, GitPullRequestArrow } from "lucide-react";
 import Link from "next/link";
 import { CustomerPicker } from "@/components/customer-picker";
 import { PaymentTermsField } from "@/components/invoice/payment-terms-field";
-import { poInvoiceLines } from "@/lib/po-invoice";
+import { claimBuilderPo, poForCustomerPo, poInvoiceLines, pricedPos } from "@/lib/po-invoice";
 import { melbourneDay } from "@/lib/invoice-terms";
 import { moneyTotals } from "@/lib/replace-line-items";
 import { variationLineDescription } from "@/lib/variation-qty";
@@ -242,10 +242,10 @@ function NewInvoiceForm() {
       .select("id, po_number, total_value")
       .eq("job_id", form.job_id)
       .order("created_at")
-      .then(({ data }) => setJobPos(((data ?? []) as { id: string; po_number: string; total_value: number }[]).filter((p) => Number(p.total_value) > 0)));
+      .then(({ data }) => setJobPos(pricedPos((data ?? []) as { id: string; po_number: string; total_value: number }[])));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [form.job_id]);
-  const pickedPo = jobPos.find((p) => p.po_number === form.customer_po.trim()) ?? null;
+  const pickedPo = poForCustomerPo(jobPos, form.customer_po);
 
   // "Invoice this PO": the PO's number, a title naming it, and its value as
   // the lines (lib/po-invoice.ts). Says so when this PO already has an invoice.
@@ -648,7 +648,7 @@ function NewInvoiceForm() {
           onChange={setClaim}
           jobId={form.job_id || null}
           subtotal={subtotal}
-          builderPo={jobPos.length > 1 && pickedPo ? { poNumber: pickedPo.po_number, value: Number(pickedPo.total_value) } : null}
+          builderPo={claimBuilderPo(jobPos, pickedPo)}
         />
 
         {unbilledVariations.filter(v => !addedVariationIds.includes(v.id)).length > 0 && (

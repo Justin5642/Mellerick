@@ -2,7 +2,6 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { createClient } from "@/lib/supabase/client";
 import { toast } from "sonner";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
@@ -16,7 +15,8 @@ interface Props {
   onOpenChange: (open: boolean) => void;
 }
 
-// Deleting a job cascades (at the database level) to its notes, photos,
+// Deleting goes through DELETE /api/jobs/[id] (admin only, run as the caller
+// under RLS), the same route the phone uses. Deleting a job cascades (at the database level) to its notes, photos,
 // documents, time entries, expenses, and variations — those tables all
 // reference jobs(id) with "on delete cascade". Quotes and invoices, however,
 // reference jobs(id) with no delete action (the default "restrict"), so the
@@ -26,18 +26,22 @@ interface Props {
 // instead of a raw SQL error.
 export function DeleteJobDialog({ jobId, jobNumber, jobTitle, open, onOpenChange }: Props) {
   const router = useRouter();
-  const supabase = createClient();
   const [deleting, setDeleting] = useState(false);
 
   async function handleDelete() {
     setDeleting(true);
-    const { error } = await supabase.from("jobs").delete().eq("id", jobId);
-    if (error) {
-      if (error.code === "23503") {
-        toast.error("This job has a linked quote or invoice — remove or unlink that first, then delete the job.");
-      } else {
-        toast.error(error.message);
+    let message: string | null = null;
+    try {
+      const res = await fetch(`/api/jobs/${jobId}`, { method: "DELETE" });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        message = typeof data.error === "string" ? data.error : "Couldn't delete the job. Try again.";
       }
+    } catch {
+      message = "Couldn't reach the server. Check your connection and try again.";
+    }
+    if (message) {
+      toast.error(message);
       setDeleting(false);
       return;
     }

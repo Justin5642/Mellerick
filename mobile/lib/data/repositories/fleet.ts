@@ -121,7 +121,7 @@ export class EquipmentRepository {
 
   // Log usage hours against an item — feeds the utilisation report and (when a
   // jobId is supplied) the job's equipment-cost total. General usage → job_id null.
-  async addEquipmentUsage(input: { equipmentId: string; loggedBy: string; usageDate?: string | null; hours: number; notes?: string | null; jobId?: string | null }): Promise<string> {
+  async addEquipmentUsage(input: { equipmentId: string; loggedBy: string; usageDate?: string | null; hours: number; loads?: number; notes?: string | null; jobId?: string | null }): Promise<string> {
     const rowId = this.ids.newId();
     const payload: Record<string, unknown> = {
       equipment_id: input.equipmentId,
@@ -130,6 +130,9 @@ export class EquipmentRepository {
       notes: input.notes ?? null,
       job_id: input.jobId ?? null,
     };
+    // Loads carted (0091): only sent when given, so a fleet-screen entry
+    // (hours only) writes exactly what it always did.
+    if (input.loads != null) payload.loads = input.loads;
     if (input.usageDate) payload.usage_date = input.usageDate; // else DB default current_date
     const op: WriteOperation = {
       kind: "write",

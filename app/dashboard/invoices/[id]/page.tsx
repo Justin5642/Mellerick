@@ -23,5 +23,12 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<{ 
   if (paymentsRes.error) console.error("invoice page: payments unavailable", paymentsRes.error);
   const payments = paymentsRes.error ? null : paymentsRes.data ?? [];
 
-  return <InvoiceDetail invoice={invoice} jobSite={invoiceJobSite(invoice)} xeroConnected={!!xeroToken} payments={payments} />;
+  return (
+    <InvoiceDetail
+      invoice={invoice}
+      jobSite={invoiceJobSite(invoice)}
+      xeroConnected={!!xeroToken}
+      payments={payments}
+    />
+  );
 }

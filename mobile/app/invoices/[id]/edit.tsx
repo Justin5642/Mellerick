@@ -11,6 +11,13 @@ import { LineItemsEditor, type EditableItem } from "../../../components/finance/
 import { getInvoice, type InvoiceDetail } from "../../../lib/data/reads/finance";
 import { ScreenError } from "../../../design/components/ScreenError";
 import { localDateKey } from "../../../lib/date";
+import { getInvoiceJobPos, type InvoicePo } from "../../../lib/data/reads/invoiceExtras";
+import { computeTotals } from "../../../lib/data/repositories/finance";
+import { claimBuilderPo, poForCustomerPo, pricedPos } from "../../../lib/poInvoice";
+import { normalizeCustomerPo } from "../../../lib/customerPo";
+import { claimColumns, claimDraftFromInvoice, emptyClaimDraft, type ClaimDraft } from "../../../lib/progressClaim";
+import { CustomerPoField } from "../../../components/finance/customer-po-field";
+import { ProgressClaimFields } from "../../../components/finance/progress-claim-fields";
 
 export default function EditInvoiceScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -27,6 +34,9 @@ export default function EditInvoiceScreen() {
   const [existingItemIds, setExistingItemIds] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<unknown>(null);
+  const [customerPo, setCustomerPo] = useState("");
+  const [jobPos, setJobPos] = useState<InvoicePo[]>([]);
+  const [claim, setClaim] = useState<ClaimDraft>(emptyClaimDraft);
 
   const load = useCallback(async () => {
     // getInvoice now THROWS on a failed query. Without this catch the throw
@@ -42,6 +52,10 @@ export default function EditInvoiceScreen() {
         setNotes(inv.notes ?? "");
         setExistingItemIds(inv.invoice_items.map((i) => i.id));
         setItems(inv.invoice_items.map((i) => ({ key: `x-${i.id}`, name: i.name, description: i.description ?? "", quantity: String(i.quantity), unit_price: String(i.unit_price) })));
+        setCustomerPo(inv.customer_po ?? "");
+        setClaim(claimDraftFromInvoice(inv));
+        // The job's POs: a convenience for the picker, never a reason to fail the form.
+        if (inv.job_id) getInvoiceJobPos(inv.job_id).then((jp) => setJobPos(pricedPos(jp.pos))).catch(() => {});
       }
     } catch (e) {
       setError(e);
@@ -62,9 +76,11 @@ export default function EditInvoiceScreen() {
     const lineItems = items.filter((i) => i.name.trim()).map((i) => ({ name: i.name.trim(), description: i.description.trim() || null, quantity: parseFloat(i.quantity) || 0, unitPrice: parseFloat(i.unit_price) || 0 }));
     if (!title.trim()) { Alert.alert("Title required", "Enter an invoice title."); return; }
     if (lineItems.length === 0) { Alert.alert("Line items required", "Add at least one named line item."); return; }
+    const claimCols = claimColumns(claim);
+    if (!claimCols.ok) { Alert.alert("Progress claim", claimCols.error); return; }
     setSaving(true);
     try {
-      const { synced } = await finance.editInvoice({ invoiceId: id, title: title.trim(), dueDateIso: dueDate ? localDateKey(dueDate) : null, notes: notes.trim() || null, existingItemIds, items: lineItems });
+      const { synced } = await finance.editInvoice({ invoiceId: id, title: title.trim(), dueDateIso: dueDate ? localDateKey(dueDate) : null, notes: notes.trim() || null, existingItemIds, items: lineItems, customerPo: normalizeCustomerPo(customerPo), claim: claimCols.columns });
       if (!synced) {
         // The detail is read from the local DB, which the outbox does not touch
         // until the write reaches the server — so it will still show the OLD
@@ -128,8 +144,20 @@ export default function EditInvoiceScreen() {
       </TouchableOpacity>
       {showDate && <DateTimePicker value={dueDate ?? new Date()} mode="date" onChange={onDateChange} />}
 
+      <CustomerPoField value={customerPo} onChange={setCustomerPo} pos={jobPos} />
+
       <Text style={[styles.label, { marginTop: 18 }]}>Line items</Text>
       <LineItemsEditor items={items} onChange={setItems} />
+
+      <ProgressClaimFields
+        value={claim}
+        onChange={setClaim}
+        jobId={invoice.job_id}
+        currentInvoiceId={invoice.id}
+        subtotal={computeTotals(items.filter((i) => i.name.trim()).map((i) => ({ name: i.name, quantity: parseFloat(i.quantity) || 0, unitPrice: parseFloat(i.unit_price) || 0 }))).subtotal}
+        jobPoTotal={jobPos.reduce((s, p) => s + Number(p.total_value || 0), 0) || null}
+        builderPo={claimBuilderPo(jobPos, poForCustomerPo(jobPos, customerPo))}
+      />
 
       <Text style={[styles.label, { marginTop: 18 }]}>Notes (optional)</Text>
       <TextInput style={[styles.input, styles.multiline]} value={notes} onChangeText={setNotes} placeholderTextColor={colors.slate400} multiline />

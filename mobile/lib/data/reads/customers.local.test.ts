@@ -90,8 +90,8 @@ describe("getCustomer (local)", () => {
       is_active: 1, is_favorite: 0,
     });
     const siteRows = [
-      { id: "s1", name: "Head office", address_line1: "1 Main St", address_line2: null, suburb: "Richmond", state: "VIC", postcode: "3121", notes: "Dog on site", is_active: 1 },
-      { id: "s2", name: "Warehouse", address_line1: "9 Dock Rd", address_line2: "Unit 2", suburb: "Port Melbourne", state: "VIC", postcode: "3207", notes: null, is_active: 0 },
+      { id: "s1", name: "Head office", address_line1: "1 Main St", address_line2: null, suburb: "Richmond", state: "VIC", postcode: "3121", notes: "Dog on site", is_active: 1, site_lat: "-37.8183", site_lng: 145.0012 },
+      { id: "s2", name: "Warehouse", address_line1: "9 Dock Rd", address_line2: "Unit 2", suburb: "Port Melbourne", state: "VIC", postcode: "3207", notes: null, is_active: 0, site_lat: null, site_lng: null },
     ];
     const getAll = jest.fn().mockResolvedValue(siteRows);
     setLocalReads(fakeReads({ getOptional, getAll }));
@@ -103,7 +103,8 @@ describe("getCustomer (local)", () => {
       phone: "0400 000 000", mobile: null, abn: "12 345 678 901", notes: "Gate code 4321",
       is_active: true, is_favorite: false,
       sites: [
-        { ...siteRows[0], is_active: true },
+        // The map pin (the office's "Set pin"); SQLite may hand a REAL back as text.
+        { ...siteRows[0], is_active: true, site_lat: -37.8183, site_lng: 145.0012 },
         { ...siteRows[1], is_active: false },
       ],
     });
@@ -114,7 +115,7 @@ describe("getCustomer (local)", () => {
     expect(custParams).toEqual(["c1"]);
     const [sitesSql, sitesParams] = getAll.mock.calls[0];
     expect(norm(sitesSql)).toBe(norm(`
-      SELECT id, name, address_line1, address_line2, suburb, state, postcode, notes, is_active
+      SELECT id, name, address_line1, address_line2, suburb, state, postcode, notes, is_active, site_lat, site_lng
       FROM sites WHERE customer_id = ?`));
     expect(sitesParams).toEqual(["c1"]);
   });

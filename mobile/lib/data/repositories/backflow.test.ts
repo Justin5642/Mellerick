@@ -38,6 +38,17 @@ const TEST_INPUT = {
   testResults: [{ group_label: "Main Device", check_valve_1_kpa: 12 }],
 };
 
+describe("BackflowRepository.deactivateDevice", () => {
+  it("takes the device off the register with an update — never a delete, so its tests are kept", async () => {
+    const { outbox, ops } = captureOutbox();
+    await new BackflowRepository(outbox, seqIds(), fixedTime()).deactivateDevice("dev-7");
+    const [w] = writes(ops);
+    expect(ops).toHaveLength(1);
+    expect(w).toMatchObject({ table: "backflow_devices", op: "update", rowId: "dev-7", aggregate: "backflow_device" });
+    expect(w.payload).toEqual({ is_active: false });
+  });
+});
+
 describe("BackflowRepository.registerDevice", () => {
   it("inserts a backflow_devices row via the outbox with a client-UUID PK and is_active true", async () => {
     const { outbox, ops } = captureOutbox();

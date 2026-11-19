@@ -103,7 +103,7 @@ export default function NewQuoteScreen() {
       <TouchableOpacity style={[styles.saveBtn, saving && styles.saveBtnDisabled]} onPress={save} disabled={saving}>
         <Text style={styles.saveText}>{saving ? "Saving…" : "Create draft quote"}</Text>
       </TouchableOpacity>
-      <Text style={styles.footnote}>Created as a draft. Sending / PDF are managed on the web dashboard.</Text>
+      <Text style={styles.footnote}>Created as a draft. Send it or open its PDF from the quote.</Text>
 
       <CustomerPicker visible={pickCustomer} onClose={() => setPickCustomer(false)} onSelect={(c) => { setCustomer(c); setPickCustomer(false); }} />
     </ScrollView>

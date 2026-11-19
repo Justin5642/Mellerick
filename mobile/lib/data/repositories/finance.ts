@@ -38,7 +38,33 @@ export function computeTotals(items: LineItemInput[]): { subtotal: number; gst: 
   return { subtotal, gst, total: cents(subtotal + gst) };
 }
 
-export interface CreateInvoiceInput {
+/** The progress-claim columns (0084), as lib/progressClaim.ts claimColumns gives them. */
+export interface InvoiceClaimColumns {
+  is_progress_claim: boolean;
+  claim_number: number | null;
+  claim_contract_value: number | null;
+  claim_previous: number | null;
+}
+
+/**
+ * The builder-PO / progress-claim columns a form sends, only when it has them:
+ * `undefined` leaves the column out of the payload (an older form, or one that
+ * doesn't manage it, never overwrites what the web set).
+ */
+export interface InvoiceBillingColumns {
+  /** invoices.customer_po (0083), normalised; null clears it. */
+  customerPo?: string | null;
+  claim?: InvoiceClaimColumns;
+}
+
+function billingPayload(input: InvoiceBillingColumns): Record<string, unknown> {
+  return {
+    ...(input.customerPo !== undefined ? { customer_po: input.customerPo } : {}),
+    ...(input.claim ? input.claim : {}),
+  };
+}
+
+export interface CreateInvoiceInput extends InvoiceBillingColumns {
   customerId: string;
   jobId?: string | null;
   title: string;
@@ -60,7 +86,7 @@ export interface CreateInvoiceInput {
    * Uses the same parentOp mechanism as `reconcile` above. */
   approve?: { payload: Record<string, unknown> } | null;
 }
-export interface EditInvoiceInput {
+export interface EditInvoiceInput extends InvoiceBillingColumns {
   invoiceId: string;
   title: string;
   dueDateIso?: string | null;
@@ -123,6 +149,7 @@ export class FinanceRepository {
       tax_amount: gst,
       total,
       status: "draft",
+      ...billingPayload(input),
     });
     await this.insertItems("invoice", "invoice_items", "invoice_id", invoiceId, input.items, parentOp);
     // Create-from-job reconciliation: mark the pulled-in variations billed and
@@ -155,6 +182,7 @@ export class FinanceRepository {
       subtotal,
       tax_amount: gst,
       total,
+      ...billingPayload(input),
     });
     // delete-all-then-reinsert (matches web) — but ordered + durable via the
     // outbox, both gated on the parent update so they never run before it.

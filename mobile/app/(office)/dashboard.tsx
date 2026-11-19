@@ -11,8 +11,12 @@ import type { ScheduleDay } from "../../lib/scheduling";
 import { StatCard } from "../../design/components/StatCard";
 import { JobListRow } from "../../design/components/JobListRow";
 import { ScreenError } from "../../design/components/ScreenError";
-import { getOfficeDashboard, type DashboardJob } from "../../lib/data/reads/dashboard";
+import { getOfficeDashboard, listOpenWorkClocks, type DashboardJob, type OpenWorkClock } from "../../lib/data/reads/dashboard";
 import { listBackflowDevices } from "../../lib/data/reads/backflow";
+import { listReadyToInvoice } from "../../lib/data/reads/finance";
+import { clocksFromBeforeToday, unfinishedYesterday, variationsToInvoice } from "../../lib/dashboardLooseEnds";
+import { MoneyText } from "../../design/components/MoneyText";
+import { RoleGate } from "../../design/guards/RoleGate";
 
 type DashJob = DashboardJob;
 // A job on today's list with TODAY's block — a Mon–Wed daily job shows its
@@ -32,6 +36,11 @@ export default function DashboardScreen() {
   const [counts, setCounts] = useState<Counts>({ total: 0, active: 0, customers: 0, overdue: 0, backflowDue: 0 });
   const [recent, setRecent] = useState<DashJob[]>([]);
   const [today, setToday] = useState<TodayJob[]>([]);
+  // "Needs a look from yesterday" and "Variations to invoice", as the web
+  // dashboard (lib/dashboardLooseEnds.ts has the rules).
+  const [yesterdayJobs, setYesterdayJobs] = useState<DashJob[]>([]);
+  const [staleClocks, setStaleClocks] = useState<OpenWorkClock[]>([]);
+  const [unbilled, setUnbilled] = useState<{ count: number; total: number }>({ count: 0, total: 0 });
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<unknown>(null);
 
@@ -49,12 +58,20 @@ export default function DashboardScreen() {
       // dashboard opens without SEVEN network round-trips — the last of which
       // used to download every active backflow device with its full test
       // history just to count the ones falling due.
-      const [dash, backflowRows] = await Promise.all([getOfficeDashboard(), listBackflowDevices()]);
+      const [dash, backflowRows, openClocks, ready] = await Promise.all([
+        getOfficeDashboard(),
+        listBackflowDevices(),
+        listOpenWorkClocks(),
+        listReadyToInvoice(),
+      ]);
       const backflowDue = backflowRows.filter((r) => r.status === "overdue" || r.status === "due_soon").length;
 
       setCounts({ ...dash.counts, backflowDue });
       setRecent(dash.recent);
       const todayKey = businessTodayKey();
+      setYesterdayJobs(unfinishedYesterday(dash.scheduled, todayKey));
+      setStaleClocks(clocksFromBeforeToday(openClocks, todayKey));
+      setUnbilled(variationsToInvoice(ready.variations));
       setToday(
         dash.scheduled
           .flatMap((job) => {
@@ -110,6 +127,16 @@ export default function DashboardScreen() {
           <StatCard title="Total Jobs" value={counts.total} icon="checkmark-circle" iconColor="#22c55e" onPress={() => router.push("/jobs")} />
           <StatCard title="Customers" value={counts.customers} icon="people" iconColor="#8b5cf6" onPress={() => router.push("/customers")} />
           <StatCard title="Overdue Invoices" value={counts.overdue} icon="alert-circle" iconColor="#ef4444" onPress={() => router.push("/invoices")} />
+          <RoleGate roles={["office", "admin"]}>
+            <StatCard
+              title="Variations to Invoice"
+              value={unbilled.count}
+              detail={<MoneyText amount={unbilled.total} style={styles.statDetail} />}
+              icon="receipt"
+              iconColor="#059669"
+              onPress={() => router.push("/invoices")}
+            />
+          </RoleGate>
           <StatCard title="Backflow Due" value={counts.backflowDue} icon="water" iconColor="#0891b2" onPress={() => router.push("/backflow/list")} />
         </View>
 
@@ -136,6 +163,37 @@ export default function DashboardScreen() {
           )}
         </Section>
 
+        {yesterdayJobs.length > 0 || staleClocks.length > 0 ? (
+          <Section title="Needs a look from yesterday" tone="warn">
+            {yesterdayJobs.map((job) => (
+              <JobListRow
+                key={job.id}
+                jobNumber={job.job_number}
+                title={job.title}
+                subtitle={`Booked yesterday, not signed off · ${job.assigned_profile?.full_name ?? "Unassigned"}`}
+                status={job.status}
+                onPress={() => router.push(`/job/${job.id}`)}
+              />
+            ))}
+            {staleClocks.map((c) => (
+              <TouchableOpacity key={c.id} style={styles.clockRow} onPress={() => router.push(`/job/${c.job_id}`)} accessibilityRole="button">
+                <Ionicons name="time-outline" size={18} color={colors.red600} />
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.clockName} numberOfLines={1}>
+                    {c.staff_name ?? "Someone"}
+                    <Text style={styles.clockJob}>{c.job_number != null ? ` · #${c.job_number} — ${c.job_title ?? ""}` : ""}</Text>
+                  </Text>
+                  <Text style={styles.clockSince}>
+                    Still clocked on since {new Date(c.clock_in).toLocaleDateString("en-AU", { weekday: "short", day: "numeric", month: "short", timeZone: "Australia/Melbourne" })}{" "}
+                    {formatBusinessTime(c.clock_in)}
+                  </Text>
+                </View>
+                <Ionicons name="chevron-forward" size={16} color={colors.slate400} />
+              </TouchableOpacity>
+            ))}
+          </Section>
+        ) : null}
+
         <Section title="Recent Jobs" action="View all" onAction={() => router.push("/jobs")}>
           {recent.length === 0 ? (
             <TouchableOpacity onPress={() => router.push("/jobs/new")} style={styles.empty}>
@@ -161,9 +219,9 @@ export default function DashboardScreen() {
   );
 }
 
-function Section({ title, action, onAction, children }: { title: string; action?: string; onAction?: () => void; children: React.ReactNode }) {
+function Section({ title, action, onAction, tone, children }: { title: string; action?: string; onAction?: () => void; tone?: "warn"; children: React.ReactNode }) {
   return (
-    <View style={styles.section}>
+    <View style={[styles.section, tone === "warn" && styles.sectionWarn]}>
       <View style={styles.sectionHead}>
         <Text style={styles.sectionTitle}>{title}</Text>
         {action ? <Text style={styles.sectionAction} onPress={onAction}>{action}</Text> : null}
@@ -194,6 +252,12 @@ const styles = StyleSheet.create({
   sectionTitle: { fontSize: 15, fontWeight: "700", color: colors.slate900 },
   sectionAction: { fontSize: 13, color: colors.blue600, fontWeight: "600" },
   sectionBody: {},
+  sectionWarn: { borderColor: "#fcd34d" },
+  statDetail: { fontSize: 12, fontWeight: "600", color: colors.slate500, marginTop: 1 },
+  clockRow: { flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 16, paddingVertical: 12, borderTopWidth: 1, borderTopColor: colors.border },
+  clockName: { fontSize: 14, fontWeight: "600", color: colors.slate900 },
+  clockJob: { fontWeight: "400", color: colors.slate500 },
+  clockSince: { fontSize: 12, color: colors.red600, marginTop: 2 },
   empty: { alignItems: "center", justifyContent: "center", paddingVertical: 34, gap: 10 },
   emptyText: { fontSize: 13, color: colors.slate400 },
   timeCol: { width: 52, alignItems: "center" },

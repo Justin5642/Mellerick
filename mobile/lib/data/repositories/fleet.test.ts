@@ -134,6 +134,17 @@ describe("EquipmentRepository", () => {
     expect(ops[0].payload).toMatchObject({ equipment_id: "eq1", hours: 4, logged_by: "u1", job_id: "job9" });
   });
 
+  it("addEquipmentUsage carries loads carted (0091) — a truck run may be loads only", async () => {
+    const { outbox, ops } = captureOutbox();
+    await new EquipmentRepository(outbox, seqIds(), fixedTime()).addEquipmentUsage({ equipmentId: "truck", loggedBy: "u1", hours: 0, loads: 4, jobId: "job9" });
+    expect(ops[0].payload).toMatchObject({ equipment_id: "truck", hours: 0, loads: 4, job_id: "job9" });
+
+    // Not given (the fleet screen): not sent, exactly as before.
+    const b2 = captureOutbox();
+    await new EquipmentRepository(b2.outbox, seqIds(), fixedTime()).addEquipmentUsage({ equipmentId: "eq1", loggedBy: "u1", hours: 2 });
+    expect(b2.ops[0].payload).not.toHaveProperty("loads");
+  });
+
   it("removeEquipmentUsage is a plain delete", async () => {
     const { outbox, ops } = captureOutbox();
     await new EquipmentRepository(outbox, seqIds(), fixedTime()).removeEquipmentUsage("u9");

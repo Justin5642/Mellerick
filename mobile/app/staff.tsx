@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { View, Text, FlatList, StyleSheet, RefreshControl, TouchableOpacity, Modal, TextInput, Alert, ScrollView, Switch } from "react-native";
-import { Stack } from "expo-router";
+import { Stack, useLocalSearchParams } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { colors } from "../lib/theme";
 import { MoneyText } from "../design/components/MoneyText";
@@ -119,6 +119,19 @@ export default function StaffScreen() {
   }, []);
   useEffect(() => { void load(); }, [load]);
   const onRefresh = useCallback(async () => { setRefreshing(true); await load(); setRefreshing(false); }, [load]);
+
+  // ?staff=<id> — opened from a leave block on the Schedule tab ("Open leave
+  // record", admin only): open that person's editor, where the Leave log is,
+  // once the roster has loaded. Once per visit, so closing it stays closed.
+  const { staff: openStaffId } = useLocalSearchParams<{ staff?: string }>();
+  const openedFor = useRef<string | null>(null);
+  useEffect(() => {
+    if (!openStaffId || openedFor.current === openStaffId) return;
+    const member = staff.find((s) => s.id === openStaffId);
+    if (!member) return;
+    openedFor.current = openStaffId;
+    setDraft(toDraft(member));
+  }, [openStaffId, staff]);
 
   // Load the leave log whenever the editor opens for a staff member.
   const staffId = draft?.id;

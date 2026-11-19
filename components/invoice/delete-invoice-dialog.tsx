@@ -2,12 +2,12 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { createClient } from "@/lib/supabase/client";
 import { toast } from "sonner";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Trash2 } from "lucide-react";
 import { formatInvoiceNumber } from "@/lib/utils";
+import { DELETE_IN_XERO_WARNING, deleteInvoiceMessage } from "@/lib/invoice-actions";
 
 interface Props {
   invoiceId: string;
@@ -20,27 +20,28 @@ interface Props {
   onOpenChange: (open: boolean) => void;
 }
 
+// Admin only: DELETE /api/invoices/[id] (requireAdmin; the phone uses it too).
 // Deleting an invoice cascades (at the database level) to its invoice_items
 // (invoice_items.invoice_id is "on delete cascade"). Any job variation linked
 // to this invoice has its invoice_id set back to null (migration 0011 uses
 // "on delete set null"), so the variation itself survives and simply becomes
-// un-invoiced again. Nothing else references invoices(id), so the delete can't
-// be blocked by a foreign key.
+// un-invoiced again.
 export function DeleteInvoiceDialog({ invoiceId, invoiceNumber, invoiceTitle, inXero, open, onOpenChange }: Props) {
   const router = useRouter();
-  const supabase = createClient();
   const [deleting, setDeleting] = useState(false);
 
   async function handleDelete() {
     setDeleting(true);
-    const { error } = await supabase.from("invoices").delete().eq("id", invoiceId);
-    if (error) {
-      toast.error(error.message);
+    try {
+      const res = await fetch(`/api/invoices/${invoiceId}`, { method: "DELETE" });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error ?? "The invoice could not be deleted. Please try again.");
+      toast.success("Invoice deleted");
+      router.push("/dashboard/invoices");
+    } catch (e: any) {
+      toast.error(e.message ?? "The invoice could not be deleted. Please try again.");
       setDeleting(false);
-      return;
     }
-    toast.success("Invoice deleted");
-    router.push("/dashboard/invoices");
   }
 
   return (
@@ -49,15 +50,11 @@ export function DeleteInvoiceDialog({ invoiceId, invoiceNumber, invoiceTitle, in
         <DialogHeader>
           <DialogTitle>Delete invoice {formatInvoiceNumber(invoiceNumber)}?</DialogTitle>
           <DialogDescription>
-            This permanently deletes &ldquo;{invoiceTitle}&rdquo; and all of its line items. Any variations that were
-            billed on it become un-invoiced again. This can&apos;t be undone.
+            {deleteInvoiceMessage(invoiceTitle, false)}
             {inXero && (
               <>
                 {" "}
-                <span className="text-amber-700 font-medium">
-                  This invoice was pushed to Xero — deleting it here does NOT remove it from Xero. Void or delete it
-                  in Xero separately, or the two will be out of sync.
-                </span>
+                <span className="text-amber-700 font-medium">{DELETE_IN_XERO_WARNING}</span>
               </>
             )}
           </DialogDescription>

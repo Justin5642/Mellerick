@@ -8,7 +8,7 @@ jest.mock("../../supabase", () => ({
       mockCalls.push(entry);
       const response = (mockQueue[table] ?? []).shift() ?? { data: [], error: null, count: 0 };
       const builder: Record<string, unknown> = {};
-      for (const m of ["select", "eq", "in", "not", "order", "limit"]) {
+      for (const m of ["select", "eq", "in", "is", "not", "order", "limit"]) {
         builder[m] = (...args: unknown[]) => {
           entry.chain.push([m, args]);
           return builder;
@@ -23,6 +23,8 @@ jest.mock("../../supabase", () => ({
 import { resetSourceForTests, setLocalReads, type LocalReads, type LocalRole } from "./source";
 import {
   getOfficeDashboard,
+  listOpenWorkClocks,
+  SQL_DASHBOARD_OPEN_CLOCKS,
   SQL_DASHBOARD_COUNTS,
   SQL_DASHBOARD_RECENT_JOBS,
   SQL_DASHBOARD_SCHEDULED_JOBS,
@@ -122,5 +124,57 @@ describe("getOfficeDashboard", () => {
     expect(SQL_DASHBOARD_SCHEDULED_JOBS).toMatch(/scheduled_start IS NOT NULL/);
     expect(SQL_DASHBOARD_SCHEDULED_JOBS).toMatch(/NOT IN \('completed', 'cancelled'\)/);
     expect(SQL_DASHBOARD_RECENT_JOBS).toMatch(/ORDER BY j\.created_at DESC\s+LIMIT 8/);
+  });
+});
+
+// "Needs a look from yesterday" — open work clocks (the screen keeps those
+// from before today). Same shape both ways, oldest first, office/admin only.
+describe("listOpenWorkClocks", () => {
+  const EXPECTED_CLOCKS = [
+    { id: "t2", clock_in: "2026-11-17T21:00:00Z", job_id: "j2", job_number: 834, job_title: "QA", staff_name: null },
+    { id: "t1", clock_in: "2026-11-18T22:00:00+00:00", job_id: "j1", job_number: 833, job_title: "Leak", staff_name: "Jake H" },
+  ];
+
+  it("local and remote agree, sorted by the instant (not the text) of clock_in", async () => {
+    const getAll = jest.fn(async (sql: string) =>
+      sql === SQL_DASHBOARD_OPEN_CLOCKS
+        ? [
+            { id: "t1", clock_in: "2026-11-18T22:00:00+00:00", job_id: "j1", job_number: "833", job_title: "Leak", staff_name: "Jake H" },
+            { id: "t2", clock_in: "2026-11-17T21:00:00Z", job_id: "j2", job_number: 834, job_title: "QA", staff_name: null },
+          ]
+        : []
+    );
+    setLocalReads({ hasSynced: () => true, role: () => "office" as LocalRole, getAll, getOptional: jest.fn() } as unknown as LocalReads);
+    const local = await listOpenWorkClocks();
+    expect(mockCalls).toHaveLength(0);
+
+    resetSourceForTests();
+    mockQueue.time_entries = [
+      {
+        data: [
+          { id: "t1", clock_in: "2026-11-18T22:00:00+00:00", job_id: "j1", jobs: { job_number: 833, title: "Leak" }, profiles: { full_name: "Jake H" } },
+          { id: "t2", clock_in: "2026-11-17T21:00:00Z", job_id: "j2", jobs: { job_number: 834, title: "QA" }, profiles: null },
+        ],
+        error: null,
+      },
+    ];
+    const remote = await listOpenWorkClocks();
+    expect(local).toEqual(EXPECTED_CLOCKS);
+    expect(remote).toEqual(EXPECTED_CLOCKS);
+    const chain = mockCalls.find((c) => c.table === "time_entries")!.chain;
+    expect(chain).toContainEqual(["is", ["clock_out", null]]);
+    expect(chain).toContainEqual(["eq", ["entry_type", "work"]]);
+  });
+
+  it("only open WORK entries locally", () => {
+    expect(SQL_DASHBOARD_OPEN_CLOCKS).toMatch(/t\.clock_out IS NULL AND t\.entry_type = 'work'/);
+  });
+
+  it("a technician's mirror is never used", async () => {
+    const getAll = jest.fn();
+    setLocalReads({ hasSynced: () => true, role: () => "technician" as LocalRole, getAll, getOptional: jest.fn() } as unknown as LocalReads);
+    mockQueue.time_entries = [{ data: [], error: null }];
+    await listOpenWorkClocks();
+    expect(getAll).not.toHaveBeenCalled();
   });
 });

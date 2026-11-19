@@ -27,5 +27,6 @@ export function useCustomers() {
     createSite: useCallback((i: SiteInput) => run((r) => r.createSite(i)), [run]),
     updateSite: useCallback((id: string, i: SiteInput) => run((r) => r.updateSite(id, i)), [run]),
     setSiteActive: useCallback((id: string, active: boolean) => run((r) => r.setSiteActive(id, active)), [run]),
+    setSitePin: useCallback((id: string, lat: number, lng: number) => run((r) => r.setSitePin(id, lat, lng)), [run]),
   };
 }

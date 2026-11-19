@@ -10,6 +10,7 @@ import { getCustomer, getCustomerOverview, type CustomerDetail, type CustomerOve
 import { useCustomers } from "../../lib/data/hooks/useCustomers";
 import { CustomerFormSheet } from "../../components/customer/customer-form";
 import { SiteFormSheet } from "../../components/customer/site-form";
+import { SitePinButton } from "../../components/customer/site-pin-button";
 
 export default function CustomerDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -185,6 +186,14 @@ export default function CustomerDetailScreen() {
                 {[s.address_line1, s.address_line2, `${s.suburb} ${s.state} ${s.postcode}`].filter(Boolean).join(", ")}
               </Text>
             </View>
+            {s.is_active ? (
+              <SitePinButton
+                site={s}
+                onSaved={(lat, lng) =>
+                  setCustomer((c) => (c ? { ...c, sites: c.sites.map((x) => (x.id === s.id ? { ...x, site_lat: lat, site_lng: lng } : x)) } : c))
+                }
+              />
+            ) : null}
             <Ionicons name="create-outline" size={16} color={colors.slate400} />
           </TouchableOpacity>
         ))

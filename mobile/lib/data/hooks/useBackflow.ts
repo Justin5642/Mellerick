@@ -23,6 +23,14 @@ export function useBackflow() {
       },
       [layer, flush]
     ),
+    deactivateDevice: useCallback(
+      async (deviceId: string): Promise<{ synced: boolean }> => {
+        if (!layer) throw new Error("Data layer not ready");
+        await layer.backflow.deactivateDevice(deviceId);
+        return { synced: await flush() };
+      },
+      [layer, flush]
+    ),
     logTest: useCallback(
       async ({ signatureBase64, ...rest }: LogTestArgs): Promise<{ id: string; synced: boolean }> => {
         if (!layer) throw new Error("Data layer not ready");

@@ -5,7 +5,14 @@ import { createClient } from "@/lib/supabase/client";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { nextClaimDefaults, progressBreakdown } from "@/lib/progress-claim";
+import {
+  nextClaimDefaults,
+  progressBreakdown,
+  emptyClaimDraft,
+  claimDraftFromInvoice,
+  claimColumns,
+  type ClaimDraft,
+} from "@/lib/progress-claim";
 
 // "Progress claim" on New / Edit Invoice (migration 0084). Ticking it fills the
 // claim number, contract value and previously-claimed amount from the job's
@@ -13,43 +20,7 @@ import { nextClaimDefaults, progressBreakdown } from "@/lib/progress-claim";
 // any of them — on a job's first claim here, "previously claimed" is where the
 // amount already claimed in Simpro goes.
 
-export interface ClaimDraft {
-  on: boolean;
-  number: string;
-  contract: string;
-  previous: string;
-}
-
-export const emptyClaimDraft: ClaimDraft = { on: false, number: "", contract: "", previous: "" };
-
-export function claimDraftFromInvoice(inv: {
-  is_progress_claim?: boolean | null;
-  claim_number?: number | null;
-  claim_contract_value?: number | string | null;
-  claim_previous?: number | string | null;
-}): ClaimDraft {
-  if (!inv.is_progress_claim) return emptyClaimDraft;
-  return {
-    on: true,
-    number: inv.claim_number != null ? String(inv.claim_number) : "",
-    contract: inv.claim_contract_value != null ? String(Number(inv.claim_contract_value)) : "",
-    previous: inv.claim_previous != null ? String(Number(inv.claim_previous)) : "0",
-  };
-}
-
-/** The invoice columns for a draft, or the reason it cannot be saved. */
-export function claimColumns(d: ClaimDraft):
-  | { ok: true; columns: { is_progress_claim: boolean; claim_number: number | null; claim_contract_value: number | null; claim_previous: number | null } }
-  | { ok: false; error: string } {
-  if (!d.on) return { ok: true, columns: { is_progress_claim: false, claim_number: null, claim_contract_value: null, claim_previous: null } };
-  const number = parseInt(d.number, 10);
-  const contract = parseFloat(d.contract);
-  const previous = d.previous.trim() === "" ? 0 : parseFloat(d.previous);
-  if (!Number.isInteger(number) || number < 1) return { ok: false, error: "Enter the progress claim number" };
-  if (!(contract > 0)) return { ok: false, error: "Enter the contract value (ex GST) for the progress claim" };
-  if (Number.isNaN(previous) || previous < 0) return { ok: false, error: "Previously claimed must be 0 or more" };
-  return { ok: true, columns: { is_progress_claim: true, claim_number: number, claim_contract_value: contract, claim_previous: previous } };
-}
+export { emptyClaimDraft, claimDraftFromInvoice, claimColumns, type ClaimDraft };
 
 const money = (n: number) => `$${n.toLocaleString("en-AU", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 

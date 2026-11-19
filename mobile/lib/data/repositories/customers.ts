@@ -74,6 +74,15 @@ export class CustomersRepository {
     await this.write("site", "update", "sites", id, { is_active: isActive });
   }
 
+  /**
+   * Drop a site's map pin (office/admin — sites are office-writable, 0064):
+   * from the address lookup or the office user standing on site. Only the two
+   * coordinates; the hourly geocoder leaves a pinned site alone.
+   */
+  async setSitePin(id: string, lat: number, lng: number): Promise<void> {
+    await this.write("site", "update", "sites", id, { site_lat: lat, site_lng: lng });
+  }
+
   private customerPayload(input: CustomerInput, isNew: boolean): Record<string, unknown> {
     const payload: Record<string, unknown> = {
       name: input.name,

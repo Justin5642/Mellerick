@@ -828,6 +828,66 @@ due date (`components/invoice/payment-terms-field.tsx`, rules in
 (today on New, `created_at` on Edit, Melbourne days); only `due_date` is
 stored. The phone's New Invoice has "14 days" / "30 days" chips.
 
+**Office invoice and quote actions on the phone (19 Nov 2026; no migration).**
+Justin: the office should be able to run invoices and quotes from the phone,
+not only create drafts. Office/admin only on every layer: the screens are in
+the office route group (`app/_layout.tsx`) and a `RoleGate`, amounts only via
+`MoneyText` (no dollar figure in an alert), and every route checks the role.
+**Online only** — Xero, email and the PDF renderer answer while the office
+waits, and `invoice_payments` is in no sync stream; offline the buttons say
+they need signal. Calls in `mobile/lib/invoiceOffice.ts` (Bearer, tested in
+`invoiceOffice.test.ts`); errors are the routes' own sentences.
+- **Invoice screen** (`mobile/app/invoices/[id].tsx`, reloads on focus and on
+  pull): **PDF** (`GET /api/invoices/[id]/pdf` → the job-report viewer,
+  `components/finance/document-pdf-button.tsx` + `pdf-preview.tsx`), Send /
+  Resend (the existing send screen), **Push / Update in Xero** (admin — the
+  route is `requireAdmin`; asks first when the job has unpriced hours, and
+  the route's 409 asks again; "Connect Xero on the web first" when not
+  connected), the **progress claim** breakdown, the **Payments** card,
+  **Hours from the job** with **Apply hourly rate** (`GET/POST
+  /api/invoices/[id]/hours`, unchanged; one rate / per technician / per cost
+  centre; the "already in Xero / emailed" 409 asks to confirm), Customer PO,
+  and **Delete invoice** (office/admin, the web's confirm words incl. the Xero
+  warning). The old "PDF and Xero are managed on the web" notes are gone.
+- **Payments and delete moved to routes** (they were browser writes on the
+  web; the web now uses them too, so both behave alike):
+  `GET/POST /api/invoices/[id]/payments` (office/admin; GET also says whether
+  Xero is connected, from `xero_tokens.tenant_name` as the web page reads it;
+  `payments: null` on a database without 0081), `DELETE
+  /api/invoices/[id]/payments/[paymentId]`, and `DELETE /api/invoices/[id]`
+  — office/admin, as the web's Delete button always was. All run as the CALLER, so RLS
+  and 0081's triggers decide as before; an invoice in Xero refuses a manual
+  payment (fixed sentence `PAYMENT_IN_XERO`). Validation `parsePayment` in
+  `lib/invoice-payments.ts`; tests `tests/unit/invoice-office-routes.test.ts`.
+- **Owed to us** (`components/finance/owed-to-us.tsx`) on top of the office
+  Invoices list: outstanding / overdue / not yet due and the late invoices by
+  bucket, from `listOwedInvoices` (`lib/data/reads/invoiceExtras.ts`; local —
+  unpaid invoices are always in the office window — with a Supabase fallback).
+- **New / Edit Invoice:** **Customer PO number**, and when the job has more
+  than one priced PO, a picker ("Which builder PO is this invoice for?") with
+  "Use PO n's value as the line items"; `/invoices/new?jobId=…&poId=…`
+  invoices one PO (its number, a title naming it, `poInvoiceLines`, and "this
+  PO already has an invoice"). **Progress claim** fields with the live
+  breakdown; ticking fills from the job's previous claim (on the picked PO;
+  read from Supabase — it may be outside the window; offline you type them)
+  or the job's PO value. Written through the outbox with the invoice
+  (`FinanceRepository` `customerPo` / `claim`, sent only when the form has
+  them). Nothing on the phone links to `poId` yet — the job's PO tab is a
+  separate piece of work.
+- **Quotes:** **PDF** and **Send to Customer / Resend** →
+  `mobile/app/quotes/[id]/send.tsx` (`POST /api/quotes/[id]/send`).
+- **Rules are mirrored, not re-written:** `mobile/lib/invoicePayments.ts`,
+  `progressClaim.ts`, `poInvoice.ts`, `invoiceActions.ts` (Push/Delete
+  wording, new `lib/invoice-actions.ts`), `customerPo.ts` are the web files
+  byte for byte below their header (`tests/unit/invoice-phone-mirrors.test.ts`
+  — change the web file first, then copy its body). `ClaimDraft` /
+  `claimColumns` / `claimDraftFromInvoice` moved from the web component into
+  `lib/progress-claim.ts`; the PO picker helpers (`pricedPos`,
+  `poForCustomerPo`, `claimBuilderPo`) into `lib/po-invoice.ts`.
+- `getInvoice` now also returns `amount_paid`, `customer_po` and the claim
+  columns (all already in the office mirror). No new native module — reaches
+  phones with the next build.
+
 **Day Works / Hire, Stage 1 (16 Nov 2026; migration `0108` applied 2026-11-16).**
 Justin: hire and cartage are always their own line under a job, never part of
 the quoted value or progress claims. Each day's line is signed by the
@@ -1347,6 +1407,68 @@ phone. Office/admin only throughout; technicians see exactly what they saw.
 - Reaches phones with the next build (no new native module). The web must be
   deployed first for `/api/approvals/hours`; without it the phone's hours panel
   says it couldn't load the hours and approving still works.
+
+**Small office/admin website features on the phone (19 Nov 2026; no migration, no stream change).**
+Justin: the bits of the website the office still had to open a laptop for.
+All office/admin only (office route group + `RoleGate`; the server or RLS
+decides), money only through `MoneyText`. Reach phones with the next build
+(no new native module).
+- **Delete a job (admin).** Phone: job screen → status badge (Update job) →
+  **Delete job** (`RoleGate` admin), the web dialog's wording, then the Jobs
+  tab. The web dialog (`components/job/delete-job-dialog.tsx`) used to delete
+  from the browser client; both now call **`DELETE /api/jobs/[id]`**
+  (`requireAdmin`, then the CALLER's client — never the service role — so
+  0049's "only office/admin may delete a job" still stands behind it). A
+  linked quote or invoice (23503) answers 409 with the dialog's sentence;
+  anything else a fixed sentence (`tests/unit/job-delete-route.test.ts`).
+  Online only on the phone (`mobile/lib/officeActions.ts` `deleteJob`): a
+  refusal must be seen at once, not dead-letter in the outbox. Until the
+  office mirror syncs the delete, the Jobs list may still show the job.
+- **Delete (deactivate) a backflow device.** Device screen → **Delete device**
+  (`RoleGate` office/admin), the web's confirm text; `is_active = false`
+  through the outbox (`BackflowRepository.deactivateDevice`), so it works
+  offline. History is kept, as on the web.
+- **Dashboard tiles** (`mobile/app/(office)/dashboard.tsx`, rules
+  `mobile/lib/dashboardLooseEnds.ts`, tested): **Needs a look from
+  yesterday** — open jobs booked yesterday (Melbourne) and not today, and open
+  work clocks from before today (`listOpenWorkClocks` in
+  `reads/dashboard.ts`, local-first for office/admin; filtered by instant in
+  JS, never by comparing timestamp text) — and **Variations to Invoice**
+  (count + `MoneyText` total via `StatCard`'s new `detail`, QA fixture left
+  out, from `listReadyToInvoice`; taps through to Invoices, whose "Ready to
+  invoice" lists them).
+- **Set a site's map pin from the office.** Customer → each active site →
+  **Set pin / Pin** (`mobile/components/customer/site-pin-button.tsx`). The
+  binary has no map module (no react-native-maps — none added), so: **Look up
+  the address** (`/api/geocode`, house/building matches only, the web's
+  `siteAddress()` copied into `officeActions.ts`), **Where I am now** (a fix
+  within ±50 m, as the crew's "Set site location here"), and **View on map**
+  for a pinned site (opens the maps app). Each asks before saving; the two
+  coordinates go through the outbox (`CustomersRepository.setSitePin`; sites
+  are office-writable, 0064). Dragging a pin on a map stays a website job.
+  `getCustomer` now returns `site_lat`/`site_lng` on each site.
+- **Copy a booking to another technician / day** — the web board's
+  Shift-drop. Schedule tab → tap a booking (Day, Week or List) → **Copy to
+  another technician or day** → pick the technician and the start day (the
+  tapped day or today onward, 14 days). Planned by the mirrored
+  `planBoardAdd` (`mobile/lib/bookingCopy.ts`, tested): same hours, shape,
+  cost centre and note; on another day it starts there. Same guards as a move:
+  refused on a closed job (0096) or a stand-in row; a duplicate (same tech,
+  window and cost centre) is refused; a clash or the technician's leave (0112)
+  asks "Book anyway". Written by `ScheduleRepository.addBookings` (its window
+  type widened to allow a start-only block) through the outbox, with the same
+  "Saving / Not on the server yet / Saved" notices as a drag.
+- **Loads on equipment usage** (job → Billing → Equipment usage; 0091): a
+  "Loads carted" field; hours may be 0 when loads > 0, one must be > 0
+  (`parseUsageAmounts`). `getJobEquipment` returns `loads` and prices each
+  entry as the web Equipment tab does: hours × cost/hour + loads × cost per
+  load + days × day rate. Still not on the phone: the entry's cost centre
+  (the Time tab's "Truck & plant" has it), and the admin Costing screen
+  (`reads/jobCosting.ts`) still prices usage without loads.
+- **"Open leave record"** on a leave block (Schedule tab, admin only, and
+  only when `schedule_leave()` returned the record's id): opens Staff with
+  `?staff=<id>`, which opens that person's editor where the phone's Leave log
+  is. Office users still get the read-only alert.
 
 ---
 

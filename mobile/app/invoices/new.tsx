@@ -14,8 +14,13 @@ import { describeReadFailure } from "../../design/components/ScreenError";
 import { getInvoiceJobPrefill } from "../../lib/data/reads/finance";
 import { getCustomer } from "../../lib/data/reads/customers";
 import type { CustomerListRow } from "../../lib/data/reads/customers";
-import { loadJobPurchaseOrders } from "../../lib/jobPurchaseOrders";
-import { poInvoiceLines } from "../../lib/poInvoice";
+import { findInvoiceForPo, getInvoiceJobPos, type InvoicePo } from "../../lib/data/reads/invoiceExtras";
+import { computeTotals } from "../../lib/data/repositories/finance";
+import { claimBuilderPo, poForCustomerPo, poInvoiceLines, pricedPos } from "../../lib/poInvoice";
+import { normalizeCustomerPo } from "../../lib/customerPo";
+import { claimColumns, emptyClaimDraft, type ClaimDraft } from "../../lib/progressClaim";
+import { CustomerPoField } from "../../components/finance/customer-po-field";
+import { ProgressClaimFields } from "../../components/finance/progress-claim-fields";
 
 interface UnbilledVariation { id: string; name: string; description: string; unitPrice: number }
 
@@ -23,11 +28,8 @@ export default function NewInvoiceScreen() {
   const router = useRouter();
   const finance = useFinance();
   const writeOutcome = useWriteOutcome();
-  // poId: "Invoice this PO" from the job's PO tab (office) — that PO's number,
-  // a title naming it and its value as the lines (lib/poInvoice.ts, the web's rule).
+  // poId: "invoice this PO" — its number, a title naming it, and its value as the lines (lib/poInvoice.ts).
   const { jobId, customerId, poId } = useLocalSearchParams<{ jobId?: string; customerId?: string; poId?: string }>();
-  const [customerPo, setCustomerPo] = useState<string | null>(null);
-  const [poNote, setPoNote] = useState<string | null>(null);
   const [customer, setCustomer] = useState<CustomerListRow | null>(null);
   const [pickCustomer, setPickCustomer] = useState(false);
   const [title, setTitle] = useState("");
@@ -41,6 +43,11 @@ export default function NewInvoiceScreen() {
   const [prefilling, setPrefilling] = useState(!!jobId);
   const [prefillError, setPrefillError] = useState<unknown>(null);
   const [prefillAttempt, setPrefillAttempt] = useState(0);
+  // The builder's PO number (0083) and the job's priced POs (several = a picker).
+  const [customerPo, setCustomerPo] = useState("");
+  const [jobPos, setJobPos] = useState<InvoicePo[]>([]);
+  const [poAlreadyInvoiced, setPoAlreadyInvoiced] = useState<string | null>(null);
+  const [claim, setClaim] = useState<ClaimDraft>(emptyClaimDraft);
 
   // Create-from-job: prefill customer, title, work description, line items, and
   // load the job's unbilled approved variations to optionally add.
@@ -56,36 +63,28 @@ export default function NewInvoiceScreen() {
     let cancelled = false;
     void (async () => {
       try {
-        const p = await getInvoiceJobPrefill(jobId);
+        // The POs are a convenience: their failure never blocks the job prefill.
+        const [p, jp] = await Promise.all([getInvoiceJobPrefill(jobId), getInvoiceJobPos(jobId).catch(() => null)]);
         if (cancelled || !p) { setPrefilling(false); return; }
         setCustomer({ id: p.customerId, name: p.customerName ?? "Customer" } as CustomerListRow);
-        setTitle(p.title);
         setWorkDescription(p.workDescription ?? "");
-        if (p.items.length > 0) {
-          setItems(p.items.map((i) => newItem({ name: i.name, description: i.description ?? "", quantity: String(i.quantity), unit_price: String(i.unitPrice) })));
-        }
         setUnbilled(p.unbilledVariations);
-        if (poId) {
-          // Online (the PO tab is online only). A failed read keeps the job's
-          // prefill and says so, rather than leaving the PO's lines off silently.
-          try {
-            const pos = await loadJobPurchaseOrders(jobId);
-            const po = pos.pos.find((x) => x.id === poId);
-            if (cancelled) return;
-            if (!po) throw new Error("That PO isn't on the job any more.");
-            setCustomerPo(po.po_number);
-            setTitle(`${p.title} — PO ${po.po_number}`);
-            setItems(poInvoiceLines(po).map((l) => newItem(l)));
-            const existing = pos.invoicedPos[po.po_number];
-            setPoNote(
-              existing
-                ? `PO ${po.po_number} already has an invoice on this job${existing !== "yes" ? ` (${existing})` : ""}.`
-                : `For PO ${po.po_number} — its value is on the lines.`
-            );
-          } catch (e) {
-            if (cancelled) return;
-            setPoNote(`Couldn't load the PO (${e instanceof Error ? e.message : "try again"}). The job's items are shown instead.`);
+        const pos = jp?.pos ?? [];
+        setJobPos(pricedPos(pos));
+        const po = poId ? pos.find((x) => x.id === poId) ?? null : null;
+        if (po) {
+          // Invoicing one PO: its own lines, not the whole job's.
+          setTitle(p.title ? `${p.title} — PO ${po.po_number}` : `PO ${po.po_number}`);
+          setItems(poInvoiceLines(po).map((l) => newItem(l)));
+          setCustomerPo(po.po_number);
+          findInvoiceForPo(jobId, po.po_number).then((n) => !cancelled && setPoAlreadyInvoiced(n)).catch(() => {});
+        } else {
+          setTitle(p.title);
+          if (p.items.length > 0) {
+            setItems(p.items.map((i) => newItem({ name: i.name, description: i.description ?? "", quantity: String(i.quantity), unit_price: String(i.unitPrice) })));
           }
+          setCustomerPo(jp?.customerPo ?? "");
+          if (poId) Alert.alert("PO not found", "Couldn't load that PO. Pick it from the PO list below.");
         }
         setPrefilling(false);
       } catch (e) {
@@ -128,6 +127,15 @@ export default function NewInvoiceScreen() {
   const addedVariationIds = new Set(items.map((i) => i.variationId).filter(Boolean));
   const availableVariations = unbilled.filter((v) => !addedVariationIds.has(v.id));
   const prefillFailure = prefillError ? describeReadFailure(prefillError) : null;
+  const pickedPo = poForCustomerPo(jobPos, customerPo);
+  const subtotal = computeTotals(
+    items.filter((i) => i.name.trim()).map((i) => ({ name: i.name, quantity: parseFloat(i.quantity) || 0, unitPrice: parseFloat(i.unit_price) || 0 }))
+  ).subtotal;
+
+  function fillFromPo(po: InvoicePo) {
+    setItems(poInvoiceLines(po).map((l) => newItem(l)));
+    setTitle((t) => (t.includes(`PO ${po.po_number}`) ? t : t ? `${t} — PO ${po.po_number}` : `PO ${po.po_number}`));
+  }
 
   async function save() {
     if (saving || !finance.ready) return;
@@ -136,6 +144,8 @@ export default function NewInvoiceScreen() {
     if (!customer) { Alert.alert("Customer required", "Select a customer for this invoice."); return; }
     if (!title.trim()) { Alert.alert("Title required", "Enter an invoice title."); return; }
     if (lineItems.length === 0) { Alert.alert("Line items required", "Add at least one named line item."); return; }
+    const claimCols = claimColumns(claim);
+    if (!claimCols.ok) { Alert.alert("Progress claim", claimCols.error); return; }
     setSaving(true);
     try {
       // Variations still present as named line items get marked billed; the job
@@ -148,8 +158,9 @@ export default function NewInvoiceScreen() {
         dueDateIso: dueDate ? localDateKey(dueDate) : null,
         notes: notes.trim() || null,
         workDescription: workDescription.trim() || null,
-        customerPo,
         items: lineItems,
+        customerPo: normalizeCustomerPo(customerPo),
+        claim: claimCols.columns,
         reconcile: jobId ? { markVariationIds } : null,
       });
       if (!synced) {
@@ -176,7 +187,6 @@ export default function NewInvoiceScreen() {
 
       {prefilling && <Text style={styles.prefill}>Loading job details…</Text>}
       {jobId && !prefilling && !prefillFailure && <Text style={styles.prefill}>Prefilled from the job — review before creating.</Text>}
-      {poNote && !prefilling && <Text style={styles.prefill}>{poNote}</Text>}
 
       {/* Stays on the form rather than replacing it: the invoice can still be
           written by hand, but only if the reader knows nothing was filled in. */}
@@ -230,6 +240,13 @@ export default function NewInvoiceScreen() {
       </View>
       {showDate && <DateTimePicker value={dueDate ?? new Date()} mode="date" onChange={onDateChange} />}
 
+      <CustomerPoField value={customerPo} onChange={(v) => { setCustomerPo(v); setPoAlreadyInvoiced(null); }} pos={jobPos} alreadyInvoiced={poAlreadyInvoiced} />
+      {jobPos.length > 1 && pickedPo && (
+        <TouchableOpacity onPress={() => fillFromPo(pickedPo)} accessibilityRole="button" hitSlop={6}>
+          <Text style={styles.poFill}>Use PO {pickedPo.po_number}&apos;s value as the line items</Text>
+        </TouchableOpacity>
+      )}
+
       <Text style={[styles.label, { marginTop: 18 }]}>Line items</Text>
       <LineItemsEditor items={items} onChange={setItems} />
 
@@ -255,13 +272,22 @@ export default function NewInvoiceScreen() {
         </>
       )}
 
+      <ProgressClaimFields
+        value={claim}
+        onChange={setClaim}
+        jobId={jobId ?? null}
+        subtotal={subtotal}
+        jobPoTotal={jobPos.reduce((s, p) => s + Number(p.total_value || 0), 0) || null}
+        builderPo={claimBuilderPo(jobPos, pickedPo)}
+      />
+
       <Text style={[styles.label, { marginTop: 18 }]}>Notes (optional)</Text>
       <TextInput style={[styles.input, styles.multiline]} value={notes} onChangeText={setNotes} placeholder="Notes shown on the invoice" placeholderTextColor={colors.slate400} multiline />
 
       <TouchableOpacity style={[styles.saveBtn, saving && styles.saveBtnDisabled]} onPress={save} disabled={saving}>
         <Text style={styles.saveText}>{saving ? "Saving…" : "Create draft invoice"}</Text>
       </TouchableOpacity>
-      <Text style={styles.footnote}>Created as a draft. Sending / PDF / Xero are managed on the web dashboard.</Text>
+      <Text style={styles.footnote}>Created as a draft. Send it, open its PDF or push it to Xero from the invoice.</Text>
 
       <CustomerPicker visible={pickCustomer} onClose={() => setPickCustomer(false)} onSelect={(c) => { setCustomer(c); setPickCustomer(false); }} />
     </ScrollView>
@@ -292,4 +318,5 @@ const styles = StyleSheet.create({
   saveBtnDisabled: { opacity: 0.6 },
   saveText: { color: "#fff", fontWeight: "700", fontSize: 15 },
   footnote: { fontSize: 11, color: colors.slate400, textAlign: "center", marginTop: 10 },
+  poFill: { fontSize: 13, fontWeight: "700", color: colors.blue600, marginTop: 8 },
 });

@@ -14,9 +14,10 @@ import { useFleet } from "../../../lib/data/hooks/useFleet";
 import { useAuth } from "../../../lib/auth-context";
 import { useIsAdmin } from "../../../design/guards/useRole";
 import type { ExpenseCategory } from "../../../lib/data/repositories/jobBilling";
+import { parseUsageAmounts } from "../../../lib/officeActions";
 
 interface Draft { name: string; quantity: string; unit_price: string; description: string }
-interface EquipDraft { equipmentId: string; usage_date: string; hours: string; notes: string }
+interface EquipDraft { equipmentId: string; usage_date: string; hours: string; loads: string; notes: string }
 interface ExpenseDraft {
   supplier_name: string;
   category: ExpenseCategory;
@@ -85,12 +86,15 @@ export default function JobBillingScreen() {
   const lineTotal = data ? data.lineItems.reduce((s, i) => s + Number(i.total ?? 0), 0) : 0;
   const expenseTotal = data ? data.expenses.reduce((s, e) => s + Number(e.amount ?? 0), 0) : 0;
   const equipHours = equipment ? equipment.usage.reduce((s, u) => s + Number(u.hours), 0) : 0;
+  const equipLoads = equipment ? equipment.usage.reduce((s, u) => s + Number(u.loads ?? 0), 0) : 0;
   const equipCost = equipment ? equipment.usage.reduce((s, u) => s + Number(u.total_cost), 0) : 0;
 
   async function addEquipmentUsage() {
     if (!equipDraft || savingEquip || !fleet.ready) return;
-    const hours = parseFloat(equipDraft.hours);
-    if (!equipDraft.equipmentId || Number.isNaN(hours) || hours <= 0) { Alert.alert("Missing details", "Choose equipment and enter hours greater than zero."); return; }
+    if (!equipDraft.equipmentId) { Alert.alert("Missing details", "Choose the equipment."); return; }
+    // Hours and/or loads carted (0091) — a truck run can be loads only.
+    const amounts = parseUsageAmounts(equipDraft.hours, equipDraft.loads);
+    if ("error" in amounts) { Alert.alert("Missing details", amounts.error); return; }
     if (!profile?.id) { Alert.alert("Not ready", "Your profile is still loading — please try again."); return; }
     setSavingEquip(true);
     try {
@@ -99,7 +103,8 @@ export default function JobBillingScreen() {
         loggedBy: profile.id,
         jobId: id,
         usageDate: equipDraft.usage_date.trim() || null,
-        hours,
+        hours: amounts.hours,
+        loads: amounts.loads,
         notes: equipDraft.notes.trim() || null,
       });
       setEquipDraft(null);
@@ -285,7 +290,7 @@ export default function JobBillingScreen() {
       <View style={styles.sectionHead}>
         <Text style={styles.section}>Equipment usage</Text>
         <TouchableOpacity
-          onPress={() => setEquipDraft({ equipmentId: equipment?.options[0]?.id ?? "", usage_date: "", hours: "", notes: "" })}
+          onPress={() => setEquipDraft({ equipmentId: equipment?.options[0]?.id ?? "", usage_date: "", hours: "", loads: "", notes: "" })}
           style={styles.addBtn}
         >
           <Ionicons name="add" size={16} color={colors.blue600} /><Text style={styles.addText}>Add</Text>
@@ -300,7 +305,7 @@ export default function JobBillingScreen() {
               <View style={{ flex: 1 }}>
                 <Text style={styles.lineName}>{u.equipment_name}</Text>
                 <Text style={styles.lineMeta}>
-                  {u.hours.toFixed(1)}h{u.usage_date ? ` · ${u.usage_date}` : ""}{u.notes ? ` · ${u.notes}` : ""}
+                  {u.hours.toFixed(1)}h{u.loads > 0 ? ` · ${u.loads} load${u.loads === 1 ? "" : "s"}` : ""}{u.usage_date ? ` · ${u.usage_date}` : ""}{u.notes ? ` · ${u.notes}` : ""}
                 </Text>
               </View>
               <MoneyText amount={u.total_cost} style={styles.lineTotal} />
@@ -309,7 +314,7 @@ export default function JobBillingScreen() {
         )}
         {equipment && equipment.usage.length > 0 && (
           <View style={styles.subtotalRow}>
-            <Text style={styles.subtotalLabel}>{equipHours.toFixed(1)}h logged</Text>
+            <Text style={styles.subtotalLabel}>{equipHours.toFixed(1)}h{equipLoads > 0 ? ` · ${equipLoads} load${equipLoads === 1 ? "" : "s"}` : ""} logged</Text>
             <MoneyText amount={equipCost} style={styles.subtotalValue} />
           </View>
         )}
@@ -461,6 +466,7 @@ export default function JobBillingScreen() {
                   <View style={{ flex: 1 }}><Field label="Date (YYYY-MM-DD)" value={equipDraft?.usage_date ?? ""} onChange={(v) => setEquipDraft((d) => d && { ...d, usage_date: v })} /></View>
                   <View style={{ flex: 1 }}><Field label="Hours" value={equipDraft?.hours ?? ""} onChange={(v) => setEquipDraft((d) => d && { ...d, hours: v })} num /></View>
                 </View>
+                <Field label="Loads carted (trucks — hours may be 0)" value={equipDraft?.loads ?? ""} onChange={(v) => setEquipDraft((d) => d && { ...d, loads: v })} num />
                 <Field label="Notes (optional)" value={equipDraft?.notes ?? ""} onChange={(v) => setEquipDraft((d) => d && { ...d, notes: v })} />
               </>
             )}
