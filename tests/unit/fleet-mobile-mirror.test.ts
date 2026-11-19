@@ -1,6 +1,8 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import ts from "typescript";
+import * as webHire from "@/lib/hire-pricing";
 
 // The phone's Fleet office screens (service history, hire setup, year cost)
 // use copies of the web's pure rules. Both must agree on when a service is
@@ -37,6 +39,30 @@ describe("Fleet mirrors on the phone", () => {
     expect(belowImports("mobile/lib/fleetCosts.ts")).toBe(belowImports("lib/fleet-costs.ts"));
   });
 
-  // mobile/lib/hireLabels.ts is checked by mobile/lib/hireLabels.mirror.test.ts
-  // (importing a mobile file here needs the Expo tsconfig, which the web CI job lacks).
+  it("mobile/lib/hireLabels.ts has the web's hire vocabulary", () => {
+    // Loaded by transpiling the source text, not by import: importing a mobile
+    // file makes vite read mobile/tsconfig.json, which extends the Expo base
+    // config that the web CI job doesn't install. hireLabels.ts has no imports.
+    const src = read("mobile/lib/hireLabels.ts");
+    expect(src).not.toMatch(/^import /m);
+    const js = ts.transpileModule(src, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 } }).outputText;
+    const mod: { exports: Record<string, unknown> } = { exports: {} };
+    new Function("exports", "module", js)(mod.exports, mod);
+    const phoneHire = mod.exports as unknown as typeof webHire;
+    expect(phoneHire.HIRE_UNITS_BY_TYPE).toEqual(webHire.HIRE_UNITS_BY_TYPE);
+    expect(phoneHire.HIRE_TYPE_LABELS).toEqual(webHire.HIRE_TYPE_LABELS);
+    expect(phoneHire.HIRE_UNIT_LABELS).toEqual(webHire.HIRE_UNIT_LABELS);
+    expect(phoneHire.DEFAULT_COST_CENTRE_BY_TYPE).toEqual(webHire.DEFAULT_COST_CENTRE_BY_TYPE);
+    for (const t of Object.keys(webHire.HIRE_UNITS_BY_TYPE) as webHire.HireType[]) {
+      for (const u of webHire.HIRE_UNITS_BY_TYPE[t]) {
+        expect(phoneHire.hireOptionLabel({ hire_type: t, hire_unit: u } as never)).toBe(
+          webHire.hireOptionLabel({ hire_type: t, hire_unit: u }),
+        );
+      }
+    }
+    for (const km of [0, 30, 50, 112.5]) {
+      const o = { float_base: 470, float_km_included: 30, float_per_km: 5 };
+      expect(phoneHire.floatMoveCharge(km, o as never)).toBe(webHire.floatMoveCharge(km, o as never));
+    }
+  });
 });
