@@ -26,6 +26,8 @@ export interface StaffMember {
   phone: string | null;
   role: string;
   is_active: boolean;
+  /** Auto clock on/off override (0082): null = by role. */
+  auto_clock?: boolean | null;
   staff_cost_profiles: CostProfile | null;
 }
 
@@ -42,7 +44,7 @@ export async function listStaff(): Promise<StaffMember[]> {
   // admin account that plainly had staff.
   const res = await supabase
     .from("profiles")
-    .select("id, full_name, email, phone, role, is_active, staff_cost_profiles!staff_cost_profiles_staff_id_fkey(hourly_rate, super_rate, workers_comp_rate, leave_loading_rate, annual_fixed_oncosts, target_hours_per_week, charge_out_rate)")
+    .select("id, full_name, email, phone, role, is_active, auto_clock, staff_cost_profiles!staff_cost_profiles_staff_id_fkey(hourly_rate, super_rate, workers_comp_rate, leave_loading_rate, annual_fixed_oncosts, target_hours_per_week, charge_out_rate)")
     .order("full_name");
   return unwrapRows(res as never, "listStaff") as unknown as StaffMember[];
 }
@@ -98,7 +100,9 @@ async function setStaffActive(id: string, active: boolean): Promise<void> {
 
 // ---- Staff leave log (admin-only; direct writes per D33) ----
 
-export type LeaveType = "sick" | "annual" | "public_holiday" | "other";
+// The same five types as the web Leave Log (0014's check; 0112's schedule colours).
+export type LeaveType = "sick" | "annual" | "public_holiday" | "long_service" | "other";
+export const LEAVE_TYPES: LeaveType[] = ["sick", "annual", "public_holiday", "long_service", "other"];
 export interface LeaveEntry {
   id: string;
   leave_type: LeaveType;
@@ -106,15 +110,29 @@ export interface LeaveEntry {
   end_date: string;
   hours: number;
   notes: string | null;
+  /** Part day (0112): Melbourne wall-clock "HH:MM[:SS]", both or neither. */
+  start_time?: string | null;
+  end_time?: string | null;
 }
 
+const LEAVE_COLUMNS = "id, leave_type, start_date, end_date, hours, notes";
+const isMissingColumn = (code: string | undefined) => code === "42703" || code === "PGRST204";
+
 export async function listLeave(staffId: string): Promise<LeaveEntry[]> {
-  const res = await supabase
-    .from("staff_leave")
-    .select("id, leave_type, start_date, end_date, hours, notes")
-    .eq("staff_id", staffId)
-    .order("start_date", { ascending: false });
+  const query = (cols: string) =>
+    supabase.from("staff_leave").select(cols).eq("staff_id", staffId).order("start_date", { ascending: false });
+  // Part-day times (0112); a database without them still lists the leave.
+  let res = await query(`${LEAVE_COLUMNS}, start_time, end_time`);
+  if (res.error && isMissingColumn(res.error.code)) res = await query(LEAVE_COLUMNS);
   return unwrapRows(res as never, "listLeave") as unknown as LeaveEntry[];
+}
+
+/** Thrown when part-day times were given but the database has no columns for them (before 0112). */
+export class LeaveTimesUnavailable extends Error {
+  constructor() {
+    super("Part-day times aren't switched on yet (0112) — log it without From/To.");
+    this.name = "LeaveTimesUnavailable";
+  }
 }
 
 export async function addLeave(input: {
@@ -124,6 +142,9 @@ export async function addLeave(input: {
   endDate: string;
   hours: number;
   notes: string | null;
+  /** Both or neither (validateLeaveTimes in lib/staffLeave.ts). */
+  startTime?: string | null;
+  endTime?: string | null;
 }): Promise<void> {
   const { error } = await supabase.from("staff_leave").insert({
     staff_id: input.staffId,
@@ -132,8 +153,13 @@ export async function addLeave(input: {
     end_date: input.endDate,
     hours: input.hours,
     notes: input.notes,
+    // Only sent when given, so leave still logs on a database without 0112.
+    ...(input.startTime && input.endTime ? { start_time: input.startTime, end_time: input.endTime } : {}),
   });
-  if (error) throw new Error(error.message);
+  if (error) {
+    if (input.startTime && isMissingColumn(error.code)) throw new LeaveTimesUnavailable();
+    throw new Error(error.message);
+  }
 }
 
 export async function removeLeave(id: string): Promise<void> {

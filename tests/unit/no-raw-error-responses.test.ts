@@ -22,8 +22,6 @@ const ALLOWED = new Set([
   "app/api/invoices/[id]/send/route.ts",
   "app/api/quotes/[id]/send/route.ts",
 ]);
-// Another open PR rewrites the staff routes; they are left to it.
-const SKIP_PREFIX = "app/api/staff/";
 
 function routes(dir: string, out: string[] = []): string[] {
   for (const e of readdirSync(dir)) {
@@ -44,7 +42,7 @@ describe("API routes do not return raw error messages", () => {
   it("no NextResponse.json body carries an error's .message", () => {
     const offenders: string[] = [];
     for (const f of files) {
-      if (f.startsWith(SKIP_PREFIX) || ALLOWED.has(f)) continue;
+      if (ALLOWED.has(f)) continue;
       readFileSync(f, "utf8")
         .split("\n")
         .forEach((line, i) => {

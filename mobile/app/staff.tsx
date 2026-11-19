@@ -5,11 +5,34 @@ import { Ionicons } from "@expo/vector-icons";
 import { colors } from "../lib/theme";
 import { MoneyText } from "../design/components/MoneyText";
 import { supabase } from "../lib/supabase";
-import { listStaff, saveStaff, listLeave, addLeave, removeLeave, type StaffMember, type LeaveEntry, type LeaveType } from "../lib/data/reads/staff";
+import {
+  listStaff,
+  saveStaff,
+  listLeave,
+  addLeave,
+  removeLeave,
+  LEAVE_TYPES,
+  type StaffMember,
+  type LeaveEntry,
+  type LeaveType,
+} from "../lib/data/reads/staff";
+import { leaveLabel, validateLeaveTimes } from "../lib/staffLeave";
+import {
+  autoClockEnabled,
+  inviteStaff,
+  loginDetailsChanged,
+  resendInvite,
+  setAutoClock,
+  staffFormProblem,
+  updateStaffLogin,
+  type StaffRole,
+} from "../lib/staffAdmin";
+import { KeyboardSheet, KEYBOARD_SHEET_INPUT_FONT_SIZE } from "../components/KeyboardSheet";
 
 const API_BASE_URL = process.env.EXPO_PUBLIC_API_BASE_URL;
 
-const LEAVE_TYPES: LeaveType[] = ["sick", "annual", "public_holiday", "other"];
+/** "07:30" → "07:30"; "07:30:00" (Postgres time) → "07:30". */
+const hhmm = (t: string | null | undefined) => (t ? t.slice(0, 5) : "");
 
 const ROLES = ["technician", "office", "admin"] as const;
 const roleColor: Record<string, { bg: string; text: string }> = {
@@ -32,6 +55,9 @@ interface Draft {
   annual_fixed_oncosts: string;
   target_hours_per_week: string;
   charge_out_rate: string;
+  /** As loaded — the login route is only called when name or email changed. */
+  original: { full_name: string; email: string };
+  auto_clock: boolean | null;
 }
 
 function toDraft(s: StaffMember): Draft {
@@ -40,6 +66,8 @@ function toDraft(s: StaffMember): Draft {
     id: s.id,
     full_name: s.full_name,
     email: s.email,
+    original: { full_name: s.full_name, email: s.email },
+    auto_clock: s.auto_clock ?? null,
     role: (s.role as Draft["role"]) ?? "technician",
     is_active: s.is_active,
     phone: s.phone ?? "",
@@ -59,10 +87,23 @@ export default function StaffScreen() {
   const [draft, setDraft] = useState<Draft | null>(null);
   const [saving, setSaving] = useState(false);
   const [leave, setLeave] = useState<LeaveEntry[]>([]);
-  const [leaveDraft, setLeaveDraft] = useState<{ leaveType: LeaveType; startDate: string; endDate: string; hours: string; notes: string } | null>(null);
+  const [leaveDraft, setLeaveDraft] = useState<{
+    leaveType: LeaveType;
+    startDate: string;
+    endDate: string;
+    hours: string;
+    notes: string;
+    startTime: string;
+    endTime: string;
+  } | null>(null);
   const [leaveSaving, setLeaveSaving] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [resetSending, setResetSending] = useState(false);
+  const [inviteResending, setInviteResending] = useState(false);
+  const [autoClockSaving, setAutoClockSaving] = useState(false);
+  // "+ Invite" (admin — this screen is only registered for admins).
+  const [invite, setInvite] = useState<{ full_name: string; email: string; phone: string; role: StaffRole } | null>(null);
+  const [inviting, setInviting] = useState(false);
 
   // A failed load must not look like an empty roster. listStaff now throws
   // rather than returning [], so the screen can say "could not load" instead of
@@ -95,9 +136,26 @@ export default function StaffScreen() {
       Alert.alert("Missing details", "Start date, end date and hours are required.");
       return;
     }
+    // Part day (0112): optional From/To, Melbourne time, the same on each day.
+    const startTime = leaveDraft.startTime.trim();
+    const endTime = leaveDraft.endTime.trim();
+    const timeError = validateLeaveTimes(startTime, endTime);
+    if (timeError) {
+      Alert.alert("Check the times", timeError);
+      return;
+    }
     setLeaveSaving(true);
     try {
-      await addLeave({ staffId, leaveType: leaveDraft.leaveType, startDate: leaveDraft.startDate.trim(), endDate: leaveDraft.endDate.trim(), hours, notes: leaveDraft.notes.trim() || null });
+      await addLeave({
+        staffId,
+        leaveType: leaveDraft.leaveType,
+        startDate: leaveDraft.startDate.trim(),
+        endDate: leaveDraft.endDate.trim(),
+        hours,
+        notes: leaveDraft.notes.trim() || null,
+        startTime: startTime || null,
+        endTime: endTime || null,
+      });
       setLeaveDraft(null);
       setLeave(await listLeave(staffId));
     } catch (e) {
@@ -116,8 +174,26 @@ export default function StaffScreen() {
   async function save() {
     if (!draft || saving) return;
     const num = (s: string) => (s.trim() === "" ? 0 : parseFloat(s));
+    const loginChanged = loginDetailsChanged(draft.original, draft);
+    if (loginChanged) {
+      const problem = staffFormProblem(draft);
+      if (problem) {
+        Alert.alert("Check the details", problem);
+        return;
+      }
+    }
     setSaving(true);
     try {
+      // Name / login email first, through the admin route — it also moves the
+      // Supabase Auth login. If that's refused, nothing else is saved.
+      if (loginChanged) {
+        try {
+          await updateStaffLogin({ id: draft.id, full_name: draft.full_name, email: draft.email, phone: draft.phone, role: draft.role });
+        } catch (e) {
+          Alert.alert("Couldn't change the login", e instanceof Error ? e.message : "Please try again.");
+          return;
+        }
+      }
       await saveStaff({
         id: draft.id,
         role: draft.role,
@@ -150,14 +226,66 @@ export default function StaffScreen() {
   async function sendPasswordReset() {
     if (!draft || resetSending) return;
     setResetSending(true);
-    const { error } = await supabase.auth.resetPasswordForEmail(draft.email, {
+    // The saved login, not an unsaved edit in the Login email field.
+    const email = draft.original.email;
+    const { error } = await supabase.auth.resetPasswordForEmail(email, {
       redirectTo: `${API_BASE_URL}/update-password`,
     });
     setResetSending(false);
     if (error) {
       Alert.alert("Couldn't send reset email", error.message);
     } else {
-      Alert.alert("Sent", `Password reset email sent to ${draft.email}.`);
+      Alert.alert("Sent", `Password reset email sent to ${email}.`);
+    }
+  }
+
+  // A fresh invite link, for someone who never set a password.
+  async function onResendInvite() {
+    if (!draft || inviteResending) return;
+    setInviteResending(true);
+    try {
+      await resendInvite({ email: draft.original.email, full_name: draft.original.full_name, role: draft.role });
+      Alert.alert("Sent", `Invite re-sent to ${draft.original.email}.`);
+    } catch (e) {
+      Alert.alert("Couldn't resend the invite", e instanceof Error ? e.message : "Please try again.");
+    } finally {
+      setInviteResending(false);
+    }
+  }
+
+  // Auto clock on site arrival (0082). Saved straight away, like the web
+  // switch; shows the effective value (by role until an admin chooses).
+  async function onToggleAutoClock(next: boolean) {
+    if (!draft || autoClockSaving) return;
+    setAutoClockSaving(true);
+    try {
+      await setAutoClock(draft.id, next);
+      setDraft((d) => d && { ...d, auto_clock: next });
+      setStaff((s) => s.map((m) => (m.id === draft.id ? { ...m, auto_clock: next } : m)));
+    } catch (e) {
+      Alert.alert("Couldn't change auto clock", e instanceof Error ? e.message : "Please try again.");
+    } finally {
+      setAutoClockSaving(false);
+    }
+  }
+
+  async function sendInvite() {
+    if (!invite || inviting) return;
+    const problem = staffFormProblem(invite);
+    if (problem) {
+      Alert.alert("Check the details", problem);
+      return;
+    }
+    setInviting(true);
+    try {
+      await inviteStaff(invite);
+      Alert.alert("Invite sent", `${invite.full_name.trim()} will get an email at ${invite.email.trim().toLowerCase()} to set a password.`);
+      setInvite(null);
+      await load();
+    } catch (e) {
+      Alert.alert("Couldn't send the invite", e instanceof Error ? e.message : "Please try again.");
+    } finally {
+      setInviting(false);
     }
   }
 
@@ -165,7 +293,20 @@ export default function StaffScreen() {
 
   return (
     <View style={styles.container}>
-      <Stack.Screen options={{ title: "Staff" }} />
+      <Stack.Screen
+        options={{
+          title: "Staff",
+          headerRight: () => (
+            <TouchableOpacity
+              onPress={() => setInvite({ full_name: "", email: "", phone: "", role: "technician" })}
+              accessibilityLabel="Invite staff member"
+              style={styles.headerBtn}
+            >
+              <Text style={styles.addText}>+ Invite</Text>
+            </TouchableOpacity>
+          ),
+        }}
+      />
       <FlatList
         data={staff}
         keyExtractor={(s) => s.id}
@@ -217,9 +358,31 @@ Pull down to retry.`}</Text>
                 <Text style={styles.switchLabel}>Active</Text>
                 <Switch value={draft?.is_active ?? true} onValueChange={(v) => setDraft((d) => d && { ...d, is_active: v })} />
               </View>
+              <View style={styles.switchRow}>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.switchLabel}>Auto clock on/off at sites</Text>
+                  <Text style={styles.switchHint}>
+                    {draft?.auto_clock == null ? "By role (technicians on, office off). " : ""}Saved straight away.
+                  </Text>
+                </View>
+                <Switch
+                  value={draft ? autoClockEnabled({ role: draft.role, auto_clock: draft.auto_clock }) : false}
+                  onValueChange={(v) => void onToggleAutoClock(v)}
+                  disabled={autoClockSaving}
+                />
+              </View>
+              <Field label="Name" value={draft?.full_name ?? ""} onChange={set("full_name")} />
+              <Field label="Login email" value={draft?.email ?? ""} onChange={set("email")} email />
+              {draft && draft.email.trim().toLowerCase() !== draft.original.email.trim().toLowerCase() && (
+                <Text style={styles.switchHint}>Saving changes the email they sign in with.</Text>
+              )}
               <TouchableOpacity style={styles.resetBtn} onPress={sendPasswordReset} disabled={resetSending}>
                 <Ionicons name="key-outline" size={14} color={colors.blue600} />
                 <Text style={styles.resetBtnText}>{resetSending ? "Sending…" : "Send password reset email"}</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.resetBtn} onPress={onResendInvite} disabled={inviteResending}>
+                <Ionicons name="mail-outline" size={14} color={colors.blue600} />
+                <Text style={styles.resetBtnText}>{inviteResending ? "Sending…" : "Resend invite (never set a password)"}</Text>
               </TouchableOpacity>
               <Field label="Phone" value={draft?.phone ?? ""} onChange={set("phone")} />
               <Text style={styles.section}>Pay & on-costs</Text>
@@ -240,7 +403,7 @@ Pull down to retry.`}</Text>
               <View style={styles.leaveHead}>
                 <Text style={styles.section}>Leave log</Text>
                 {!leaveDraft && (
-                  <TouchableOpacity onPress={() => setLeaveDraft({ leaveType: "annual", startDate: "", endDate: "", hours: "", notes: "" })} style={styles.addBtn}>
+                  <TouchableOpacity onPress={() => setLeaveDraft({ leaveType: "annual", startDate: "", endDate: "", hours: "", notes: "", startTime: "", endTime: "" })} style={styles.addBtn}>
                     <Text style={styles.addText}>+ Add</Text>
                   </TouchableOpacity>
                 )}
@@ -250,7 +413,7 @@ Pull down to retry.`}</Text>
                   <View style={styles.leaveChips}>
                     {LEAVE_TYPES.map((t) => (
                       <TouchableOpacity key={t} style={[styles.leaveChip, leaveDraft.leaveType === t && styles.leaveChipActive]} onPress={() => setLeaveDraft((d) => d && { ...d, leaveType: t })}>
-                        <Text style={[styles.leaveChipText, leaveDraft.leaveType === t && styles.leaveChipTextActive]}>{t.replace("_", " ")}</Text>
+                        <Text style={[styles.leaveChipText, leaveDraft.leaveType === t && styles.leaveChipTextActive]}>{leaveLabel(t)}</Text>
                       </TouchableOpacity>
                     ))}
                   </View>
@@ -262,6 +425,11 @@ Pull down to retry.`}</Text>
                     <View style={{ flex: 1 }}><Field label="Hours" value={leaveDraft.hours} onChange={(v) => setLeaveDraft((d) => d && { ...d, hours: v })} num /></View>
                     <View style={{ flex: 1 }}><Field label="Notes (optional)" value={leaveDraft.notes} onChange={(v) => setLeaveDraft((d) => d && { ...d, notes: v })} /></View>
                   </View>
+                  <View style={styles.twoCol}>
+                    <View style={{ flex: 1 }}><Field label="From (part day, HH:MM)" value={leaveDraft.startTime} onChange={(v) => setLeaveDraft((d) => d && { ...d, startTime: v })} placeholder="e.g. 07:00" /></View>
+                    <View style={{ flex: 1 }}><Field label="To (part day, HH:MM)" value={leaveDraft.endTime} onChange={(v) => setLeaveDraft((d) => d && { ...d, endTime: v })} placeholder="e.g. 11:30" /></View>
+                  </View>
+                  <Text style={styles.leaveHint}>Leave From/To empty for whole days. Shown on the schedule: office and admin see the type; others see “Unavailable”.</Text>
                   <View style={styles.leaveActions}>
                     <TouchableOpacity style={styles.leaveCancel} onPress={() => setLeaveDraft(null)} disabled={leaveSaving}><Text style={styles.cancelText}>Cancel</Text></TouchableOpacity>
                     <TouchableOpacity style={styles.leaveSave} onPress={saveLeave} disabled={leaveSaving}><Text style={styles.saveText}>{leaveSaving ? "…" : "Add leave"}</Text></TouchableOpacity>
@@ -273,8 +441,12 @@ Pull down to retry.`}</Text>
                 leave.map((l) => (
                   <TouchableOpacity key={l.id} style={styles.leaveRow} onLongPress={() => confirmRemoveLeave(l)}>
                     <View style={{ flex: 1 }}>
-                      <Text style={styles.leaveRowTitle}>{l.leave_type.replace("_", " ")} · {l.hours}h</Text>
-                      <Text style={styles.leaveRowMeta}>{l.start_date} → {l.end_date}{l.notes ? ` · ${l.notes}` : ""}</Text>
+                      <Text style={styles.leaveRowTitle}>{leaveLabel(l.leave_type)} · {l.hours}h</Text>
+                      <Text style={styles.leaveRowMeta}>
+                        {l.start_date} → {l.end_date}
+                        {l.start_time && l.end_time ? ` · ${hhmm(l.start_time)}–${hhmm(l.end_time)}` : ""}
+                        {l.notes ? ` · ${l.notes}` : ""}
+                      </Text>
                     </View>
                     <Ionicons name="trash-outline" size={15} color={colors.slate400} />
                   </TouchableOpacity>
@@ -289,15 +461,82 @@ Pull down to retry.`}</Text>
           </View>
         </View>
       </Modal>
+
+      <KeyboardSheet
+        visible={!!invite}
+        onRequestClose={() => !inviting && setInvite(null)}
+        title="Invite staff member"
+        testID="staff-invite-sheet"
+        footer={
+          <View style={styles.actions}>
+            <TouchableOpacity style={styles.cancel} onPress={() => setInvite(null)} disabled={inviting}><Text style={styles.cancelText}>Cancel</Text></TouchableOpacity>
+            <TouchableOpacity style={styles.saveBtn} onPress={sendInvite} disabled={inviting}><Text style={styles.saveText}>{inviting ? "Sending…" : "Send invite"}</Text></TouchableOpacity>
+          </View>
+        }
+      >
+        <Text style={styles.switchHint}>They get an email to set a password, then sign in with this email on the phone or the web.</Text>
+        <InviteField label="Full name" value={invite?.full_name ?? ""} onChange={(v) => setInvite((i) => i && { ...i, full_name: v })} />
+        <InviteField label="Email (their login)" value={invite?.email ?? ""} onChange={(v) => setInvite((i) => i && { ...i, email: v })} email />
+        <InviteField label="Phone (optional)" value={invite?.phone ?? ""} onChange={(v) => setInvite((i) => i && { ...i, phone: v })} phone />
+        <Text style={styles.fieldLabel}>Role</Text>
+        <View style={styles.segment}>
+          {ROLES.map((r) => (
+            <TouchableOpacity key={r} style={[styles.segItem, invite?.role === r && styles.segItemActive]} onPress={() => setInvite((i) => i && { ...i, role: r })}>
+              <Text style={[styles.segText, invite?.role === r && styles.segTextActive]}>{r}</Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+      </KeyboardSheet>
     </View>
   );
 }
 
-function Field({ label, value, onChange, num }: { label: string; value: string; onChange: (v: string) => void; num?: boolean }) {
+// 16pt inputs inside the KeyboardSheet (iOS zooms anything smaller).
+function InviteField({ label, value, onChange, email, phone }: { label: string; value: string; onChange: (v: string) => void; email?: boolean; phone?: boolean }) {
   return (
     <View style={styles.field}>
       <Text style={styles.fieldLabel}>{label}</Text>
-      <TextInput style={styles.input} value={value} onChangeText={onChange} keyboardType={num ? "decimal-pad" : "default"} placeholderTextColor={colors.slate400} />
+      <TextInput
+        style={[styles.input, { fontSize: KEYBOARD_SHEET_INPUT_FONT_SIZE }]}
+        value={value}
+        onChangeText={onChange}
+        keyboardType={email ? "email-address" : phone ? "phone-pad" : "default"}
+        autoCapitalize={email ? "none" : "words"}
+        autoCorrect={false}
+        placeholderTextColor={colors.slate400}
+      />
+    </View>
+  );
+}
+
+function Field({
+  label,
+  value,
+  onChange,
+  num,
+  email,
+  placeholder,
+}: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  num?: boolean;
+  email?: boolean;
+  placeholder?: string;
+}) {
+  return (
+    <View style={styles.field}>
+      <Text style={styles.fieldLabel}>{label}</Text>
+      <TextInput
+        style={styles.input}
+        value={value}
+        onChangeText={onChange}
+        keyboardType={num ? "decimal-pad" : email ? "email-address" : "default"}
+        autoCapitalize={email ? "none" : "sentences"}
+        autoCorrect={!email}
+        placeholder={placeholder}
+        placeholderTextColor={colors.slate400}
+      />
     </View>
   );
 }
@@ -331,6 +570,8 @@ const styles = StyleSheet.create({
   segTextActive: { color: "#fff" },
   switchRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingVertical: 6, marginBottom: 6 },
   switchLabel: { fontSize: 14, fontWeight: "600", color: colors.slate700 },
+  switchHint: { fontSize: 11, color: colors.slate400, marginTop: 2, marginBottom: 6 },
+  headerBtn: { paddingHorizontal: 8, paddingVertical: 4 },
   resetBtn: { flexDirection: "row", alignItems: "center", gap: 6, paddingVertical: 8, marginBottom: 12 },
   resetBtnText: { fontSize: 13, fontWeight: "600", color: colors.blue600 },
   twoCol: { flexDirection: "row", gap: 12 },

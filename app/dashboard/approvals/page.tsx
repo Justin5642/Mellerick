@@ -5,8 +5,7 @@ import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
 import type { UnbilledVariation } from "@/components/approvals/unbilled-variations";
 import { ApprovalsClient, type JobHoursSummary } from "@/components/approvals/approvals-client";
-import { loadJobHours, unbilledGroups } from "@/lib/invoice-hours";
-import { totalHours } from "@/lib/approved-hours";
+import { approvalHoursByJob } from "@/lib/invoice-hours";
 
 export default async function ApprovalsPage() {
   const supabase = await createClient();
@@ -44,18 +43,8 @@ export default async function ApprovalsPage() {
   // BEFORE approving (Justin, 14 Nov 2026). A failed read is shown on the job,
   // not swallowed: "no hours" and "could not check" must look different.
   const jobIds = (jobs ?? []).map((j: any) => j.id as string);
-  let hoursByJob: Record<string, JobHoursSummary> = {};
-  try {
-    const entries = await loadJobHours(supabase as any, jobIds);
-    hoursByJob = Object.fromEntries(
-      jobIds.map((id) => {
-        const groups = unbilledGroups(entries.get(id) ?? []);
-        return [id, { groups, total: totalHours(groups), error: null }];
-      })
-    );
-  } catch (e: any) {
-    hoursByJob = Object.fromEntries(jobIds.map((id) => [id, { groups: [], total: 0, error: e.message ?? "Could not load hours" }]));
-  }
+  // Same read the phone uses (GET /api/approvals/hours).
+  const hoursByJob: Record<string, JobHoursSummary> = await approvalHoursByJob(supabase as any, jobIds);
 
   return (
     <ApprovalsClient

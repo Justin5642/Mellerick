@@ -53,11 +53,11 @@ export function approvalMessage(r: ApproveResult): string {
   let msg: string;
   if (r.invoiceCreated) {
     msg = hours
-      ? `A draft invoice was created with ${hours} of hours to price. Apply an hourly rate on the invoice from the web, then push it to Xero.`
+      ? `A draft invoice was created with ${hours} of hours to price. Apply an hourly rate to it (here or on the web), then push it to Xero.`
       : "A draft invoice was created. Send it or push it to Xero from the web.";
   } else if (r.invoiceId) {
     msg = hours
-      ? `${hours} of hours are NOT on the existing ${where} yet. Apply an hourly rate on it from the web` +
+      ? `${hours} of hours are NOT on the existing ${where} yet. Apply an hourly rate to it (here or on the web)` +
         (r.alreadyPushed ? ", then push it to Xero again." : ", then push it to Xero.")
       : `An ${where} already existed for this job — marked approved.`;
   } else {

@@ -24,7 +24,7 @@ vi.mock("@/lib/supabase/server", () => ({
 vi.mock("@/lib/supabase/admin", () => ({
   createAdminClient: () => ({
     auth: { admin: { inviteUserByEmail: (...a: unknown[]) => invite(...a) } },
-    from: () => ({ insert: (...a: unknown[]) => insert(...a) }),
+    from: () => ({ upsert: (...a: unknown[]) => insert(...a) }),
   }),
 }));
 
@@ -40,6 +40,44 @@ describe("staff invite email casing", () => {
     );
     expect(res.status).toBe(200);
     expect(invite.mock.calls[0][0]).toBe("jake.henderson@mellerick.com");
-    expect(insert).toHaveBeenCalledWith(expect.objectContaining({ email: "jake.henderson@mellerick.com" }));
+    // Upsert: handle_new_user() (0044) has usually made the row already.
+    expect(insert).toHaveBeenCalledWith(expect.objectContaining({ email: "jake.henderson@mellerick.com" }), { onConflict: "id" });
+  });
+
+  it("links the invite to the app's own origin, never the request Host (the phone calls this too)", async () => {
+    invite.mockClear();
+    await POST(
+      new NextRequest("http://evil.example/api/staff/invite", {
+        method: "POST",
+        body: JSON.stringify({ full_name: "Jake", email: "jake@mellerick.com", role: "technician" }),
+      })
+    );
+    const opts = invite.mock.calls[0][1] as { redirectTo: string };
+    expect(opts.redirectTo).not.toContain("evil.example");
+    expect(opts.redirectTo).toMatch(/\/update-password$/);
+  });
+
+  it("refuses a malformed email or an unknown role without inviting", async () => {
+    invite.mockClear();
+    for (const body of [
+      { full_name: "Jake", email: "not-an-email", role: "technician" },
+      { full_name: "Jake", email: "jake@mellerick.com", role: "superuser" },
+    ]) {
+      const res = await POST(new NextRequest("http://localhost/api/staff/invite", { method: "POST", body: JSON.stringify(body) }));
+      expect(res.status).toBe(400);
+    }
+    expect(invite).not.toHaveBeenCalled();
+  });
+
+  it("answers an existing account with a fixed sentence, not GoTrue's text", async () => {
+    invite.mockImplementationOnce(async () => ({ data: { user: null }, error: { message: "A user with this email address has already been registered" } }) as never);
+    const res = await POST(
+      new NextRequest("http://localhost/api/staff/invite", {
+        method: "POST",
+        body: JSON.stringify({ full_name: "Jake", email: "jake@mellerick.com", role: "technician" }),
+      })
+    );
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toBe("Someone with this email already has a login.");
   });
 });

@@ -37,12 +37,13 @@ project waiting on one purchase order.
 | Backflow | full (in-repo) ✅ | ~~register-device offline~~ (D46); test-log offline is **blocked on Q3** (water-authority submit dedupe) — flagged crucial, not deferrable in-repo |
 | Quotes | full (in-repo) ✅ | ~~convert-to-job~~ (D50); Send/PDF are the **external** Bearer gate |
 | Fleet | **full** ✅ | ~~assign~~ (D54), ~~detail + expenses~~ (D56), ~~usage log~~ (D61), ~~documents view/open~~ (D67); **19 Nov 2026 (office/admin, online):** ~~service history + Log a service with the invoice photo read automatically~~, ~~hire setup per machine + Fleet → Hire rates + attachments~~, ~~per load carted + year-cost summaries~~, ~~document upload (photos)~~. Gap: **PDF** invoices/documents still go up on the web — no document picker in the binary (adding one is a native module) |
-| Staff | near-full | ~~charge-out rate~~ (D53), ~~leave log~~ (D58); invite/resend/edit-email (ext) |
+| Staff | **full** ✅ | ~~charge-out rate~~ (D53), ~~leave log~~ (D58); ~~invite / resend invite / edit login email, auto clock switch, leave part-day times + long service~~ (19 Nov 2026, web `/api/staff/*` routes with Bearer) |
 | Settings | near-full | ~~variation-types~~ (D57), ~~cost-centre templates~~ (D59); Xero account codes + OAuth connect (web/ext) |
 | Reports | **full (analytics)** ✅ | all 5 tables done: revenue-by-month, top-customers, jobs-by-staff (D48), staff cost/efficiency (D51), equipment utilisation (D52) |
 | Jobs | **full** ✅ | ~~reassign/reschedule~~ (D41), ~~status/priority edit~~ (D43), ~~**create job**~~ (D45), ~~equipment-usage~~ (D63), ~~title/type/description edit~~ (D64), ~~price+approve variations~~ (D65), ~~**PO tab** (builder POs, split lines, supplier invoices, Send to Xero, Invoice this PO)~~ and ~~document upload (photos) + office-only~~ (Nov 2026); customer/site reassignment left to web; PDF document upload left to web (no picker in the binary) |
 | Invoices | partial | ~~prefill-from-job + add unbilled variations~~ **DONE** (D44/Q15); Send/PDF/Xero (ext) |
-| Approvals | partial ✅ | ~~approve→auto-invoice, send-back~~ **DONE** (D40); Xero auto-push (ext) |
+| Approvals | near-full ✅ | ~~approve→auto-invoice, send-back~~ **DONE** (D40); ~~clocked-hours table, Apply hourly rate after approving, Variations to invoice~~ (19 Nov 2026); Xero auto-push after approval stays web |
+| Job Time tab (office/admin) | **full** ✅ | ~~log time for another person, edit anyone's entry, admin billing-rate override (normal / 1.5× / 2×), clock-location flag~~ (19 Nov 2026) |
 | Schedule | partial ✅ | ~~assign/unassign, reschedule~~ **DONE** (D41); day/week grid deferred |
 
 ## Remaining in-repo work — NONE closable without a crucial decision or a native dep
@@ -84,14 +85,17 @@ out of in-repo scope:
 
 ## External gates (NOT closable in-repo)
 
-**Three gates remain, all listed below.** (An earlier edit put "this is the whole
+**Two gates remain** — on-device QA/accounts and integration OAuth. Staff
+invite/resend/edit-login-email was struck on 19 Nov 2026: the phone now calls
+the admin-only web routes with a Bearer token, so it was never an external
+gate once `requireAdmin` accepted Bearer. (An earlier edit put "this is the whole
 list now" on the first bullet with two live gates directly beneath it — which is
 the same defect this document was being corrected for, introduced while
 correcting it. A reader who trusts that sentence stops reading at the first
 line.)
 
 - **On-device QA, store accounts, push credentials, PowerSync password** — hardware/accounts.
-- **Staff invite / resend / edit-login-email** — Supabase auth-admin onboarding.
+- ~~**Staff invite / resend / edit-login-email** — Supabase auth-admin onboarding.~~ — **done 19 Nov 2026** (phone Staff screen → `/api/staff/invite`, `/resend-invite`, `/update` with Bearer).
 - **Integration OAuth connect/reconnect** (Xero, Google) — browser redirect flow.
 - ~~**Invoice/Quote Send-email, PDF view/download, Xero push** — the web API routes are cookie-only and reject a mobile Bearer token → backend refactor (Justin)~~ — **merged.** `lib/api/caller-client.ts` resolves either a mobile Bearer token or a web cookie into an RLS-scoped client, and the send/pdf/Xero/Google-sync routes use it. Wiring the mobile buttons is now in-repo work, not a gate.
 

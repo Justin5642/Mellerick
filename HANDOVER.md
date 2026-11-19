@@ -1294,6 +1294,60 @@ end-of-day hours and loads. His rules:
   lock trigger disabled or the cost table's RLS off; the money boundary sweep
   stays intact with the seeded load and cost.
 
+**Office/admin Time, Approvals and Staff on the phone (19 Nov 2026; no migration, no stream change).**
+Justin: bring the office's website tools for time, approvals and staff to the
+phone. Office/admin only throughout; technicians see exactly what they saw.
+- **Time tab** (`mobile/components/job/time.tsx`, role from `useRole` — no
+  change to `app/job/[id].tsx`): office/admin can open and correct **anyone's**
+  entry and **log time for another person** (staff picker + Work/Travel; RLS
+  0030 already allowed it; the web dialog still offers the picker to admins
+  only). `edited_by` is the office user, `staff_id` the technician
+  (`TimeEntriesRepository.addManual` `editorId`, `editEntry` `staffId`),
+  through the outbox as before. **Billing rate** chips (Normal / 1.5× / 2× /
+  Auto) are **admin only** — the 0025 trigger reverts anyone else's
+  `rate_override`. Nobody can read that column (0045), so editing opens on
+  "Leave as it is" and sends nothing unless the admin picks one
+  (`mobile/lib/timeEntryOffice.ts`, tested) — the web dialog opens on "Auto"
+  and silently clears an existing override; that web gap is unchanged. Each
+  entry shows **"In: on site / Out: 320 m from site"**, amber ⚠ outside the
+  fence allowing for accuracy — `mobile/lib/clockLocation.ts`, a byte copy of
+  `lib/clock-location.ts` pinned by `tests/unit/clock-location-mirror.test.ts`.
+  The site pin and staff list are read online (offline: no picker, no flag).
+  Technician reads are unchanged: `TIME_ENTRY_COLUMNS` still excludes
+  `rate_override`; `tech_time_entries` untouched.
+- **Approvals** (`mobile/app/(office)/approvals.tsx`): each job shows "Xh to
+  invoice" and, expanded, the hours table by cost centre × technician from the
+  new **`GET /api/approvals/hours?jobIds=…`** (office/admin, caller's client
+  under RLS, hours only — `approvalHoursByJob` in `lib/invoice-hours.ts`, which
+  the web page now uses too; `tests/unit/approval-hours-route.test.ts`). After
+  an approval that leaves hours unpriced, "Apply hourly rate" opens
+  `mobile/components/approvals/apply-hourly-rate-sheet.tsx` — the existing
+  `GET/POST /api/invoices/[id]/hours` with Bearer (one rate / per technician /
+  per cost centre, server defaults, the 409 "already in Xero / emailed"
+  confirmation; rules `mobile/lib/approvalHours.ts`, tested). **Variations to
+  invoice** (approved, not invoiced, by job, QA fixture left out) with Create
+  invoice → `/invoices/new?jobId=` or Open invoice #n; amounts via
+  `MoneyText` in `RoleGate` (`mobile/lib/unbilledVariations.ts`, tested).
+- **Staff** (`mobile/app/staff.tsx`, admin route group): **+ Invite**, **Resend
+  invite**, edit **Name / Login email** (→ `/api/staff/update`, which also moves
+  the Supabase Auth login; called only when they changed, before the rest is
+  saved), and the **Auto clock on/off** switch (`/api/staff/set-auto-clock`,
+  saved at once, shows the by-role default). Calls in `mobile/lib/staffAdmin.ts`
+  via the shared Bearer helper `mobile/lib/officeApi.ts` (tested). **Leave Log**
+  gains **Long service** and part-day **From/To** (HH:MM, `validateLeaveTimes`;
+  sent only when both given; a database without 0112's columns is told so).
+- **Staff routes hardened** (they now serve the phone too): `invite`,
+  `resend-invite`, `update` answer fixed sentences (GoTrue/DB text to the log
+  only — the `app/api/staff/` skip in `no-raw-error-responses.test.ts` is
+  gone), validate email and role, store the email lowercase on edit as on
+  invite, link invites to `appUrl()` instead of the request Host, and the
+  invite **upserts** the profile: `handle_new_user()` (0044) has already made
+  the row, so the old plain insert collided and reported a failed invite for
+  one that had been sent. Shared rules `lib/staff-invite.ts`.
+- Reaches phones with the next build (no new native module). The web must be
+  deployed first for `/api/approvals/hours`; without it the phone's hours panel
+  says it couldn't load the hours and approving still works.
+
 ---
 
 ## 2. The one rule that must never break
