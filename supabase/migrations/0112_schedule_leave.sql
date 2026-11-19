@@ -1,8 +1,9 @@
 -- ============================================================================
 -- Staff leave on the schedule.
 --
--- STATUS: DRAFT — NOT APPLIED. Gate test supabase/tests/0112_schedule_leave_test.sql;
--- trust only a final "0112 PASSED" row.
+-- STATUS: ✅ APPLIED IN PRODUCTION (2026-11-19, via SQL editor; gate test passed).
+-- Was: paste, then supabase/tests/0112_schedule_leave_test.sql; trust only a
+-- final "0112 PASSED" row.
 --
 -- WHY (Justin, 17 Nov 2026): when a staff member has sick leave entered, show
 -- it on the schedule so nobody books them, and flag bookings already on those
