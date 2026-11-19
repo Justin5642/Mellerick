@@ -2370,6 +2370,76 @@ the three columns by hand (exactly what the generator emits after the apply —
 `office_jobs` syncs `jobs.*`); regenerating it is optional now that `0067` is live.
 No mobile UI yet.
 
+**To-do list beside the board — drag in and out (19 Nov 2026; no migration; web only).**
+Justin: "drag and drop jobs that either weren't ready or jobs that can be done
+anytime … Should a job fall over at last minute, we can drag and populate the
+schedule from the to-do list. So we need to drag in and out of the to-do list,
+but also be able to enter a job into the to-do list to try and limit the amount
+of unbilled labour hours."
+- **Panel** (`components/schedule/todo-board-panel.tsx`): on the Week and Day
+  board, **office/admin only** (`viewerRole`; technicians never see it). Desktop:
+  a column right of the board, open by default; under 1024 px: a "To-do list"
+  toggle that opens it above the board (and folds it away when a job is picked
+  to place). Rows show number/title, customer · suburb, priority, hours
+  (estimate, else "PO" hours), days on list, status when not pending; the
+  "Fits in [__] h" filter is there too. The old **To-do list tab stays** as it
+  was (full-width list with its own Fits-in box and "Schedule" buttons).
+- **Drag in** (to-do row → a technician's day or Unassigned; or tap the row's
+  pointer icon, then tap a cell — the touch path, like cut & paste; Esc
+  cancels). One single-day booking (`planTodoDrop`, `lib/todo-board.ts`): no
+  estimate or ≥ 8 h → "All day" 7:00–15:30; a shorter estimate → that many
+  hours (rounded up to 15 min) from 7:00, or straight after the technician's
+  last booking that day if it ends by 15:30. No cost centre (set it in the
+  Schedule dialog); multi-day = stretch it with the edge handles afterwards.
+  Same guards as every board write: read-only board and closed jobs refused,
+  "already booked then — Book anyway?" (`newBookingClashes`), the 0112 leave
+  confirm, a pending card until the insert returns, rolled back on refusal
+  (0096 etc.). Then ONE jobs write (`jobPatchAfterDrop`): `todo_listed_at`
+  cleared — 0067's trigger already clears it when 0079 derives the new
+  `scheduled_start`, this also covers a job listed while it had a start — and
+  `pending` → `scheduled` (the Schedule dialog's rule; on hold stays on hold).
+  Calendar pushed, page refreshed.
+- **Drag out** (a booking card → the panel; or double-click to cut it, then
+  click the panel). Always confirms, and deletes THAT booking only — never the
+  rest of the crew's (`planDragOut`):
+  - the job's **last** booking, status pending / scheduled / on hold → "Take
+    #123 off Dave's Thursday and put it back on the to-do list?" → delete,
+    then one jobs update: listed, and `scheduled` → **`pending`** (the reverse
+    of the dialog's pending → scheduled; 0067 refuses to list a scheduled job,
+    and an unscheduled job reading "Scheduled" is wrong anyway). 0079 has
+    already nulled `scheduled_start` with the delete, so the trigger keeps the
+    listing;
+  - the job **still has other bookings** → "Take #123 off Dave's Thursday?"
+    — only that booking goes; the job stays on the schedule and is NOT listed
+    (a job can't be both scheduled and on the list — 0067 would clear it);
+  - **in progress** → booking removed, not listed (0067 never lists an
+    in-progress job, and changing its status here would hide started work);
+  - closed jobs / unsaved bookings → refused.
+  No trigger change was needed, so **no migration**.
+- **Add job…** search in the panel: in the database as you type (≥ 2 chars or a
+  job number), at most 20: pending/on-hold, not listed, no `scheduled_start`,
+  every word matching the title or the customer's name/company (customer ids
+  resolved first, ≤ 50). Picking one asks the optional estimate, as the job
+  page's "Add to to-do list" does. "+ New job" links to New Job. The ✕ on a
+  row takes it off the list.
+- **Unbooked hours** (`unbookedHours`): each technician's free hours per day =
+  8 h − booked hours (never negative; an all-day booking's 8.5 h leaves 0);
+  leave is **unavailable, not unbooked** — a full day, or a part day of unknown
+  hours, shows no gap; a part day with known hours comes off the 8 h. No gap on
+  weekends or past days. Shown as a green "3 h free" in each Week cell and
+  under each name in Day view (office/admin only); clicking it sets Fits-in to
+  that gap and opens the panel.
+- One `DndContext` now wraps the board and the panel; collisions use the
+  pointer's own target first (`pointerWithin`), falling back to the nearest.
+  The board keeps jobs / bookings / to-do list in local state for optimistic
+  updates and re-seeds them from the server after each write
+  (`router.refresh()`).
+- Tests: `tests/unit/todo-board.test.ts` (25). Checked in Chromium with mock
+  data at 1600 px and iPhone size: drag in (placed after the existing booking),
+  leave confirm, drag out (last booking and with other bookings), cut → panel,
+  add by search, gap → Fits-in, tap-to-place on a phone.
+- **Not on the phone** (the office Schedule tab has no to-do list yet).
+
 All 21 other open questions are resolved, each with its reasoning recorded in
 `mobile/DECISIONS-FOR-AVI.md`.
 
