@@ -16,7 +16,47 @@ import type { LoadCost } from "@/lib/cartage-pricing";
 // and added for office/admin alone. The loads are read with the CALLER's
 // session, so RLS (jobs you are on) still decides.
 
-const MISSING = new Set(["42P01", "PGRST205", "PGRST200", "42703", "PGRST204"]);
+export const MISSING = new Set(["42P01", "PGRST205", "PGRST200", "42703", "PGRST204"]);
+
+/** cartage_loads columns read with each load: the row and who logged it. */
+export const LOAD_SELECT = "*, profiles!cartage_loads_created_by_fkey(full_name)";
+
+/** Loads as read with LOAD_SELECT, flattened to LoadRow. */
+export function loadRowsOf(data: unknown): LoadRow[] {
+  type RawLoad = Omit<LoadRow, "created_by_name"> & { profiles: { full_name: string | null } | null };
+  return ((data ?? []) as RawLoad[]).map(({ profiles, ...l }) => ({ ...l, created_by_name: profiles?.full_name ?? null }));
+}
+
+export interface CartageLists {
+  trucks: TruckRow[];
+  suppliers: { id: string; name: string; pin_order: number | null }[];
+  costCentreNames: Map<string, string>;
+}
+
+/**
+ * The fleet (with its hire options — rates included, for isLoadTruck and the
+ * office's pricing only), the quarries and the company cost-centre names,
+ * through the service role: all three tables are office/admin only by RLS.
+ * CALLERS MUST HAVE AUTHORIZED FIRST and pass the result through
+ * buildTruckLoadsView, which copies names only for a technician.
+ */
+export async function loadCartageLists(): Promise<CartageLists> {
+  const admin = createAdminClient();
+  const [trucksRes, suppliersRes, centresRes] = await Promise.all([
+    admin.from("equipment").select("id, name, is_active, category, equipment_hire_options(hire_type, hire_unit, rate, is_active)").order("name"),
+    admin.from("suppliers").select("id, name, pin_order").eq("is_active", true).order("name"),
+    admin.from("cost_centres").select("id, name"),
+  ]);
+  if (trucksRes.error) throw trucksRes.error;
+  if (suppliersRes.error) throw suppliersRes.error;
+  if (centresRes.error) throw centresRes.error;
+  type RawTruck = Omit<TruckRow, "options"> & { equipment_hire_options: TruckRow["options"] | null };
+  return {
+    trucks: ((trucksRes.data ?? []) as unknown as RawTruck[]).map(({ equipment_hire_options, ...t }) => ({ ...t, options: equipment_hire_options ?? [] })),
+    suppliers: (suppliersRes.data ?? []) as { id: string; name: string; pin_order: number | null }[],
+    costCentreNames: new Map((centresRes.data ?? []).map((c) => [c.id as string, c.name as string])),
+  };
+}
 
 export type TruckLoadsLoad = { ready: false } | ({ ready: true; isOffice: boolean; userId: string } & TruckLoadsView);
 
@@ -25,35 +65,23 @@ export async function loadTruckLoads(request: NextRequest, jobId: string, caller
   const admin = createAdminClient();
   const supabase = await callerClient(request);
 
-  const [trucksRes, suppliersRes, loadsRes, jobRes, centresRes] = await Promise.all([
-    admin.from("equipment").select("id, name, is_active, category, equipment_hire_options(hire_type, hire_unit, rate, is_active)").order("name"),
-    admin.from("suppliers").select("id, name, pin_order").eq("is_active", true).order("name"),
+  const [lists, loadsRes, jobRes] = await Promise.all([
+    loadCartageLists(),
     supabase
       .from("cartage_loads")
-      .select("*, profiles!cartage_loads_created_by_fkey(full_name)")
+      .select(LOAD_SELECT)
       .eq("job_id", jobId)
       .order("load_date", { ascending: false })
       .order("created_at", { ascending: false }),
     supabase.from("jobs").select("id, quarry_included, sites(name, address_line1, suburb)").eq("id", jobId).maybeSingle(),
-    admin.from("cost_centres").select("id, name"),
   ]);
   for (const r of [loadsRes, jobRes]) {
     if (r.error && MISSING.has(r.error.code ?? "")) return { ready: false };
   }
-  if (trucksRes.error) throw trucksRes.error;
-  if (suppliersRes.error) throw suppliersRes.error;
   if (loadsRes.error) throw loadsRes.error;
   if (jobRes.error) throw jobRes.error;
-  if (centresRes.error) throw centresRes.error;
-
-  type RawLoad = Omit<LoadRow, "created_by_name"> & { profiles: { full_name: string | null } | null };
-  const loads: LoadRow[] = ((loadsRes.data ?? []) as unknown as RawLoad[]).map(({ profiles, ...l }) => ({ ...l, created_by_name: profiles?.full_name ?? null }));
-
-  type RawTruck = Omit<TruckRow, "options"> & { equipment_hire_options: TruckRow["options"] | null };
-  const trucks: TruckRow[] = ((trucksRes.data ?? []) as unknown as RawTruck[]).map(({ equipment_hire_options, ...t }) => ({
-    ...t,
-    options: equipment_hire_options ?? [],
-  }));
+  const { trucks, suppliers, costCentreNames } = lists;
+  const loads = loadRowsOf(loadsRes.data);
 
   type RawJob = { quarry_included: boolean | null; sites: { name: string | null; address_line1: string | null; suburb: string | null } | null };
   const job = jobRes.data as unknown as RawJob | null;
@@ -93,11 +121,11 @@ export async function loadTruckLoads(request: NextRequest, jobId: string, caller
   const view = buildTruckLoadsView({
     isOffice,
     trucks,
-    suppliers: (suppliersRes.data ?? []) as { id: string; name: string; pin_order: number | null }[],
+    suppliers,
     loads,
     quarryIncluded: job?.quarry_included ?? null,
     siteLabel: siteLabelOf(job?.sites ?? null),
-    costCentreNames: new Map((centresRes.data ?? []).map((c) => [c.id as string, c.name as string])),
+    costCentreNames,
     signatureUrls,
     costs,
     companyMarginPct,

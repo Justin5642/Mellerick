@@ -897,7 +897,7 @@ Stage 1 is web + database + pure rules; the phone comes next.
      with a distance lookup (km are typed in today), and an offline path
      if it is ever wanted (outbox + `hire_entries` in a technician stream
      with its columns listed — it has no money column). Office void and
-     Invoice Day Works stay web-only.
+     Invoice Day Works reached the phone on 19 Nov 2026 (Stage 2, below).
   2. **Dry hire controls:** hirer details, condition photos out/in, meter
      readings at hand-over.
   3. **Truck register:** body volume and cartage rates per truck.
@@ -962,8 +962,29 @@ line and hand the phone to the builder's rep, who signs it; it then locks.
   `RoleGate`, and only when the server sent them.
 - Reaches phones with the next build (`react-native-signature-canvas` is
   already in the binary).
-- **Not on the phone:** office void, Invoice Day Works, truck day stops,
-  float distance lookup (km typed), offline entry.
+- **Office Day Works on the phone (19 Nov 2026; no migration).** The Day
+  Works tab's office/admin controls, as on the web, all inside a `RoleGate`
+  for office/admin with amounts only via `MoneyText` and only when the server
+  sent them (`mobile/components/job/day-works-office.tsx`): **Void** on a
+  signed Day Works line or signed truck load (a reason sheet; void is final),
+  **Quarry product on this job** (included / extra), each load's **docket
+  cost + margin override** with its price breakdown and why it isn't priced,
+  **View docket photo** (the office's signed URL), and **Invoice Day Works**
+  (Last week / Last month / All waiting, untick lines, "Create draft
+  invoice" → the existing `POST …/hire-entries/invoice`; selection rules
+  `mobile/lib/dayWorksInvoice.ts`, tested — amounts come only from the
+  office's pricing answer, nothing is priced on the phone, an unpriced line
+  blocks the invoice). The web used to do four of these as direct browser
+  writes; they are now routes both use, all `requireOfficeOrAdmin` + the
+  CALLER's client (RLS and the 0108/0111 triggers decide as before; body
+  rules in `lib/day-works-office.ts`, routes tested in
+  `tests/unit/day-works-office.test.ts`): `POST …/hire-entries/[entryId]/void`,
+  `POST …/cartage-loads/[loadId]/void`, `PUT …/cartage-loads/[loadId]/cost`,
+  `PUT …/cartage-loads/quarry`. Only a signed line/load is voided (an
+  invoiced one must come off its invoice first); a cost is refused once the
+  load is invoiced or void. Reaches phones with the next build.
+- **Not on the phone:** truck day stops, float distance lookup (km typed),
+  offline entry.
 
 **Fleet service history takes the invoice by drag and drop (17 Nov 2026; no migration).**
 Justin: "What happened to the drag and drop in the fleet? We drop the invoices
@@ -1104,7 +1125,46 @@ end-of-day hours and loads. His rules:
   the same invoice, one line each ("Spoil removal 12 t — 12 Smith St,
   Craigieburn → Wollert tip, docket 1234"; quantity 1 at the load's price, the
   margin not shown), marking them invoiced (`hire-entries/invoice` takes
-  `loadIds`). The web does not add or sign loads — that's the phone.
+  `loadIds`). The web does not add or sign loads — that's the phone. The
+  office's writes (quarry default, docket cost, void) go through office-only
+  routes shared with the phone (Day Works Stage 2, "Office Day Works on the
+  phone").
+- **Today's run — the driver's run sheet (phone, 19 Nov 2026; no migration).**
+  Justin: a driver booked on cartage floats between jobs in a day (rock to
+  Job A, on to Job B, back to Job A). My Jobs shows a **"Today's run (N
+  jobs)"** card on top when the signed-in user (technician or office) has at
+  least one of THEIR OWN bookings today (Melbourne day, the 0071 day rules via
+  `bookingWindow` — never `starts_at` alone) whose cost centre is cartage:
+  the booking's PO line tagged with company cost centre **Transport** or
+  **Truck Cartage** (0087/0108 — the names 0111 falls back to), or, for a
+  line the office never tagged, 0087's keyword rule on its name. No such
+  booking (or offline) → no card. The card opens `app/run/today.tsx`
+  (registered beside `job/[id]` for every role; screen
+  `mobile/components/run/todays-run-screen.tsx`, calls/helpers
+  `mobile/lib/todaysRun.ts`, tested): today's cartage jobs in booking order —
+  number/title, customer, site + **Navigate** (`openNavigation`), booking
+  time and cost centre, today's loads (counts, t / m³ / km by direction,
+  each load's status), **+ Material in** / **+ Spoil out** (the same form
+  as the job's Truck loads — moved to
+  `mobile/components/job/truck-load-forms.tsx`, shared), **Get builder to
+  sign (N extras)** (the existing sign flow), **Open job**; day totals at
+  the foot; **+ Add a job** logs against another of their own open jobs
+  (lead or crew) not booked today (it then stays on the run for the day);
+  pull to refresh. Online only ("Today's run needs signal"). Writes are the
+  existing `…/cartage-loads` routes, unchanged.
+  - **Server:** `GET /api/runs/today` (`?summary=1` = the card's count only),
+    rules `lib/todays-run.ts` (tested in `tests/unit/todays-run.test.ts`).
+    Bookings, jobs and loads are read with the CALLER's client (RLS);
+    the service role reads only (a) `po_cost_centers` `id, name` + its
+    company cost centre's name, for the cost-centre ids on the caller's own
+    bookings — technicians can't read that table (it carries money), and it
+    is what says a booking is cartage — and (b) trucks/quarries/cost-centre
+    names through `loadCartageLists()` → `buildTruckLoadsView` (names only),
+    as the job's Truck loads section already does. **No money for anyone**:
+    the run sheet is quantities only; office sees prices on the job's tab.
+    `tests/unit/todays-run-route.test.ts` walks technician and office
+    payloads for money keys, rate/allocation values and docket paths. Guard:
+    `requireRole` (admin/office/technician — an active user with a role).
 - **Before 0111 is applied** nothing breaks: the section says truck loads
   aren't switched on (GET answers `{ready:false}` on 42P01/42703/PGRST2xx),
   Settings → Truck loads says the same, Invoice Day Works works as before.

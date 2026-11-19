@@ -179,6 +179,8 @@ function RootNavigation() {
 
       {/* Shared across roles (reached from tech tabs and office Jobs/Dashboard). */}
       <Stack.Screen name="job/[id]" options={{ headerShown: true, title: "Job Details" }} />
+      {/* The driver's run sheet (their cartage bookings today) — technicians and office alike. */}
+      <Stack.Screen name="run/today" options={{ headerShown: true, title: "Today's run" }} />
       {/* Backflow detail / register / log-test are reached from the technician
           Backflow tab AND the office backflow list. They used to fall through to
           `headerShown: false` above and draw their own "Back" row inside a

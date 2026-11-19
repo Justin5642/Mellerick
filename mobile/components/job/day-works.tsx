@@ -11,7 +11,8 @@ import { KeyboardSheet, KEYBOARD_SHEET_INPUT_FONT_SIZE } from "../KeyboardSheet"
 import { MoneyText } from "../../design/components/MoneyText";
 import { RoleGate } from "../../design/guards/RoleGate";
 import { signatureWebStyle } from "./signature";
-import { TruckLoadsSection } from "./truck-loads";
+import { TruckLoadsSection, type TruckLoadsLoaded } from "./truck-loads";
+import { InvoiceDayWorksSheet, VoidReasonSheet } from "./day-works-office";
 import {
   DAY_WORKS_OFFLINE,
   STATUS_LABEL,
@@ -31,6 +32,7 @@ import {
   signDayWorksEntry,
   splitMachinesByHire,
   updateDayWorksEntry,
+  voidDayWorksEntry,
   type DayWorksDraft,
   type DayWorksEntry,
   type DayWorksState,
@@ -44,7 +46,9 @@ import {
 //
 // Online only (lib/dayWorks.ts says why). Quantities only for the crew: the
 // server sends a technician no rate and no amount, and an office user's
-// amounts render only through MoneyText inside a RoleGate.
+// amounts render only through MoneyText inside a RoleGate. Office/admin also
+// get the web tab's own controls (./day-works-office.tsx): Void on a signed
+// line and Invoice Day Works — office-only routes, refused for anyone else.
 
 type Loaded = Extract<DayWorksState, { ready: true }>;
 type Status = { kind: "loading" } | { kind: "offline" } | { kind: "error"; message: string } | { kind: "not-ready" } | { kind: "ok"; view: Loaded };
@@ -62,6 +66,11 @@ export function JobDayWorksTab({ jobId }: { jobId: string }) {
   const [saving, setSaving] = useState(false);
   const [signing, setSigning] = useState<DayWorksEntry | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [voiding, setVoiding] = useState<DayWorksEntry | null>(null);
+  const [invoicing, setInvoicing] = useState(false);
+  // The Truck loads section's office answer (its signed extras go on the same invoice).
+  const [truckLoads, setTruckLoads] = useState<TruckLoadsLoaded | null>(null);
+  const [loadsKey, setLoadsKey] = useState(0);
   // A new entry's id, made before the first Save and kept across retries, so a
   // retry after a dropped answer can't add the day twice (the server answers
   // a second add with the same id as already saved).
@@ -213,6 +222,16 @@ export function JobDayWorksTab({ jobId }: { jobId: string }) {
         </RoleGate>
       )}
 
+      {view.isOffice && view.pricing && (
+        <RoleGate roles={["office", "admin"]}>
+          <View style={[styles.card, { marginTop: 8 }]}>
+            <TouchableOpacity style={styles.primary} onPress={() => setInvoicing(true)} accessibilityRole="button">
+              <Text style={styles.primaryText}>Invoice Day Works</Text>
+            </TouchableOpacity>
+          </View>
+        </RoleGate>
+      )}
+
       {groups.length === 0 ? (
         <Text style={[styles.meta, { textAlign: "center", marginTop: 12 }]}>No Day Works on this job yet.</Text>
       ) : (
@@ -261,6 +280,13 @@ export function JobDayWorksTab({ jobId }: { jobId: string }) {
                     </View>
                   )}
                   {e.status === "void" && !!e.void_reason && <Text style={styles.error}>Void: {e.void_reason}</Text>}
+                  {view.isOffice && e.status === "signed" && (
+                    <RoleGate roles={["office", "admin"]}>
+                      <TouchableOpacity style={styles.addButton} onPress={() => setVoiding(e)} accessibilityRole="button">
+                        <Text style={[styles.addButtonText, { color: colors.red600 }]}>Void</Text>
+                      </TouchableOpacity>
+                    </RoleGate>
+                  )}
 
                   {e.status === "draft" && (
                     <>
@@ -284,8 +310,36 @@ export function JobDayWorksTab({ jobId }: { jobId: string }) {
         ))
       )}
 
-      {/* Truck loads (0111, drafted — not applied yet): quarry product in, spoil out. */}
-      <TruckLoadsSection jobId={jobId} />
+      {/* Truck loads (0111): quarry product in, spoil out. */}
+      <TruckLoadsSection jobId={jobId} onLoaded={setTruckLoads} reloadKey={loadsKey} />
+
+      {voiding && (
+        <VoidReasonSheet
+          title="Void this Day Works line?"
+          detail={`${formatWorkDate(voiding.work_date)} · ${voiding.equipment} · ${quantityText(voiding)}`}
+          onVoid={async (reason) => show(await voidDayWorksEntry(jobId, voiding.id, reason))}
+          onClose={() => setVoiding(null)}
+        />
+      )}
+
+      {invoicing && (
+        <InvoiceDayWorksSheet
+          jobId={jobId}
+          today={localDateKey(new Date())}
+          entries={view.entries}
+          entryPricing={view.pricing}
+          loads={truckLoads?.loads ?? []}
+          loadPricing={truckLoads?.pricing}
+          siteLabel={truckLoads?.siteLabel ?? null}
+          onClose={() => setInvoicing(false)}
+          onInvoiced={(number) => {
+            setInvoicing(false);
+            void load();
+            setLoadsKey((k) => k + 1);
+            Alert.alert("Draft invoice made", `${number ? `Invoice ${number}` : "The invoice"} is a draft — check it, then send it from Invoices.`);
+          }}
+        />
+      )}
 
       {draft && (
         <EntrySheet

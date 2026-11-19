@@ -56,7 +56,20 @@ export interface TruckLoad {
 /** Office/admin answers only. Never present for a technician. */
 export interface TruckLoadsOfficePricing {
   companyMarginPct: number;
-  loads: Record<string, { total: number | null; problem: string | null }>;
+  loads: Record<
+    string,
+    {
+      docketCost: number | null;
+      /** The load's own margin override, or null = the company's. */
+      marginOverride: number | null;
+      marginPct: number;
+      /** Short-lived signed URL of the docket photo (it shows prices). */
+      docketPhotoUrl: string | null;
+      total: number | null;
+      lines: { label: string; amount: number }[];
+      problem: string | null;
+    }
+  >;
   uninvoicedSigned: number;
 }
 
@@ -97,7 +110,8 @@ export interface TruckLoadInput {
 
 export const TRUCK_LOADS_OFFLINE = "Truck loads need signal. Try again when you have it.";
 
-async function call<T>(path: string, init: RequestInit = {}, timeoutMs?: number): Promise<T> {
+/** A Bearer call to the office server; also used by the run sheet (lib/todaysRun.ts). */
+export async function call<T>(path: string, init: RequestInit = {}, timeoutMs?: number): Promise<T> {
   if (!API_BASE_URL) throw new Error("App isn't configured to reach the office server.");
   const { data: sessionData } = await supabase.auth.getSession();
   const accessToken = sessionData.session?.access_token;
@@ -144,6 +158,29 @@ export function attachDocketPhoto(jobId: string, loadId: string, imageBase64: st
 /** The builder's sign-off for several loads at once: their name and one signature (base64 PNG). */
 export function signTruckLoads(jobId: string, loadIds: string[], signerName: string, signatureBase64: string): Promise<TruckLoadsWriteResult> {
   return call(`${base(jobId)}/sign`, { method: "POST", body: JSON.stringify({ load_ids: loadIds, signer_name: signerName, signature: signatureBase64 }) });
+}
+
+// ---------------------------------------------------------------------------
+// Office/admin only (the routes refuse anyone else) — the web tab's own routes.
+// ---------------------------------------------------------------------------
+
+/** "Quarry product on this job": true included, false extra, null = the default (included). */
+export function setQuarryDefault(jobId: string, quarryIncluded: boolean | null): Promise<TruckLoadsState> {
+  return call(`${base(jobId)}/quarry`, { method: "PUT", body: JSON.stringify({ quarry_included: quarryIncluded }) });
+}
+
+/** Void a SIGNED load (final). */
+export function voidTruckLoad(jobId: string, loadId: string, reason: string | null): Promise<TruckLoadsState> {
+  return call(`${base(jobId)}/${encodeURIComponent(loadId)}/void`, { method: "POST", body: JSON.stringify({ reason }) });
+}
+
+/** The docket cost ex GST and margin override as typed (blank = none / the company's); the server checks them. */
+export function setTruckLoadCost(jobId: string, loadId: string, docketCost: string, marginPct: string): Promise<TruckLoadsState> {
+  const t = (s: string) => (s.trim() === "" ? null : s.trim());
+  return call(`${base(jobId)}/${encodeURIComponent(loadId)}/cost`, {
+    method: "PUT",
+    body: JSON.stringify({ docket_cost_ex_gst: t(docketCost), margin_pct: t(marginPct) }),
+  });
 }
 
 // ---------------------------------------------------------------------------

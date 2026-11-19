@@ -235,8 +235,14 @@ export function JobDayWorks({ jobId, readOnly = false }: Props) {
   async function voidEntry(e: DayWorksEntry) {
     const reason = window.prompt(`Void the signed ${e.equipment} entry for ${fmtDate(e.work_date)}? Say why:`);
     if (reason === null) return;
-    const { error, count } = await supabase.from("hire_entries").update({ status: "void", void_reason: reason.trim() || null }, { count: "exact" }).eq("id", e.id);
-    if (error || count === 0) return toast.error(error?.message ?? "Couldn't void it.");
+    // Through the office-only route (shared with the phone): RLS + 0108's guard decide.
+    const res = await fetch(`/api/jobs/${jobId}/hire-entries/${e.id}/void`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ reason }),
+    }).catch(() => null);
+    const body = await res?.json().catch(() => ({}));
+    if (!res?.ok) return toast.error(body?.error ?? "Couldn't void it.");
     toast.success("Entry voided");
     await load();
   }
