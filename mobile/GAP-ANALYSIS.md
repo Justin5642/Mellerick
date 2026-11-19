@@ -58,6 +58,10 @@ See HANDOVER.md §1, "Small office/admin website features on the phone".
   stand (no map module in the binary; dragging a pin on a map stays web-only).
 - **Schedule:** **Copy to another technician or day** (the board's Shift-drop);
   admin **Open leave record** from a leave block → Staff → that person's Leave log.
+- **Bookings always ask for a cost centre** (19 Nov 2026, as the web): the
+  Schedule Job sheet's cost centre step is required, placing a to-do job asks
+  for one in its confirm sheet, and New Job with a schedule asks for a company
+  cost centre. Adding a cost centre the job doesn't have is online only.
 - **Jobs → Billing:** **loads carted** on equipment usage (0091), priced as the
   web. Left: the usage entry's cost centre on Billing, and loads in the admin
   Costing screen.

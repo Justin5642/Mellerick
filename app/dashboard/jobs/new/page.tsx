@@ -22,7 +22,8 @@ import { setJobAssignments, type ScheduleWriteClient } from "@/lib/schedule-disp
 import { cn } from "@/lib/utils";
 import { ScheduleFields } from "@/components/job/schedule-fields";
 import { BuilderPoLines, blankLine, type StageOption } from "@/components/job/builder-po-lines";
-import { hasBuilderPo, planBuilderPo, type BuilderPoLineInput, type CostCentreOption } from "@/lib/builder-po";
+import { hasBuilderPo, isBlankLine, planBuilderPo, type BuilderPoLineInput, type CostCentreOption } from "@/lib/builder-po";
+import { defaultBookingCostCentre, PICK_COST_CENTRE } from "@/lib/booking-cost-centre";
 
 // The Site picker's first row, "+ Add new site", opens the "Add New Site"
 // dialog over the form, instead of making staff go create the site somewhere
@@ -65,6 +66,13 @@ export default function NewJobPage() {
   const [costCentres, setCostCentres] = useState<CostCentreOption[]>([]);
   const [stages, setStages] = useState<StageOption[]>([]);
   const [costCentresFailed, setCostCentresFailed] = useState(false);
+  // A scheduled job's bookings need a cost centre (19 Nov 2026). A COMPANY
+  // cost centre here: the job's PO lines don't exist until it is saved. One
+  // not on the PO split above is added to the job's PO at $0.
+  const [bookingCostCentre, setBookingCostCentre] = useState<string | null>(null);
+  const splitCentreIds = [...new Set(poLines.filter((l) => !isBlankLine(l) && l.costCentreId).map((l) => l.costCentreId))];
+  const scheduled = !!schedule.startDateKey;
+  const bookingCostCentreShown = bookingCostCentre ?? defaultBookingCostCentre({ lines: splitCentreIds.map((id) => ({ id })) });
 
   useEffect(() => {
     async function load() {
@@ -117,6 +125,11 @@ export default function NewJobPage() {
       toast.error(built.error);
       return;
     }
+    const costCentreForBookings = built.columns.scheduled_start ? bookingCostCentreShown : null;
+    if (built.columns.scheduled_start && !costCentreForBookings) {
+      toast.error(`${PICK_COST_CENTRE} for the booking.`);
+      return;
+    }
     // No value and no lines = no PO yet (a service call, or the PO comes
     // later). Lines with no value make a PO worth their total — a cartage
     // line with hours only is a $0 PO.
@@ -167,18 +180,35 @@ export default function NewJobPage() {
         toast.error(`Job created, but ${missing.join(" and ")} couldn't be assigned. Add them from Schedule Job on the job.`);
       }
     }
+    let poSaved = true;
+    if (data?.id && planned?.ok) poSaved = await saveBuilderPo(data.id, data.job_number, payload.customer_po, planned.po);
+    // The bookings 0079 made from the schedule get the cost centre picked:
+    // the PO line for it (added at $0, or `<job>-1` made at $0, when the job
+    // has none) — the office user's own write, through the same route as the
+    // Schedule dialog's "Add to this job".
+    let costCentreFailed = false;
+    if (data?.id && costCentreForBookings) {
+      const res = await fetch(`/api/jobs/${data.id}/booking-cost-centre`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ costCentreId: costCentreForBookings, applyToBookings: true }),
+      }).catch(() => null);
+      costCentreFailed = !res?.ok;
+    }
     if (data?.id) {
-      // After the crew, so each technician's booking gets its calendar event.
+      // After the crew and the cost centre, so each technician's booking gets its calendar event.
       fetch(`/api/jobs/${data.id}/sync-calendar`, { method: "POST" }).catch(() => {});
     }
-    if (data?.id && planned?.ok) {
-      const poSaved = await saveBuilderPo(data.id, data.job_number, payload.customer_po, planned.po);
-      if (!poSaved) {
-        // The job is real; only its PO is missing. Send them to it.
-        toast.error("Job created, but its PO didn't save. Add it on the job's PO tab.");
-        window.location.href = `/dashboard/jobs/${data.id}?tab=po`;
-        return;
-      }
+    if (data?.id && !poSaved) {
+      // The job is real; only its PO is missing. Send them to it.
+      toast.error("Job created, but its PO didn't save. Add it on the job's PO tab.");
+      window.location.href = `/dashboard/jobs/${data.id}?tab=po`;
+      return;
+    }
+    if (data?.id && costCentreFailed) {
+      toast.error("Job created, but its bookings have no cost centre yet. Pick one in Schedule Job.");
+      window.location.href = `/dashboard/jobs/${data.id}?schedule=1`;
+      return;
     }
     if (data?.id && crewFailed) {
       // The job exists with its first technician; open it to add the rest.
@@ -325,6 +355,27 @@ export default function NewJobPage() {
               <Label>Schedule</Label>
               <ScheduleFields value={schedule} onChange={setSchedule} optional />
             </div>
+            {scheduled && (
+              <div className="space-y-2">
+                <Label>Cost centre for the booking{assignees.length > 1 ? "s" : ""} *</Label>
+                <Select value={bookingCostCentreShown} onValueChange={(v) => setBookingCostCentre((v as string) || null)}>
+                  <SelectTrigger className={cn("max-w-sm", !bookingCostCentreShown && "border-red-400")}>
+                    <SelectValue placeholder={PICK_COST_CENTRE} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {costCentres.map((c) => (
+                      <SelectItem key={c.id} value={c.id}>
+                        {c.name}
+                        {splitCentreIds.length > 0 && !splitCentreIds.includes(c.id) ? " (added to the PO)" : ""}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-slate-400">
+                  What the scheduled work is costed to. Book other days or cost centres afterwards in Schedule Job.
+                </p>
+              </div>
+            )}
             <div className="space-y-2">
               <Label htmlFor="customer_po">Builder&apos;s PO number</Label>
               <Input

@@ -629,6 +629,10 @@ export default function JobDetailScreen() {
         currentScheduleAllDay={!!job.schedule_all_day}
         costCenters={costCenters}
         currentScheduledCostCenterId={job.scheduled_cost_center_id}
+        onCostCentreAdded={() => {
+          // Reaches the local mirror once it syncs; the sheet keeps the new line meanwhile.
+          getJobCostCentres(job.id).then(setCostCenters).catch(() => {});
+        }}
         bookings={bookings}
         onBookingsChanged={(next) => {
           setBookings(next);

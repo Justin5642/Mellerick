@@ -38,7 +38,9 @@ import { closedJobScheduleMessage, isJobClosedForScheduling } from "@/lib/job-sc
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { BookingCostCentreSelect } from "./booking-cost-centre-select";
+import { bookingCostCentreProblem, defaultBookingCostCentre, type BookingLineOption, type CompanyCostCentreOption } from "@/lib/booking-cost-centre";
+import { loadCompanyCostCentres } from "@/lib/booking-cost-centre-client";
 import { Check, ChevronDown, Pencil, Plus, Trash2, User } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -53,6 +55,8 @@ interface CostCenterOption {
   name: string;
   code: string | null;
   po_number?: string;
+  /** The company cost centre the line is tagged with (0087). */
+  cost_centre_id?: string | null;
 }
 
 interface Props {
@@ -64,6 +68,10 @@ interface Props {
   staff: StaffMember[];
   currentUserId: string;
   costCenters?: CostCenterOption[];
+  /** jobs.scheduled_cost_center_id — the first new booking's default cost centre. */
+  scheduledCostCenterId?: string | null;
+  /** A company cost centre was added to the job as a $0 PO line from here — re-read the job's POs. */
+  onCostCentreAdded?: () => void;
   /** The job's saved bookings — the list the dialog opens with. */
   bookings: JobBookingWithNames[];
   /**
@@ -104,15 +112,15 @@ function rowFromBooking(b: JobBookingWithNames): Row {
  * on the same stage ("Sam rough-in Monday morning"). The first row of an
  * unscheduled job starts today, All day.
  */
-function newRow(after: Row | undefined): Row {
+function newRow(after: Row | undefined, defaultCostCenterId: string | null): Row {
   if (after) {
-    return { key: nextKey(), staffIds: [], costCenterId: after.costCenterId, schedule: { ...after.schedule }, note: after.note ?? "", allDayDecided: true };
+    return { key: nextKey(), staffIds: [], costCenterId: after.costCenterId ?? defaultCostCenterId, schedule: { ...after.schedule }, note: after.note ?? "", allDayDecided: true };
   }
   const today = dateKeyInBusinessTZ(new Date());
   return {
     key: nextKey(),
     staffIds: [],
-    costCenterId: null,
+    costCenterId: defaultCostCenterId,
     schedule: { startDateKey: today, endDateKey: today, startTime: DEFAULT_SHIFT_START_TIME, endTime: DEFAULT_SHIFT_END_TIME, allDay: true },
     note: "",
     allDayDecided: false,
@@ -145,6 +153,8 @@ export function ScheduleJobDialog({
   staff,
   currentUserId,
   costCenters = [],
+  scheduledCostCenterId = null,
+  onCostCentreAdded,
   bookings,
   bookingsReady,
   onReopen,
@@ -160,7 +170,17 @@ export function ScheduleJobDialog({
   const [leave, setLeave] = useState<ScheduleLeave[]>([]);
   const [leaveConfirm, setLeaveConfirm] = useState(false);
   const staffById = useMemo(() => new Map(staff.map((s) => [s.id, s])), [staff]);
-  const costCenterName = (id: string | null) => (id ? costCenters.find((cc) => cc.id === id)?.name ?? null : null);
+  // Every booking needs a cost centre (19 Nov 2026): the job's PO lines, plus
+  // any added from the picker while this dialog is open, plus the company
+  // list for "Add to this job".
+  const [addedLines, setAddedLines] = useState<BookingLineOption[]>([]);
+  const [company, setCompany] = useState<CompanyCostCentreOption[]>([]);
+  const lines: BookingLineOption[] = useMemo(() => {
+    const base = costCenters.map((c) => ({ id: c.id, name: c.name, cost_centre_id: c.cost_centre_id ?? null, po_number: c.po_number ?? null }));
+    return [...base, ...addedLines.filter((a) => !base.some((b) => b.id === a.id))];
+  }, [costCenters, addedLines]);
+  const defaultCostCenterId = defaultBookingCostCentre({ scheduled: scheduledCostCenterId, lines });
+  const costCenterName = (id: string | null) => (id ? lines.find((cc) => cc.id === id)?.name ?? null : null);
   // A completed or cancelled job is off the schedule board: nothing here may
   // be saved for it (the page's button is disabled too; this covers a dialog
   // already open when the status changed).
@@ -176,7 +196,7 @@ export function ScheduleJobDialog({
       setRows([]);
       setEditingKey(null);
     } else if (seeded.length === 0) {
-      const first = newRow(undefined);
+      const first = newRow(undefined, defaultCostCenterId);
       setRows([first]);
       setEditingKey(first.key);
     } else {
@@ -185,7 +205,22 @@ export function ScheduleJobDialog({
     }
     setConflicts({});
     setLeaveConfirm(false);
+    // The default cost centre is read once per opening.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, bookings, editable]);
+
+  // The company cost centres, once per opening ("Add to this job").
+  useEffect(() => {
+    if (!open) return;
+    let live = true;
+    void loadCompanyCostCentres(supabaseClient).then((list) => {
+      if (live) setCompany(list);
+    });
+    return () => {
+      live = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
 
   // Leave from last week to a year ahead, read once per opening. [] before
   // 0112 (or on any failure): no warnings, nothing else changes.
@@ -278,7 +313,7 @@ export function ScheduleJobDialog({
   }
 
   function addRow() {
-    const row = newRow(rows[rows.length - 1]);
+    const row = newRow(rows[rows.length - 1], defaultCostCenterId);
     setRows((prev) => [...prev, row]);
     setEditingKey(row.key);
   }
@@ -328,9 +363,17 @@ export function ScheduleJobDialog({
     }
     return errors;
   }, [rows]);
+  // Rows with no cost centre yet — Save waits for every one to be picked.
+  const missingCostCentre = useMemo(() => rows.filter((r) => bookingCostCentreProblem(r.costCenterId)).map((r) => r.key), [rows]);
 
   async function save() {
     if (!editable || rowErrors.size > 0) return;
+    if (missingCostCentre.length > 0) {
+      // Open the first row that still needs one, so the office sees why.
+      setEditingKey(missingCostCentre[0]);
+      toast.error("Pick a cost centre for every booking.");
+      return;
+    }
     // Booking onto leave: say so and wait for "Book anyway" — never silent.
     if (leaveWarnings.size > 0 && !leaveConfirm) {
       setLeaveConfirm(true);
@@ -479,6 +522,7 @@ export function ScheduleJobDialog({
                     <p className={cn("text-sm font-medium truncate", row.staffIds.length === 0 ? "text-amber-700" : "text-slate-900")}>
                       {namesOf(row.staffIds, staffById)}
                       {cc && <span className="font-normal text-cyan-700"> · {cc}</span>}
+                      {!row.costCenterId && editable && <span className="font-medium text-red-600"> · Pick a cost centre</span>}
                     </p>
                     <p className={cn("text-xs truncate", error ? "text-red-600" : "text-slate-500")}>
                       {error ?? (window ? describeBooking(window) : "")}
@@ -542,28 +586,26 @@ export function ScheduleJobDialog({
                       <p className="text-xs text-slate-400">Nobody picked = an unassigned booking.</p>
                     </div>
 
-                    {costCenters.length > 0 && (
-                      <div className="space-y-2">
-                        <Label>Cost centre (optional)</Label>
-                        <Select
-                          value={row.costCenterId ?? "none"}
-                          onValueChange={(v) => updateRow(row.key, (r) => ({ ...r, costCenterId: v === "none" || !v ? null : v }))}
-                        >
-                          <SelectTrigger><SelectValue placeholder="No stage selected" /></SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="none">No stage selected</SelectItem>
-                            {costCenters.map((c) => (
-                              <SelectItem key={c.id} value={c.id}>
-                                {c.name}{c.po_number ? ` (PO #${c.po_number})` : ""}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                        <p className="text-xs text-slate-400">
-                          Time logged on this job defaults to this stage at clock-in — the technician can still change it per entry.
-                        </p>
-                      </div>
-                    )}
+                    <div className="space-y-2">
+                      <Label htmlFor={`cc-${row.key}`}>Cost centre</Label>
+                      <BookingCostCentreSelect
+                        id={`cc-${row.key}`}
+                        jobId={jobId}
+                        value={row.costCenterId}
+                        lines={lines}
+                        company={company}
+                        onChange={(lineId) => updateRow(row.key, (r) => ({ ...r, costCenterId: lineId }))}
+                        onLineAdded={(line) => {
+                          setAddedLines((prev) => (prev.some((l) => l.id === line.id) ? prev : [...prev, line]));
+                          onCostCentreAdded?.();
+                        }}
+                        showProblem
+                      />
+                      <p className="text-xs text-slate-400">
+                        What this booking&apos;s work is costed to. Time logged on it defaults to this cost centre at
+                        clock-in. A cost centre the job doesn&apos;t have yet is added to its PO with nothing allocated.
+                      </p>
+                    </div>
 
                     <div className="space-y-2">
                       <Label>Note for this booking (optional)</Label>

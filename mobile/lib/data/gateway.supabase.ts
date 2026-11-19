@@ -299,6 +299,7 @@ const sideEffectPath: Record<SideEffectKind, (p: Record<string, unknown>) => str
   "assign-technicians": (p) => `/api/jobs/${p.jobId}/set-assignments`,
   "stage-complete": (p) => `/api/jobs/${p.jobId}/stages/${p.stageId}/complete`,
   "quote-po": (p) => `/api/jobs/${p.jobId}/quote-po`,
+  "booking-cost-centre": (p) => `/api/jobs/${p.jobId}/booking-cost-centre`,
 };
 
 /**

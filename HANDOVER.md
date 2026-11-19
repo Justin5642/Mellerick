@@ -176,6 +176,65 @@ scheduling to read-only; it does not corrupt anything.
 - Old-style writers (mobile ≤15, New Job, approvals) still write the job-level
   schedule; 0079 translates them. Mobile build 16 is the next stage.
 
+**Bookings always ask for a cost centre (19 Nov 2026; no migration).**
+Justin: "When scheduling technicians to a job it doesn't ask you for a cost
+centre. Quite often we have folks on multiple days on the same job achieving
+different tasks to different costs." A booking's cost centre is one of the
+job's PO lines (`job_bookings.cost_center_id` → `po_cost_centers`); it was
+optional and hidden on jobs with no PO lines. Now every path that makes a
+booking asks, and Save/Book waits for one. Several rows with different
+technicians, days and cost centres on one job still work as before.
+- **Rules** (`lib/booking-cost-centre.ts`, pure, names and ids only; mirrored
+  byte for byte from the first export at `mobile/lib/bookingCostCentre.ts`,
+  `tests/unit/booking-cost-centre-mirror.test.ts`; tested in
+  `tests/unit/booking-cost-centre.test.ts`): default = the booking above's,
+  else `jobs.scheduled_cost_center_id`, else the job's only line, never a line
+  the job doesn't have (`defaultBookingCostCentre`); "Pick a cost centre"
+  (`bookingCostCentreProblem`); the company cost centres the job has no line
+  for (`addableCostCentres`, tagged id or same name); where a new line goes
+  (`planBookingLine`).
+- **"Add to this job"**: the picker lists the job's PO lines, then the
+  company cost centres (`cost_centres`, 0087) it doesn't have. Picking one
+  calls `POST /api/jobs/[id]/booking-cost-centre` (`requireOfficeOrAdmin`,
+  every read and write as the CALLER via `callerClient`, fixed sentences, no
+  money in the answer): it reuses a line already tagged with that cost centre,
+  else adds a line named after it with nothing allocated (amount 0, hours 0)
+  to the job's FIRST PO, else makes the job's `<job number>-1` PO
+  (`nextJobPoNumber`) with value 0 first. The PO's value is left as it was.
+  `applyToBookings: true` also gives the job's bookings with no cost centre
+  that line. `poId` (optional, a client UUID) makes a retried PO insert
+  idempotent.
+- **Web Schedule dialog** (`components/job/schedule-job-dialog.tsx`): every
+  row has a required Cost centre picker (`components/job/booking-cost-centre-select.tsx`);
+  a row with none says "Pick a cost centre" in its header, and Save opens it
+  and refuses. A line added from the picker re-reads the job page's POs.
+- **Web board to-do drop** (`team-schedule-view.tsx`): a drop or tap-to-place
+  first opens `components/schedule/booking-cost-centre-dialog.tsx` (Cancel =
+  nothing booked); `planTodoDrop` takes `costCenterId` (mirrored in
+  `mobile/lib/todoBoard.ts`). Board moves and Shift-copies keep the source's
+  cost centre, as before.
+- **Web New Job**: with a start date, a required "Cost centre for the
+  booking(s)" (a company cost centre; defaults to the PO split's only one).
+  After the job, crew and PO are saved, the route above is called with
+  `applyToBookings` — the line comes from the PO split, or is added — then
+  the calendar sync. If it fails the job opens with `?schedule=1`.
+- **Phone Schedule Job sheet**: the cost centre step is always shown and
+  required (`mobile/components/schedule/CostCentrePicker.tsx`); a booking
+  with none lists "No cost centre — edit to pick one". **Phone to-do place**:
+  the alert became `PlaceTodoSheet` with the picker. **Phone New Job**: a
+  required company cost centre when scheduled; `JobsRepository.createJob`
+  queues a `booking-cost-centre` side effect (after the crew, before the
+  calendar sync) to the same route, so it works offline once the company list
+  has been read once this session (`mobile/lib/bookingCostCentreOptions.ts`
+  keeps it in memory; the list is in no PowerSync stream).
+- **Online only on the phone:** adding a company cost centre to a job ("Adding
+  a cost centre needs signal."); offline the job's own lines can still be
+  picked. Reaches phones with the next build (no native module); the web must
+  be deployed first (the route).
+- Not changed: old-style writers (approvals, the crew picker's
+  `set_job_assignments`, the calendar poll) still don't pick a cost centre —
+  0079 copies the job's one window and cost centre, as before.
+
 **Load page data on the server, not in the browser.** A browser→Supabase
 query from Australia costs ~100 ms+; a server query in `sin1` costs ~2 ms. So
 My Jobs, Approvals, Staff, Fleet and Customers are server pages that pass
@@ -2760,8 +2819,9 @@ of unbilled labour hours."
   cancels). One single-day booking (`planTodoDrop`, `lib/todo-board.ts`): no
   estimate or ≥ 8 h → "All day" 7:00–15:30; a shorter estimate → that many
   hours (rounded up to 15 min) from 7:00, or straight after the technician's
-  last booking that day if it ends by 15:30. No cost centre (set it in the
-  Schedule dialog); multi-day = stretch it with the edge handles afterwards.
+  last booking that day if it ends by 15:30. The drop first asks which cost
+  centre the booking is for (see "Bookings always ask for a cost centre");
+  multi-day = stretch it with the edge handles afterwards.
   Same guards as every board write: read-only board and closed jobs refused,
   "already booked then — Book anyway?" (`newBookingClashes`), the 0112 leave
   confirm, a pending card until the insert returns, rolled back on refusal
@@ -2824,7 +2884,8 @@ of unbilled labour hours."
     Same rules as the web drop: `planTodoDrop` (the phone's estimate is
     estimate else PO hours, as the web), closed jobs and a database without
     bookings refused, and it ALWAYS confirms (a tap misses more easily than a
-    drag), adding "already booked then" (`newBookingClashes`) and the 0112
+    drag) in a sheet that also asks for the booking's cost centre
+    (`components/schedule/PlaceTodoSheet.tsx`), adding "already booked then" (`newBookingClashes`) and the 0112
     leave warning → "Book anyway". Writes through the outbox
     (`ScheduleRepository.placeTodo`): the booking insert, then the
     `jobPatchAfterDrop` jobs update **depending on the insert** (a refused

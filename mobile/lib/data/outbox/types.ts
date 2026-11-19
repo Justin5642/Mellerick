@@ -96,7 +96,11 @@ export type SideEffectKind =
   | "stage-complete"
   // A converted quote's subtotal → the job's `<job number>-1` PO. Server-side
   // because the job number is a serial the phone only learns after the insert.
-  | "quote-po";
+  | "quote-po"
+  // A new job's bookings get the cost centre picked on New Job (19 Nov 2026):
+  // the job's PO line for it, added at $0 (or the job's `<n>-1` PO made at $0)
+  // when it has none. Server-side for the same reason as quote-po.
+  | "booking-cost-centre";
 
 export interface SideEffectOperation {
   kind: "side_effect";

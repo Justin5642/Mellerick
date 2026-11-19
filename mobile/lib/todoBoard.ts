@@ -91,8 +91,9 @@ function wallClock(iso: string): string {
  *   to 7:00 (the clash check then asks).
  *
  * `dayBlocks` is the target technician's booked blocks on that day (empty for
- * Unassigned). The cost centre is left empty — a job on the to-do list has no
- * booking to copy one from; the office sets it in the Schedule dialog.
+ * Unassigned). `costCenterId` is the job's PO line the office picked in the
+ * drop's confirm — every booking asks for one (19 Nov 2026); null only for a
+ * caller that hasn't asked yet.
  */
 export function planTodoDrop(args: {
   jobId: string;
@@ -100,9 +101,10 @@ export function planTodoDrop(args: {
   dateKey: string;
   estimateHours: number | null;
   dayBlocks?: readonly Pick<ScheduleDay, "dateKey" | "endIso">[];
+  costCenterId?: string | null;
 }): BookingInsert {
-  const { jobId, staffId, dateKey, estimateHours, dayBlocks = [] } = args;
-  const base = { job_id: jobId, staff_id: staffId, cost_center_id: null };
+  const { jobId, staffId, dateKey, estimateHours, dayBlocks = [], costCenterId = null } = args;
+  const base = { job_id: jobId, staff_id: staffId, cost_center_id: costCenterId };
   const partDay = estimateHours !== null && estimateHours > 0 && estimateHours < STANDARD_DAY_HOURS;
   if (!partDay) {
     return {

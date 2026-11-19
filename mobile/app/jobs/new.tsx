@@ -12,6 +12,8 @@ import { listAssignableStaff, type AssignableStaff } from "../../lib/data/reads/
 import { SiteFormSheet, type SiteSaveStatus } from "../../components/customer/site-form";
 import { CustomerFormSheet } from "../../components/customer/customer-form";
 import { SitePickerSheet } from "../../components/job/site-picker";
+import { PICK_COST_CENTRE, type CompanyCostCentreOption } from "../../lib/bookingCostCentre";
+import { loadCompanyCostCentres } from "../../lib/bookingCostCentreOptions";
 
 const JOB_TYPES = ["service", "installation", "maintenance", "emergency", "quote"] as const;
 const PRIORITIES = ["low", "normal", "high", "urgent"] as const;
@@ -38,6 +40,14 @@ export default function NewJobScreen() {
   const [showDate, setShowDate] = useState(false);
   const [showTime, setShowTime] = useState(false);
   const [description, setDescription] = useState("");
+  // A scheduled job's bookings need a cost centre (19 Nov 2026). A COMPANY
+  // cost centre: the job has no PO lines yet — once the job syncs, the server
+  // adds the line (and the job's `<n>-1` PO when it has none) and tags the
+  // bookings (JobsRepository.createJob → booking-cost-centre).
+  const [costCentres, setCostCentres] = useState<CompanyCostCentreOption[]>([]);
+  const [costCentresOnline, setCostCentresOnline] = useState(true);
+  const [costCentre, setCostCentre] = useState<CompanyCostCentreOption | null>(null);
+  const [pickCostCentre, setPickCostCentre] = useState(false);
   const [saving, setSaving] = useState(false);
   // "+ New customer" and "+ Add new site" open sheets over this screen, so
   // everything already entered here stays as it is.
@@ -106,6 +116,14 @@ export default function NewJobScreen() {
     setSite(existing);
   }
 
+  function openCostCentres() {
+    void loadCompanyCostCentres().then((r) => {
+      setCostCentres(r.list);
+      setCostCentresOnline(r.online);
+    });
+    setPickCostCentre(true);
+  }
+
   function openAssignee() {
     if (staff.length === 0) listAssignableStaff().then(setStaff).catch(() => {});
     setPickAssignee(true);
@@ -141,6 +159,7 @@ export default function NewJobScreen() {
     if (saving || !ready) return;
     if (!customer) { Alert.alert("Customer required", "Select a customer for this job."); return; }
     if (!title.trim()) { Alert.alert("Title required", "Enter a job title."); return; }
+    if (schedDate && !costCentre) { Alert.alert(PICK_COST_CENTRE, "Pick the cost centre the scheduled work is for."); return; }
     setSaving(true);
     try {
       const scheduledStartIso = schedDate ? schedDate.toISOString() : null;
@@ -154,6 +173,7 @@ export default function NewJobScreen() {
         status: scheduledStartIso ? "scheduled" : "pending",
         scheduledStartIso,
         description: description.trim() || null,
+        bookingCostCentreId: schedDate ? costCentre?.id ?? null : null,
       });
       const outcome = synced ? await writeOutcome(id) : "pending";
       if (!synced) {
@@ -251,6 +271,17 @@ export default function NewJobScreen() {
       )}
       {showTime && <DateTimePicker value={schedDate ?? new Date()} mode="time" onChange={onTimeChange} />}
 
+      {schedDate && (
+        <>
+          <Text style={styles.label}>Cost centre</Text>
+          <TouchableOpacity style={[styles.selector, !costCentre && styles.selectorProblem]} onPress={openCostCentres}>
+            <Text style={[styles.selectorText, !costCentre && styles.placeholder]}>{costCentre ? costCentre.name : `${PICK_COST_CENTRE}…`}</Text>
+            <Ionicons name="chevron-forward" size={16} color={colors.slate400} />
+          </TouchableOpacity>
+          <Text style={styles.siteNote}>What the scheduled work is costed to. Added to the job&apos;s PO when the job syncs.</Text>
+        </>
+      )}
+
       <Text style={[styles.label, { marginTop: 12 }]}>Description (optional)</Text>
       <TextInput style={[styles.input, styles.multiline]} value={description} onChangeText={setDescription} placeholder="What needs doing" placeholderTextColor={colors.slate400} multiline />
 
@@ -290,6 +321,25 @@ export default function NewJobScreen() {
         onClose={() => setCreatingCustomer(false)}
         onSaved={(id, _synced, name) => onCustomerCreated(id, name)}
       />
+
+      <PickerModal visible={pickCostCentre} title="Cost centre" onClose={() => setPickCostCentre(false)}>
+        {costCentres.length === 0 && (
+          <Text style={[styles.rowSub, { textTransform: "none", paddingVertical: 12 }]}>
+            {costCentresOnline ? "Loading…" : "Picking a cost centre needs signal the first time. Leave the job unscheduled, or try again with signal."}
+          </Text>
+        )}
+        {costCentres.map((c) => (
+          <TouchableOpacity
+            key={c.id}
+            style={[styles.row, styles.checkRow]}
+            onPress={() => { setCostCentre(c); setPickCostCentre(false); }}
+            accessibilityState={{ selected: costCentre?.id === c.id }}
+          >
+            <Text style={[styles.rowText, { flex: 1 }]}>{c.name}</Text>
+            {costCentre?.id === c.id && <Ionicons name="checkmark" size={20} color={colors.blue600} />}
+          </TouchableOpacity>
+        ))}
+      </PickerModal>
 
       <PickerModal visible={pickAssignee} title="Assign to (one or more)" onClose={() => setPickAssignee(false)} closeLabel="Done">
         <TouchableOpacity style={styles.row} onPress={() => { setAssignees([]); setPickAssignee(false); }}>
@@ -349,6 +399,7 @@ const styles = StyleSheet.create({
   selector: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", borderWidth: 1, borderColor: colors.border, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 12, backgroundColor: colors.card },
   selectorText: { fontSize: 14, color: colors.slate900, fontWeight: "500", flex: 1 },
   placeholder: { color: colors.slate400, fontWeight: "400" },
+  selectorProblem: { borderColor: colors.red600 },
   chips: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
   chip: { paddingHorizontal: 12, paddingVertical: 8, borderRadius: 999, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.card },
   chipActive: { backgroundColor: colors.blue600, borderColor: colors.blue600 },

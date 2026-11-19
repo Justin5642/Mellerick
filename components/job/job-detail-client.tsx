@@ -206,8 +206,14 @@ export function JobDetailClient({ job, currentUserId, photos: initialPhotos, doc
   // Expenses and Time can tag against them and the PO tab can show actual
   // spend/hours per stage instead of just per job.
   const costCenters = purchaseOrders.flatMap((po: any) =>
-    (po.po_cost_centers ?? []).map((cc: any) => ({ id: cc.id, name: cc.name, code: cc.code, po_number: po.po_number }))
+    (po.po_cost_centers ?? []).map((cc: any) => ({ id: cc.id, name: cc.name, code: cc.code, po_number: po.po_number, cost_centre_id: cc.cost_centre_id ?? null }))
   );
+  // A cost centre added to the job from the Schedule dialog's picker (a $0
+  // line, 19 Nov 2026): re-read the POs so every tab sees the new line.
+  const refreshPurchaseOrders = async () => {
+    const { data } = await createClient().from("purchase_orders").select("*, po_cost_centers(*)").eq("job_id", job.id).order("created_at");
+    if (data) setPurchaseOrders(data);
+  };
 
   // The bookings shown in the header, on Overview and in the Schedule
   // dialog. Without the bookings table (0079 yet)
@@ -541,6 +547,8 @@ export function JobDetailClient({ job, currentUserId, photos: initialPhotos, doc
           staff={staff}
           currentUserId={currentUserId}
           costCenters={costCenters}
+          scheduledCostCenterId={job.scheduled_cost_center_id ?? null}
+          onCostCentreAdded={() => void refreshPurchaseOrders()}
           bookings={bookings}
           bookingsReady={bookingsReady}
           onReopen={() => setActiveTab("overview")}
