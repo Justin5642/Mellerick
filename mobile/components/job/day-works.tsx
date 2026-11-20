@@ -13,6 +13,7 @@ import { RoleGate } from "../../design/guards/RoleGate";
 import { signatureWebStyle } from "./signature";
 import { TruckLoadsSection, type TruckLoadsLoaded } from "./truck-loads";
 import { InvoiceDayWorksSheet, VoidReasonSheet } from "./day-works-office";
+import { meterNote, prefillMeters } from "../../lib/komtraxMeter";
 import {
   DAY_WORKS_OFFLINE,
   STATUS_LABEL,
@@ -409,9 +410,11 @@ function EntrySheet({ draft, setDraft, view, saving, onSave, onCancel }: {
   onCancel: () => void;
 }) {
   const [showDate, setShowDate] = useState(false);
-  const set = (patch: Partial<DayWorksDraft>) => setDraft({ ...draft, ...patch });
+  // An engine-hour line on a Komtrax machine fills its meter readings for that day (editable).
+  const set = (patch: Partial<DayWorksDraft>) => setDraft(prefillMeters({ ...draft, ...patch }, view.meter_readings));
   const machine = view.machines.find((m) => m.id === draft.equipment_id);
   const opt = draftOption(draft, view.machines);
+  const komtraxNote = opt?.hire_unit === "engine_hour" ? meterNote(draft, view.meter_readings) : null;
   // The whole fleet is listed; a machine with no hire rate is shown greyed and can't be picked.
   const { ready, noRate } = splitMachinesByHire(view.machines);
   const today = localDateKey(new Date());
@@ -499,6 +502,7 @@ function EntrySheet({ draft, setDraft, view, saving, onSave, onCancel }: {
                 <Field label="Meter closing" value={draft.meter_close} onChange={(v) => set({ meter_close: v })} numeric />
               </View>
             )}
+            {komtraxNote && <Text style={styles.meta}>{komtraxNote}</Text>}
             {(opt.hire_unit === "km" || opt.hire_unit === "move") && (
               <Field label={opt.hire_unit === "move" ? "Loaded km" : "Km"} value={draft.km} onChange={(v) => set({ km: v })} numeric placeholder="e.g. 42" />
             )}

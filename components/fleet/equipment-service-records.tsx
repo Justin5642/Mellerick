@@ -18,6 +18,7 @@ import {
   SERVICE_TYPE_LABELS,
   dueLabel,
   serviceDue,
+  type LiveHours,
   serviceInvoicePath,
   sortRecords,
   type ServiceRecord,
@@ -69,6 +70,7 @@ export function EquipmentServiceRecords({
   canEdit,
   currentUserId,
   today,
+  liveHours = null,
 }: {
   equipmentId: string;
   /** null = the table is not in this database yet (0099 unapplied). */
@@ -79,6 +81,8 @@ export function EquipmentServiceRecords({
   canEdit: boolean;
   currentUserId: string;
   today: string;
+  /** Komtrax's live hour meter (0113 (draft)), when this machine reports one. */
+  liveHours?: LiveHours | null;
 }) {
   const supabase = createClient();
   const [showForm, setShowForm] = useState(false);
@@ -90,7 +94,7 @@ export function EquipmentServiceRecords({
   const [readNote, setReadNote] = useState<{ tone: "ok" | "warn"; text: string } | null>(null);
 
   const sorted = useMemo(() => sortRecords(records ?? []), [records]);
-  const due = useMemo(() => serviceDue(records ?? [], today), [records, today]);
+  const due = useMemo(() => serviceDue(records ?? [], today, liveHours), [records, today, liveHours]);
   const linked = new Set((records ?? []).map((r) => r.expense_id).filter(Boolean));
   const linkable = expenses.filter((e) => !linked.has(e.id));
   const expenseById = new Map(expenses.map((e) => [e.id, e]));
@@ -293,7 +297,7 @@ export function EquipmentServiceRecords({
           {dueLabel(due)}{due.dueDate ? ` (${formatDate(due.dueDate)})` : ""}
         </span>
         {due.dueKm != null && <span>Due at {due.dueKm.toLocaleString("en-AU")} km{due.lastKm != null ? ` · last recorded ${due.lastKm.toLocaleString("en-AU")} km` : ""}</span>}
-        {due.dueHours != null && <span>Due at {due.dueHours.toLocaleString("en-AU")} h{due.lastHours != null ? ` · last recorded ${due.lastHours.toLocaleString("en-AU")} h` : ""}</span>}
+        {due.dueHours != null && <span>Due at {due.dueHours.toLocaleString("en-AU")} h{due.liveHours != null ? ` · meter now ${due.liveHours.toLocaleString("en-AU")} h (Komtrax)` : due.lastHours != null ? ` · last recorded ${due.lastHours.toLocaleString("en-AU")} h` : ""}</span>}
       </div>
 
       {canEdit && !showForm && (

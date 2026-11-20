@@ -1,5 +1,6 @@
 import { supabase } from "./supabase";
 import { fetchWithTimeout } from "./fetchWithTimeout";
+import type { MeterReadings } from "./komtraxMeter";
 
 // Day Works / Hire on the phone (Stage 2, Nov 2026; web routes under
 // /api/jobs/[id]/hire-entries, migration 0108). The crew add the day's hire
@@ -82,6 +83,8 @@ export type DayWorksState =
       entries: DayWorksEntry[];
       clashes: DayWorksClash[];
       pricing?: DayWorksOfficePricing;
+      /** Komtrax hour-meter readings (0113 (draft)) by machine and day — hours only. Absent from older servers. */
+      meter_readings?: MeterReadings;
     };
 
 /** What every write answers: the fresh tab, the entry saved, and any warning (an attachment clash). */
@@ -196,6 +199,8 @@ export interface DayWorksDraft {
   dropoff: string;
   description: string;
   attachment_ids: string[];
+  /** What Komtrax filled into the meter fields (lib/komtraxMeter.ts). */
+  meter_auto?: { open: string; close: string } | null;
 }
 
 export function emptyDraft(today: string): DayWorksDraft {

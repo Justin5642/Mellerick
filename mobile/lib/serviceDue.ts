@@ -38,6 +38,14 @@ export const SERVICE_TYPE_EXPENSE_CATEGORY: Record<string, string> = {
 
 /** "Due soon" window. */
 export const DUE_SOON_DAYS = 30;
+/** "Due soon" window on a live hour meter. */
+export const DUE_SOON_HOURS = 50;
+
+/** A live hour-meter reading (Komtrax). */
+export interface LiveHours {
+  hours: number;
+  at: string | null;
+}
 
 export type DueState = "overdue" | "due_soon" | "ok" | "no_due_date" | "none";
 
@@ -49,9 +57,16 @@ export interface ServiceDue {
   daysUntil: number | null;
   dueKm: number | null;
   dueHours: number | null;
-  /** Highest readings on any record — the most recent known. */
+  /** Highest readings known — the records', or the live meter's when higher. */
   lastKm: number | null;
   lastHours: number | null;
+  /** The live meter (Komtrax), when there is one. */
+  liveHours: number | null;
+  liveHoursAt: string | null;
+  /** Engine hours left until the hours target (negative = past it); live meter only. */
+  hoursUntil: number | null;
+  /** Which target set `state`: the date, or the live hours. */
+  dueBy: "date" | "hours" | null;
 }
 
 const toDay = (k: string) => Date.parse(`${k}T00:00:00Z`) / 86_400_000;
@@ -63,7 +78,9 @@ export function sortRecords(records: ServiceRecord[]): ServiceRecord[] {
   );
 }
 
-export function serviceDue(records: ServiceRecord[], today: string): ServiceDue {
+const STATE_RANK: Record<"overdue" | "due_soon" | "ok", number> = { overdue: 2, due_soon: 1, ok: 0 };
+
+export function serviceDue(records: ServiceRecord[], today: string, live?: LiveHours | null): ServiceDue {
   const sorted = sortRecords(records);
   const latest = sorted[0] ?? null;
   // The due date/km/hours come from the newest record that SET one — not the
@@ -72,21 +89,41 @@ export function serviceDue(records: ServiceRecord[], today: string): ServiceDue 
   const planner = sorted.find((r) => r.next_due_date || r.next_due_km != null || r.next_due_hours != null) ?? null;
   const kms = records.map((r) => r.odometer_km).filter((v): v is number => v != null);
   const hrs = records.map((r) => (r.engine_hours == null ? null : Number(r.engine_hours))).filter((v): v is number => v != null);
+  const liveHours = live && Number.isFinite(live.hours) ? live.hours : null;
+  if (liveHours !== null) hrs.push(liveHours);
+  const dueHours = planner?.next_due_hours == null ? null : Number(planner.next_due_hours);
+  const hoursUntil = dueHours !== null && liveHours !== null ? Math.round((dueHours - liveHours) * 10) / 10 : null;
   const base = {
     latest,
     dueKm: planner?.next_due_km ?? null,
-    dueHours: planner?.next_due_hours == null ? null : Number(planner.next_due_hours),
+    dueHours,
     lastKm: kms.length ? Math.max(...kms) : null,
     lastHours: hrs.length ? Math.max(...hrs) : null,
+    liveHours,
+    liveHoursAt: liveHours !== null ? live?.at ?? null : null,
+    hoursUntil,
   };
-  if (!latest) return { ...base, state: "none", dueDate: null, daysUntil: null };
-  if (!planner?.next_due_date) return { ...base, state: "no_due_date", dueDate: null, daysUntil: null };
+  if (!latest) return { ...base, state: "none", dueDate: null, daysUntil: null, dueBy: null };
+  const hoursState = hoursUntil === null ? null : hoursUntil < 0 ? "overdue" : hoursUntil <= DUE_SOON_HOURS ? "due_soon" : "ok";
+  if (!planner?.next_due_date) {
+    if (hoursState) return { ...base, state: hoursState, dueDate: null, daysUntil: null, dueBy: "hours" };
+    return { ...base, state: "no_due_date", dueDate: null, daysUntil: null, dueBy: null };
+  }
   const daysUntil = Math.round(toDay(planner.next_due_date) - toDay(today));
-  const state: DueState = daysUntil < 0 ? "overdue" : daysUntil <= DUE_SOON_DAYS ? "due_soon" : "ok";
-  return { ...base, state, dueDate: planner.next_due_date, daysUntil };
+  const dateState = daysUntil < 0 ? "overdue" : daysUntil <= DUE_SOON_DAYS ? "due_soon" : "ok";
+  // The worse of the two decides; a tie stays with the date.
+  const byHours = hoursState !== null && STATE_RANK[hoursState] > STATE_RANK[dateState];
+  return { ...base, state: byHours ? hoursState! : dateState, dueDate: planner.next_due_date, daysUntil, dueBy: byHours ? "hours" : "date" };
 }
 
+const engineHours = (h: number) => `${Math.round(Math.abs(h)).toLocaleString("en-AU")} engine hour${Math.round(Math.abs(h)) === 1 ? "" : "s"}`;
+
 export function dueLabel(d: ServiceDue): string {
+  if (d.dueBy === "hours" && d.hoursUntil !== null) {
+    if (d.state === "overdue") return `Service overdue by ${engineHours(d.hoursUntil)}`;
+    if (d.state === "due_soon") return Math.round(d.hoursUntil) === 0 ? "Service due now (engine hours)" : `Service due in ${engineHours(d.hoursUntil)}`;
+    return `Next service in ${engineHours(d.hoursUntil)}`;
+  }
   switch (d.state) {
     case "none":
       return "No service recorded";

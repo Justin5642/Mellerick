@@ -25,7 +25,25 @@ export interface DigestInput {
   coverage: MonthCoverage[];
   overdue: { total: number; count: number; top: DigestDebtor[] };
   awaitingInvoice: { count: number; oldest: DigestAwaitingInvoice[] };
+  /** Komtrax fault codes in the last 7 days (0113 (draft)); null/undefined = Komtrax not set up, section left out. */
+  machineFaults?: DigestMachineFault[] | null;
 }
+
+/** One machine + fault code seen in the last week (lib/komtrax-data.ts groupFaults). */
+export interface DigestMachineFault {
+  machine: string;
+  code: string;
+  severity: string | null;
+  description: string | null;
+  /** ISO instant */
+  lastSeen: string;
+  times: number;
+}
+
+const FAULT_LIMIT = 12;
+const faultDay = (iso: string) => new Date(iso).toLocaleDateString("en-AU", { day: "numeric", month: "short", timeZone: "Australia/Melbourne" });
+const faultLine = (f: DigestMachineFault) =>
+  `${f.machine}  ${f.code}${f.severity ? ` (${f.severity})` : ""}  ${f.description ?? ""}  last ${faultDay(f.lastSeen)}${f.times > 1 ? `, ${f.times} times` : ""}`;
 
 const money = (n: number) => `$${Math.round(n).toLocaleString("en-AU")}`;
 const RECENT_MONTHS = 3;
@@ -35,6 +53,9 @@ export function buildDigest(i: DigestInput): { subject: string; html: string; te
   const link = `${i.appUrl}/dashboard/reports/unallocated-bills`;
   const recent = i.coverage.slice(-RECENT_MONTHS);
   const oldest = i.unallocated.bills.slice(0, LIST_LIMIT);
+  const faults = i.machineFaults ?? null;
+  const shownFaults = (faults ?? []).slice(0, FAULT_LIMIT);
+  const faultsHeading = faults ? `ACTIVE MACHINE FAULTS (LAST 7 DAYS): ${faults.length === 0 ? "none" : faults.length}` : null;
 
   const subject =
     i.unallocated.count === 0
@@ -60,6 +81,15 @@ export function buildDigest(i: DigestInput): { subject: string; html: string; te
     "",
     `SUPPLIER POs STILL WAITING FOR THEIR INVOICE: ${i.awaitingInvoice.count}`,
     ...i.awaitingInvoice.oldest.map((p) => `  - ${p.poNumber}  ${p.supplier}  ordered ${p.orderedOn ?? "?"}`),
+    ...(faultsHeading
+      ? [
+          "",
+          faultsHeading,
+          ...shownFaults.map((f) => `  - ${faultLine(f)}`),
+          faults!.length > shownFaults.length ? `  …and ${faults!.length - shownFaults.length} more` : "",
+          faults!.length > 0 ? `Details on each machine in Fleet: ${i.appUrl}/dashboard/fleet` : "",
+        ]
+      : []),
   ]
     .filter((l, idx, a) => !(l === "" && a[idx - 1] === ""))
     .join("\n");
@@ -81,6 +111,13 @@ ${h(`Overdue debtors: ${i.overdue.count} invoices, ${money(i.overdue.total)}`)}
 ${table(i.overdue.top.map((d) => row([escapeHtml(d.customer), `#${escapeHtml(String(d.invoiceNumber))}`, `due ${escapeHtml(d.dueDate ?? "?")}`, money(d.balance)])))}
 ${h(`Supplier POs still waiting for their invoice: ${i.awaitingInvoice.count}`)}
 ${table(i.awaitingInvoice.oldest.map((p) => row([escapeHtml(p.poNumber), escapeHtml(p.supplier), `ordered ${escapeHtml(p.orderedOn ?? "?")}`])))}
+${
+  faults
+    ? `${h(`Active machine faults (last 7 days): ${faults.length === 0 ? "none" : faults.length}`)}
+${table(shownFaults.map((f) => row([escapeHtml(f.machine), `<code>${escapeHtml(f.code)}</code>${f.severity ? ` (${escapeHtml(f.severity)})` : ""}`, escapeHtml(f.description ?? ""), `last ${escapeHtml(faultDay(f.lastSeen))}${f.times > 1 ? `, ${f.times}×` : ""}`])))}
+${faults.length > shownFaults.length ? `<p style="font-size:13px;color:#64748b;">…and ${faults.length - shownFaults.length} more</p>` : ""}`
+    : ""
+}
 </div>`;
 
   return { subject, html, text };

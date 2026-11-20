@@ -86,3 +86,20 @@ export function appUrl(): string {
   const configured = optionalEnv("APP_URL") ?? optionalEnv("NEXT_PUBLIC_APP_URL");
   return (configured ?? PRODUCTION_APP_URL).replace(/\/+$/, "");
 }
+
+// Komtrax (Komatsu ISO 15143-3 / AEMP 2.0 API, lib/komtrax.ts). The login is a
+// SECRET set in Vercel (Production) as KOMTRAX_USERNAME / KOMTRAX_PASSWORD —
+// never log it, never put it in an error message. Unset = the feature is off
+// (the sync answers {skipped:true}, the UI says "Komtrax not connected").
+export const KOMTRAX_DEFAULT_SUBSCRIBER_ID = "400673";
+
+export function komtraxCredentials(): { userName: string; password: string } | null {
+  const userName = optionalEnv("KOMTRAX_USERNAME");
+  const password = optionalEnv("KOMTRAX_PASSWORD");
+  return userName && password ? { userName, password } : null;
+}
+
+/** Mellerick's Komtrax subscriber id (not secret; from Komatsu's email). */
+export function komtraxSubscriberId(): string {
+  return optionalEnv("KOMTRAX_SUBSCRIBER_ID") ?? KOMTRAX_DEFAULT_SUBSCRIBER_ID;
+}

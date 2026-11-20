@@ -19,7 +19,8 @@ import { dateKeyInBusinessTZ } from "../../lib/date";
 import { ServiceHistory } from "../../components/fleet/ServiceHistory";
 import { EquipmentYearCost } from "../../components/fleet/EquipmentYearCost";
 import { HireSetupSheet } from "../../components/fleet/HireSetupSheet";
-import { MAX_UPLOAD_BYTES, base64Bytes, uploadEquipmentDocument } from "../../lib/fleetOffice";
+import { MAX_UPLOAD_BYTES, base64Bytes, komtraxLiveHours, loadKomtrax, uploadEquipmentDocument, type KomtraxForMachine } from "../../lib/fleetOffice";
+import { KomtraxCard } from "../../components/fleet/KomtraxCard";
 
 const CATEGORIES: EquipmentExpenseCategory[] = ["service", "repair", "fuel", "tyres", "registration", "insurance", "other"];
 
@@ -54,6 +55,9 @@ export default function EquipmentDetailScreen() {
   const isOffice = useIsOfficeOrAdmin();
   const [hireOpen, setHireOpen] = useState(false);
   const [uploadingDoc, setUploadingDoc] = useState(false);
+  // Komtrax (0113 (draft); office/admin, online): hours, location, fuel, faults.
+  const [komtrax, setKomtrax] = useState<KomtraxForMachine | null>(null);
+  const [komtraxError, setKomtraxError] = useState<string | null>(null);
   const today = dateKeyInBusinessTZ(new Date());
 
   // Four reads in one Promise.all, and these read modules throw now: a single
@@ -68,13 +72,19 @@ export default function EquipmentDetailScreen() {
       setExpenses(ex);
       setUsage(us);
       setDocuments(docs);
+      if (isOffice) {
+        // Never takes the screen down: shown under its own heading.
+        loadKomtrax(id)
+          .then((k) => { setKomtrax(k); setKomtraxError(null); })
+          .catch((e: unknown) => setKomtraxError(e instanceof Error ? e.message : "Couldn't load."));
+      }
     } catch (err) {
       setError(err);
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [id]);
+  }, [id, isOffice]);
 
   // getEquipmentDocumentSignedUrl throws on a Storage error rather than posing
   // as "no URL", so without this catch the row's spinner never cleared and the
@@ -245,7 +255,13 @@ export default function EquipmentDetailScreen() {
         estimatedAnnualCost={cost.annualTotalCost}
       />
 
-      <ServiceHistory equipmentId={id} today={today} onCostLogged={() => void load()} />
+      {isOffice && (
+        <RoleGate roles={["office", "admin"]}>
+          <KomtraxCard data={komtrax} error={komtraxError} />
+        </RoleGate>
+      )}
+
+      <ServiceHistory equipmentId={id} today={today} onCostLogged={() => void load()} liveHours={komtraxLiveHours(komtrax)} />
 
       <View style={styles.sectionHead}>
         <Text style={styles.section}>Expenses</Text>

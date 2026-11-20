@@ -7,6 +7,7 @@ import { EquipmentDetailClient } from "@/components/fleet/equipment-detail-clien
 import { attachEffectiveRates } from "@/lib/fleet-rates";
 import { dateKeyInBusinessTZ } from "@/lib/date";
 import { isServiceTableMissing, type ServiceRecord } from "@/lib/service-due";
+import { loadKomtraxForEquipment, type KomtraxMachineLoad } from "@/lib/komtrax-data";
 
 export default async function EquipmentDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -42,6 +43,18 @@ export default async function EquipmentDetailPage({ params }: { params: Promise<
   if (servicesRes.error && !isServiceTableMissing(servicesRes.error)) console.error("fleet: service records unavailable", servicesRes.error);
   const services = servicesRes.error ? null : ((servicesRes.data ?? []) as ServiceRecord[]);
 
+  // Komtrax (0113 (draft), office/admin by RLS): hours, location, fuel, faults. A read
+  // failure only hides the card.
+  const isOfficeOrAdmin = viewer?.profile?.role === "admin" || viewer?.profile?.role === "office";
+  let komtrax: KomtraxMachineLoad | null = null;
+  if (isOfficeOrAdmin) {
+    try {
+      komtrax = await loadKomtraxForEquipment(supabase, id);
+    } catch (err) {
+      console.error("fleet: Komtrax unavailable", err);
+    }
+  }
+
   let isAdmin = false;
   const user = viewer?.user;
   if (user) {
@@ -53,6 +66,7 @@ export default async function EquipmentDetailPage({ params }: { params: Promise<
       equipment={withRate}
       today={today}
       services={services}
+      komtrax={komtrax}
       canEditServices={viewer?.profile?.role === "admin" || viewer?.profile?.role === "office"}
       currentUserId={user!.id}
       isAdmin={isAdmin}

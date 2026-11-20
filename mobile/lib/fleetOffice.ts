@@ -292,3 +292,52 @@ export const updateHireAttachment = (id: string, patch: { day_rate?: number; is_
 
 export const uploadEquipmentDocument = (equipmentId: string, fileBase64: string, fileName: string) =>
   call<{ document: { id: string } }>(`/api/fleet/${equipmentId}/documents`, { method: "POST", body: JSON.stringify({ fileBase64, fileName }) });
+
+// ---------------------------------------------------------------------------
+// Komtrax (Komatsu machine data, 0113 (draft)) — office/admin, online. Hours, fuel,
+// position and fault codes: no money.
+// ---------------------------------------------------------------------------
+
+export interface KomtraxMachine {
+  id: string;
+  model: string;
+  serial: string;
+  hours: number | null;
+  hours_at: string | null;
+  lat: number | null;
+  lng: number | null;
+  location_at: string | null;
+  fuel_used_cumulative: number | null;
+  fuel_used_last24: number | null;
+  fuel_units: string | null;
+  fuel_remaining_pct: number | null;
+  def_remaining_pct: number | null;
+  idle_hours: number | null;
+  last_seen_at: string | null;
+}
+
+export interface KomtraxFault {
+  id: string;
+  code: string;
+  severity: string | null;
+  description: string | null;
+  occurred_at: string;
+}
+
+/** connected = the server has a Komtrax login; ready = 0113 (draft) applied; machine null = not a linked Komatsu. */
+export interface KomtraxForMachine {
+  connected: boolean;
+  ready: boolean;
+  machine: KomtraxMachine | null;
+  faults: KomtraxFault[];
+}
+
+export const loadKomtrax = (equipmentId: string) => call<KomtraxForMachine>(`/api/fleet/${equipmentId}/komtrax`);
+
+/** A maps link for the last known position (as the web's lib/komtrax-view.ts). */
+export const komtraxMapsUrl = (lat: number, lng: number) => `https://www.google.com/maps/search/?api=1&query=${lat.toFixed(6)},${lng.toFixed(6)}`;
+
+/** Komtrax's hour meter as service-due's live reading, or null. */
+export function komtraxLiveHours(k: KomtraxForMachine | null): { hours: number; at: string | null } | null {
+  return k?.ready && k.machine?.hours != null ? { hours: k.machine.hours, at: k.machine.hours_at } : null;
+}

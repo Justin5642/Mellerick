@@ -10,7 +10,7 @@ import { prepareImage } from "../../lib/imageUpload";
 import { cryptoIdGen } from "../../lib/data/ids";
 import { openExternalUrl } from "../../lib/open-external-url";
 import { getEquipmentReceiptSignedUrl } from "../../lib/data/reads/fleet";
-import { SERVICE_TYPE_LABELS, dueLabel, serviceDue, sortRecords, type ServiceRecord } from "../../lib/serviceDue";
+import { SERVICE_TYPE_LABELS, dueLabel, serviceDue, sortRecords, type LiveHours, type ServiceRecord } from "../../lib/serviceDue";
 import { applyServiceInvoiceRead } from "../../lib/serviceInvoiceForm";
 import {
   MAX_UPLOAD_BYTES,
@@ -41,7 +41,7 @@ import {
 
 const fmtDate = (k: string) => new Date(`${k}T00:00:00`).toLocaleDateString("en-AU", { day: "numeric", month: "short", year: "numeric" });
 
-export function ServiceHistory({ equipmentId, today, onCostLogged }: { equipmentId: string; today: string; onCostLogged: () => void }) {
+export function ServiceHistory({ equipmentId, today, onCostLogged, liveHours = null }: { equipmentId: string; today: string; onCostLogged: () => void; liveHours?: LiveHours | null }) {
   const [history, setHistory] = useState<History | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [form, setForm] = useState<ServiceForm | null>(null);
@@ -62,7 +62,7 @@ export function ServiceHistory({ equipmentId, today, onCostLogged }: { equipment
   useEffect(() => { void load(); }, [load]);
 
   const records = useMemo(() => sortRecords(history?.records ?? []), [history]);
-  const due = useMemo(() => serviceDue(history?.records ?? [], today), [history, today]);
+  const due = useMemo(() => serviceDue(history?.records ?? [], today, liveHours), [history, today, liveHours]);
   const expenseById = useMemo(() => new Map((history?.expenses ?? []).map((e) => [e.id, e])), [history]);
   const linkable = useMemo(() => {
     const linked = new Set((history?.records ?? []).map((r) => r.expense_id).filter(Boolean));
@@ -190,7 +190,7 @@ export function ServiceHistory({ equipmentId, today, onCostLogged }: { equipment
               <View style={{ flex: 1 }}>
                 <Text style={styles.dueText}>{dueLabel(due)}{due.dueDate ? ` (${fmtDate(due.dueDate)})` : ""}</Text>
                 {due.dueKm != null && <Text style={styles.meta}>Due at {due.dueKm.toLocaleString("en-AU")} km{due.lastKm != null ? ` · last recorded ${due.lastKm.toLocaleString("en-AU")} km` : ""}</Text>}
-                {due.dueHours != null && <Text style={styles.meta}>Due at {due.dueHours.toLocaleString("en-AU")} h{due.lastHours != null ? ` · last recorded ${due.lastHours.toLocaleString("en-AU")} h` : ""}</Text>}
+                {due.dueHours != null && <Text style={styles.meta}>Due at {due.dueHours.toLocaleString("en-AU")} h{due.liveHours != null ? ` · meter now ${due.liveHours.toLocaleString("en-AU")} h (Komtrax)` : due.lastHours != null ? ` · last recorded ${due.lastHours.toLocaleString("en-AU")} h` : ""}</Text>}
               </View>
             </View>
             {records.length === 0 ? <Text style={styles.empty}>No services recorded yet.</Text> : records.map((r) => {
