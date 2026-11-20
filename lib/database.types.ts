@@ -2383,6 +2383,189 @@ export type Database = {
           },
         ]
       }
+      komtrax_faults: {
+        Row: {
+          code: string
+          description: string | null
+          first_seen_at: string
+          id: string
+          machine_id: string
+          occurred_at: string
+          severity: string | null
+          source: string | null
+        }
+        Insert: {
+          code: string
+          description?: string | null
+          first_seen_at?: string
+          id?: string
+          machine_id: string
+          occurred_at: string
+          severity?: string | null
+          source?: string | null
+        }
+        Update: {
+          code?: string
+          description?: string | null
+          first_seen_at?: string
+          id?: string
+          machine_id?: string
+          occurred_at?: string
+          severity?: string | null
+          source?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "komtrax_faults_machine_id_fkey"
+            columns: ["machine_id"]
+            isOneToOne: false
+            referencedRelation: "komtrax_machines"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      komtrax_hour_readings: {
+        Row: {
+          hours: number
+          machine_id: string
+          read_at: string
+        }
+        Insert: {
+          hours: number
+          machine_id: string
+          read_at: string
+        }
+        Update: {
+          hours?: number
+          machine_id?: string
+          read_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "komtrax_hour_readings_machine_id_fkey"
+            columns: ["machine_id"]
+            isOneToOne: false
+            referencedRelation: "komtrax_machines"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      komtrax_machines: {
+        Row: {
+          def_remaining_pct: number | null
+          equipment_id: string | null
+          first_seen_at: string
+          fuel_remaining_pct: number | null
+          fuel_units: string | null
+          fuel_used_at: string | null
+          fuel_used_cumulative: number | null
+          fuel_used_last24: number | null
+          hours: number | null
+          hours_at: string | null
+          id: string
+          idle_hours: number | null
+          komtrax_label: string | null
+          last_seen_at: string
+          lat: number | null
+          lng: number | null
+          location_at: string | null
+          make_code: string
+          matched_by: string | null
+          model: string
+          oem_name: string | null
+          serial: string
+          updated_at: string
+        }
+        Insert: {
+          def_remaining_pct?: number | null
+          equipment_id?: string | null
+          first_seen_at?: string
+          fuel_remaining_pct?: number | null
+          fuel_units?: string | null
+          fuel_used_at?: string | null
+          fuel_used_cumulative?: number | null
+          fuel_used_last24?: number | null
+          hours?: number | null
+          hours_at?: string | null
+          id?: string
+          idle_hours?: number | null
+          komtrax_label?: string | null
+          last_seen_at?: string
+          lat?: number | null
+          lng?: number | null
+          location_at?: string | null
+          make_code: string
+          matched_by?: string | null
+          model: string
+          oem_name?: string | null
+          serial: string
+          updated_at?: string
+        }
+        Update: {
+          def_remaining_pct?: number | null
+          equipment_id?: string | null
+          first_seen_at?: string
+          fuel_remaining_pct?: number | null
+          fuel_units?: string | null
+          fuel_used_at?: string | null
+          fuel_used_cumulative?: number | null
+          fuel_used_last24?: number | null
+          hours?: number | null
+          hours_at?: string | null
+          id?: string
+          idle_hours?: number | null
+          komtrax_label?: string | null
+          last_seen_at?: string
+          lat?: number | null
+          lng?: number | null
+          location_at?: string | null
+          make_code?: string
+          matched_by?: string | null
+          model?: string
+          oem_name?: string | null
+          serial?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "komtrax_machines_equipment_id_fkey"
+            columns: ["equipment_id"]
+            isOneToOne: false
+            referencedRelation: "equipment"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      komtrax_sync_state: {
+        Row: {
+          id: boolean
+          last_error: string | null
+          last_machines: number | null
+          last_ok_at: string | null
+          last_requests: number | null
+          last_run_at: string | null
+          url_calls: Json
+        }
+        Insert: {
+          id?: boolean
+          last_error?: string | null
+          last_machines?: number | null
+          last_ok_at?: string | null
+          last_requests?: number | null
+          last_run_at?: string | null
+          url_calls?: Json
+        }
+        Update: {
+          id?: boolean
+          last_error?: string | null
+          last_machines?: number | null
+          last_ok_at?: string | null
+          last_requests?: number | null
+          last_run_at?: string | null
+          url_calls?: Json
+        }
+        Relationships: []
+      }
       login_lockouts: {
         Row: {
           failed_count: number

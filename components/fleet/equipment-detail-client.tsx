@@ -16,12 +16,16 @@ import { EquipmentYearCost } from "./equipment-year-cost";
 import { EquipmentServiceRecords } from "./equipment-service-records";
 import { dueLabel, serviceDue, type ServiceRecord } from "@/lib/service-due";
 import type { EffectiveRate } from "@/lib/fleet-costs";
+import type { KomtraxMachineLoad } from "@/lib/komtrax-data";
+import { EquipmentKomtrax } from "./equipment-komtrax";
 
 interface Props {
   equipment: any;
   today: string;
   /** null = service records not in this database yet (0099). */
   services: ServiceRecord[] | null;
+  /** Komtrax data (office/admin); null for others or when unreadable. */
+  komtrax?: KomtraxMachineLoad | null;
   canEditServices: boolean;
   currentUserId: string;
   isAdmin: boolean;
@@ -31,11 +35,13 @@ interface Props {
   staff: any[];
 }
 
-export function EquipmentDetailClient({ equipment, today, services: initialServices, canEditServices, currentUserId, isAdmin, documents: initialDocuments, expenses: initialExpenses, usage, staff }: Props) {
+export function EquipmentDetailClient({ equipment, today, services: initialServices, komtrax = null, canEditServices, currentUserId, isAdmin, documents: initialDocuments, expenses: initialExpenses, usage, staff }: Props) {
   const [documents, setDocuments] = useState(initialDocuments);
   const [expenses, setExpenses] = useState(initialExpenses);
   const [services, setServices] = useState(initialServices);
-  const due = services ? serviceDue(services, today) : null;
+  // Komtrax's live hour meter, when this machine reports one, counts toward service due.
+  const liveHours = komtrax?.ready && komtrax.machine?.hours != null ? { hours: komtrax.machine.hours, at: komtrax.machine.hours_at } : null;
+  const due = services ? serviceDue(services, today, liveHours) : null;
   const [costDialogOpen, setCostDialogOpen] = useState(false);
 
   const { costPerHour: estimatePerHour, annualTotalCost } = computeEquipmentCost(equipment);
@@ -138,8 +144,12 @@ export function EquipmentDetailClient({ equipment, today, services: initialServi
                   <Wrench className="w-3.5 h-3.5 inline mr-1.5 -mt-0.5" />
                   {dueLabel(due)}{due.dueDate ? ` (${formatDate(due.dueDate)})` : ""}
                   {due.dueKm != null ? ` · or at ${due.dueKm.toLocaleString("en-AU")} km` : ""}
+                  {due.dueHours != null ? ` · or at ${due.dueHours.toLocaleString("en-AU")} engine h` : ""}
+                  {due.liveHours != null ? ` · meter ${due.liveHours.toLocaleString("en-AU")} h (Komtrax)` : ""}
                 </p>
               )}
+
+              <EquipmentKomtrax data={komtrax} />
 
               <EquipmentYearCost expenses={expenses} usage={usage} today={today} estimatedAnnualCost={annualTotalCost} />
 
@@ -195,6 +205,7 @@ export function EquipmentDetailClient({ equipment, today, services: initialServi
                 canEdit={canEditServices}
                 currentUserId={currentUserId}
                 today={today}
+                liveHours={liveHours}
               />
             </TabsContent>
 

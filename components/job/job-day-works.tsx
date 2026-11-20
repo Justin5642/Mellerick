@@ -18,6 +18,7 @@ import { dayWorksPeriodLabel, quantityProblem, type HireType, type HireUnit } fr
 import { splitMachinesByHire, type DayWorksView, type DayWorksEntry } from "@/lib/day-works-view";
 import { buildHireEntryRow } from "@/lib/day-works-entry";
 import { TruckLoadsCard, loadSummary, type TruckLoadsLoaded } from "./job-truck-loads";
+import { meterNote, prefillMeters, type MeterReadings } from "@/lib/komtrax-meter";
 
 // The job's Day Works / Hire tab (Stage 1, Nov 2026). Hire and cartage are
 // their own lines under the job — never part of the quoted value or a progress
@@ -29,7 +30,7 @@ import { TruckLoadsCard, loadSummary, type TruckLoadsLoaded } from "./job-truck-
 // the crew; amounts only for office/admin). Writes go straight to hire_entries
 // under RLS and its guard trigger, which refuse anything the crew may not do.
 
-type Loaded = DayWorksView & { ready: true; isOffice: boolean; userId: string };
+type Loaded = DayWorksView & { ready: true; isOffice: boolean; userId: string; meter_readings?: MeterReadings };
 type State = { status: "loading" } | { status: "error" } | { status: "not-ready" } | ({ status: "ok" } & Loaded);
 
 interface Draft {
@@ -46,6 +47,8 @@ interface Draft {
   dropoff: string;
   description: string;
   attachment_ids: string[];
+  /** What Komtrax filled into the meter fields (lib/komtrax-meter.ts). */
+  meter_auto?: { open: string; close: string } | null;
 }
 
 const money = (n: number) => `$${n.toLocaleString("en-AU", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -460,7 +463,9 @@ function EntryForm({ draft, setDraft, view, saving, onSave, onCancel }: {
   const { ready, noRate } = splitMachinesByHire(view.machines);
   const [t, u] = draft.optionKey.split("|") as [HireType | "", HireUnit | ""];
   const opt = m?.options.find((o) => o.hire_type === t && o.hire_unit === u) ?? null;
-  const set = (patch: Partial<Draft>) => setDraft({ ...draft, ...patch });
+  // An engine-hour line on a Komtrax machine fills its meter readings for that day.
+  const set = (patch: Partial<Draft>) => setDraft(prefillMeters({ ...draft, ...patch }, view.meter_readings));
+  const komtraxNote = opt?.hire_unit === "engine_hour" ? meterNote(draft, view.meter_readings) : null;
   const pickMachine = (id: string) => {
     const next = view.machines.find((x) => x.id === id);
     const only = next?.options.length === 1 ? `${next.options[0].hire_type}|${next.options[0].hire_unit}` : "";
@@ -552,6 +557,7 @@ function EntryForm({ draft, setDraft, view, saving, onSave, onCancel }: {
                     <Label>Meter closing</Label>
                     <Input type="number" inputMode="decimal" min={0} step={0.1} value={draft.meter_close} onChange={(e) => set({ meter_close: e.target.value })} />
                   </div>
+                  {komtraxNote && <p className="col-span-2 sm:col-span-4 text-xs text-slate-500">{komtraxNote}</p>}
                 </>
               )}
               {(opt.hire_unit === "km" || opt.hire_unit === "move") && (

@@ -27,6 +27,10 @@
       "schedule": "25 17 * * *"
     },
     {
+      "path": "/api/komtrax/sync",
+      "schedule": "47 */6 * * *"
+    },
+    {
       "path": "/api/reports/weekly-digest",
       "schedule": "30 19 * * 0"
     }

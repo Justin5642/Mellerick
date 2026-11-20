@@ -1245,6 +1245,80 @@ directly as before; the routes are there for them to share.
   phones with the next build (no new native module); the web routes must be
   deployed first.
 
+**Komtrax (Komatsu machine data), 20 Nov 2026; migration `0113` DRAFT — not applied yet.**
+Justin: connect Komatsu's Komtrax ISO 15143-3 (AEMP 2.0) web API so the
+Komatsu machines' own data flows into Fleet. Read-only toward Komatsu.
+- **What it reads** (`lib/komtrax.ts` sync, `lib/komtrax-parse.ts` parsing):
+  a fleet snapshot (`/v1/400673/Fleet/{page}`, 100 per page) — engine hours
+  (SMR, `CumulativeOperatingHours`), last known location + time, fuel used
+  (cumulative + last 24 h), fuel/DEF remaining %, idle hours — then per
+  machine the last 2 days' hour-meter and fault-code time series
+  (`…/MakeModelSerial/{make}/{model}/{serial}/{CumulativeOperatingHours|FaultCode}/{start}/{end}`;
+  `FaultCodes` is tried when `FaultCode` answers 404).
+- **Tables (`0113`)**: `komtrax_machines` (one per make/model/serial, latest
+  snapshot, `equipment_id` link + `matched_by` auto/office), `komtrax_hour_readings`,
+  `komtrax_faults`, `komtrax_sync_state` (one row: last run/ok, per-URL last
+  call times, `last_error` — no column grant to signed-in users). Office/admin
+  read by RLS; only the service role writes, except the office may set the
+  link (`equipment_id`, `matched_by` column grant). **No money column** (the
+  money-sweep regex is asserted). In no PowerSync stream (`sync-streams.yaml`
+  untouched); granted explicitly.
+- **Matching:** the register has no serial column, so the sync links a new
+  Komtrax machine when its serial appears as a whole word in exactly one
+  active fleet item's name, rego or notes (`matchEquipmentBySerial`).
+  Everything else: **Fleet → Komtrax machines** card (office/admin) — a
+  select per machine → `PATCH /api/komtrax/machines/[id]` (caller's client;
+  `matched_by='office'`, which the sync never overrides, including an unlink).
+- **Sync:** `GET /api/komtrax/sync` (cron `47 */6 * * *`, `requireCronSecret`)
+  and `POST` (admin — "Sync Komtrax" on the card). Token: `POST /token`,
+  form-encoded password grant, kept in memory for the run only (never
+  stored). **Rate limit:** Komatsu allows each URL once per 15 min per user —
+  a run within 15 min of the last one is answered `{skipped:true}` without
+  calling Komatsu, every URL's last call is kept in `url_calls` and skipped if
+  recent, and a run makes at most 80 requests (40 s budget). Errors: fixed
+  sentence to callers; status-only message to logs, `last_error` and
+  `reportError` (tags only) — never a body or credential.
+- **Service due** (`lib/service-due.ts`, mirrored at `mobile/lib/serviceDue.ts`):
+  `serviceDue(records, today, live)` takes Komtrax's hours as a live meter —
+  past the record's `next_due_hours` = overdue, within 50 h = due soon, the
+  worse of date and hours decides ("Service overdue by 12 engine hours").
+  Without a live meter, behaviour is unchanged. Used by the Fleet list, the
+  machine page and its Service history (web) and the phone's Service history.
+- **Machine page** (web `components/fleet/equipment-komtrax.tsx`; phone
+  `mobile/components/fleet/KomtraxCard.tsx` via `GET /api/fleet/[id]/komtrax`,
+  office/admin, online): hours + when read, idle hours, location ("Open in
+  maps"), fuel last 24 h / lifetime, tank/DEF %, fault codes from the last 30
+  days.
+- **Day Works engine-hour lines:** the hire-entries GET payload carries
+  `meter_readings` (machine → Melbourne day → first/last reading; hours only,
+  read with the service role after `requireOnJob`, last 62 days). A NEW
+  `engine_hour` line on a linked machine has its meter open/close filled from
+  that day's first and last readings (`lib/komtrax-meter.ts`, mirrored at
+  `mobile/lib/komtraxMeter.ts`, pinned by `tests/unit/komtrax-mirror.test.ts`);
+  editable, typed values never overwritten, the builder still signs.
+- **Weekly digest:** "Active machine faults (last 7 days)" — one line per
+  machine + code (`loadRecentFaultsForDigest`); left out when Komtrax tables
+  aren't there; a read failure never stops the email.
+- **Env:** `KOMTRAX_USERNAME`, `KOMTRAX_PASSWORD` (secret; already in Vercel
+  Production), optional `KOMTRAX_SUBSCRIBER_ID` (default `400673`) — accessors
+  in `lib/env.ts`. Unset → the sync answers `{skipped:true}` and Fleet says
+  "Komtrax not connected".
+- **Not verified against the live API** (no access from where it was
+  written). Parsing is built from the standard + Komatsu's manual and is
+  deliberately forgiving (case/`@`-insensitive keys, a single object as a list,
+  `{"#text": …}` values). Likeliest first-run tweaks: the exact JSON wrapping
+  of a time-series answer, the fault data-item name, the date format in the
+  series URL (`YYYY-MM-DDTHH:mm:ssZ` unencoded), and `MakeCode` vs `OEMName`
+  as the URL's make. The "first reading of the day" is only as early as
+  Komtrax's ~6-hourly refresh — the crew should check it against the meter.
+- **Apply order:** paste `0113_komtrax.sql` → paste
+  `supabase/tests/0113_komtrax_test.sql` (needs an active technician and
+  admin), trust only `0113 PASSED` → mark 0113's header applied and add the
+  ledger row → merge/deploy the web → admin: Fleet → Komtrax machines → Sync
+  Komtrax, then link any machine not linked by serial. The phone parts reach
+  devices with the next build (no native module) and need the web deployed.
+  No PowerSync redeploy.
+
 **Day Works lists the whole fleet; Fleet → Hire rates (16 Nov 2026; no migration).**
 Justin: "The whole Fleet doesn't seem to be there." The picker used to list
 only machines with an active `equipment_hire_options` row, and 0108 seeded
@@ -2402,6 +2476,7 @@ a shippable release.
 | **App Review account: limit it (0110)** | Justin | `0110` applied 2026-11-17 (gate test passed); sync streams redeployed and active the same day. Mark the reviewer in the SQL editor: `select set_config('request.jwt.claims', '{"role":"service_role"}', true); update profiles set limited_access = true where lower(email) = lower('<reviewer email>');` (expect UPDATE 1). Ledger: `insert into supabase_migrations.schema_migrations (version,name) values ('0110','limited_access_accounts') on conflict do nothing;` The phone hides the Backflow tab for it from the next build. |
 | **Truck loads: set rates (0111 applied)** | Justin | `0111` applied 2026-11-19 (gate test passed). Ledger row: `insert into supabase_migrations.schema_migrations (version,name) values ('0111','cartage_loads') on conflict do nothing;` Then: Fleet → Hire setup on each truck, add **Cartage per tonne** and/or **per m³** and **per km** rates; Settings → Truck loads, check the margin (15% by default); on jobs where quarry product is NOT in the quote, set the Day Works tab's "Quarry product on this job" to Extra. |
 | **Leave on the schedule: record 0112** | Justin | `0112` applied 2026-11-19 (gate test passed). Ledger row: `insert into supabase_migrations.schema_migrations (version,name) values ('0112','schedule_leave') on conflict do nothing;` No PowerSync redeploy. Who sees the leave type defaults to office + admin; change it in Settings → Leave on the schedule. Part days: add From/To times on the Leave Log entry. |
+| **Komtrax: apply 0113, then sync** | Justin | `0113` is a DRAFT. Paste `0113_komtrax.sql`, then `supabase/tests/0113_komtrax_test.sql`, trust only `0113 PASSED`; mark the header applied; ledger row: `insert into supabase_migrations.schema_migrations (version,name) values ('0113','komtrax') on conflict do nothing;` After the web deploys: admin → Fleet → Komtrax machines → **Sync Komtrax**, then link any Komatsu machine not linked by serial (or put its serial in the fleet item's notes). `KOMTRAX_USERNAME` / `KOMTRAX_PASSWORD` are already in Vercel Production. |
 | **Maestro flow 02** | Avi | Needs `ADMIN_EMAIL` / `ADMIN_PASSWORD` in the environment. The login subflow deliberately skips when a session already exists, so a password never passes through a script — which is why flows 01/03/04 could be run and 02 could not. |
 
 ### QA fixture — do not delete

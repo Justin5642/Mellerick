@@ -10,6 +10,7 @@ import { dateKeyInBusinessTZ } from "@/lib/date";
 import type { FleetExpense } from "@/lib/fleet-costs";
 import type { ServiceRecord } from "@/lib/service-due";
 import type { HireOptionRow } from "@/components/fleet/equipment-hire-dialog";
+import { loadKomtraxFleet } from "@/lib/komtrax-data";
 
 export default async function FleetPage() {
   const supabase = await createClient();
@@ -47,6 +48,9 @@ export default async function FleetPage() {
   if (!viewer) redirect("/login");
 
   const today = dateKeyInBusinessTZ(new Date());
+  // Komtrax (0113 (draft)): office/admin only by RLS, so only asked for them.
+  const role = viewer.profile?.role ?? null;
+  const komtrax = role === "admin" || role === "office" ? await loadKomtraxFleet(supabase) : null;
   const withRates = await attachEffectiveRates(supabase as any, (equipment ?? []) as any[], today);
 
   return (
@@ -62,6 +66,7 @@ export default async function FleetPage() {
       hireOptions={hireOptionsRes.error ? null : ((hireOptionsRes.data ?? []) as HireOptionRow[])}
       hireAttachments={attachmentsRes.error ? null : attachmentsRes.data ?? []}
       costCentres={centresRes.data ?? []}
+      komtrax={komtrax}
       fetchError={error?.message ?? null}
     />
   );

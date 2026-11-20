@@ -7,6 +7,7 @@ import { appUrl } from "@/lib/env";
 import { coverageByMonth, loadBills, unallocatedSummary } from "@/lib/unallocated-bills";
 import { buildDigest, type DigestDebtor } from "@/lib/weekly-digest";
 import { reportError } from "@/lib/monitoring";
+import { loadRecentFaultsForDigest } from "@/lib/komtrax-data";
 
 export const maxDuration = 60;
 
@@ -61,6 +62,14 @@ export async function GET(request: NextRequest) {
       .limit(8);
     if (waitingError) throw new Error(waitingError.message);
 
+    // Komtrax faults (0113 (draft)). Optional: a failure here never stops the email.
+    let machineFaults: Awaited<ReturnType<typeof loadRecentFaultsForDigest>> = null;
+    try {
+      machineFaults = await loadRecentFaultsForDigest(admin, 7);
+    } catch (err) {
+      console.error("weekly digest: Komtrax faults unavailable", err);
+    }
+
     const digest = buildDigest({
       appUrl: appUrl(),
       unallocated: unallocatedSummary(loaded.bills),
@@ -78,6 +87,7 @@ export async function GET(request: NextRequest) {
           orderedOn: w.order_date ?? (w.created_at ? String(w.created_at).slice(0, 10) : null),
         })),
       },
+      machineFaults,
     });
 
     const { error: sendError } = await getResend().emails.send({ from: getFromAddress(), to, subject: digest.subject, html: digest.html, text: digest.text });

@@ -20,6 +20,7 @@ import { EquipmentHireDialog, type HireOptionRow } from "@/components/fleet/equi
 import { HireAttachments, type HireAttachmentRow } from "@/components/fleet/hire-attachments";
 import { FleetHireRates } from "@/components/fleet/fleet-hire-rates";
 import { hireOptionLabel } from "@/lib/hire-pricing";
+import { FleetKomtrax, type KomtraxFleetState } from "@/components/fleet/fleet-komtrax";
 
 // Radix/shadcn's SelectItem can't take value="", so an explicit "Unassigned"
 // option needs a sentinel value that gets translated back to "" (-> null on
@@ -41,25 +42,30 @@ interface Props {
   hireOptions?: HireOptionRow[] | null;
   hireAttachments?: HireAttachmentRow[] | null;
   costCentres?: { id: string; name: string }[];
+  /** Komtrax machines (0113 (draft)); null for technicians. */
+  komtrax?: KomtraxFleetState | null;
   fetchError: string | null;
 }
 
 // The fleet list and its actions. The page (app/dashboard/fleet/page.tsx) loads
 // the rows and the viewer's role on the server and hands them in.
-export function FleetClient({ role, currentUserId, equipment: initialEquipment, staff, expenses, expensesError, today, services, hireOptions: initialHireOptions = null, hireAttachments = null, costCentres = [], fetchError }: Props) {
+export function FleetClient({ role, currentUserId, equipment: initialEquipment, staff, expenses, expensesError, today, services, hireOptions: initialHireOptions = null, hireAttachments = null, costCentres = [], komtrax: initialKomtrax = null, fetchError }: Props) {
   const supabase = createClient();
   const [equipment, setEquipment] = useState(initialEquipment);
   const years = useMemo(() => financialYearsSince((expenses ?? []).map((e) => e.expense_date), today), [expenses, today]);
   const [yearLabel, setYearLabel] = useState(years[0].label);
-  // Next-service status per item, from its latest service record.
+  const [komtrax, setKomtrax] = useState<KomtraxFleetState | null>(initialKomtrax);
+  // Next-service status per item, from its latest service record — and
+  // Komtrax's live hour meter for a linked Komatsu machine.
   const dueByEquipment = useMemo(() => {
     const m = new Map<string, ServiceDue>();
     if (!services) return m;
+    const live = new Map((komtrax?.machines ?? []).filter((k) => k.equipment_id && k.hours != null).map((k) => [k.equipment_id!, { hours: k.hours!, at: k.hours_at }]));
     const by = new Map<string, ServiceRecord[]>();
     for (const r of services) (by.get(r.equipment_id) ?? by.set(r.equipment_id, []).get(r.equipment_id)!).push(r);
-    for (const [id, list] of by) m.set(id, serviceDue(list, today));
+    for (const [id, list] of by) m.set(id, serviceDue(list, today, live.get(id) ?? null));
     return m;
-  }, [services, today]);
+  }, [services, today, komtrax]);
   const overdueCount = [...dueByEquipment.entries()].filter(
     ([id, d]) => d.state === "overdue" && initialEquipment.find((e) => e.id === id)?.is_active
   ).length;
@@ -334,6 +340,15 @@ export function FleetClient({ role, currentUserId, equipment: initialEquipment, 
       {canEditHire && <FleetHireRates equipment={equipment} hireOptions={hireOptions} onEdit={setHireDialogFor} />}
 
       {canEditHire && hireAttachments && <HireAttachments initial={hireAttachments} />}
+
+      {komtrax && (
+        <FleetKomtrax
+          state={komtrax}
+          equipment={equipment}
+          isAdmin={isAdmin}
+          onMachinesChange={(machines) => setKomtrax((k) => (k ? { ...k, machines } : k))}
+        />
+      )}
 
       {hireDialogFor && (
         <EquipmentHireDialog

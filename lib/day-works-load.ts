@@ -4,6 +4,8 @@ import { callerClient } from "@/lib/api/caller-client";
 import { buildDayWorksView, type DayWorksView, type EntryRow, type MachineRow, type OtherAttachmentUse } from "@/lib/day-works-view";
 import type { HireOptionFlags } from "@/lib/day-works-entry";
 import type { HireType, HireUnit } from "@/lib/hire-pricing";
+import { loadMeterReadings } from "@/lib/komtrax-data";
+import type { MeterReadings } from "@/lib/komtrax-meter";
 
 // Reads behind the job's Day Works / Hire tab, shared by every
 // /api/jobs/[id]/hire-entries route: the GET, and each write, which answers
@@ -18,14 +20,17 @@ import type { HireType, HireUnit } from "@/lib/hire-pricing";
 
 const MISSING_TABLE = new Set(["42P01", "PGRST205", "PGRST200"]);
 
-export type DayWorksLoad = { ready: false } | ({ ready: true; isOffice: boolean; userId: string } & DayWorksView);
+// meter_readings: Komtrax hour-meter readings (0113 (draft)) by machine and Melbourne
+// day, for prefilling an engine-hour line's meter open/close. Hours only — the
+// crew may see them. Empty when Komtrax isn't set up.
+export type DayWorksLoad = { ready: false } | ({ ready: true; isOffice: boolean; userId: string; meter_readings: MeterReadings } & DayWorksView);
 
 export async function loadDayWorks(request: NextRequest, jobId: string, caller: { userId: string; isOffice: boolean }): Promise<DayWorksLoad> {
   const { userId, isOffice } = caller;
   const admin = createAdminClient();
   const supabase = await callerClient(request);
 
-  const [machinesRes, attachmentsRes, entriesRes, centresRes] = await Promise.all([
+  const [machinesRes, attachmentsRes, entriesRes, centresRes, meterReadings] = await Promise.all([
     admin
       .from("equipment")
       .select("id, name, is_active, category, equipment_hire_options(hire_type, hire_unit, rate, whole_days_only, fuel_included, float_base, float_km_included, float_per_km, cost_centre_id, is_active)")
@@ -38,6 +43,7 @@ export async function loadDayWorks(request: NextRequest, jobId: string, caller: 
       .order("work_date", { ascending: false })
       .order("created_at", { ascending: false }),
     admin.from("cost_centres").select("id, name"),
+    loadMeterReadings(admin),
   ]);
   for (const r of [machinesRes, attachmentsRes, entriesRes]) {
     if (r.error && MISSING_TABLE.has(r.error.code ?? "")) return { ready: false };
@@ -104,7 +110,10 @@ export async function loadDayWorks(request: NextRequest, jobId: string, caller: 
     costCentreNames: new Map((centresRes.data ?? []).map((c) => [c.id as string, c.name as string])),
     signatureUrls,
   });
-  return { ready: true, isOffice, userId, ...view };
+  // Only machines the tab lists.
+  const listed = new Set(view.machines.map((m) => m.id));
+  const meter_readings: MeterReadings = Object.fromEntries(Object.entries(meterReadings).filter(([id]) => listed.has(id)));
+  return { ready: true, isOffice, userId, meter_readings, ...view };
 }
 
 /**
