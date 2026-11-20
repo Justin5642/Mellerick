@@ -43,7 +43,7 @@ export default async function EquipmentDetailPage({ params }: { params: Promise<
   if (servicesRes.error && !isServiceTableMissing(servicesRes.error)) console.error("fleet: service records unavailable", servicesRes.error);
   const services = servicesRes.error ? null : ((servicesRes.data ?? []) as ServiceRecord[]);
 
-  // Komtrax (0113 (draft), office/admin by RLS): hours, location, fuel, faults. A read
+  // Komtrax (0113, office/admin by RLS): hours, location, fuel, faults. A read
   // failure only hides the card.
   const isOfficeOrAdmin = viewer?.profile?.role === "admin" || viewer?.profile?.role === "office";
   let komtrax: KomtraxMachineLoad | null = null;

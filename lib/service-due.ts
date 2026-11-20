@@ -6,7 +6,7 @@
 // on their own, because the reading on record is only as recent as the last
 // service.
 //
-// With a LIVE hour meter (Komtrax, 0113 (draft) — `live`), the engine-hours target
+// With a LIVE hour meter (Komtrax, 0113 — `live`), the engine-hours target
 // counts too: the item is overdue once the meter passes it, due soon within
 // DUE_SOON_HOURS, and the worse of the date and the hours decides.
 

@@ -20,7 +20,7 @@ import type { MeterReadings } from "@/lib/komtrax-meter";
 
 const MISSING_TABLE = new Set(["42P01", "PGRST205", "PGRST200"]);
 
-// meter_readings: Komtrax hour-meter readings (0113 (draft)) by machine and Melbourne
+// meter_readings: Komtrax hour-meter readings (0113) by machine and Melbourne
 // day, for prefilling an engine-hour line's meter open/close. Hours only — the
 // crew may see them. Empty when Komtrax isn't set up.
 export type DayWorksLoad = { ready: false } | ({ ready: true; isOffice: boolean; userId: string; meter_readings: MeterReadings } & DayWorksView);

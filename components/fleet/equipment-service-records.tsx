@@ -81,7 +81,7 @@ export function EquipmentServiceRecords({
   canEdit: boolean;
   currentUserId: string;
   today: string;
-  /** Komtrax's live hour meter (0113 (draft)), when this machine reports one. */
+  /** Komtrax's live hour meter (0113), when this machine reports one. */
   liveHours?: LiveHours | null;
 }) {
   const supabase = createClient();

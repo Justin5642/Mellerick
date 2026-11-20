@@ -6,7 +6,7 @@ import { reportError } from "@/lib/monitoring";
 
 export const maxDuration = 60;
 
-// Reads Komatsu Komtrax (ISO 15143-3) into the 0113 (draft) tables: each machine's
+// Reads Komatsu Komtrax (ISO 15143-3) into the 0113 tables: each machine's
 // hours, position, fuel and fault codes. Read-only toward Komatsu. Komatsu
 // refuses a URL asked twice in 15 minutes, so a run straight after another
 // is answered {skipped:true} without calling them.

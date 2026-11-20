@@ -62,7 +62,7 @@ export async function GET(request: NextRequest) {
       .limit(8);
     if (waitingError) throw new Error(waitingError.message);
 
-    // Komtrax faults (0113 (draft)). Optional: a failure here never stops the email.
+    // Komtrax faults (0113). Optional: a failure here never stops the email.
     let machineFaults: Awaited<ReturnType<typeof loadRecentFaultsForDigest>> = null;
     try {
       machineFaults = await loadRecentFaultsForDigest(admin, 7);

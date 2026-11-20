@@ -25,7 +25,7 @@ export interface DigestInput {
   coverage: MonthCoverage[];
   overdue: { total: number; count: number; top: DigestDebtor[] };
   awaitingInvoice: { count: number; oldest: DigestAwaitingInvoice[] };
-  /** Komtrax fault codes in the last 7 days (0113 (draft)); null/undefined = Komtrax not set up, section left out. */
+  /** Komtrax fault codes in the last 7 days (0113); null/undefined = Komtrax not set up, section left out. */
   machineFaults?: DigestMachineFault[] | null;
 }
 

@@ -6,7 +6,7 @@ import { formatDateTime } from "@/lib/date";
 import type { KomtraxMachineLoad } from "@/lib/komtrax-data";
 import { ageText, fuelText, hoursText, mapsUrl, severityTone } from "@/lib/komtrax-view";
 
-// Fleet → machine → Komtrax (office/admin; 0113 (draft)). Engine hours, last known
+// Fleet → machine → Komtrax (office/admin; 0113). Engine hours, last known
 // position, fuel used and recent fault codes, as Komtrax last reported them
 // (it refreshes about every 6 hours). Read-only. No money.
 

@@ -48,7 +48,7 @@ export default async function FleetPage() {
   if (!viewer) redirect("/login");
 
   const today = dateKeyInBusinessTZ(new Date());
-  // Komtrax (0113 (draft)): office/admin only by RLS, so only asked for them.
+  // Komtrax (0113): office/admin only by RLS, so only asked for them.
   const role = viewer.profile?.role ?? null;
   const komtrax = role === "admin" || role === "office" ? await loadKomtraxFleet(supabase) : null;
   const withRates = await attachEffectiveRates(supabase as any, (equipment ?? []) as any[], today);

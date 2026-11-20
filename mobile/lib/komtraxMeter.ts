@@ -1,5 +1,5 @@
 // MIRROR of the web's lib/komtrax-meter.ts (Day Works engine-hour lines
-// prefilled from Komtrax, 0113 (draft)). The body below is identical, pinned by
+// prefilled from Komtrax, 0113). The body below is identical, pinned by
 // tests/unit/komtrax-mirror.test.ts — change the web file first, then copy
 // its body here.
 

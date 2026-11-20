@@ -1,9 +1,9 @@
 -- ============================================================================
 -- Komtrax (Komatsu machine data, ISO 15143-3 / AEMP 2.0) mirrored into Fleet.
 --
--- STATUS: DRAFT — NOT YET APPLIED. Apply (SQL editor), then paste
--- supabase/tests/0113_komtrax_test.sql and trust only a final "0113 PASSED"
--- row. Then mark this header applied and add the ledger row:
+-- STATUS: ✅ APPLIED IN PRODUCTION (2026-11-20, via SQL editor; gate test passed).
+-- Gate test: supabase/tests/0113_komtrax_test.sql (trust only "0113 PASSED").
+-- Ledger row:
 --   insert into supabase_migrations.schema_migrations (version,name)
 --   values ('0113','komtrax') on conflict do nothing;
 -- Safe to merge the app before this is applied: the sync route answers

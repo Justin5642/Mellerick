@@ -83,7 +83,7 @@ export type DayWorksState =
       entries: DayWorksEntry[];
       clashes: DayWorksClash[];
       pricing?: DayWorksOfficePricing;
-      /** Komtrax hour-meter readings (0113 (draft)) by machine and day — hours only. Absent from older servers. */
+      /** Komtrax hour-meter readings (0113) by machine and day — hours only. Absent from older servers. */
       meter_readings?: MeterReadings;
     };
 
