@@ -11,7 +11,7 @@ import {
   type KomtraxSnapshot,
 } from "@/lib/komtrax-parse";
 
-// Komatsu Komtrax (ISO 15143-3 / AEMP 2.0) → our own tables (migration 0113 (draft)).
+// Komatsu Komtrax (ISO 15143-3 / AEMP 2.0) → our own tables (migration 0113).
 // Read-only toward Komatsu. Run by /api/komtrax/sync (cron every 6 h; admin
 // can run it by hand).
 //

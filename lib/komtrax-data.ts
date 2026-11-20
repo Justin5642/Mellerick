@@ -5,7 +5,7 @@ import { isKomtraxTableMissing } from "@/lib/komtrax";
 import { meterDays, type MeterReadings } from "@/lib/komtrax-meter";
 import type { DigestMachineFault } from "@/lib/weekly-digest";
 
-// Reads of the Komtrax mirror (0113 (draft)) shared by the Fleet pages, the phone's
+// Reads of the Komtrax mirror (0113) shared by the Fleet pages, the phone's
 // machine route, Day Works and the weekly digest. No money anywhere: hours,
 // fuel litres, a position and fault codes.
 

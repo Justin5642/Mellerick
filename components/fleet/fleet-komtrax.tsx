@@ -9,7 +9,7 @@ import { RefreshCw } from "lucide-react";
 import type { KomtraxMachine } from "@/lib/komtrax-data";
 import { ageText, hoursText } from "@/lib/komtrax-view";
 
-// Fleet → Komtrax machines (office/admin; 0113 (draft)). Every Komatsu machine
+// Fleet → Komtrax machines (office/admin; 0113). Every Komatsu machine
 // Komtrax reports, linked to its fleet item — the sync links by serial when
 // the serial is in the item's name, rego or notes; anything else the office
 // links here. Admin can run the sync by hand (Komatsu allows each address
@@ -19,7 +19,7 @@ const NONE = "__none__";
 
 export interface KomtraxFleetState {
   connected: boolean;
-  /** false = 0113 (draft) not applied. */
+  /** false = 0113 not applied. */
   ready: boolean;
   machines: KomtraxMachine[];
   lastOkAt: string | null;

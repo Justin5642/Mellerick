@@ -1,4 +1,4 @@
-// Day Works engine-hour lines prefilled from Komtrax (0113 (draft)).
+// Day Works engine-hour lines prefilled from Komtrax (0113).
 //
 // When a dry-hire "per engine hour" line is added for a Komatsu machine that
 // Komtrax reports on, the meter opening and closing are filled from that

@@ -5,7 +5,7 @@ import { isUuid } from "@/lib/fleet-office";
 import { isKomtraxTableMissing } from "@/lib/komtrax";
 
 // Link (or unlink) a Komtrax machine to a fleet item — Fleet → Komtrax
-// machines. Office/admin; runs as the CALLER, so 0113 (draft)'s RLS and column grant
+// machines. Office/admin; runs as the CALLER, so 0113's RLS and column grant
 // (equipment_id, matched_by only) decide. matched_by = 'office' so the sync's
 // serial match never overrides the office's choice — including an unlink.
 

@@ -5,7 +5,7 @@ import { isUuid } from "@/lib/fleet-office";
 import { loadKomtraxForEquipment } from "@/lib/komtrax-data";
 
 // One fleet item's Komtrax data for the phone's machine screen (office/admin,
-// online — the 0113 (draft) tables are in no PowerSync stream): latest hours, position,
+// online — the 0113 tables are in no PowerSync stream): latest hours, position,
 // fuel and the last 30 days' fault codes. Read as the CALLER (RLS). No money.
 
 type Ctx = { params: Promise<{ id: string }> };

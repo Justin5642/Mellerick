@@ -55,7 +55,7 @@ export default function EquipmentDetailScreen() {
   const isOffice = useIsOfficeOrAdmin();
   const [hireOpen, setHireOpen] = useState(false);
   const [uploadingDoc, setUploadingDoc] = useState(false);
-  // Komtrax (0113 (draft); office/admin, online): hours, location, fuel, faults.
+  // Komtrax (0113; office/admin, online): hours, location, fuel, faults.
   const [komtrax, setKomtrax] = useState<KomtraxForMachine | null>(null);
   const [komtraxError, setKomtraxError] = useState<string | null>(null);
   const today = dateKeyInBusinessTZ(new Date());

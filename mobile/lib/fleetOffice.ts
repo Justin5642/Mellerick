@@ -294,7 +294,7 @@ export const uploadEquipmentDocument = (equipmentId: string, fileBase64: string,
   call<{ document: { id: string } }>(`/api/fleet/${equipmentId}/documents`, { method: "POST", body: JSON.stringify({ fileBase64, fileName }) });
 
 // ---------------------------------------------------------------------------
-// Komtrax (Komatsu machine data, 0113 (draft)) — office/admin, online. Hours, fuel,
+// Komtrax (Komatsu machine data, 0113) — office/admin, online. Hours, fuel,
 // position and fault codes: no money.
 // ---------------------------------------------------------------------------
 
@@ -324,7 +324,7 @@ export interface KomtraxFault {
   occurred_at: string;
 }
 
-/** connected = the server has a Komtrax login; ready = 0113 (draft) applied; machine null = not a linked Komatsu. */
+/** connected = the server has a Komtrax login; ready = 0113 applied; machine null = not a linked Komatsu. */
 export interface KomtraxForMachine {
   connected: boolean;
   ready: boolean;

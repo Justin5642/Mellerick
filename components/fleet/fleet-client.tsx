@@ -42,7 +42,7 @@ interface Props {
   hireOptions?: HireOptionRow[] | null;
   hireAttachments?: HireAttachmentRow[] | null;
   costCentres?: { id: string; name: string }[];
-  /** Komtrax machines (0113 (draft)); null for technicians. */
+  /** Komtrax machines (0113); null for technicians. */
   komtrax?: KomtraxFleetState | null;
   fetchError: string | null;
 }

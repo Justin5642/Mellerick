@@ -1,4 +1,4 @@
-// Display helpers for Komtrax data (0113 (draft)) on the Fleet pages. Pure.
+// Display helpers for Komtrax data (0113) on the Fleet pages. Pure.
 
 /** A maps link for a machine's last known position. */
 export function mapsUrl(lat: number, lng: number): string {
