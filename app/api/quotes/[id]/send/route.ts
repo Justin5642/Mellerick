@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireOfficeOrAdmin } from "@/lib/api/guards";
 import { callerClient } from "@/lib/api/caller-client";
 import { renderDocumentPdf } from "@/lib/pdf/render";
+import { loadBillingAddress } from "@/lib/customer-address-load";
 import { businessInfo } from "@/lib/business-info";
 import { QUOTE_SITE_SELECT, quoteJobSite } from "@/lib/job-site";
 import { getResend, getFromAddress, getReplyTo } from "@/lib/resend";
@@ -46,7 +47,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     const buffer = await renderDocumentPdf({
       docType: "Quote",
       docNumber: quote.quote_number,
-      customer: quote.customers,
+      customer: { ...quote.customers, billing_address: await loadBillingAddress(supabase, quote.customer_id) },
       items: quote.quote_items,
       subtotal: Number(quote.subtotal),
       taxAmount: Number(quote.tax_amount),

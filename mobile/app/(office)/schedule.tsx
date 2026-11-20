@@ -76,6 +76,8 @@ import {
 // booking's "Back to to-do list", and each technician's free hours. Rules are
 // the web's, mirrored (lib/todoBoard.ts, lib/todoList.ts).
 import { TodoSheet } from "../../components/schedule/TodoSheet";
+import { ScheduleExistingSheet } from "../../components/schedule/ScheduleExistingSheet";
+import type { SchedulableJob } from "../../lib/data/reads/scheduleSearch";
 import { PlaceTodoSheet, type PlaceRequest } from "../../components/schedule/PlaceTodoSheet";
 import { listTodoJobs, type TodoCandidate, type TodoJob } from "../../lib/data/reads/todo";
 import { describeDragOut, jobPatchAfterDrop, newBookingClashes, planDragOut, planTodoDrop, unbookedHours } from "../../lib/todoBoard";
@@ -241,6 +243,21 @@ export default function ScheduleScreen() {
   const [gapInput, setGapInput] = useState("");
   // A to-do job picked to place: the next tap on the grid books it.
   const [placing, setPlacing] = useState<TodoJob | null>(null);
+  // "Schedule an existing job" (20 Nov 2026): the search sheet, then the job
+  // picked — the next tap on the grid names the technician and day its
+  // Schedule Job sheet opens with ("Skip" opens it without them).
+  const [existingOpen, setExistingOpen] = useState(false);
+  const [placingExisting, setPlacingExisting] = useState<SchedulableJob | null>(null);
+  const openExistingJob = useCallback(
+    (job: SchedulableJob, target: BoardCell | null) => {
+      setPlacingExisting(null);
+      const params: Record<string, string> = { id: job.id, schedule: "1" };
+      if (target?.staffId) params.tech = target.staffId;
+      if (target?.dateKey) params.day = target.dateKey;
+      router.push({ pathname: "/job/[id]", params });
+    },
+    [router]
+  );
   // The place confirm, waiting for its cost centre (every booking asks — 19 Nov 2026).
   const [placeAsk, setPlaceAsk] = useState<(PlaceRequest & { job: TodoJob; insert: ReturnType<typeof planTodoDrop>; target: BoardCell }) | null>(null);
   // The crew as it was when the picker opened — only people ADDED are asked about leave.
@@ -709,6 +726,7 @@ export default function ScheduleScreen() {
     (job: TodoJob) => {
       setTodoOpen(false);
       setPlacing(job);
+      setPlacingExisting(null);
       if (view === "list") setView("day");
     },
     [view]
@@ -780,6 +798,10 @@ export default function ScheduleScreen() {
    */
   const onPlace = useCallback(
     (target: BoardCell) => {
+      if (placingExisting) {
+        openExistingJob(placingExisting, target);
+        return;
+      }
       const job = placing;
       setPlacing(null);
       if (!job) return;
@@ -821,7 +843,7 @@ export default function ScheduleScreen() {
         target,
       });
     },
-    [placing, bookings, realBookings, bookingDays, nameOf, allJobs, leave, todayKey]
+    [placing, placingExisting, openExistingJob, bookings, realBookings, bookingDays, nameOf, allJobs, leave, todayKey]
   );
 
   /** A booking's "Back to to-do list": the web's drag-out, same rules and words (planDragOut). */
@@ -1231,7 +1253,20 @@ export default function ScheduleScreen() {
       ) : null}
       {canTodo ? (
         <View style={styles.todoBar}>
-          {placing ? (
+          {placingExisting ? (
+            <View style={styles.placingBar} accessibilityLiveRegion="polite">
+              <Ionicons name="hand-left-outline" size={18} color="#fff" />
+              <Text style={styles.placingText} numberOfLines={2}>
+                Tap {view === "week" ? "a technician's day" : "a technician"} to schedule #{placingExisting.job_number} {placingExisting.title}
+              </Text>
+              <TouchableOpacity onPress={() => openExistingJob(placingExisting, null)} hitSlop={10} accessibilityRole="button" accessibilityLabel="Schedule it without picking a day">
+                <Text style={styles.placingCancel}>Skip</Text>
+              </TouchableOpacity>
+              <TouchableOpacity onPress={() => setPlacingExisting(null)} hitSlop={10} accessibilityRole="button" accessibilityLabel="Stop scheduling it">
+                <Text style={styles.placingCancel}>Cancel</Text>
+              </TouchableOpacity>
+            </View>
+          ) : placing ? (
             <View style={styles.placingBar} accessibilityLiveRegion="polite">
               <Ionicons name="hand-left-outline" size={18} color="#fff" />
               <Text style={styles.placingText} numberOfLines={2}>
@@ -1242,10 +1277,16 @@ export default function ScheduleScreen() {
               </TouchableOpacity>
             </View>
           ) : (
-            <TouchableOpacity style={styles.todoBtn} onPress={() => setTodoOpen(true)} accessibilityRole="button" accessibilityLabel="Open the to-do list">
-              <Ionicons name="list" size={16} color="#4338ca" />
-              <Text style={styles.todoBtnText}>To-do ({todoJobs?.length ?? "…"})</Text>
-            </TouchableOpacity>
+            <>
+              <TouchableOpacity style={styles.todoBtn} onPress={() => setTodoOpen(true)} accessibilityRole="button" accessibilityLabel="Open the to-do list">
+                <Ionicons name="list" size={16} color="#4338ca" />
+                <Text style={styles.todoBtnText}>To-do ({todoJobs?.length ?? "…"})</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.todoBtn} onPress={() => setExistingOpen(true)} accessibilityRole="button" accessibilityLabel="Schedule an existing job">
+                <Ionicons name="calendar-outline" size={16} color="#4338ca" />
+                <Text style={styles.todoBtnText}>Schedule existing job</Text>
+              </TouchableOpacity>
+            </>
           )}
         </View>
       ) : null}
@@ -1277,7 +1318,7 @@ export default function ScheduleScreen() {
           onOpenLeave={onOpenLeave}
           gapFor={canTodo ? gapFor : undefined}
           onGapPress={onGapPress}
-          placing={canTodo && !!placing}
+          placing={canTodo && (!!placing || !!placingExisting)}
           onPlace={onPlace}
         />
       ) : (
@@ -1491,6 +1532,20 @@ export default function ScheduleScreen() {
           onPlace={pickToPlace}
           onRemove={removeFromTodo}
           onAdd={addToTodo}
+        />
+      ) : null}
+
+      {canTodo ? (
+        <ScheduleExistingSheet
+          visible={existingOpen}
+          onClose={() => setExistingOpen(false)}
+          onPick={(job) => {
+            setExistingOpen(false);
+            setPlacing(null);
+            // The list has no grid to tap: open the job's schedule straight away.
+            if (view === "list") openExistingJob(job, null);
+            else setPlacingExisting(job);
+          }}
         />
       ) : null}
 

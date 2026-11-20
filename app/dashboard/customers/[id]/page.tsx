@@ -20,6 +20,7 @@ import {
   Plus,
 } from "lucide-react";
 import { formatDate } from "@/lib/date";
+import { loadBillingAddress } from "@/lib/customer-address-load";
 import { formatScheduleDates } from "@/lib/schedule-form";
 import { SiteArchiveButton } from "@/components/site-archive-button";
 import { SitePinButton } from "@/components/site-pin-button";
@@ -51,6 +52,7 @@ export default async function CustomerDetailPage({
     ]);
 
   if (!customer) notFound();
+  const billingAddress = await loadBillingAddress(supabase, id);
 
   // Archived sites listed last, dimmed, so they can be restored.
   const activeSites = (sites ?? []).filter((s: any) => s.is_active !== false);
@@ -140,6 +142,12 @@ export default async function CustomerDetailPage({
               {customer.email && (
                 <div className="flex items-center gap-2 text-slate-600">
                   <Mail className="w-4 h-4 text-slate-400" /> {customer.email}
+                </div>
+              )}
+              {billingAddress && (
+                <div className="flex items-start gap-2 text-slate-600">
+                  <MapPin className="w-4 h-4 text-slate-400 mt-0.5" />
+                  <span className="whitespace-pre-line">{billingAddress}</span>
                 </div>
               )}
               {customer.abn && (

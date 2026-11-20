@@ -4,6 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { notFound } from "next/navigation";
 import { InvoiceDetail } from "@/components/invoice/invoice-detail";
 import { INVOICE_SITE_SELECT, invoiceJobSite } from "@/lib/job-site";
+import { loadBillingAddress } from "@/lib/customer-address-load";
 
 export default async function InvoiceDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -16,6 +17,7 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<{ 
   ]);
 
   if (!invoice) notFound();
+  const billingAddress = await loadBillingAddress(supabase, invoice.customer_id);
 
   // A database without invoice_payments (migration 0081) answers 42P01 / PGRST205: the payments card then says so instead of
   // offering a form that cannot save. Any other error is logged and shows the
@@ -27,6 +29,7 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<{ 
     <InvoiceDetail
       invoice={invoice}
       jobSite={invoiceJobSite(invoice)}
+      billingAddress={billingAddress}
       xeroConnected={!!xeroToken}
       payments={payments}
     />

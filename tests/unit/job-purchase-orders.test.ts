@@ -323,6 +323,37 @@ describe("job documents", () => {
     expect(res.status).toBe(200);
     expect(fake.ops.find((o) => o.action === "update")!.payload).toEqual({ office_only: true });
   });
+
+  it("files an upload in Site Documents by default, or the folder asked for (0114)", async () => {
+    const fake = fakeClient(baseTables());
+    callerClient.mockResolvedValue(fake.client);
+    await docPOST(req("POST", { file: PDF, fileName: "a.pdf" }), ctx({}));
+    await docPOST(req("POST", { file: PDF, fileName: "b.pdf", folder: "soil" }), ctx({}));
+    await docPOST(req("POST", { file: PDF, fileName: "c.pdf", folder: "other" }), ctx({}));
+    const rows = fake.ops.filter((o) => o.table === "job_documents" && o.action === "insert").map((o) => (o.payload as { folder: unknown }).folder);
+    expect(rows).toEqual(["site_documents", "soil", null]);
+  });
+
+  it("refuses an unknown folder before touching storage", async () => {
+    const fake = fakeClient(baseTables());
+    callerClient.mockResolvedValue(fake.client);
+    const res = await docPOST(req("POST", { file: PDF, fileName: "a.pdf", folder: "invoices" }), ctx({}));
+    expect(res.status).toBe(400);
+    expect(fake.uploads).toEqual([]);
+  });
+
+  it("moves a document to another folder, or back to Other", async () => {
+    const fake = fakeClient(baseTables());
+    callerClient.mockResolvedValue(fake.client);
+    const res = await docPATCH(req("PATCH", { folder: "drainage" }), ctx({ docId: ORDER }));
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ folder: "drainage" });
+    await docPATCH(req("PATCH", { folder: null }), ctx({ docId: ORDER }));
+    const updates = fake.ops.filter((o) => o.action === "update").map((o) => o.payload);
+    expect(updates).toEqual([{ folder: "drainage" }, { folder: null }]);
+    expect((await docPATCH(req("PATCH", { folder: "money" }), ctx({ docId: ORDER }))).status).toBe(400);
+    expect((await docPATCH(req("PATCH", {}), ctx({ docId: ORDER }))).status).toBe(400);
+  });
 });
 
 describe("rules", () => {

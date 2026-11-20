@@ -6,7 +6,7 @@ import { colors } from "../../lib/theme";
 import { MoneyText } from "../../design/components/MoneyText";
 import { ScreenError } from "../../design/components/ScreenError";
 import { openExternalUrl } from "../../lib/open-external-url";
-import { getCustomer, getCustomerOverview, type CustomerDetail, type CustomerOverview, type Site } from "../../lib/data/reads/customers";
+import { getCustomer, getCustomerBillingAddress, getCustomerOverview, type CustomerDetail, type CustomerOverview, type Site } from "../../lib/data/reads/customers";
 import { useCustomers } from "../../lib/data/hooks/useCustomers";
 import { CustomerFormSheet } from "../../components/customer/customer-form";
 import { SiteFormSheet } from "../../components/customer/site-form";
@@ -18,6 +18,8 @@ export default function CustomerDetailScreen() {
   const writes = useCustomers();
   const [customer, setCustomer] = useState<CustomerDetail | null>(null);
   const [overview, setOverview] = useState<CustomerOverview | null>(null);
+  // undefined = not known (offline, or 0114 — drafted — not applied yet).
+  const [billingAddress, setBillingAddress] = useState<string | null | undefined>(undefined);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<unknown>(null);
   const [editing, setEditing] = useState(false);
@@ -31,9 +33,10 @@ export default function CustomerDetailScreen() {
   const load = useCallback(async () => {
     try {
       setError(null);
-      const [c, o] = await Promise.all([getCustomer(id), getCustomerOverview(id)]);
+      const [c, o, a] = await Promise.all([getCustomer(id), getCustomerOverview(id), getCustomerBillingAddress(id)]);
       setCustomer(c);
       setOverview(o);
+      setBillingAddress(a);
     } catch (e) {
       setError(e);
     } finally {
@@ -129,6 +132,7 @@ export default function CustomerDetailScreen() {
         {customer.phone ? <Contact icon="call-outline" value={customer.phone} onPress={() => { void openExternalUrl(`tel:${customer.phone}`, "the dialler"); }} /> : null}
         {customer.mobile ? <Contact icon="phone-portrait-outline" value={customer.mobile} onPress={() => { void openExternalUrl(`tel:${customer.mobile}`, "the dialler"); }} /> : null}
         {customer.abn ? <Row label="ABN" value={customer.abn} /> : null}
+        {billingAddress ? <Row label="Billing address" value={billingAddress} /> : null}
         {!customer.email && !customer.phone && !customer.mobile && !customer.abn ? <Text style={styles.muted}>No contact details.</Text> : null}
       </Card>
 
@@ -205,7 +209,7 @@ export default function CustomerDetailScreen() {
         </Card>
       )}
 
-      <CustomerFormSheet visible={editing} existing={customer} onClose={() => setEditing(false)} onSaved={() => { setEditing(false); void load(); }} />
+      <CustomerFormSheet visible={editing} existing={customer} billingAddress={billingAddress} onClose={() => setEditing(false)} onSaved={() => { setEditing(false); void load(); }} />
       <SiteFormSheet
         visible={siteDraft !== null}
         customerId={customer.id}

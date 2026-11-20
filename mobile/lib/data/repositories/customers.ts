@@ -11,6 +11,11 @@ export interface CustomerInput {
   mobile?: string | null;
   abn?: string | null;
   notes?: string | null;
+  /**
+   * customers.billing_address (0114, drafted). Sent only when given: undefined
+   * leaves the stored address alone (the form didn't know it — offline).
+   */
+  billingAddress?: string | null;
 }
 export interface SiteInput {
   customerId: string;
@@ -93,6 +98,7 @@ export class CustomersRepository {
       abn: input.abn ?? null,
       notes: input.notes ?? null,
     };
+    if (input.billingAddress !== undefined) payload.billing_address = input.billingAddress;
     if (isNew) payload.is_active = true;
     return payload;
   }

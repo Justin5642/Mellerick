@@ -5,6 +5,7 @@ import { colors } from "../../lib/theme";
 import { getOpenWorkEntryOnJob } from "../../lib/data/reads/clock";
 import { useTimeClock } from "../../lib/data/hooks/useTimeClock";
 import { onClockChanged } from "../../lib/clockEvents";
+import { offerSitePinAfterClockOn } from "../../lib/sitePinOffer";
 import { currentFix } from "../../lib/clockFix";
 import { clockInCostCentre, type BookingWindow } from "../../lib/bookings";
 import { loadSupplierOrders } from "../../lib/supplierOrders";
@@ -80,13 +81,16 @@ export function JobTodayCard({
     try {
       // The same default cost centre as the Time tab: the booking covering now,
       // then the nearest one today, then the job's.
+      const fix = await currentFix(3000);
       await timeClock.clockIn({
         jobId,
         staffId: currentUserId,
         costCenterId: clockInCostCentre(myBookings, Date.now(), scheduledCostCenterId),
-        fix: await currentFix(3000),
+        fix,
       });
       setClockedInSince(new Date().toISOString());
+      // No map pin on this site? Offer to save this fix (asks, once per job).
+      void offerSitePinAfterClockOn(jobId, fix);
     } catch (e: any) {
       Alert.alert("Clock on failed", e?.message ?? "Try again from the Time tab.");
     } finally {

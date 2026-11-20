@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { BILLING_ADDRESS_MAX, normaliseBillingAddress } from "@/lib/customer-address";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ArrowLeft } from "lucide-react";
 import Link from "next/link";
@@ -28,8 +29,12 @@ export default function EditCustomerPage() {
     company: "",
     abn: "",
     notes: "",
+    billing_address: "",
     is_active: true,
   });
+  // False until migration 0114 (drafted) adds customers.billing_address: the
+  // field is then hidden and never sent.
+  const [hasAddress, setHasAddress] = useState(false);
 
   useEffect(() => {
     async function load() {
@@ -47,8 +52,10 @@ export default function EditCustomerPage() {
         company: customer.company ?? "",
         abn: customer.abn ?? "",
         notes: customer.notes ?? "",
+        billing_address: (customer as { billing_address?: string | null }).billing_address ?? "",
         is_active: customer.is_active ?? true,
       });
+      setHasAddress("billing_address" in customer);
       setFetching(false);
     }
     load();
@@ -62,9 +69,16 @@ export default function EditCustomerPage() {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setLoading(true);
+    const address = normaliseBillingAddress(form.billing_address);
+    if (!address.ok) {
+      toast.error(address.error);
+      setLoading(false);
+      return;
+    }
     const { error } = await supabase
       .from("customers")
       .update({
+        ...(hasAddress ? { billing_address: address.value } : {}),
         name: form.name,
         email: form.email,
         phone: form.phone,
@@ -132,6 +146,12 @@ export default function EditCustomerPage() {
                 <Input id="abn" value={form.abn} onChange={(e) => set("abn", e.target.value)} />
               </div>
             </div>
+            {hasAddress && (
+              <div className="space-y-2">
+                <Label htmlFor="billing_address">Billing address (printed on invoices and quotes)</Label>
+                <Textarea id="billing_address" value={form.billing_address} onChange={(e) => set("billing_address", e.target.value)} placeholder={"PO Box 123\nNutfield VIC 3099"} rows={3} maxLength={BILLING_ADDRESS_MAX} />
+              </div>
+            )}
             <div className="space-y-2">
               <Label htmlFor="notes">Notes</Label>
               <Textarea id="notes" value={form.notes} onChange={(e) => set("notes", e.target.value)} rows={3} />

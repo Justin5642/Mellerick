@@ -3,33 +3,52 @@ import { requireOfficeOrAdmin } from "@/lib/api/guards";
 import { callerClient } from "@/lib/api/caller-client";
 import { reportError } from "@/lib/monitoring";
 import { isUuidLike } from "@/lib/job-purchase-orders";
+import { isMissingFolderColumn, parseDocumentFolder } from "@/lib/document-folders";
 
 // One job document, from the phone (office/admin). PATCH sets "Office only"
-// (0065: hidden from technicians, row and file — anything with prices);
+// (0065: hidden from technicians, row and file — anything with prices)
+// and/or its folder (`folder`: site_documents / drainage / plumbing / soil, or
+// "other"/null — job_documents.folder, migration 0114, drafted; before it is
+// applied a folder change answers FOLDERS_OFF);
 // DELETE removes it, ROW FIRST then the file, the web's order (a refused row
 // delete must not leave a listed document whose file is gone). As the caller.
 
 type Ctx = { params: Promise<{ id: string; docId: string }> };
 
 const NOT_FOUND = "That document isn't on this job any more. Refresh to see it.";
+const FOLDERS_OFF = "Document folders aren't switched on yet.";
 
 export async function PATCH(request: NextRequest, { params }: Ctx) {
   const guard = await requireOfficeOrAdmin(request);
   if (!guard.ok) return guard.response;
   const { id: jobId, docId } = await params;
   if (!isUuidLike(jobId) || !isUuidLike(docId)) return NextResponse.json({ error: NOT_FOUND }, { status: 404 });
-  const body = (await request.json().catch(() => null)) as { officeOnly?: unknown } | null;
-  if (typeof body?.officeOnly !== "boolean") return NextResponse.json({ error: "Say whether it's office only." }, { status: 400 });
+  const body = (await request.json().catch(() => null)) as { officeOnly?: unknown; folder?: unknown } | null;
+  const patch: { office_only?: boolean; folder?: string | null } = {};
+  if (body && "officeOnly" in body) {
+    if (typeof body.officeOnly !== "boolean") return NextResponse.json({ error: "Say whether it's office only." }, { status: 400 });
+    patch.office_only = body.officeOnly;
+  }
+  if (body && "folder" in body) {
+    const folder = parseDocumentFolder(body.folder);
+    if (folder === undefined) return NextResponse.json({ error: "Pick one of the folders." }, { status: 400 });
+    patch.folder = folder;
+  }
+  if (Object.keys(patch).length === 0) return NextResponse.json({ error: "Say whether it's office only." }, { status: 400 });
   try {
     const supabase = await callerClient(request);
     const { error, count } = await supabase
       .from("job_documents")
-      .update({ office_only: body.officeOnly }, { count: "exact" })
+      .update(patch, { count: "exact" })
       .eq("id", docId)
       .eq("job_id", jobId);
+    if (isMissingFolderColumn(error)) return NextResponse.json({ error: FOLDERS_OFF }, { status: 409 });
     if (error) throw error;
     if (count === 0) return NextResponse.json({ error: NOT_FOUND }, { status: 404 });
-    return NextResponse.json({ officeOnly: body.officeOnly });
+    return NextResponse.json({
+      ...(patch.office_only !== undefined ? { officeOnly: patch.office_only } : {}),
+      ...(patch.folder !== undefined ? { folder: patch.folder } : {}),
+    });
   } catch (err) {
     console.error("job document PATCH error:", err);
     reportError(err, { route: "api/jobs/documents/[docId]" });

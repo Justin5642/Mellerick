@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { attentionName, billingName } from "@/lib/customer-billing";
+import { billingAddressLines } from "@/lib/customer-address";
 import { quoteBudgetPo } from "@/lib/quote-job-po";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
@@ -26,9 +27,11 @@ import { quoteStatusColors } from "@/lib/badge-colors";
 
 interface Props {
   quote: any;
+  /** customers.billing_address (0114, drafted — null until it is applied). */
+  billingAddress?: string | null;
 }
 
-export function QuoteDetail({ quote }: Props) {
+export function QuoteDetail({ quote, billingAddress = null }: Props) {
   const router = useRouter();
   const supabase = createClient();
   const [status, setStatus] = useState(quote.status);
@@ -257,6 +260,9 @@ export function QuoteDetail({ quote }: Props) {
           <CardContent className="text-sm space-y-1">
             <p className="font-medium">{billingName(quote.customers)}</p>
             {attentionName(quote.customers) && <p className="text-slate-500">Attn: {attentionName(quote.customers)}</p>}
+            {billingAddressLines(billingAddress).map((line, i) => (
+              <p key={`addr-${i}`} className="text-slate-500">{line}</p>
+            ))}
             {quote.customers?.email && <p className="text-slate-500">{quote.customers.email}</p>}
             {quote.customers?.phone && <p className="text-slate-500">{quote.customers.phone}</p>}
           </CardContent>

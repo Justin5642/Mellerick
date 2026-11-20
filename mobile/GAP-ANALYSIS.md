@@ -66,6 +66,25 @@ See HANDOVER.md §1, "Small office/admin website features on the phone".
   web. Left: the usage entry's cost centre on Billing, and loads in the admin
   Costing screen.
 
+## Notebook list (20 Nov 2026) — web and phone together
+
+See HANDOVER.md §1, "Notebook list (20 Nov 2026)".
+
+- **Schedule an existing job** (office Schedule tab): search open jobs, tap a
+  technician's day on the grid (or Skip), and the job's Schedule Job sheet
+  opens with a new booking for them on that day (the web board: toolbar
+  button, "+" on each technician's day).
+- **Copy job** (job screen → Update job sheet, office/admin, online): the
+  web's `POST /api/jobs/[id]/copy`.
+- **Site pin offer at a manual clock-on** (every role): a site with no map
+  location and a fix within ±50 m asks once per job to save it.
+- **Customer billing address** (customer form + detail; read online, written
+  through the outbox, never sent when it couldn't be read). Printed on
+  invoice/quote PDFs by the web routes the phone already uses.
+- **Document folders** (Documents tab): grouped and collapsible for everyone;
+  office/admin pick the folder on upload and move documents. Technicians
+  can't move documents on the phone (on the web they can, per RLS).
+
 ## Remaining in-repo work — NONE closable without a crucial decision or a native dep
 
 All P1 office workflows, Reports (all 5 tables), Customer-360 / quick-create /

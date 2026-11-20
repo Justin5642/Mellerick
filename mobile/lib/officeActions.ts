@@ -45,6 +45,32 @@ export async function deleteJob(jobId: string): Promise<void> {
   await call(`/api/jobs/${encodeURIComponent(jobId)}`, { method: "DELETE" }, "No connection. Deleting a job needs signal — try again when you have it.");
 }
 
+/** "Copy of <title>" — the web's default title for a copied job (lib/job-copy.ts). */
+export function copyJobTitle(title: string): string {
+  return `Copy of ${title.trim()}`.slice(0, 200);
+}
+
+export interface CopiedJob {
+  id: string;
+  jobNumber: number;
+  /** Set when the job was made but its cost centres weren't (add them on the web PO tab). */
+  warning?: string;
+}
+
+/**
+ * "Copy job" (20 Nov 2026; office/admin — the server checks): a new job from
+ * this one as a template — POST /api/jobs/[id]/copy, the web's route.
+ * `newJobId` (a client UUID) makes a retry find the job already made.
+ * Online only: the new job's number comes from the server.
+ */
+export async function copyJob(jobId: string, title: string, newJobId: string): Promise<CopiedJob> {
+  return call<CopiedJob>(
+    `/api/jobs/${encodeURIComponent(jobId)}/copy`,
+    { method: "POST", body: JSON.stringify({ title, newJobId }) },
+    "No connection. Copying a job needs signal — try again when you have it."
+  );
+}
+
 export interface SiteAddressParts {
   address_line1?: string | null;
   suburb?: string | null;

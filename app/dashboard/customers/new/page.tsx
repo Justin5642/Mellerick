@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { BILLING_ADDRESS_MAX, isMissingBillingAddressColumn, normaliseBillingAddress } from "@/lib/customer-address";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ArrowLeft } from "lucide-react";
 import Link from "next/link";
@@ -17,7 +18,7 @@ export default function NewCustomerPage() {
   const supabase = createClient();
   const [loading, setLoading] = useState(false);
   const [form, setForm] = useState({
-    name: "", email: "", phone: "", mobile: "", company: "", abn: "", notes: "",
+    name: "", email: "", phone: "", mobile: "", company: "", abn: "", notes: "", billing_address: "",
   });
 
   function set(field: string, value: string) {
@@ -27,11 +28,22 @@ export default function NewCustomerPage() {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setLoading(true);
+    const address = normaliseBillingAddress(form.billing_address);
+    if (!address.ok) {
+      toast.error(address.error);
+      setLoading(false);
+      return;
+    }
     const { data: { user } } = await supabase.auth.getUser();
-    const { error } = await supabase.from("customers").insert({
-      ...form,
-      created_by: user?.id,
-    });
+    const row = { ...form, billing_address: address.value, created_by: user?.id };
+    let { error } = await supabase.from("customers").insert(row);
+    // Before migration 0114 is applied (drafted) the column isn't there: save
+    // the customer without the address rather than not at all, and say so.
+    if (isMissingBillingAddressColumn(error)) {
+      const { billing_address: dropped, ...rest } = row;
+      ({ error } = await supabase.from("customers").insert(rest));
+      if (!error && dropped) toast.warning("Customer saved without the billing address — the database isn't ready for addresses yet.");
+    }
     if (error) {
       toast.error(error.message);
       setLoading(false);
@@ -81,6 +93,10 @@ export default function NewCustomerPage() {
                 <Label htmlFor="abn">ABN</Label>
                 <Input id="abn" value={form.abn} onChange={(e) => set("abn", e.target.value)} placeholder="12 345 678 901" />
               </div>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="billing_address">Billing address (printed on invoices and quotes)</Label>
+              <Textarea id="billing_address" value={form.billing_address} onChange={(e) => set("billing_address", e.target.value)} placeholder={"PO Box 123\nNutfield VIC 3099"} rows={3} maxLength={BILLING_ADDRESS_MAX} />
             </div>
             <div className="space-y-2">
               <Label htmlFor="notes">Notes</Label>

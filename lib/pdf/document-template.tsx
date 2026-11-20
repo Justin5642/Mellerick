@@ -1,5 +1,6 @@
 import { Document, Page, Text, View, StyleSheet, Image } from "@react-pdf/renderer";
 import { attentionName, billingName } from "@/lib/customer-billing";
+import { billingAddressLines } from "@/lib/customer-address";
 import { formatDate } from "@/lib/date";
 import { formatInvoiceNumber } from "@/lib/utils";
 import type { JobSite } from "@/lib/job-site";
@@ -103,7 +104,9 @@ export interface DocumentPdfItem {
 export interface DocumentPdfProps {
   docType: "Quote" | "Tax Invoice";
   docNumber: number | string;
-  customer: { name: string; company?: string | null; email?: string | null; phone?: string | null };
+  // billing_address: printed under the billed name (customers.billing_address,
+  // migration 0114 — drafted; blank or absent prints no address).
+  customer: { name: string; company?: string | null; email?: string | null; phone?: string | null; billing_address?: string | null };
   items: DocumentPdfItem[];
   subtotal: number;
   taxAmount: number;
@@ -198,6 +201,9 @@ export function DocumentPdf({
           <View style={styles.billTo}>
             <Text style={styles.billToName}>{billingName(customer)}</Text>
             {attentionName(customer) && <Text>Attn: {attentionName(customer)}</Text>}
+            {billingAddressLines(customer.billing_address).map((line, i) => (
+              <Text key={`addr-${i}`}>{line}</Text>
+            ))}
             {customer.email && <Text>{customer.email}</Text>}
             {customer.phone && <Text>{customer.phone}</Text>}
           </View>

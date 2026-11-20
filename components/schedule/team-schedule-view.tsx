@@ -48,6 +48,8 @@ import {
 import { todoHours } from "@/lib/todo-list";
 import { BoardJobLink } from "./board-job-link";
 import { BookingCostCentreDialog, type CostCentreRequest, type PickedCostCentre } from "./booking-cost-centre-dialog";
+import { ScheduleExistingJobDialog } from "./schedule-existing-job-dialog";
+import type { SchedulePrefill } from "@/lib/schedule-existing-job";
 import {
   applyBoardMove,
   buildBoardIndex,
@@ -100,7 +102,7 @@ import {
   type ScheduleLeave,
 } from "@/lib/staff-leave";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Navigation, LayoutList, ListTodo, ChevronLeft, ChevronRight, GripVertical, CalendarDays, CalendarRange, Scissors, StickyNote, X } from "lucide-react";
+import { Navigation, LayoutList, ListTodo, ChevronLeft, ChevronRight, GripVertical, CalendarDays, CalendarRange, Scissors, StickyNote, X, CalendarPlus, Plus } from "lucide-react";
 import {
   formatTime,
   formatDate,
@@ -660,6 +662,7 @@ function DroppableWeekCell({
   gap,
   onGapClick,
   onPick,
+  onAddJob,
   children,
 }: {
   id: string;
@@ -670,6 +673,8 @@ function DroppableWeekCell({
   gap?: DayGap;
   onGapClick?: (hours: number) => void;
   onPick?: (id: string) => void;
+  /** "Schedule an existing job" on this technician's day (office/admin, today on). */
+  onAddJob?: () => void;
   children: React.ReactNode;
 }) {
   const { setNodeRef, isOver } = useDroppable({ id });
@@ -679,20 +684,52 @@ function DroppableWeekCell({
       data-week-cell
       onClick={onPick ? () => onPick(id) : undefined}
       className={cn(
-        "bg-white p-1.5 space-y-1 min-h-[64px] transition-colors",
+        "group/cell bg-white p-1.5 space-y-1 min-h-[64px] transition-colors",
         isToday && "bg-blue-50/40",
         isOver && "ring-2 ring-inset ring-blue-400 bg-blue-50/70",
         onPick && "cursor-copy hover:ring-2 hover:ring-inset hover:ring-amber-400"
       )}
     >
-      {((hours !== undefined && hours > 0) || (gap?.kind === "free" && gap.hours > 0)) && (
+      {((hours !== undefined && hours > 0) || (gap?.kind === "free" && gap.hours > 0) || (onAddJob && !onPick)) && (
         <div className="flex items-center justify-between gap-1 leading-none">
           {gap?.kind === "free" && gap.hours > 0 ? <GapButton hours={gap.hours} onClick={onGapClick} compact /> : <span />}
-          {hours !== undefined && hours > 0 && <p className="text-[10px] font-semibold text-slate-500">{formatHours(hours)}</p>}
+          <span className="flex items-center gap-1">
+            {hours !== undefined && hours > 0 && <span className="text-[10px] font-semibold text-slate-500">{formatHours(hours)}</span>}
+            {onAddJob && !onPick && <AddExistingJobButton onClick={onAddJob} compact />}
+          </span>
         </div>
       )}
       {children}
     </div>
+  );
+}
+
+/**
+ * "+" on a technician's day: schedule an EXISTING job there (Justin's
+ * notebook list, 20 Nov 2026). Opens the job search; the picked job's
+ * Schedule dialog then opens with this technician and day filled in. Never
+ * reaches the cell (no paste, no drop).
+ */
+function AddExistingJobButton({ onClick, compact }: { onClick: () => void; compact?: boolean }) {
+  return (
+    <button
+      type="button"
+      title="Schedule an existing job here"
+      aria-label="Schedule an existing job here"
+      onPointerDown={(e) => e.stopPropagation()}
+      onClick={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        onClick();
+      }}
+      className={cn(
+        "inline-flex items-center gap-0.5 rounded border border-blue-200 bg-blue-50 font-semibold text-blue-700 hover:bg-blue-100",
+        compact ? "px-1 text-[10px] leading-4 opacity-0 group-hover/cell:opacity-100 focus:opacity-100" : "px-1.5 py-0.5 text-xs"
+      )}
+    >
+      <Plus className={compact ? "w-2.5 h-2.5" : "w-3 h-3"} />
+      {compact ? null : "Add job"}
+    </button>
   );
 }
 
@@ -813,6 +850,14 @@ export function TeamScheduleView({
   }, []);
   // "Fits in [__] h" — typed, or set by clicking a technician's free hours.
   const [gapInput, setGapInput] = useState("");
+  // "Schedule an existing job" — from the toolbar (no prefill) or a
+  // technician's day (that technician and day). Office/admin only.
+  const [existingFor, setExistingFor] = useState<SchedulePrefill | null>(null);
+  const [existingOpen, setExistingOpen] = useState(false);
+  function openExisting(prefill: SchedulePrefill | null) {
+    setExistingFor(prefill);
+    setExistingOpen(true);
+  }
   // A to-do job picked to place by tapping a cell (the touch path for drag-in).
   const [placing, setPlacing] = useState<TodoJob | null>(null);
   // The to-do job being dragged, for the overlay.
@@ -1625,6 +1670,11 @@ export function TeamScheduleView({
             )}
           </div>
           {canTodo && (
+            <div className="flex items-center gap-2">
+            <Button variant="outline" size="sm" className="gap-1.5" onClick={() => openExisting(null)}>
+              <CalendarPlus className="w-4 h-4" />
+              Schedule existing job
+            </Button>
             <Button
               variant={todoOpen ? "secondary" : "outline"}
               size="sm"
@@ -1636,6 +1686,7 @@ export function TeamScheduleView({
               {todoOpen ? "Hide to-do list" : "To-do list"}
               {todoList.length > 0 && <span className="rounded-full bg-indigo-600 px-1.5 text-[10px] font-bold text-white">{todoList.length}</span>}
             </Button>
+            </div>
           )}
 
         </div>
@@ -1792,8 +1843,13 @@ export function TeamScheduleView({
                             </p>
                             {(() => {
                               const gap = gapFor(member.id, selectedDateKey);
-                              return gap?.kind === "free" && gap.hours > 0 ? (
-                                <div className="mt-1"><GapButton hours={gap.hours} onClick={filterToGap} /></div>
+                              const showGap = gap?.kind === "free" && gap.hours > 0;
+                              const showAdd = canTodo && !onPick && selectedDateKey >= todayKey;
+                              return showGap || showAdd ? (
+                                <div className="mt-1 flex items-center gap-1">
+                                  {showGap && gap ? <GapButton hours={gap.hours} onClick={filterToGap} /> : null}
+                                  {showAdd ? <AddExistingJobButton onClick={() => openExisting({ staffId: member.id, dateKey: selectedDateKey })} /> : null}
+                                </div>
                               ) : null;
                             })()}
                           </div>
@@ -1855,7 +1911,13 @@ export function TeamScheduleView({
                   <span className="text-xs font-medium text-slate-700 truncate">Unassigned</span>
                 </div>
                 {weekKeys.map((key) => (
-                  <DroppableWeekCell key={key} id={weekCellId(null, key)} isToday={key === todayKey} onPick={onPick}>
+                  <DroppableWeekCell
+                  key={key}
+                  id={weekCellId(null, key)}
+                  isToday={key === todayKey}
+                  onPick={onPick}
+                  onAddJob={canTodo && key >= todayKey ? () => openExisting({ staffId: null, dateKey: key }) : undefined}
+                >
                     {(board.unassigned.get(key) ?? []).map((entry) => (
                       <DraggableWeekJobChip
                         key={entry.booking.id}
@@ -1899,6 +1961,7 @@ export function TeamScheduleView({
                           gap={gapFor(member.id, key)}
                           onGapClick={filterToGap}
                           onPick={onPick}
+                          onAddJob={canTodo && key >= todayKey ? () => openExisting({ staffId: member.id, dateKey: key }) : undefined}
                         >
                           {leaveOn(member.id, key).map((day) => (
                             <LeaveTile key={`leave-${day.leave.start_date}-${day.startIso}`} day={day} compact onOpen={setOpenLeave} />
@@ -2118,6 +2181,14 @@ export function TeamScheduleView({
         </DialogContent>
       </Dialog>
       <BookingCostCentreDialog request={costCentreAsk} onDone={closeCostCentre} />
+      {canTodo && (
+        <ScheduleExistingJobDialog
+          open={existingOpen}
+          prefill={existingFor}
+          staffName={existingFor?.staffId ? nameOf(existingFor.staffId) : existingFor ? "Unassigned" : null}
+          onOpenChange={setExistingOpen}
+        />
+      )}
       {/* Booking someone onto their leave: asked, never silent. */}
       <Dialog open={!!confirm} onOpenChange={(open) => { if (!open) closeConfirm(false); }}>
         <DialogContent>

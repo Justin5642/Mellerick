@@ -3,6 +3,7 @@ import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert } from "reac
 import { KeyboardSheet, KEYBOARD_SHEET_INPUT_FONT_SIZE } from "../KeyboardSheet";
 import { colors } from "../../lib/theme";
 import { useCustomers } from "../../lib/data/hooks/useCustomers";
+import { BILLING_ADDRESS_MAX, normaliseBillingAddress } from "../../lib/customerAddress";
 
 export interface EditableCustomer {
   id: string;
@@ -23,9 +24,10 @@ interface Draft {
   mobile: string;
   abn: string;
   notes: string;
+  billingAddress: string;
 }
 
-function toDraft(c: EditableCustomer | null): Draft {
+function toDraft(c: EditableCustomer | null, billingAddress: string | null | undefined): Draft {
   return {
     name: c?.name ?? "",
     company: c?.company ?? "",
@@ -34,34 +36,51 @@ function toDraft(c: EditableCustomer | null): Draft {
     mobile: c?.mobile ?? "",
     abn: c?.abn ?? "",
     notes: c?.notes ?? "",
+    billingAddress: billingAddress ?? "",
   };
 }
 
 // Create/edit customer form. `existing` present => edit, else => create.
+//
+// Billing address (customers.billing_address, 0114 — drafted): printed on
+// invoices and quotes. It is read online (getCustomerBillingAddress), so when
+// editing, `billingAddress === undefined` means "not known" (offline, or the
+// column isn't there yet): the field is then hidden and never sent, so an
+// address the phone couldn't read is never saved over as blank. A new
+// customer always offers it; if the database isn't ready the gateway drops
+// the column and saves the rest (optionalColumns.ts).
 export function CustomerFormSheet({
   visible,
   existing,
+  billingAddress,
   onClose,
   onSaved,
 }: {
   visible: boolean;
   existing?: EditableCustomer | null;
+  billingAddress?: string | null;
   onClose: () => void;
   onSaved: (id: string, synced: boolean, name: string) => void;
 }) {
   const customers = useCustomers();
-  const [draft, setDraft] = useState<Draft>(toDraft(existing ?? null));
+  const [draft, setDraft] = useState<Draft>(toDraft(existing ?? null, billingAddress));
   const [saving, setSaving] = useState(false);
+  const showAddress = !existing || billingAddress !== undefined;
 
   // Reset the form whenever it (re)opens for a different record.
   useEffect(() => {
-    if (visible) setDraft(toDraft(existing ?? null));
-  }, [visible, existing]);
+    if (visible) setDraft(toDraft(existing ?? null, billingAddress));
+  }, [visible, existing, billingAddress]);
 
   async function save() {
     if (saving || !customers.ready) return;
     if (!draft.name.trim()) {
       Alert.alert("Name required", "A customer name is required.");
+      return;
+    }
+    const address = normaliseBillingAddress(draft.billingAddress);
+    if (!address.ok) {
+      Alert.alert("Billing address", address.error);
       return;
     }
     setSaving(true);
@@ -74,6 +93,7 @@ export function CustomerFormSheet({
         mobile: draft.mobile.trim() || null,
         abn: draft.abn.trim() || null,
         notes: draft.notes.trim() || null,
+        ...(showAddress ? { billingAddress: address.value } : {}),
       };
       if (existing) {
         const { synced } = await customers.updateCustomer(existing.id, input);
@@ -123,12 +143,15 @@ export function CustomerFormSheet({
         <View style={{ flex: 1 }}><Field label="Mobile" value={draft.mobile} onChange={set("mobile")} keyboardType="phone-pad" /></View>
       </View>
       <Field label="ABN" value={draft.abn} onChange={set("abn")} />
+      {showAddress ? (
+        <Field label="Billing address (on invoices and quotes)" value={draft.billingAddress} onChange={set("billingAddress")} multiline maxLength={BILLING_ADDRESS_MAX} />
+      ) : null}
       <Field label="Notes" value={draft.notes} onChange={set("notes")} multiline />
     </KeyboardSheet>
   );
 }
 
-function Field({ label, value, onChange, keyboardType, multiline }: { label: string; value: string; onChange: (v: string) => void; keyboardType?: "default" | "email-address" | "phone-pad"; multiline?: boolean }) {
+function Field({ label, value, onChange, keyboardType, multiline, maxLength }: { label: string; value: string; onChange: (v: string) => void; keyboardType?: "default" | "email-address" | "phone-pad"; multiline?: boolean; maxLength?: number }) {
   return (
     <View style={styles.field}>
       <Text style={styles.fieldLabel}>{label}</Text>
@@ -138,6 +161,7 @@ function Field({ label, value, onChange, keyboardType, multiline }: { label: str
         onChangeText={onChange}
         keyboardType={keyboardType ?? "default"}
         multiline={multiline}
+        maxLength={maxLength}
         autoCapitalize={keyboardType === "email-address" ? "none" : "sentences"}
         placeholderTextColor={colors.slate400}
       />

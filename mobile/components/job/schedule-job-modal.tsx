@@ -1,4 +1,5 @@
 import { useEffect, useState, type ReactNode } from "react";
+import type { SchedulePrefill } from "../../lib/scheduleExistingJob";
 import { View, Text, StyleSheet, TouchableOpacity, Alert, Platform, TextInput, Keyboard } from "react-native";
 import DateTimePicker, { type DateTimePickerEvent } from "@react-native-community/datetimepicker";
 import { Ionicons } from "@expo/vector-icons";
@@ -58,6 +59,12 @@ interface Props {
   onReopen?: () => void;
   /** A company cost centre was added to the job as a PO line from the picker — re-read the job's cost centres. */
   onCostCentreAdded?: () => void;
+  /**
+   * Opened from the Schedule tab's "Schedule an existing job" on a
+   * technician's day: the sheet starts on a new booking for them on that day
+   * (when bookings exist; the pre-0079 form ignores it).
+   */
+  prefill?: SchedulePrefill | null;
   onScheduled: (patch: {
     scheduled_start: string;
     scheduled_end: string;
@@ -130,6 +137,7 @@ export function ScheduleJobModal({
   onReopen,
   onCostCentreAdded,
   onScheduled,
+  prefill = null,
 }: Props) {
   const { schedule, addBookings, updateBooking, deleteBooking, ready } = useSchedule();
   const [mode, setMode] = useState<Mode>({ kind: "list" });
@@ -207,9 +215,16 @@ export function ScheduleJobModal({
       if (r.available) setLeave(r.leave);
     });
     if (bookings === null) openForm({ kind: "legacy" });
-    else setMode({ kind: "list" });
+    else if (prefill) {
+      openForm({ kind: "add" });
+      if (prefill.staffId) setTechnicianIds([prefill.staffId]);
+      if (prefill.dateKey) {
+        setStartDateKey(prefill.dateKey);
+        setEndDateKey(prefill.dateKey);
+      }
+    } else setMode({ kind: "list" });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [visible, bookings === null, currentScheduledStart, currentScheduledEnd, currentScheduleDaily, currentScheduleAllDay, currentScheduledCostCenterId]);
+  }, [visible, bookings === null, prefill, currentScheduledStart, currentScheduledEnd, currentScheduleDaily, currentScheduleAllDay, currentScheduledCostCenterId]);
 
   function loadWindow(start: string | null, end: string | null, daily: boolean, allDayFlag: boolean) {
     // Reopen as saved (start/end date, hours, All day) — the reverse of
