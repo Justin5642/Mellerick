@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireOfficeOrAdmin } from "@/lib/api/guards";
 import { callerClient } from "@/lib/api/caller-client";
 import { renderDocumentPdf } from "@/lib/pdf/render";
+import { loadBillingAddress } from "@/lib/customer-address-load";
 import { businessInfo } from "@/lib/business-info";
 import { INVOICE_SITE_SELECT, invoiceJobSite } from "@/lib/job-site";
 import { invoiceProgress } from "@/lib/progress-claim";
@@ -30,7 +31,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   const buffer = await renderDocumentPdf({
     docType: "Tax Invoice",
     docNumber: invoice.invoice_number,
-    customer: invoice.customers,
+    customer: { ...invoice.customers, billing_address: await loadBillingAddress(supabase, invoice.customer_id) },
     items: invoice.invoice_items ?? [],
     subtotal: Number(invoice.subtotal),
     taxAmount: Number(invoice.tax_amount),

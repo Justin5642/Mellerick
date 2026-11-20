@@ -1,4 +1,5 @@
 import { fetchWithTimeout } from "./fetchWithTimeout";
+import type { DocumentFolder } from "./documentFolders";
 import { supabase } from "./supabase";
 import type { BuilderPoLineInput, CostCentreOption } from "./builderPo";
 
@@ -212,13 +213,18 @@ export function gstOf(amount: string): number | null {
 /** Uploads a photo (base64 JPEG) as a job document. 60 s: it carries the file up. */
 export async function uploadJobDocument(
   jobId: string,
-  input: { file: string; fileName: string; officeOnly: boolean }
+  input: { file: string; fileName: string; officeOnly: boolean; folder?: DocumentFolder | null }
 ): Promise<{ id: string; fileName: string }> {
   return callDocuments(`${base(jobId)}/documents`, { method: "POST", body: JSON.stringify(input) }, 60_000);
 }
 
 export function setJobDocumentOfficeOnly(jobId: string, docId: string, officeOnly: boolean): Promise<{ officeOnly: boolean }> {
   return callDocuments(`${base(jobId)}/documents/${enc(docId)}`, { method: "PATCH", body: JSON.stringify({ officeOnly }) });
+}
+
+/** Moves a document to a folder (0114, drafted — null = "Other"). */
+export function setJobDocumentFolder(jobId: string, docId: string, folder: DocumentFolder | null): Promise<{ folder: DocumentFolder | null }> {
+  return callDocuments(`${base(jobId)}/documents/${enc(docId)}`, { method: "PATCH", body: JSON.stringify({ folder }) });
 }
 
 export function deleteJobDocument(jobId: string, docId: string): Promise<{ deleted: boolean; warning?: string }> {

@@ -380,6 +380,9 @@ export function JobOverview({ job, readOnly = false, bookings, bookingsError, le
                 <p className="rounded-md bg-amber-50 px-2.5 py-1.5 text-xs text-amber-800">
                   No map location for this address, so auto clock-in won&apos;t work here.
                   {canEditSite ? " Set it on the map, or check the address is correct." : " Ask the office to set it on the map."}
+                  <span className="mt-1 block">
+                    Set it on site: open the job on the phone and tap &ldquo;Set site location here&rdquo; (the phone also offers it at a manual clock-on){canEditSite ? ", or drop a pin here." : "."}
+                  </span>
                 </p>
               )}
               {canEditSite && job.site_id && (

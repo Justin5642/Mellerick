@@ -1245,6 +1245,89 @@ directly as before; the routes are there for them to share.
   phones with the next build (no new native module); the web routes must be
   deployed first.
 
+**Notebook list (20 Nov 2026): existing jobs on the schedule, Copy job, site pin at clock-on, customer billing address, document folders (migration `0114` — DRAFT, not applied).**
+Five items from Justin's list, web and phone.
+- **A. Schedule an existing job.** The board only offered New Job. Web board
+  (`components/schedule/team-schedule-view.tsx`, office/admin): a
+  **Schedule existing job** button in the toolbar and a **+** on each
+  technician's day (Week cell, on hover; Day view under the name; today on)
+  open `components/schedule/schedule-existing-job-dialog.tsx` — open jobs
+  (not completed/cancelled) by number, or every word in the title or
+  customer name/company, searched in the database as you type, ≤ 20. Picking
+  one goes to `/dashboard/jobs/<id>?schedule=1&tech=<staff>&day=<YYYY-MM-DD>`;
+  the job page opens `ScheduleJobDialog` with a NEW row for that technician
+  and day beside any saved bookings (`prefill`; a technician not in the staff
+  list or a bad date is dropped). Cost centre, leave and clash rules are the
+  dialog's own, unchanged. Phone office Schedule tab: **Schedule existing
+  job** beside To-do → `components/schedule/ScheduleExistingSheet.tsx`
+  (`lib/data/reads/scheduleSearch.ts`, online) → "Tap a technician's day to
+  schedule #n" (or **Skip**) → `/job/<id>?schedule=1&tech=&day=`, which opens
+  the Schedule Job sheet on a new booking for them (`prefill` in
+  `components/job/schedule-job-modal.tsx`). Rules `lib/schedule-existing-job.ts`,
+  mirrored at `mobile/lib/scheduleExistingJob.ts`
+  (`tests/unit/schedule-existing-job.test.ts`).
+- **B. Copy job / use as a template.** Web job page header **Copy job**
+  (office/admin, `components/job/copy-job-dialog.tsx`, title editable,
+  "Copy of …" by default) and the phone's Update job sheet (**Copy job**,
+  `RoleGate` office/admin, online) both call **`POST /api/jobs/[id]/copy`**
+  (`requireOfficeOrAdmin`, every read and write as the CALLER, fixed
+  sentences; tests `tests/unit/job-copy.test.ts`). Copies customer, site,
+  title, job type, priority, description; makes the job `pending`; copies the
+  source's PO cost-centre LINES (name, company cost-centre tag, code, allowed
+  hours — amount 0) under a new `<new job number>-1` PO valued $0. Never
+  copies bookings, time, photos, notes, documents, invoices, variations,
+  schedule or money. `newJobId` (client UUID) makes a retry return the job it
+  already made; if the PO can't be saved the job is kept and the answer warns
+  (add the cost centres on the PO tab). Rules `lib/job-copy.ts`.
+- **C. Site location at a manual clock-on (phone).** After a manual clock-on
+  (Time tab, Today card), `mobile/lib/sitePinOffer.ts` reads the job's site
+  online; if it has no `site_lat/site_lng` and the clock-on fix is within
+  ±50 m, it asks once per job (AsyncStorage) "This site has no map location —
+  save where you are now…?" Yes → the existing `/api/jobs/[id]/site-location`
+  route (`postSiteLocation` in `lib/siteLocation.ts`, the same fix). Never
+  silent, never with a pin already there, offline it doesn't ask. Web job
+  Overview's "No map location" warning now says how to set it on site.
+- **D. Customer billing address.** `customers.billing_address` (0114, text,
+  ≤ 500). Web: New / Edit Customer (edit hides the field until the column
+  exists), shown on the customer page; printed under the billed name (and
+  Attn:) on invoice and quote PDFs (`lib/pdf/document-template.tsx`; the
+  invoice/quote pdf and send routes) and on the invoice/quote detail pages.
+  Read with its own small query (`lib/customer-address-load.ts`): a missing
+  column (before 0114) or any failure = no address, never a broken document.
+  No fallback to the site address. Phone: customer form + detail; the address
+  is read ONLINE (`getCustomerBillingAddress`) — no PowerSync stream carries
+  it, so no sync-rule redeploy; when it couldn't be read the edit form hides
+  the field and never sends it; writes go through the outbox
+  (`CustomersRepository`, sent only when given) and the gateway drops the
+  column on a database without it (`optionalColumns.ts`). Rules
+  `lib/customer-address.ts`, mirrored at `mobile/lib/customerAddress.ts`.
+- **E. Document folders.** `job_documents.folder` (0114): `site_documents`,
+  `drainage`, `plumbing`, `soil`, NULL = **Other** (all legacy rows). Web
+  Documents tab: grouped by folder with counts, collapsible; the upload asks
+  which folder (default Site Documents); each document has a "move to folder"
+  select for office/admin and for the job's crew on documents they can edit
+  (the 0065/0074 RLS — office-only documents stay office/admin). Phone
+  Documents tab: grouped and collapsible for everyone; office/admin pick the
+  folder on upload and move documents (folder icon) through
+  `POST /api/jobs/[id]/documents` (`folder`) and `PATCH …/documents/[docId]`
+  (`folder`, alone or with `officeOnly`; 409 "folders aren't switched on yet"
+  before 0114). job_documents is in no stream, so no PowerSync change.
+  Rules `lib/document-folders.ts`, mirrored at `mobile/lib/documentFolders.ts`.
+- **Before 0114 is applied nothing breaks:** web uploads and route inserts
+  retry without `folder`; folder controls hide while rows have no `folder`
+  key; billing-address readers answer null; New Customer saves without the
+  address and says so.
+- **Apply order:** paste `supabase/migrations/0114_customer_address_doc_folders.sql`
+  → paste `supabase/tests/0114_customer_address_doc_folders_test.sql` (needs
+  an active technician and an active office/admin), trust only `0114 PASSED`
+  → mark 0114's header applied, add the ledger row, regenerate types
+  (`lib/database.types.ts` has both columns by hand) → merge web → ship the
+  phone build. **No PowerSync redeploy** (no stream changed). The phone parts
+  need the web deployed first (`/api/jobs/[id]/copy`, the documents `folder`).
+- **Not done:** the phone's invoice/quote detail screens don't show the
+  billing address (the PDFs do); technicians can't move documents on the
+  phone; folders can't be renamed or added (fixed list, a check constraint).
+
 **Komtrax (Komatsu machine data), 20 Nov 2026; migration `0113` applied 2026-11-20.**
 Justin: connect Komatsu's Komtrax ISO 15143-3 (AEMP 2.0) web API so the
 Komatsu machines' own data flows into Fleet. Read-only toward Komatsu.
@@ -2477,6 +2560,7 @@ a shippable release.
 | **Truck loads: set rates (0111 applied)** | Justin | `0111` applied 2026-11-19 (gate test passed). Ledger row: `insert into supabase_migrations.schema_migrations (version,name) values ('0111','cartage_loads') on conflict do nothing;` Then: Fleet → Hire setup on each truck, add **Cartage per tonne** and/or **per m³** and **per km** rates; Settings → Truck loads, check the margin (15% by default); on jobs where quarry product is NOT in the quote, set the Day Works tab's "Quarry product on this job" to Extra. |
 | **Leave on the schedule: record 0112** | Justin | `0112` applied 2026-11-19 (gate test passed). Ledger row: `insert into supabase_migrations.schema_migrations (version,name) values ('0112','schedule_leave') on conflict do nothing;` No PowerSync redeploy. Who sees the leave type defaults to office + admin; change it in Settings → Leave on the schedule. Part days: add From/To times on the Leave Log entry. |
 | **Komtrax: sync and link machines** | Justin | `0113` applied 2026-11-20 (gate test passed). Ledger row: `insert into supabase_migrations.schema_migrations (version,name) values ('0113','komtrax') on conflict do nothing;` Admin → Fleet → Komtrax machines → **Sync Komtrax**, then link any Komatsu machine not linked by serial (or put its serial in the fleet item's notes). `KOMTRAX_USERNAME` / `KOMTRAX_PASSWORD` are in Vercel Production. |
+| **Apply 0114 (customer address, document folders)** | Justin | `0114` is a DRAFT — not applied. Paste `0114_customer_address_doc_folders.sql`, then `supabase/tests/0114_customer_address_doc_folders_test.sql`, trust only `0114 PASSED`; mark the header applied; ledger: `insert into supabase_migrations.schema_migrations (version,name) values ('0114','customer_address_doc_folders') on conflict do nothing;` No PowerSync redeploy. Then add billing addresses to customers (they print on invoices and quotes). |
 | **Maestro flow 02** | Avi | Needs `ADMIN_EMAIL` / `ADMIN_PASSWORD` in the environment. The login subflow deliberately skips when a session already exists, so a password never passes through a script — which is why flows 01/03/04 could be run and 02 could not. |
 
 ### QA fixture — do not delete

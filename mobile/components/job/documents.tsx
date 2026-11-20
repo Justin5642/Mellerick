@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { View, Text, StyleSheet, TouchableOpacity, FlatList, Alert, ActivityIndicator, TextInput, Switch } from "react-native";
+import { View, Text, StyleSheet, TouchableOpacity, Alert, ActivityIndicator, TextInput, Switch } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { supabase } from "../../lib/supabase";
 import { colors } from "../../lib/theme";
@@ -8,7 +8,17 @@ import { openExternalUrl } from "../../lib/open-external-url";
 import { useIsOfficeOrAdmin } from "../../design/guards/useRole";
 import { KeyboardSheet, KEYBOARD_SHEET_INPUT_FONT_SIZE } from "../KeyboardSheet";
 import { prepareImage } from "../../lib/imageUpload";
-import { deleteJobDocument, documentPhotoName, setJobDocumentOfficeOnly, uploadJobDocument } from "../../lib/jobPurchaseOrders";
+import { deleteJobDocument, documentPhotoName, setJobDocumentFolder, setJobDocumentOfficeOnly, uploadJobDocument } from "../../lib/jobPurchaseOrders";
+import {
+  DEFAULT_DOCUMENT_FOLDER,
+  DOCUMENT_FOLDERS,
+  DOCUMENT_FOLDER_GROUPS,
+  documentFolderGroup,
+  documentFolderLabel,
+  groupDocumentsByFolder,
+  type DocumentFolder,
+  type DocumentFolderGroup,
+} from "../../lib/documentFolders";
 import { pickPhoto } from "../../lib/pickPhoto";
 
 interface Document {
@@ -22,6 +32,8 @@ interface Document {
   // Hidden from technicians by RLS (migration 0065) — only office/admin ever
   // receive these rows, so the label is only ever seen by them.
   office_only?: boolean;
+  // Folder (job_documents.folder, 0114 — drafted): null/absent = "Other".
+  folder?: string | null;
 }
 
 function formatBytes(bytes: number | null) {
@@ -46,6 +58,7 @@ interface UploadDraft {
   uri: string;
   name: string;
   officeOnly: boolean;
+  folder: DocumentFolder;
 }
 
 export function JobDocumentsTab({ jobId }: { jobId: string }) {
@@ -57,6 +70,10 @@ export function JobDocumentsTab({ jobId }: { jobId: string }) {
   const [loading, setLoading] = useState(true);
   const [openingId, setOpeningId] = useState<string | null>(null);
   const [error, setError] = useState<unknown>(null);
+  const [collapsed, setCollapsed] = useState<Set<DocumentFolderGroup>>(new Set());
+  const [moveDoc, setMoveDoc] = useState<Document | null>(null);
+  // Before 0114 (drafted) the rows have no folder key: no folder controls then.
+  const foldersReady = documents.length === 0 || documents.some((d) => "folder" in d);
 
   // The query error was being destructured away, so a failed read fell through
   // to "No documents uploaded for this job yet." A technician who reads that on
@@ -105,7 +122,7 @@ export function JobDocumentsTab({ jobId }: { jobId: string }) {
 
   async function startUpload(source: "camera" | "library") {
     const uri = await pickPhoto(source);
-    if (uri) setUpload({ uri, name: "", officeOnly: false });
+    if (uri) setUpload({ uri, name: "", officeOnly: false, folder: DEFAULT_DOCUMENT_FOLDER });
   }
 
   async function saveUpload() {
@@ -114,7 +131,7 @@ export function JobDocumentsTab({ jobId }: { jobId: string }) {
     try {
       const { base64 } = await prepareImage(upload.uri, { base64: true });
       if (!base64) throw new Error("Couldn't prepare the photo — take it again.");
-      await uploadJobDocument(jobId, { file: base64, fileName: documentPhotoName(upload.name), officeOnly: upload.officeOnly });
+      await uploadJobDocument(jobId, { file: base64, fileName: documentPhotoName(upload.name), officeOnly: upload.officeOnly, folder: upload.folder });
       setUpload(null);
       await loadDocuments();
     } catch (e) {
@@ -134,6 +151,29 @@ export function JobDocumentsTab({ jobId }: { jobId: string }) {
     } finally {
       setBusyId(null);
     }
+  }
+
+  async function moveTo(doc: Document, group: DocumentFolderGroup) {
+    setMoveDoc(null);
+    if (documentFolderGroup(doc) === group) return;
+    setBusyId(doc.id);
+    try {
+      const { folder } = await setJobDocumentFolder(jobId, doc.id, group === "other" ? null : group);
+      setDocuments((prev) => prev.map((d) => (d.id === doc.id ? { ...d, folder } : d)));
+    } catch (e) {
+      Alert.alert("Not moved", e instanceof Error ? e.message : "Try again.");
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  function toggleSection(group: DocumentFolderGroup) {
+    setCollapsed((prev) => {
+      const next = new Set(prev);
+      if (next.has(group)) next.delete(group);
+      else next.add(group);
+      return next;
+    });
   }
 
   function confirmDelete(doc: Document) {
@@ -191,54 +231,75 @@ export function JobDocumentsTab({ jobId }: { jobId: string }) {
           </TouchableOpacity>
         </View>
       )}
-      <FlatList
-        data={documents}
-        keyExtractor={(d) => d.id}
-        scrollEnabled={false}
-        contentContainerStyle={{ gap: 8, marginTop: 10 }}
-        ListEmptyComponent={<Text style={styles.emptyText}>No documents uploaded for this job yet.</Text>}
-        renderItem={({ item }) => (
-          <TouchableOpacity style={styles.row} onPress={() => handleOpen(item)} disabled={openingId === item.id}>
-            <View style={styles.iconBox}>
-              {openingId === item.id ? (
-                <ActivityIndicator size="small" color={colors.blue600} />
-              ) : (
-                <Text style={styles.iconText}>{extLabel(item.file_name)}</Text>
-              )}
-            </View>
-            <View style={styles.rowContent}>
-              <Text style={styles.fileName} numberOfLines={1}>
-                {item.office_only ? "🔒 " : ""}{item.file_name}
-              </Text>
-              <Text style={styles.fileMeta}>
-                {[formatBytes(item.file_size), item.profiles?.full_name, new Date(item.created_at).toLocaleDateString("en-AU")]
-                  .filter(Boolean)
-                  .join(" · ")}
-              </Text>
-            </View>
-            {isOffice && (
-              <>
-                <TouchableOpacity
-                  onPress={() => void toggleOfficeOnly(item)}
-                  disabled={busyId === item.id}
-                  hitSlop={8}
-                  accessibilityLabel={item.office_only ? "Office only — tap to show technicians" : "Visible to technicians — tap to make office only"}
-                >
-                  {busyId === item.id ? (
-                    <ActivityIndicator size="small" color={colors.blue600} />
-                  ) : (
-                    <Ionicons name={item.office_only ? "lock-closed" : "lock-open-outline"} size={20} color={item.office_only ? colors.orange700 : colors.slate400} />
+      {documents.length === 0 ? (
+        <Text style={styles.emptyText}>No documents uploaded for this job yet.</Text>
+      ) : (
+        groupDocumentsByFolder(documents).map((section) => {
+          const open = !collapsed.has(section.folder);
+          return (
+            <View key={section.folder} style={styles.section}>
+              <TouchableOpacity
+                style={styles.sectionHeader}
+                onPress={() => toggleSection(section.folder)}
+                accessibilityRole="button"
+                accessibilityState={{ expanded: open }}
+              >
+                <Ionicons name={open ? "chevron-down" : "chevron-forward"} size={16} color={colors.slate500} />
+                <Ionicons name="folder-outline" size={16} color={colors.slate500} />
+                <Text style={styles.sectionTitle}>{section.label}</Text>
+                <Text style={styles.sectionCount}>{section.documents.length}</Text>
+              </TouchableOpacity>
+              {open &&
+                section.documents.map((item) => (
+                <TouchableOpacity key={item.id} style={styles.row} onPress={() => handleOpen(item)} disabled={openingId === item.id}>
+                  <View style={styles.iconBox}>
+                    {openingId === item.id ? (
+                      <ActivityIndicator size="small" color={colors.blue600} />
+                    ) : (
+                      <Text style={styles.iconText}>{extLabel(item.file_name)}</Text>
+                    )}
+                  </View>
+                  <View style={styles.rowContent}>
+                    <Text style={styles.fileName} numberOfLines={1}>
+                      {item.office_only ? "🔒 " : ""}{item.file_name}
+                    </Text>
+                    <Text style={styles.fileMeta}>
+                      {[formatBytes(item.file_size), item.profiles?.full_name, new Date(item.created_at).toLocaleDateString("en-AU")]
+                        .filter(Boolean)
+                        .join(" · ")}
+                    </Text>
+                  </View>
+                  {isOffice && (
+                    <>
+                      {foldersReady && (
+                        <TouchableOpacity onPress={() => setMoveDoc(item)} disabled={busyId === item.id} hitSlop={8} accessibilityLabel={`Move ${item.file_name} to another folder`}>
+                          <Ionicons name="folder-open-outline" size={20} color={colors.slate400} />
+                        </TouchableOpacity>
+                      )}
+                      <TouchableOpacity
+                        onPress={() => void toggleOfficeOnly(item)}
+                        disabled={busyId === item.id}
+                        hitSlop={8}
+                        accessibilityLabel={item.office_only ? "Office only — tap to show technicians" : "Visible to technicians — tap to make office only"}
+                      >
+                        {busyId === item.id ? (
+                          <ActivityIndicator size="small" color={colors.blue600} />
+                        ) : (
+                          <Ionicons name={item.office_only ? "lock-closed" : "lock-open-outline"} size={20} color={item.office_only ? colors.orange700 : colors.slate400} />
+                        )}
+                      </TouchableOpacity>
+                      <TouchableOpacity onPress={() => confirmDelete(item)} disabled={busyId === item.id} hitSlop={8} accessibilityLabel={`Delete ${item.file_name}`}>
+                        <Ionicons name="trash-outline" size={20} color={colors.slate400} />
+                      </TouchableOpacity>
+                    </>
                   )}
+                  <Ionicons name="open-outline" size={20} color={colors.blue600} />
                 </TouchableOpacity>
-                <TouchableOpacity onPress={() => confirmDelete(item)} disabled={busyId === item.id} hitSlop={8} accessibilityLabel={`Delete ${item.file_name}`}>
-                  <Ionicons name="trash-outline" size={20} color={colors.slate400} />
-                </TouchableOpacity>
-              </>
-            )}
-            <Ionicons name="open-outline" size={20} color={colors.blue600} />
-          </TouchableOpacity>
-        )}
-      />
+                ))}
+            </View>
+          );
+        })
+      )}
       {upload && (
         <KeyboardSheet
           visible
@@ -262,6 +323,23 @@ export function JobDocumentsTab({ jobId }: { jobId: string }) {
             onChangeText={(name) => setUpload({ ...upload, name })}
             placeholder="e.g. Plumbing plan sheet 2"
           />
+          {foldersReady && (
+            <>
+              <Text style={[styles.label, { marginTop: 14 }]}>Folder</Text>
+              <View style={styles.chips}>
+                {DOCUMENT_FOLDERS.map((f) => (
+                  <TouchableOpacity
+                    key={f}
+                    style={[styles.chip, upload.folder === f && styles.chipOn]}
+                    onPress={() => setUpload({ ...upload, folder: f })}
+                    accessibilityState={{ selected: upload.folder === f }}
+                  >
+                    <Text style={[styles.chipText, upload.folder === f && styles.chipTextOn]}>{documentFolderLabel(f)}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </>
+          )}
           <View style={styles.switchRow}>
             <View style={styles.rowContent}>
               <Text style={styles.label}>Office only</Text>
@@ -269,6 +347,29 @@ export function JobDocumentsTab({ jobId }: { jobId: string }) {
             </View>
             <Switch value={upload.officeOnly} onValueChange={(officeOnly) => setUpload({ ...upload, officeOnly })} />
           </View>
+        </KeyboardSheet>
+      )}
+      {moveDoc && (
+        <KeyboardSheet
+          visible
+          onRequestClose={() => setMoveDoc(null)}
+          title={`Move ${moveDoc.file_name}`}
+          footer={
+            <TouchableOpacity style={[styles.sheetBtn, styles.sheetCancel]} onPress={() => setMoveDoc(null)}>
+              <Text style={styles.sheetCancelText}>Cancel</Text>
+            </TouchableOpacity>
+          }
+        >
+          {DOCUMENT_FOLDER_GROUPS.map((g) => {
+            const current = documentFolderGroup(moveDoc) === g;
+            return (
+              <TouchableOpacity key={g} style={styles.moveRow} onPress={() => void moveTo(moveDoc, g)} accessibilityState={{ selected: current }}>
+                <Ionicons name={current ? "folder-open" : "folder-outline"} size={18} color={current ? colors.blue600 : colors.slate500} />
+                <Text style={[styles.moveText, current && styles.chipTextOn]}>{documentFolderLabel(g)}</Text>
+                {current ? <Ionicons name="checkmark" size={18} color={colors.blue600} /> : null}
+              </TouchableOpacity>
+            );
+          })}
         </KeyboardSheet>
       )}
     </View>
@@ -313,5 +414,16 @@ const styles = StyleSheet.create({
   sheetCancelText: { color: colors.slate700, fontWeight: "600", fontSize: 14 },
   sheetSave: { backgroundColor: colors.blue600 },
   sheetSaveText: { color: colors.white, fontWeight: "700", fontSize: 14 },
+  section: { marginTop: 12, gap: 8 },
+  sectionHeader: { flexDirection: "row", alignItems: "center", gap: 6, paddingVertical: 4 },
+  sectionTitle: { fontSize: 13, fontWeight: "700", color: colors.slate700 },
+  sectionCount: { fontSize: 11, fontWeight: "600", color: colors.slate500, backgroundColor: colors.bg, borderRadius: 10, paddingHorizontal: 7, paddingVertical: 1, overflow: "hidden" },
+  chips: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
+  chip: { borderWidth: 1, borderColor: colors.border, borderRadius: 16, paddingHorizontal: 12, paddingVertical: 6, backgroundColor: colors.card },
+  chipOn: { borderColor: colors.blue600, backgroundColor: colors.blue100 },
+  chipText: { fontSize: 13, color: colors.slate700 },
+  chipTextOn: { color: colors.blue600, fontWeight: "700" },
+  moveRow: { flexDirection: "row", alignItems: "center", gap: 10, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: colors.border },
+  moveText: { flex: 1, fontSize: 15, color: colors.slate900 },
   emptyText: { textAlign: "center", color: colors.slate400, marginTop: 20, fontSize: 13 },
 });

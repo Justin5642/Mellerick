@@ -240,3 +240,22 @@ export async function getCustomerOverview(customerId: string): Promise<CustomerO
     ROLES
   );
 }
+
+/**
+ * The customer's billing address (customers.billing_address — migration 0114,
+ * drafted; not applied until its header says so). Printed on invoices and
+ * quotes. Online only, on purpose: no PowerSync stream carries the column, so
+ * there is no sync-rule redeploy to coordinate. `undefined` = not known
+ * (offline, or the column isn't there yet): the edit form then hides the field
+ * and never sends it, so an unknown address can't be saved over as blank.
+ */
+export async function getCustomerBillingAddress(customerId: string): Promise<string | null | undefined> {
+  try {
+    const { data, error } = await supabase.from("customers").select("billing_address").eq("id", customerId).maybeSingle();
+    if (error || !data) return undefined;
+    const value = (data as { billing_address?: unknown }).billing_address;
+    return typeof value === "string" && value.trim() !== "" ? value : null;
+  } catch {
+    return undefined;
+  }
+}

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, Alert, TextInput } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useFocusEffect, useLocalSearchParams, useNavigation, useRouter } from "expo-router";
@@ -10,7 +10,8 @@ import { colors, statusColors } from "../../lib/theme";
 import { ScreenError } from "../../design/components/ScreenError";
 import { useIsOfficeOrAdmin } from "../../design/guards/useRole";
 import { RoleGate } from "../../design/guards/RoleGate";
-import { deleteJob, deleteJobMessage } from "../../lib/officeActions";
+import { copyJob, copyJobTitle, deleteJob, deleteJobMessage } from "../../lib/officeActions";
+import * as Crypto from "expo-crypto";
 import { useJobEdit } from "../../lib/data/hooks/useJobEdit";
 import { JobOverviewTab } from "../../components/job/overview";
 import { JobNotesTab } from "../../components/job/notes";
@@ -28,6 +29,7 @@ import { JobDayWorksTab } from "../../components/job/day-works";
 import { JobPurchaseOrdersTab } from "../../components/job/purchase-orders";
 import { ScheduleJobModal } from "../../components/job/schedule-job-modal";
 import { isJobClosedForScheduling } from "../../lib/jobSchedulable";
+import { parseSchedulePrefill, type SchedulePrefill } from "../../lib/scheduleExistingJob";
 import { KeyboardSheet, KEYBOARD_SHEET_INPUT_FONT_SIZE } from "../../components/KeyboardSheet";
 import { getJobStageLabel } from "../../lib/job-stages";
 import { formatScheduleSummary, businessTodayKey } from "../../lib/scheduleDisplay";
@@ -73,7 +75,7 @@ const JOB_PRIORITIES = ["low", "normal", "high", "urgent"] as const;
 const JOB_TYPES = ["service", "installation", "maintenance", "emergency", "quote", "project"] as const;
 
 export default function JobDetailScreen() {
-  const { id } = useLocalSearchParams<{ id: string }>();
+  const { id, schedule: scheduleParam, tech: techParam, day: dayParam } = useLocalSearchParams<{ id: string; schedule?: string; tech?: string; day?: string }>();
   const router = useRouter();
   const navigation = useNavigation();
   const isOfficeOrAdmin = useIsOfficeOrAdmin();
@@ -109,6 +111,11 @@ export default function JobDetailScreen() {
   const [tab, setTab] = useState<TabKey>("overview");
   const [editing, setEditing] = useState(false);
   const [scheduleOpen, setScheduleOpen] = useState(false);
+  // `?schedule=1&tech=&day=` — the Schedule tab's "Schedule an existing job"
+  // (20 Nov 2026): open the Schedule Job sheet once the job has loaded, with a
+  // new booking for that technician and day. Office/admin only; used once.
+  const [schedulePrefill, setSchedulePrefill] = useState<SchedulePrefill | null>(null);
+  const scheduleParamUsed = useRef(false);
   const [savingEdit, setSavingEdit] = useState(false);
   const [details, setDetails] = useState<{ title: string; description: string } | null>(null);
   // Latest stage note's stage only (not the full note history — that's the
@@ -133,6 +140,15 @@ export default function JobDetailScreen() {
   // when they could not be read) — the header then shows the job-level
   // schedule as before.
   const [bookings, setBookings] = useState<JobBooking[] | null>(null);
+  useEffect(() => {
+    if (scheduleParamUsed.current || scheduleParam !== "1" || !isOfficeOrAdmin || !job || loading) return;
+    scheduleParamUsed.current = true;
+    if (isJobClosedForScheduling(job.status)) return;
+    // Any active technician id: the sheet's own staff list decides who can be ticked.
+    const ids = techParam ? [techParam] : [];
+    setSchedulePrefill(parseSchedulePrefill(techParam ?? null, dayParam ?? null, ids));
+    setScheduleOpen(true);
+  }, [scheduleParam, techParam, dayParam, isOfficeOrAdmin, job, loading]);
   const [leave, setLeave] = useState<ScheduleLeave[]>([]);
   const layer = useDataLayer();
 
@@ -262,6 +278,42 @@ export default function JobDetailScreen() {
   // DELETE /api/jobs/[id]. Online — a refusal (a linked quote or invoice)
   // is answered here, never left to dead-letter in the queue.
   const [deleting, setDeleting] = useState(false);
+  // "Copy job" (20 Nov 2026; office/admin — RoleGate, and the route checks):
+  // a new job from this one as a template, then open it. Online only.
+  const [copying, setCopying] = useState(false);
+  const copyIdRef = useRef<string | null>(null);
+  const confirmCopy = useCallback(() => {
+    if (!job || copying) return;
+    setEditing(false);
+    const title = copyJobTitle(job.title ?? "");
+    setTimeout(() => {
+      Alert.alert(
+        `Copy job #${job.job_number}?`,
+        `A new job "${title}" for the same customer and site, with the same type, priority, description and cost centres (hours, no money). Bookings, time, photos, notes and documents are not copied. You can rename it afterwards.`,
+        [
+          { text: "Cancel", style: "cancel" },
+          {
+            text: "Copy job",
+            onPress: async () => {
+              setCopying(true);
+              // One id per copy attempt, kept across a retry of the same one.
+              copyIdRef.current = copyIdRef.current ?? Crypto.randomUUID();
+              try {
+                const copied = await copyJob(job.id, title, copyIdRef.current);
+                copyIdRef.current = null;
+                if (copied.warning) Alert.alert("Job copied", copied.warning);
+                router.push(`/job/${copied.id}`);
+              } catch (e) {
+                Alert.alert("Couldn't copy the job", e instanceof Error ? e.message : "Please try again.");
+              } finally {
+                setCopying(false);
+              }
+            },
+          },
+        ]
+      );
+    }, 450);
+  }, [job, copying, router]);
   const confirmDelete = useCallback(() => {
     if (!job || deleting) return;
     setEditing(false);
@@ -608,6 +660,12 @@ export default function JobDetailScreen() {
 
             <Text style={styles.editHint}>Status, priority and type save instantly. Customer and site are edited on the web.</Text>
 
+            <RoleGate roles={["office", "admin"]}>
+              <TouchableOpacity style={styles.copyJobBtn} onPress={confirmCopy} disabled={copying || savingEdit} accessibilityLabel="Copy job">
+                <Ionicons name="copy-outline" size={15} color={colors.blue600} />
+                <Text style={styles.copyJobText}>{copying ? "Copying…" : "Copy job (use as a template)"}</Text>
+              </TouchableOpacity>
+            </RoleGate>
             <RoleGate roles={["admin"]}>
               <TouchableOpacity style={styles.deleteJobBtn} onPress={confirmDelete} disabled={deleting || savingEdit} accessibilityLabel="Delete job">
                 <Ionicons name="trash-outline" size={15} color={colors.red600} />
@@ -618,7 +676,11 @@ export default function JobDetailScreen() {
 
       <ScheduleJobModal
         visible={scheduleOpen}
-        onClose={() => setScheduleOpen(false)}
+        onClose={() => {
+          setScheduleOpen(false);
+          setSchedulePrefill(null);
+        }}
+        prefill={schedulePrefill}
         jobId={job.id}
         jobStatus={job.status}
         currentAssignedIds={assignedStaff.map((a) => a.id)}
@@ -690,6 +752,8 @@ const styles = StyleSheet.create({
   chipText: { fontSize: 13, fontWeight: "600", color: colors.slate700, textTransform: "capitalize" },
   chipTextActive: { color: "#fff" },
   editHint: { fontSize: 11, color: colors.slate400, marginTop: 14 },
+  copyJobBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, marginTop: 16, paddingVertical: 10, borderRadius: 10, borderWidth: 1, borderColor: colors.blue100, backgroundColor: colors.bg },
+  copyJobText: { color: colors.blue600, fontWeight: "700", fontSize: 13 },
   deleteJobBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, marginTop: 16, paddingVertical: 10, borderRadius: 10, borderWidth: 1, borderColor: colors.red100, backgroundColor: colors.bg },
   deleteJobText: { fontSize: 13, fontWeight: "600", color: colors.red600 },
   editActions: { flexDirection: "row", gap: 10 },

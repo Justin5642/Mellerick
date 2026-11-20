@@ -2,7 +2,7 @@ jest.mock("./supabase", () => ({ supabase: { auth: { getSession: jest.fn(async (
 jest.mock("./fetchWithTimeout", () => ({ fetchWithTimeout: jest.fn() }));
 
 import { fetchWithTimeout } from "./fetchWithTimeout";
-import { deleteJob, deleteJobMessage, formatPin, geocodeSiteAddress, parseUsageAmounts, pinFixProblem, siteAddress } from "./officeActions";
+import { copyJob, copyJobTitle, deleteJob, deleteJobMessage, formatPin, geocodeSiteAddress, parseUsageAmounts, pinFixProblem, siteAddress } from "./officeActions";
 
 const fetchMock = fetchWithTimeout as jest.Mock;
 const reply = (status: number, body: unknown) => ({ ok: status >= 200 && status < 300, status, json: async () => body });
@@ -35,6 +35,29 @@ describe("deleteJob", () => {
   it("keeps the web dialog's wording", () => {
     expect(deleteJobMessage("Blocked drain")).toMatch(/permanently deletes "Blocked drain" along with all of its notes, photos, documents, time entries, expenses, and variations/);
     expect(deleteJobMessage("x")).toMatch(/can't be undone/);
+  });
+});
+
+describe("copyJob", () => {
+  it("posts the title and the client id to the web's copy route", async () => {
+    fetchMock.mockResolvedValue(reply(200, { id: "new", jobNumber: 901 }));
+    expect(await copyJob("job-1", "Copy of Lot 7", "uuid-1")).toEqual({ id: "new", jobNumber: 901 });
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toMatch(/\/api\/jobs\/job-1\/copy$/);
+    expect(init.method).toBe("POST");
+    expect(JSON.parse(init.body)).toEqual({ title: "Copy of Lot 7", newJobId: "uuid-1" });
+  });
+
+  it("throws the server's sentence, or says it needs signal", async () => {
+    fetchMock.mockResolvedValue(reply(403, { error: "Only the office can copy a job." }));
+    await expect(copyJob("job-1", "t", "u")).rejects.toThrow(/Only the office/);
+    fetchMock.mockRejectedValue(new TypeError("Network request failed"));
+    await expect(copyJob("job-1", "t", "u")).rejects.toThrow(/needs signal/);
+  });
+
+  it("titles the copy as the web does", () => {
+    expect(copyJobTitle(" Lot 7 ")).toBe("Copy of Lot 7");
+    expect(copyJobTitle("x".repeat(300))).toHaveLength(200);
   });
 });
 

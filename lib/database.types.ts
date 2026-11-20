@@ -590,6 +590,7 @@ export type Database = {
       customers: {
         Row: {
           abn: string | null
+          billing_address: string | null
           company: string | null
           created_at: string | null
           created_by: string | null
@@ -608,6 +609,7 @@ export type Database = {
         }
         Insert: {
           abn?: string | null
+          billing_address?: string | null
           company?: string | null
           created_at?: string | null
           created_by?: string | null
@@ -626,6 +628,7 @@ export type Database = {
         }
         Update: {
           abn?: string | null
+          billing_address?: string | null
           company?: string | null
           created_at?: string | null
           created_by?: string | null
@@ -1707,6 +1710,7 @@ export type Database = {
           file_name: string
           file_size: number | null
           file_type: string | null
+          folder: string | null
           id: string
           job_id: string
           office_only: boolean
@@ -1719,6 +1723,7 @@ export type Database = {
           file_name: string
           file_size?: number | null
           file_type?: string | null
+          folder?: string | null
           id?: string
           job_id: string
           office_only?: boolean
@@ -1731,6 +1736,7 @@ export type Database = {
           file_name?: string
           file_size?: number | null
           file_type?: string | null
+          folder?: string | null
           id?: string
           job_id?: string
           office_only?: boolean

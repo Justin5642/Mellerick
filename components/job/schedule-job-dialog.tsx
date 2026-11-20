@@ -1,5 +1,6 @@
 "use client";
 
+import type { SchedulePrefill } from "@/lib/schedule-existing-job";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
@@ -82,6 +83,12 @@ interface Props {
   bookingsReady: boolean;
   /** Take the office to where the job's status is changed (Overview). */
   onReopen?: () => void;
+  /**
+   * Opened from the schedule board's "Schedule an existing job" on a
+   * technician's day (`?schedule=1&tech=&day=`): a new row for that
+   * technician and day is added and opened, beside any saved bookings.
+   */
+  prefill?: SchedulePrefill | null;
 }
 
 /** A dialog row: what will be saved, plus local UI state. */
@@ -112,6 +119,17 @@ function rowFromBooking(b: JobBookingWithNames): Row {
  * on the same stage ("Sam rough-in Monday morning"). The first row of an
  * unscheduled job starts today, All day.
  */
+/** A new row for the board's clicked technician and day. */
+function rowFromPrefill(prefill: SchedulePrefill, defaultCostCenterId: string | null): Row {
+  const row = newRow(undefined, defaultCostCenterId);
+  const day = prefill.dateKey ?? row.schedule.startDateKey;
+  return {
+    ...row,
+    staffIds: prefill.staffId ? [prefill.staffId] : [],
+    schedule: { ...row.schedule, startDateKey: day, endDateKey: day },
+  };
+}
+
 function newRow(after: Row | undefined, defaultCostCenterId: string | null): Row {
   if (after) {
     return { key: nextKey(), staffIds: [], costCenterId: after.costCenterId ?? defaultCostCenterId, schedule: { ...after.schedule }, note: after.note ?? "", allDayDecided: true };
@@ -158,6 +176,7 @@ export function ScheduleJobDialog({
   bookings,
   bookingsReady,
   onReopen,
+  prefill = null,
 }: Props) {
   const router = useRouter();
   const supabaseClient = createClient();
@@ -195,6 +214,10 @@ export function ScheduleJobDialog({
     if (seeded.length === 0 && !editable) {
       setRows([]);
       setEditingKey(null);
+    } else if (prefill) {
+      const added = rowFromPrefill(prefill, defaultCostCenterId);
+      setRows([...seeded, added]);
+      setEditingKey(added.key);
     } else if (seeded.length === 0) {
       const first = newRow(undefined, defaultCostCenterId);
       setRows([first]);
@@ -207,7 +230,7 @@ export function ScheduleJobDialog({
     setLeaveConfirm(false);
     // The default cost centre is read once per opening.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, bookings, editable]);
+  }, [open, bookings, editable, prefill]);
 
   // The company cost centres, once per opening ("Add to this job").
   useEffect(() => {

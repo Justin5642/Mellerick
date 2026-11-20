@@ -1,5 +1,6 @@
 "use client";
 
+import { parseSchedulePrefill, type SchedulePrefill } from "@/lib/schedule-existing-job";
 import { useEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import { useSearchParams } from "next/navigation";
@@ -8,10 +9,11 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { isJobViewOnly, VIEW_ONLY_TABS } from "@/lib/job-view-only";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { ArrowLeft, Briefcase, FileText, Image, List, MessageSquare, PenLine, ClipboardList, Clock, Receipt, GitPullRequestArrow, DollarSign, Truck, TrendingUp, Trash2, CalendarClock, Construction } from "lucide-react";
+import { ArrowLeft, Briefcase, FileText, Image, List, MessageSquare, PenLine, ClipboardList, Clock, Receipt, GitPullRequestArrow, DollarSign, Truck, TrendingUp, Trash2, CalendarClock, Construction, Copy } from "lucide-react";
 import Link from "next/link";
 import { JobOverview } from "./job-overview";
 import { DeleteJobDialog } from "./delete-job-dialog";
+import { CopyJobDialog } from "./copy-job-dialog";
 import { JobHoursScoreboard } from "./job-hours-scoreboard";
 import { JobTodoControl } from "./job-todo-control";
 import { sumAllocatedHours } from "@/lib/hours-scoreboard";
@@ -130,6 +132,7 @@ export function JobDetailClient({ job, currentUserId, photos: initialPhotos, doc
   const shownTab = viewOnly && !VIEW_ONLY_TABS.includes(activeTab) ? "overview" : activeTab;
   const highlightVariationId = searchParams.get("variation");
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const [copyOpen, setCopyOpen] = useState(false);
   // `?schedule=1` (the Schedule page's To-do list "Schedule" action) opens the
   // schedule wizard straight away. Office/admin only — the same people that
   // list reaches; a technician following the link just gets the job page.
@@ -144,11 +147,19 @@ export function JobDetailClient({ job, currentUserId, photos: initialPhotos, doc
   const autoOpenSchedule = isOffice && !jobClosed && searchParams.get("schedule") === "1";
   const [scheduleOpen, setScheduleOpen] = useState(autoOpenSchedule);
   const [scheduleMounted, setScheduleMounted] = useState(autoOpenSchedule);
+  // `&tech=&day=` — the board's "Schedule an existing job" on a technician's
+  // day: the dialog opens with a row for them on that day. Used once; a later
+  // opening of the dialog starts from the saved bookings as usual.
+  const [schedulePrefill, setSchedulePrefill] = useState<SchedulePrefill | null>(() =>
+    autoOpenSchedule ? parseSchedulePrefill(searchParams.get("tech"), searchParams.get("day"), staff.map((s) => s.id)) : null
+  );
   // Drop the param once honoured, so a reload or Back doesn't reopen the wizard.
   useEffect(() => {
     if (!autoOpenSchedule) return;
     const url = new URL(window.location.href);
     url.searchParams.delete("schedule");
+    url.searchParams.delete("tech");
+    url.searchParams.delete("day");
     window.history.replaceState(null, "", url.pathname + url.search + url.hash);
   }, [autoOpenSchedule]);
 
@@ -353,6 +364,11 @@ export function JobDetailClient({ job, currentUserId, photos: initialPhotos, doc
                 Awaiting Invoice
               </span>
             )}
+            {isOffice && (
+              <Button variant="ghost" size="sm" className="gap-1.5 text-slate-500" onClick={() => setCopyOpen(true)} title="New job using this one as a template">
+                <Copy className="w-4 h-4" />Copy job
+              </Button>
+            )}
             {isAdmin && (
               <Button
                 variant="ghost" size="sm"
@@ -529,6 +545,10 @@ export function JobDetailClient({ job, currentUserId, photos: initialPhotos, doc
         </Tabs>
       </div>
 
+      {isOffice && (
+        <CopyJobDialog jobId={job.id} jobNumber={job.job_number} jobTitle={job.title} open={copyOpen} onOpenChange={setCopyOpen} />
+      )}
+
       <DeleteJobDialog
         jobId={job.id}
         jobNumber={job.job_number}
@@ -540,7 +560,11 @@ export function JobDetailClient({ job, currentUserId, photos: initialPhotos, doc
       {scheduleMounted && (
         <ScheduleJobDialog
           open={scheduleOpen}
-          onOpenChange={setScheduleOpen}
+          onOpenChange={(next) => {
+            setScheduleOpen(next);
+            if (!next) setSchedulePrefill(null);
+          }}
+          prefill={schedulePrefill}
           jobId={job.id}
           jobNumber={job.job_number}
           jobStatus={job.status}

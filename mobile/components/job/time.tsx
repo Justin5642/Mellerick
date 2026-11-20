@@ -5,6 +5,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { supabase } from "../../lib/supabase";
 import { colors } from "../../lib/theme";
 import { useTimeClock } from "../../lib/data/hooks/useTimeClock";
+import { offerSitePinAfterClockOn } from "../../lib/sitePinOffer";
 import { currentFix } from "../../lib/clockFix";
 import { getJobCostCentres, type JobCostCentre } from "../../lib/data/reads/jobBilling";
 import { ScreenError } from "../../design/components/ScreenError";
@@ -558,6 +559,8 @@ export function JobTimeTab({
     // server row reconciles in via useSyncSettled once the write lands.
     setEntries((prev) => [optimisticEntry(id, currentUserId, clockInIso, costCenterId), ...prev]);
     setLoading(false);
+    // No map pin on this site? Offer to save this fix (asks, once per job).
+    void offerSitePinAfterClockOn(jobId, fix);
   }
 
   async function clockOut() {

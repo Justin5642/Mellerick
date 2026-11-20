@@ -1,5 +1,8 @@
 // Columns a queued write may carry before the migration that adds them is
-// applied. Today: job_bookings.note (0109 — the booking's scheduling note).
+// applied. Today: job_bookings.note (0109 — the booking's scheduling note),
+// and customers.billing_address (0114 — drafted, not applied until its header
+// says so; a customer saved before then keeps every other field and only
+// loses the address).
 //
 // Why the gateway needs this: a write sitting in the outbox is replayed as it
 // was queued. If the phone ships before 0109 is applied, an insert or edit
@@ -14,6 +17,7 @@
 // column (real drift) still fails loudly.
 export const OPTIONAL_COLUMNS: Readonly<Record<string, readonly string[]>> = {
   job_bookings: ["note"],
+  customers: ["billing_address"],
 };
 
 /**

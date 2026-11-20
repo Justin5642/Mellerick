@@ -27,6 +27,7 @@ import { invoiceProgress } from "@/lib/progress-claim";
 import type { JobReportRequest } from "@/lib/job-report";
 import { JobReportOptions } from "./job-report-options";
 import { attentionName, billingName } from "@/lib/customer-billing";
+import { billingAddressLines } from "@/lib/customer-address";
 import { InvoiceAttachmentsField, fileToBase64, type PickedAttachment } from "./invoice-attachments-field";
 import { InvoiceHours } from "./invoice-hours";
 import { pushedMessage, pushFailedMessage, pushToXeroLabel, unpricedPushConfirm } from "@/lib/invoice-actions";
@@ -37,9 +38,11 @@ interface Props {
   xeroConnected: boolean;
   /** null when the invoice_payments table is not in this database yet. */
   payments: InvoicePayment[] | null;
+  /** customers.billing_address (0114, drafted — null until it is applied). */
+  billingAddress?: string | null;
 }
 
-export function InvoiceDetail({ invoice, jobSite, xeroConnected, payments }: Props) {
+export function InvoiceDetail({ invoice, jobSite, xeroConnected, payments, billingAddress = null }: Props) {
   const progress = invoiceProgress(invoice);
   const [pushing, setPushing] = useState(false);
   const [pushed, setPushed] = useState(!!invoice.xero_invoice_id);
@@ -285,6 +288,9 @@ export function InvoiceDetail({ invoice, jobSite, xeroConnected, payments }: Pro
           <CardContent className="text-sm space-y-1">
             <p className="font-medium">{billingName(invoice.customers)}</p>
             {attentionName(invoice.customers) && <p className="text-slate-500">Attn: {attentionName(invoice.customers)}</p>}
+            {billingAddressLines(billingAddress).map((line, i) => (
+              <p key={`addr-${i}`} className="text-slate-500">{line}</p>
+            ))}
             {invoice.customers?.email && <p className="text-slate-500">{invoice.customers.email}</p>}
             {invoice.customers?.phone && <p className="text-slate-500">{invoice.customers.phone}</p>}
             {jobSite && (
