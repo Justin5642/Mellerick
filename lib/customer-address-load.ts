@@ -4,8 +4,7 @@ import { isMissingBillingAddressColumn } from "@/lib/customer-address";
 /**
  * A customer's billing address for an invoice or quote (PDF, email, detail
  * page), read as the caller. Its own small query rather than a column in the
- * documents' big select, so a database without migration 0114 (drafted, not
- * applied until its header says so) only loses the address: a missing column
+ * documents' big select, so a database without migration 0114 only loses the address: a missing column
  * — or any other failure — answers null and the document prints without one.
  */
 export async function loadBillingAddress(

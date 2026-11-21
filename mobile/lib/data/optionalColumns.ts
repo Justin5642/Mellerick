@@ -1,7 +1,7 @@
 // Columns a queued write may carry before the migration that adds them is
 // applied. Today: job_bookings.note (0109 — the booking's scheduling note),
-// and customers.billing_address (0114 — drafted, not applied until its header
-// says so; a customer saved before then keeps every other field and only
+// and customers.billing_address (0114 — applied 2026-11-21; kept for a
+// database without it, where a customer keeps every other field and only
 // loses the address).
 //
 // Why the gateway needs this: a write sitting in the outbox is replayed as it

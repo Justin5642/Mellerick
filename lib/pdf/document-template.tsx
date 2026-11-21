@@ -105,7 +105,7 @@ export interface DocumentPdfProps {
   docType: "Quote" | "Tax Invoice";
   docNumber: number | string;
   // billing_address: printed under the billed name (customers.billing_address,
-  // migration 0114 — drafted; blank or absent prints no address).
+  // migration 0114; blank or absent prints no address).
   customer: { name: string; company?: string | null; email?: string | null; phone?: string | null; billing_address?: string | null };
   items: DocumentPdfItem[];
   subtotal: number;

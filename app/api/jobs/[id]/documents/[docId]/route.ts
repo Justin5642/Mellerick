@@ -8,8 +8,8 @@ import { isMissingFolderColumn, parseDocumentFolder } from "@/lib/document-folde
 // One job document, from the phone (office/admin). PATCH sets "Office only"
 // (0065: hidden from technicians, row and file — anything with prices)
 // and/or its folder (`folder`: site_documents / drainage / plumbing / soil, or
-// "other"/null — job_documents.folder, migration 0114, drafted; before it is
-// applied a folder change answers FOLDERS_OFF);
+// "other"/null — job_documents.folder, migration 0114; on a database without it
+// a folder change answers FOLDERS_OFF);
 // DELETE removes it, ROW FIRST then the file, the web's order (a refused row
 // delete must not leave a listed document whose file is gone). As the caller.
 

@@ -32,7 +32,7 @@ interface Document {
   // Hidden from technicians by RLS (migration 0065) — only office/admin ever
   // receive these rows, so the label is only ever seen by them.
   office_only?: boolean;
-  // Folder (job_documents.folder, 0114 — drafted): null/absent = "Other".
+  // Folder (job_documents.folder, 0114): null/absent = "Other".
   folder?: string | null;
 }
 
@@ -72,7 +72,7 @@ export function JobDocumentsTab({ jobId }: { jobId: string }) {
   const [error, setError] = useState<unknown>(null);
   const [collapsed, setCollapsed] = useState<Set<DocumentFolderGroup>>(new Set());
   const [moveDoc, setMoveDoc] = useState<Document | null>(null);
-  // Before 0114 (drafted) the rows have no folder key: no folder controls then.
+  // Before 0114 the rows have no folder key: no folder controls then.
   const foldersReady = documents.length === 0 || documents.some((d) => "folder" in d);
 
   // The query error was being destructured away, so a failed read fell through
