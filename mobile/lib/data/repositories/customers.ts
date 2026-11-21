@@ -12,7 +12,7 @@ export interface CustomerInput {
   abn?: string | null;
   notes?: string | null;
   /**
-   * customers.billing_address (0114, drafted). Sent only when given: undefined
+   * customers.billing_address (0114). Sent only when given: undefined
    * leaves the stored address alone (the form didn't know it — offline).
    */
   billingAddress?: string | null;

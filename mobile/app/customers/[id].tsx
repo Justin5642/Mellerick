@@ -18,7 +18,7 @@ export default function CustomerDetailScreen() {
   const writes = useCustomers();
   const [customer, setCustomer] = useState<CustomerDetail | null>(null);
   const [overview, setOverview] = useState<CustomerOverview | null>(null);
-  // undefined = not known (offline, or 0114 — drafted — not applied yet).
+  // undefined = not known (offline, or a database without 0114).
   const [billingAddress, setBillingAddress] = useState<string | null | undefined>(undefined);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<unknown>(null);

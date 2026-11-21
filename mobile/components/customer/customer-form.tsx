@@ -42,7 +42,7 @@ function toDraft(c: EditableCustomer | null, billingAddress: string | null | und
 
 // Create/edit customer form. `existing` present => edit, else => create.
 //
-// Billing address (customers.billing_address, 0114 — drafted): printed on
+// Billing address (customers.billing_address, 0114): printed on
 // invoices and quotes. It is read online (getCustomerBillingAddress), so when
 // editing, `billingAddress === undefined` means "not known" (offline, or the
 // column isn't there yet): the field is then hidden and never sent, so an

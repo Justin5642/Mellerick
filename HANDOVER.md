@@ -1245,7 +1245,7 @@ directly as before; the routes are there for them to share.
   phones with the next build (no new native module); the web routes must be
   deployed first.
 
-**Notebook list (20 Nov 2026): existing jobs on the schedule, Copy job, site pin at clock-on, customer billing address, document folders (migration `0114` — DRAFT, not applied).**
+**Notebook list (20 Nov 2026): existing jobs on the schedule, Copy job, site pin at clock-on, customer billing address, document folders (migration `0114` applied 2026-11-21).**
 Five items from Justin's list, web and phone.
 - **A. Schedule an existing job.** The board only offered New Job. Web board
   (`components/schedule/team-schedule-view.tsx`, office/admin): a
@@ -2560,7 +2560,7 @@ a shippable release.
 | **Truck loads: set rates (0111 applied)** | Justin | `0111` applied 2026-11-19 (gate test passed). Ledger row: `insert into supabase_migrations.schema_migrations (version,name) values ('0111','cartage_loads') on conflict do nothing;` Then: Fleet → Hire setup on each truck, add **Cartage per tonne** and/or **per m³** and **per km** rates; Settings → Truck loads, check the margin (15% by default); on jobs where quarry product is NOT in the quote, set the Day Works tab's "Quarry product on this job" to Extra. |
 | **Leave on the schedule: record 0112** | Justin | `0112` applied 2026-11-19 (gate test passed). Ledger row: `insert into supabase_migrations.schema_migrations (version,name) values ('0112','schedule_leave') on conflict do nothing;` No PowerSync redeploy. Who sees the leave type defaults to office + admin; change it in Settings → Leave on the schedule. Part days: add From/To times on the Leave Log entry. |
 | **Komtrax: sync and link machines** | Justin | `0113` applied 2026-11-20 (gate test passed). Ledger row: `insert into supabase_migrations.schema_migrations (version,name) values ('0113','komtrax') on conflict do nothing;` Admin → Fleet → Komtrax machines → **Sync Komtrax**, then link any Komatsu machine not linked by serial (or put its serial in the fleet item's notes). `KOMTRAX_USERNAME` / `KOMTRAX_PASSWORD` are in Vercel Production. |
-| **Apply 0114 (customer address, document folders)** | Justin | `0114` is a DRAFT — not applied. Paste `0114_customer_address_doc_folders.sql`, then `supabase/tests/0114_customer_address_doc_folders_test.sql`, trust only `0114 PASSED`; mark the header applied; ledger: `insert into supabase_migrations.schema_migrations (version,name) values ('0114','customer_address_doc_folders') on conflict do nothing;` No PowerSync redeploy. Then add billing addresses to customers (they print on invoices and quotes). |
+| **Customer billing addresses (0114 applied)** | Justin | `0114` applied 2026-11-21 (gate test passed). Ledger row: `insert into supabase_migrations.schema_migrations (version,name) values ('0114','customer_address_doc_folders') on conflict do nothing;` Add billing addresses to customers — they print on invoices and quotes. |
 | **Maestro flow 02** | Avi | Needs `ADMIN_EMAIL` / `ADMIN_PASSWORD` in the environment. The login subflow deliberately skips when a session already exists, so a password never passes through a script — which is why flows 01/03/04 could be run and 02 could not. |
 
 ### QA fixture — do not delete

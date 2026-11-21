@@ -37,7 +37,7 @@ export default function NewCustomerPage() {
     const { data: { user } } = await supabase.auth.getUser();
     const row = { ...form, billing_address: address.value, created_by: user?.id };
     let { error } = await supabase.from("customers").insert(row);
-    // Before migration 0114 is applied (drafted) the column isn't there: save
+    // On a database without migration 0114 the column isn't there: save
     // the customer without the address rather than not at all, and say so.
     if (isMissingBillingAddressColumn(error)) {
       const { billing_address: dropped, ...rest } = row;

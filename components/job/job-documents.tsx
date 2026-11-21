@@ -48,7 +48,7 @@ export function JobDocuments({ jobId, documents, onUpdate, currentUserId, isOffi
   const [uploading, setUploading] = useState(false);
   const [deleting, setDeleting] = useState<string | null>(null);
   const [dragActive, setDragActive] = useState(false);
-  // Folders (job_documents.folder, 0114 — drafted; until it is applied every
+  // Folders (job_documents.folder, 0114; on a database without it every
   // document is under "Other" and uploads/moves leave the column out).
   const [uploadFolder, setUploadFolder] = useState<DocumentFolder>(DEFAULT_DOCUMENT_FOLDER);
   const [collapsed, setCollapsed] = useState<Set<DocumentFolderGroup>>(new Set());

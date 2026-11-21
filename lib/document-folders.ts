@@ -1,5 +1,5 @@
 // Job document folders (Justin's notebook list, 20 Nov 2026). The column is
-// job_documents.folder from migration 0114 (drafted; until it is applied every
+// job_documents.folder from migration 0114 (applied 2026-11-21; on a database without it every
 // document reads as "Other"). Mirrored byte for byte below this header at
 // mobile/lib/documentFolders.ts (tests/unit/document-folders.test.ts) —
 // change this file first, then copy.

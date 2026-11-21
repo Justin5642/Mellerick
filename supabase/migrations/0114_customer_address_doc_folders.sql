@@ -1,9 +1,8 @@
 -- ============================================================================
 -- Customer billing address (on invoices and quotes) and job document folders.
 --
--- STATUS: DRAFT — NOT YET APPLIED. Apply (SQL editor), then paste
--- supabase/tests/0114_customer_address_doc_folders_test.sql and trust only a
--- final "0114 PASSED" row. Then mark this header applied and add the ledger row:
+-- STATUS: ✅ APPLIED IN PRODUCTION (2026-11-21, via SQL editor; gate test passed).
+-- Ledger row, if not yet recorded:
 --   insert into supabase_migrations.schema_migrations (version,name)
 --   values ('0114','customer_address_doc_folders') on conflict do nothing;
 -- Safe to merge the app before this is applied: every reader retries without
