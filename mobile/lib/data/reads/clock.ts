@@ -45,29 +45,32 @@ export async function getOpenWorkEntry(staffId: string): Promise<OpenWorkEntry |
 
 /** This person's open work entry on one job, for clocking them off at sign-off. */
 export const SQL_OPEN_WORK_ENTRY_ON_JOB = `
-  SELECT id, clock_in FROM time_entries
+  SELECT id, clock_in, cost_center_id FROM time_entries
   WHERE staff_id = ? AND job_id = ? AND entry_type = 'work' AND clock_out IS NULL
   ORDER BY clock_in DESC
   LIMIT 1`;
 
-export async function getOpenWorkEntryOnJob(staffId: string, jobId: string): Promise<{ id: string; clockInIso: string } | null> {
+export async function getOpenWorkEntryOnJob(
+  staffId: string,
+  jobId: string
+): Promise<{ id: string; clockInIso: string; costCenterId: string | null } | null> {
   return fromLocalOr(
     async (db) => {
-      const row = await db.getOptional<{ id: string; clock_in: string }>(SQL_OPEN_WORK_ENTRY_ON_JOB, [staffId, jobId]);
-      return row ? { id: row.id, clockInIso: row.clock_in } : null;
+      const row = await db.getOptional<{ id: string; clock_in: string; cost_center_id: string | null }>(SQL_OPEN_WORK_ENTRY_ON_JOB, [staffId, jobId]);
+      return row ? { id: row.id, clockInIso: row.clock_in, costCenterId: row.cost_center_id ?? null } : null;
     },
     async () => {
       const res = await supabase
         .from("time_entries")
-        .select("id, clock_in")
+        .select("id, clock_in, cost_center_id")
         .eq("staff_id", staffId)
         .eq("job_id", jobId)
         .eq("entry_type", "work")
         .is("clock_out", null)
         .order("clock_in", { ascending: false })
         .limit(1);
-      const [row] = unwrapRows(res as never, "getOpenWorkEntryOnJob") as unknown as { id: string; clock_in: string }[];
-      return row ? { id: row.id, clockInIso: row.clock_in } : null;
+      const [row] = unwrapRows(res as never, "getOpenWorkEntryOnJob") as unknown as { id: string; clock_in: string; cost_center_id: string | null }[];
+      return row ? { id: row.id, clockInIso: row.clock_in, costCenterId: row.cost_center_id ?? null } : null;
     }
   );
 }

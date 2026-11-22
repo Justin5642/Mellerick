@@ -406,6 +406,9 @@ export function JobNotes({ jobId, notes, onUpdate, currentUserId, stageNotes, on
                   {note.source === "day_finish" && (
                     <span className="text-xs text-blue-700 bg-blue-50 px-1.5 py-0.5 rounded">End of day</span>
                   )}
+                  {note.source === "stage_complete" && (
+                    <span className="text-xs text-green-700 bg-green-50 px-1.5 py-0.5 rounded">Stage sign-off</span>
+                  )}
                 </div>
                 <p className="text-sm text-slate-700 whitespace-pre-wrap">{note.content}</p>
               </div>

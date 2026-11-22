@@ -539,7 +539,13 @@ export function JobDetailClient({ job, currentUserId, photos: initialPhotos, doc
               />
             </TabsContent>
             <TabsContent value="signature" className="m-0 h-full">
-              <JobSignature jobId={job.id} currentUserId={currentUserId} existingSignature={job.completion_notes} voiceReportTranscript={job.voice_report_transcript} />
+              <JobSignature
+                jobId={job.id}
+                currentUserId={currentUserId}
+                existingSignature={job.completion_notes}
+                voiceReportTranscript={job.voice_report_transcript}
+                myBookings={bookings.filter((b) => b.staff_id === currentUserId)}
+              />
             </TabsContent>
           </div>
         </Tabs>

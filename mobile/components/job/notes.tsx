@@ -594,6 +594,11 @@ export function JobNotesTab({
                 <Text style={styles.scheduleTagText}>End of day</Text>
               </View>
             )}
+            {item.source === "stage_complete" && (
+              <View style={styles.scheduleTag}>
+                <Text style={styles.scheduleTagText}>Stage sign-off</Text>
+              </View>
+            )}
             <Text style={styles.noteContent}>{item.content}</Text>
           </View>
         )}

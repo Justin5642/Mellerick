@@ -2,6 +2,7 @@ import type { Outbox } from "../outbox/outbox";
 import type { IdGen } from "../ids";
 import type { WriteOperation, SideEffectOperation } from "../outbox/types";
 import { systemTime, type TimeSource } from "../time";
+import { stageSignOffNote, STAGE_SIGNOFF_SOURCE } from "../../stageCompletion";
 
 const BUCKET = "job-photos";
 
@@ -13,6 +14,19 @@ export interface SignOffInput {
   localUri: string;
   /** Localized date label for completion_notes (e.g. new Date().toLocaleDateString("en-AU")). */
   signedOffDate: string;
+  /** Stage completion (lib/stageCompletion.ts). Absent = close the whole job, as before. */
+  stages?: StageSignOff;
+}
+
+/**
+ * Which stages this sign-off completes (Justin, 22 Nov 2026). `closesJob`
+ * false = only these stages: no jobs update is queued and the job stays open.
+ */
+export interface StageSignOff {
+  completed: { id: string; name: string }[];
+  closesJob: boolean;
+  /** Open stages left, for the job note when the job stays open. */
+  remainingNames: string[];
 }
 
 /**
@@ -76,6 +90,14 @@ export class SignatureRepository {
     };
     await this.outbox.enqueue(photoOp);
 
+    const stages = input.stages;
+    if (stages && !stages.closesJob) {
+      // Only these stages: the job stays open. The note and the stages wait
+      // for the signature image, as the job update does below.
+      await this.stagesOnly(input.jobId, input.uploadedBy, stages, `customer ${input.signerName || "Customer"}`, input.signedOffDate, photoOpId);
+      return { photoId: photoRowId, storagePath };
+    }
+
     // 2) mark the job completed — GATED on the signature image landing first
     //    (dependsOn photoOp). This preserves the web invariant: the old handleOK
     //    aborted before completing the job if the signature upload failed, so a
@@ -119,6 +141,8 @@ export class SignatureRepository {
     };
     await this.outbox.enqueue(calOp);
 
+    await this.stageCompletes(input.jobId, stages?.completed ?? [], jobsOpId);
+
     return { photoId: photoRowId, storagePath };
   }
 
@@ -153,19 +177,7 @@ export class SignatureRepository {
       nextAttemptAt: 0,
       createdAt: this.time.nowMs(),
     });
-    for (const stage of input.stages) {
-      await this.outbox.enqueue({
-        kind: "side_effect",
-        id: this.ids.newId(),
-        effect: "stage-complete",
-        coalesceKey: `stage-complete:${stage.id}`,
-        payload: { jobId: input.jobId, stageId: stage.id, completedAt: this.time.nowIso() },
-        status: "pending",
-        attempts: 0,
-        nextAttemptAt: 0,
-        createdAt: this.time.nowMs(),
-      });
-    }
+    await this.stageCompletes(input.jobId, input.stages);
   }
 
   /**
@@ -173,7 +185,20 @@ export class SignatureRepository {
    * same job update and calendar resync as signOff, with no signature image to
    * wait for.
    */
-  async completeAsTechnician(input: { jobId: string; technicianName: string | null; signedOffDate: string }): Promise<void> {
+  async completeAsTechnician(input: {
+    jobId: string;
+    technicianName: string | null;
+    signedOffDate: string;
+    /** Stage completion; absent = close the whole job, as before. */
+    stages?: StageSignOff;
+    /** Author of the job note when only stages complete. */
+    authorId?: string;
+  }): Promise<void> {
+    if (input.stages && !input.stages.closesJob) {
+      const who = input.technicianName?.trim() ? `technician ${input.technicianName.trim()}` : "the technician";
+      await this.stagesOnly(input.jobId, input.authorId ?? null, input.stages, `${who} (customer not on site)`, input.signedOffDate);
+      return;
+    }
     const jobsOpId = this.ids.newId();
     await this.outbox.enqueue({
       kind: "write",
@@ -205,5 +230,63 @@ export class SignatureRepository {
       nextAttemptAt: 0,
       createdAt: this.time.nowMs(),
     });
+    await this.stageCompletes(input.jobId, input.stages?.completed ?? [], jobsOpId);
+  }
+
+  /**
+   * Some stages signed off, the job stays open: a job note saying which (and
+   * who signed), and one stage-complete call per stage. No jobs update.
+   */
+  private async stagesOnly(
+    jobId: string,
+    authorId: string | null,
+    stages: StageSignOff,
+    signedOffBy: string,
+    date: string,
+    dependsOn?: string
+  ): Promise<void> {
+    await this.outbox.enqueue({
+      kind: "write",
+      id: this.ids.newId(),
+      rowId: this.ids.newId(),
+      aggregate: "job_note",
+      op: "insert",
+      table: "job_notes",
+      dependsOn,
+      payload: {
+        job_id: jobId,
+        author_id: authorId,
+        content: stageSignOffNote({
+          stageNames: stages.completed.map((s) => s.name),
+          signedOffBy,
+          date,
+          remainingNames: stages.remainingNames,
+        }),
+        source: STAGE_SIGNOFF_SOURCE,
+      },
+      status: "pending",
+      attempts: 0,
+      nextAttemptAt: 0,
+      createdAt: this.time.nowMs(),
+    });
+    await this.stageCompletes(jobId, stages.completed, dependsOn);
+  }
+
+  /** One stage-complete call per stage, stamped with when it was tapped. */
+  private async stageCompletes(jobId: string, stages: { id: string }[], dependsOn?: string): Promise<void> {
+    for (const stage of stages) {
+      await this.outbox.enqueue({
+        kind: "side_effect",
+        id: this.ids.newId(),
+        effect: "stage-complete",
+        coalesceKey: `stage-complete:${stage.id}`,
+        payload: { jobId, stageId: stage.id, completedAt: this.time.nowIso() },
+        dependsOn,
+        status: "pending",
+        attempts: 0,
+        nextAttemptAt: 0,
+        createdAt: this.time.nowMs(),
+      });
+    }
   }
 }

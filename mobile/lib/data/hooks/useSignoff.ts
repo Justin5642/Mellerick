@@ -4,6 +4,7 @@ import { useFlush } from "./useFlush";
 import { persistOutboxAttachmentFromBase64 } from "../attachments";
 import { getOpenWorkEntryOnJob } from "../reads/clock";
 import { currentFix } from "../../clockFix";
+import type { StageSignOff } from "../repositories/signature";
 
 // Write-side hook for customer sign-off / job completion. Persists the signature
 // PNG (base64 from the canvas) to durable storage, enqueues the compound
@@ -17,6 +18,8 @@ export interface Signoff {
     signerName: string;
     signatureBase64: string;
     signedOffDate: string;
+    /** Per-stage completion (22 Nov 2026); absent = the whole job, as before. */
+    stages?: StageSignOff;
   }): Promise<{ photoId: string; storagePath: string; clockedOut: boolean; synced: boolean }>;
   /** End of a day on a multi-day job: a note, finished stages, clock off. Job stays open. */
   finishForToday(input: {
@@ -31,6 +34,7 @@ export interface Signoff {
     staffId: string;
     technicianName: string | null;
     signedOffDate: string;
+    stages?: StageSignOff;
   }): Promise<{ clockedOut: boolean; synced: boolean }>;
 }
 
@@ -65,6 +69,7 @@ export function useSignoff(): Signoff {
       signerName: input.signerName,
       localUri,
       signedOffDate: input.signedOffDate,
+      stages: input.stages,
     });
     const clockedOut = await clockOutOfJob(input.uploadedBy, input.jobId);
     return { photoId, storagePath, clockedOut, synced: await flush() };
@@ -76,6 +81,8 @@ export function useSignoff(): Signoff {
       jobId: input.jobId,
       technicianName: input.technicianName,
       signedOffDate: input.signedOffDate,
+      stages: input.stages,
+      authorId: input.staffId,
     });
     const clockedOut = await clockOutOfJob(input.staffId, input.jobId);
     return { clockedOut, synced: await flush() };
