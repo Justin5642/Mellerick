@@ -21,7 +21,7 @@ export interface Signoff {
     /** Per-stage completion (22 Nov 2026); absent = the whole job, as before. */
     stages?: StageSignOff;
   }): Promise<{ photoId: string; storagePath: string; clockedOut: boolean; synced: boolean }>;
-  /** End of a day on a multi-day job: a note, finished stages, clock off. Job stays open. */
+  /** End of a day on a multi-day job: a note and clock off. Job stays open; no stage closes (pass stages: []). */
   finishForToday(input: {
     jobId: string;
     staffId: string;

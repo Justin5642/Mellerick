@@ -310,7 +310,7 @@ export function JobSignatureTab({
         {(
           [
             ["today", "Finish for today"],
-            ["complete", "Job complete"],
+            ["complete", "Stage / job complete"],
           ] as const
         ).map(([st, label]) => (
           <TouchableOpacity

@@ -270,8 +270,13 @@ and 0096 then refused bookings for the other cost centres.
   `POST …/stages/[stageId]/complete`. The Overview's status drop-down set to
   Completed while stages are open asks first, naming them (`openStagesWarning`);
   it doesn't block.
-- **Not changed:** "Finish for today", the office's status drop-down itself,
-  the PO tab's stage controls.
+- **"Finish for today" never closes a stage** (Justin, 22 Nov 2026: "They
+  could be going back to that cost centre tomorrow"): it records the day's
+  note and clocks off, nothing else — its stage tick boxes are gone. Stages
+  are closed only by the **Stage / job complete** step (the tab was "Job
+  complete") or the office's PO tab.
+- **Not changed:** the office's status drop-down itself, the PO tab's stage
+  controls.
 
 **Load page data on the server, not in the browser.** A browser→Supabase
 query from Australia costs ~100 ms+; a server query in `sin1` costs ~2 ms. So
