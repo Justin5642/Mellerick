@@ -118,6 +118,77 @@ describe("SignatureRepository", () => {
     expect(ops.some((o) => o.kind === "write" && o.table === "jobs")).toBe(false);
   });
 
+  describe("per-stage completion (22 Nov 2026)", () => {
+    const sewerOnly = { completed: [{ id: "s1", name: "Sewer" }], closesJob: false, remainingNames: ["Stormwater"] };
+
+    it("signOff for some stages: signature, then a stage note and the stages, and NO jobs update", async () => {
+      const { outbox, ops } = captureOutbox();
+      const repo = new SignatureRepository(outbox, seqIds(), fixedTime());
+      await repo.signOff({ jobId: "j1", uploadedBy: "u1", signerName: "Jo", localUri: "file:///s.png", signedOffDate: "22/11/2026", stages: sewerOnly });
+      const [photo, note] = writes(ops);
+      expect(writes(ops)).toHaveLength(2);
+      expect(photo.table).toBe("job_photos");
+      expect(note).toMatchObject({ table: "job_notes", dependsOn: photo.id });
+      expect(note.payload).toEqual({
+        job_id: "j1",
+        author_id: "u1",
+        source: "stage_complete",
+        content: "Stage complete (22/11/2026): Sewer\nSigned off by customer Jo\nThe job stays open for the other stage: Stormwater.",
+      });
+      const [stage] = sides(ops);
+      expect(sides(ops)).toHaveLength(1);
+      expect(stage).toMatchObject({ effect: "stage-complete", coalesceKey: "stage-complete:s1", dependsOn: photo.id });
+      expect(ops.some((o) => o.kind === "write" && o.table === "jobs")).toBe(false);
+      expect(ops.some((o) => o.kind === "side_effect" && o.effect === "sync-calendar")).toBe(false);
+    });
+
+    it("signOff that closes the job also completes its stages, after the job update", async () => {
+      const { outbox, ops } = captureOutbox();
+      const repo = new SignatureRepository(outbox, seqIds(), fixedTime());
+      await repo.signOff({
+        jobId: "j1",
+        uploadedBy: "u1",
+        signerName: "Jo",
+        localUri: "file:///s.png",
+        signedOffDate: "22/11/2026",
+        stages: { completed: [{ id: "s1", name: "Sewer" }, { id: "s2", name: "Stormwater" }], closesJob: true, remainingNames: [] },
+      });
+      const [photo, jobUpdate] = writes(ops);
+      expect(jobUpdate).toMatchObject({ table: "jobs", dependsOn: photo.id });
+      expect(jobUpdate.payload.status).toBe("completed");
+      const [cal, ...stageOps] = sides(ops);
+      expect(cal.effect).toBe("sync-calendar");
+      expect(stageOps.map((o) => o.coalesceKey)).toEqual(["stage-complete:s1", "stage-complete:s2"]);
+      expect(stageOps.every((o) => o.dependsOn === jobUpdate.id)).toBe(true);
+    });
+
+    it("completeAsTechnician for some stages queues no jobs update", async () => {
+      const { outbox, ops } = captureOutbox();
+      const repo = new SignatureRepository(outbox, seqIds(), fixedTime());
+      await repo.completeAsTechnician({ jobId: "j1", technicianName: "Brodie", signedOffDate: "22/11/2026", stages: sewerOnly, authorId: "u1" });
+      const [note] = writes(ops);
+      expect(writes(ops)).toHaveLength(1);
+      expect(note.table).toBe("job_notes");
+      expect(note.payload.author_id).toBe("u1");
+      expect(note.payload.content).toContain("Signed off by technician Brodie (customer not on site)");
+      expect(sides(ops).map((o) => o.effect)).toEqual(["stage-complete"]);
+    });
+
+    it("completeAsTechnician that closes the job completes its one stage too", async () => {
+      const { outbox, ops } = captureOutbox();
+      const repo = new SignatureRepository(outbox, seqIds(), fixedTime());
+      await repo.completeAsTechnician({
+        jobId: "j1",
+        technicianName: null,
+        signedOffDate: "22/11/2026",
+        stages: { completed: [{ id: "s1", name: "Sewer" }], closesJob: true, remainingNames: [] },
+      });
+      const [jobUpdate] = writes(ops);
+      expect(jobUpdate.table).toBe("jobs");
+      expect(sides(ops).map((o) => o.effect)).toEqual(["sync-calendar", "stage-complete"]);
+    });
+  });
+
   it("dayFinishNote works with no note and no stages", () => {
     expect(dayFinishNote({ date: "04/11/2026", note: " ", stagesCompleted: [] })).toBe("Finished for today (04/11/2026)");
   });

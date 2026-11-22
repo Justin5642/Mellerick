@@ -582,6 +582,7 @@ export default function JobDetailScreen() {
             existingSignature={job.status === "completed" ? job.completion_notes : null}
             existingVoiceTranscript={job.voice_report_transcript}
             multiDay={isMultiDay(job)}
+            myBookings={bookings ? bookings.filter((b) => b.staff_id === userId) : null}
             onCompleted={loadJob}
           />
         )}

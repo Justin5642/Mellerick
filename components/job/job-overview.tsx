@@ -23,6 +23,7 @@ import { leaveDateLabel, leaveDayLabel, NEEDS_REASSIGNING, type LeaveConflict } 
 import { CustomerPicker } from "@/components/customer-picker";
 import { AddSiteDialog } from "@/components/site-add-dialog";
 import { SitePicker } from "@/components/job/site-picker";
+import { openStagesWarning, type CompletionStage } from "@/lib/stage-completion";
 
 interface Props {
   job: any;
@@ -127,6 +128,15 @@ export function JobOverview({ job, readOnly = false, bookings, bookingsError, le
     if (!form.customer_id) {
       toast.error("Customer is required");
       return;
+    }
+    // Completing the whole job by hand while some stages (builder PO lines)
+    // are still open: say which, and ask (22 Nov 2026). A failed read never
+    // blocks the save.
+    if (form.status === "completed" && job.status !== "completed") {
+      const res = await fetch(`/api/jobs/${job.id}/stages`).catch(() => null);
+      const body = res?.ok ? ((await res.json().catch(() => null)) as { stages?: CompletionStage[] } | null) : null;
+      const warning = openStagesWarning(body?.stages ?? null);
+      if (warning && !window.confirm(warning)) return;
     }
     setSaving(true);
     // Through the same seam the board used: the write and the Google push are

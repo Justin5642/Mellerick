@@ -235,6 +235,49 @@ technicians, days and cost centres on one job still work as before.
   `set_job_assignments`, the calendar poll) still don't pick a cost centre —
   0079 copies the job's one window and cost centre, as before.
 
+**Job complete closes only the stage when others are open (22 Nov 2026; no migration).**
+Justin: "check that when a job is marked as complete, it is only that cost
+centre / that stage of the job, not the whole job." Stages are the job's
+builder PO lines (`po_cost_centers`, `completed_at` from 0095); bookings and
+clock entries point at the same ids. Before, "Job complete" (phone and web,
+customer signature or "customer not on site") always closed the whole job —
+and 0096 then refused bookings for the other cost centres.
+- **Rule** (`lib/stage-completion.ts`, pure, names and ids only — never an
+  amount; mirrored from the imports on at `mobile/lib/stageCompletion.ts`,
+  `tests/unit/stage-completion-mirror.test.ts`; tested in
+  `tests/unit/stage-completion.test.ts`): no stages or one open stage → the
+  job closes exactly as before, and that one open stage is marked complete
+  too. Two or more open → the sign-off lists them as tick boxes, pre-ticking
+  the signer's own bookings' stages that occupy today (0071 day rules), else
+  the stage they're clocked into, else none; at least one must be ticked. The
+  ticked stages are marked complete and the job STAYS OPEN ("The job stays
+  open for the other stages: X, Y.") — unless they are all the open ones,
+  when the job closes as before. The confirm names the stages that close.
+- **When only stages close:** no `jobs` write at all (status, `completion_notes`,
+  `ready_to_invoice`, calendar untouched). The signature photo is still saved
+  against the job; the sign-off goes to `job_notes` (`source:
+  "stage_complete"`, badged "Stage sign-off"), and the signer is clocked off.
+- **Phone** (`components/job/signature.tsx`, `SignatureRepository.signOff /
+  completeAsTechnician` with `stages`, through the outbox): the stage list
+  needs signal (`loadJobStages`); without it the screen says "Couldn't check
+  the job's stages — this will close the whole job" and behaves as before.
+  Stage completions are `stage-complete` side effects; with a signature they
+  (and the note) depend on the photo upload, and when the job closes they
+  depend on the jobs update. `getOpenWorkEntryOnJob` now also returns the
+  entry's `costCenterId`. Reaches phones with the next build (no native module).
+- **Web** (`components/job/job-signature.tsx`): the same rule; stages from
+  `GET /api/jobs/[id]/stages`, marked through the existing
+  `POST …/stages/[stageId]/complete`. The Overview's status drop-down set to
+  Completed while stages are open asks first, naming them (`openStagesWarning`);
+  it doesn't block.
+- **"Finish for today" never closes a stage** (Justin, 22 Nov 2026: "They
+  could be going back to that cost centre tomorrow"): it records the day's
+  note and clocks off, nothing else — its stage tick boxes are gone. Stages
+  are closed only by the **Stage / job complete** step (the tab was "Job
+  complete") or the office's PO tab.
+- **Not changed:** the office's status drop-down itself, the PO tab's stage
+  controls.
+
 **Load page data on the server, not in the browser.** A browser→Supabase
 query from Australia costs ~100 ms+; a server query in `sin1` costs ~2 ms. So
 My Jobs, Approvals, Staff, Fleet and Customers are server pages that pass
