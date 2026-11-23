@@ -152,7 +152,10 @@ scheduling to read-only; it does not corrupt anything.
   days/hours (same `ScheduleFields`). Several technicians on a row = one
   booking each. Saved rows update in place (keeping their calendar event);
   writes are inserts/updates first, deletes last; not atomic — a partial
-  failure closes and refreshes. `?schedule=1` still auto-opens it. The
+  failure closes and refreshes. **"Add booking" starts on today** (23 Nov
+  2026, Justin: it used to copy the row above's days, i.e. the last day they
+  were there); it keeps that row's hours and cost centre. The phone's Add
+  booking already started on today. `?schedule=1` still auto-opens it. The
   Overview tab no longer edits the schedule or Assigned Technician (either
   write would flatten bookings via the compatibility triggers); it lists the
   bookings read-only with an "Edit schedule" button.
