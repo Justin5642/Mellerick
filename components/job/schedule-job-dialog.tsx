@@ -114,9 +114,11 @@ function rowFromBooking(b: JobBookingWithNames): Row {
 }
 
 /**
- * A new row starts from the row above it — same days, hours and cost centre,
- * nobody picked — because the next booking is usually the second technician
- * on the same stage ("Sam rough-in Monday morning"). The first row of an
+ * A new row starts TODAY (Justin, 23 Nov 2026: it used to copy the row above's
+ * dates, so it opened on the last day they were there — "automatically go to
+ * the current day's date and then we can adjust it forward"). It keeps the
+ * row above's hours and cost centre, nobody picked, because the next booking
+ * is usually the second technician on the same stage. The first row of an
  * unscheduled job starts today, All day.
  */
 /** A new row for the board's clicked technician and day. */
@@ -131,10 +133,17 @@ function rowFromPrefill(prefill: SchedulePrefill, defaultCostCenterId: string | 
 }
 
 function newRow(after: Row | undefined, defaultCostCenterId: string | null): Row {
-  if (after) {
-    return { key: nextKey(), staffIds: [], costCenterId: after.costCenterId ?? defaultCostCenterId, schedule: { ...after.schedule }, note: after.note ?? "", allDayDecided: true };
-  }
   const today = dateKeyInBusinessTZ(new Date());
+  if (after) {
+    return {
+      key: nextKey(),
+      staffIds: [],
+      costCenterId: after.costCenterId ?? defaultCostCenterId,
+      schedule: { ...after.schedule, startDateKey: today, endDateKey: today },
+      note: after.note ?? "",
+      allDayDecided: true,
+    };
+  }
   return {
     key: nextKey(),
     staffIds: [],
