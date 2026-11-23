@@ -25,8 +25,9 @@ const DOUBLE_CLICK_WINDOW_MS = 250;
  * While a job is cut (`cutActive`) a click never navigates: it bubbles to the
  * board cell underneath, which is where the cut job gets pasted.
  *
- * Unaffected by the dnd-kit PointerSensor: its 200 ms hold delay is never
- * reached by the two quick presses of a double-click.
+ * Unaffected by the board's drag sensor (BoardPointerSensor): a double-click's
+ * two quick presses neither move 6 px (mouse) nor hold 200 ms (touch), and
+ * the 500 ms press-and-hold menu swallows the click its release makes.
  */
 export function BoardJobLink({
   href,

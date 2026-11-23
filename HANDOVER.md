@@ -164,6 +164,55 @@ scheduling to read-only; it does not corrupt anything.
   bookings. Drag/paste moves THAT booking (`staff_id` and/or dates via
   `moveSchedule`); Shift-drop inserts a copy for the target tech (same window
   and cost centre; on another day in Week view it starts there).
+- **Schedule from the board, and press-and-hold to copy (23 Nov 2026; no
+  migration; office/admin only — technicians see the board as before).**
+  Justin: make the web schedule like the phone's — "hit Schedule and type the
+  job", and "press and hold on a job … copy … paste into another employee's
+  schedule".
+  - **Schedule** (toolbar, primary button; the page header's old "Schedule
+    Job" → New Job is now labelled **New Job**): the job search
+    (`schedule-existing-job-dialog.tsx`, unchanged rules) → pick → banner
+    "Click a technician's day to schedule #123 — Esc to cancel" (or "Open its
+    schedule" for no day) → the click opens that job's **`ScheduleJobDialog`
+    as a modal over the board** with a new row for that technician and day
+    (the same `prefill` path). The "+" on a technician's day searches, then
+    opens the dialog straight away. Save refreshes the page, which redraws the
+    board. The dialog's data is read by `components/schedule/board-schedule-dialog.tsx`
+    through `lib/schedule-dialog-data.ts` — the same helpers the job page now
+    uses (`costCentersFromPurchaseOrders`, `bookingsForScheduleDialog`,
+    `appendInactiveStaff`; PO lines read without any amount; tested in
+    `tests/unit/schedule-board-actions.test.ts`). The job page's
+    `?schedule=1&tech=&day=` link still works (nothing on the board uses it now).
+  - **Booking menu**: press and hold a booking still for 500 ms (mouse, pen or
+    finger), or right-click it → Copy to another technician or day / Cut
+    (move) / Edit this job's schedule… / Open job / Back to to-do list
+    (`components/schedule/booking-hold-menu.tsx`; items in `bookingMenuItems`).
+    **Copy** → "Click a technician's day to paste a copy of #123 — Esc to
+    finish" (Done): every click pastes a copy there with the Shift-drop rules
+    (`planBoardAdd`: same hours, shape, cost centre and note, starting on the
+    clicked day); a duplicate or Unassigned is refused with a reason
+    (`copyRefusal`), a closed job refused, and a clash with their other
+    bookings (`newBookingClashes`) or leave asks "Book anyway" — Shift-drop and
+    Shift-paste now ask on a clash too. Cut is the old double-click cut.
+  - **Hold vs drag** (`components/schedule/board-actions.ts`, tested):
+    `BoardPointerSensor` picks dnd-kit's activation per press — mouse/pen drag
+    once moved 6 px (no hold needed), touch keeps the 200 ms hold-then-move. A
+    hold is cancelled by the same 6 px (8 px on touch), so a mouse press is a
+    drag or a menu, never both. On touch the drag starts at 200 ms and the menu
+    opens at 500 ms if the finger hasn't moved; letting go there leaves the
+    booking where it was with the menu open, moving on drags it and closes the
+    menu. The click a hold's release makes is swallowed (no job opened).
+    One mode at a time — cut, copy, placing a to-do job, scheduling a searched
+    job — in `boardModeReducer`; Esc ends any of them. Double-click to cut and
+    Shift-drag still work.
+  - Checked in Chromium with mock data (desktop 1500 px and iPhone 13, touch
+    via CDP): Schedule → search → click Dan's Friday → dialog on Dan/Friday →
+    Save wrote the booking with its cost centre and pending → scheduled; "+"
+    → dialog on that tech/day; hold → menu (release kept it open, no
+    navigation) → Copy → pasted on two technicians, a third paste refused as a
+    duplicate, Esc ended it; right-click menu; mouse drag and hold-then-drag
+    still move; touch hold → Copy → two pastes; touch drag still moves; Day
+    view right-click → Cut → paste. Not yet tried on a real iPad/iPhone Safari.
 - **Google Calendar:** one event per booking, titled `#<job> <cost centre> —
   <tech>` (job title when no cost centre, "Unassigned" with no tech), linked
   by `job_bookings.google_event_id` and tagged with private extended
@@ -1352,7 +1401,9 @@ Five items from Justin's list, web and phone.
   open `components/schedule/schedule-existing-job-dialog.tsx` — open jobs
   (not completed/cancelled) by number, or every word in the title or
   customer name/company, searched in the database as you type, ≤ 20. Picking
-  one goes to `/dashboard/jobs/<id>?schedule=1&tech=<staff>&day=<YYYY-MM-DD>`;
+  one went to `/dashboard/jobs/<id>?schedule=1&tech=<staff>&day=<YYYY-MM-DD>`
+  (since 23 Nov 2026 the board opens the dialog over itself instead — "Schedule
+  from the board" under Job bookings — web; the link still works);
   the job page opens `ScheduleJobDialog` with a NEW row for that technician
   and day beside any saved bookings (`prefill`; a technician not in the staff
   list or a bad date is dropped). Cost centre, leave and clash rules are the

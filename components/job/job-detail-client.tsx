@@ -17,7 +17,8 @@ import { CopyJobDialog } from "./copy-job-dialog";
 import { JobHoursScoreboard } from "./job-hours-scoreboard";
 import { JobTodoControl } from "./job-todo-control";
 import { sumAllocatedHours } from "@/lib/hours-scoreboard";
-import { bookingsFromJobWindow, nameBookings, summariseBookings, type JobBookingWithNames } from "@/lib/bookings";
+import { summariseBookings, type JobBookingWithNames } from "@/lib/bookings";
+import { bookingsForScheduleDialog, costCentersFromPurchaseOrders } from "@/lib/schedule-dialog-data";
 import { bookingsNeedingReassignment, NEEDS_REASSIGNING, type ScheduleLeave } from "@/lib/staff-leave";
 import { dateKeyInBusinessTZ } from "@/lib/date";
 import { closedJobScheduleMessage, isJobClosedForScheduling } from "@/lib/job-schedulable";
@@ -217,9 +218,7 @@ export function JobDetailClient({ job, currentUserId, photos: initialPhotos, doc
   // Flat list of every cost centre (stage) across all POs on this job, so
   // Expenses and Time can tag against them and the PO tab can show actual
   // spend/hours per stage instead of just per job.
-  const costCenters = purchaseOrders.flatMap((po: any) =>
-    (po.po_cost_centers ?? []).map((cc: any) => ({ id: cc.id, name: cc.name, code: cc.code, po_number: po.po_number, cost_centre_id: cc.cost_centre_id ?? null }))
-  );
+  const costCenters = costCentersFromPurchaseOrders(purchaseOrders);
   // A cost centre added to the job from the Schedule dialog's picker (a $0
   // line, 19 Nov 2026): re-read the POs so every tab sees the new line.
   const refreshPurchaseOrders = async () => {
@@ -234,16 +233,7 @@ export function JobDetailClient({ job, currentUserId, photos: initialPhotos, doc
   // Memoised so the dialog (which re-seeds when this list changes) is not
   // handed a fresh array on every render.
   const bookings: JobBookingWithNames[] = useMemo(
-    () =>
-      bookingsReady
-        ? loadedBookings
-        : nameBookings(
-            bookingsFromJobWindow(job, currentAssignedIds),
-            staff,
-            new Map(
-              purchaseOrders.flatMap((po: any) => (po.po_cost_centers ?? []).map((cc: any) => [cc.id, cc.name] as [string, string])),
-            ),
-          ),
+    () => bookingsForScheduleDialog({ bookingsReady, loaded: loadedBookings, job, crew: currentAssignedIds, staff, purchaseOrders }),
     [bookingsReady, loadedBookings, job, currentAssignedIds, staff, purchaseOrders],
   );
   const scheduleSummary = summariseBookings(bookings);
