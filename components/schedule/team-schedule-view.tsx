@@ -1,11 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import {
   DndContext,
   DragOverlay,
-  PointerSensor,
   closestCenter,
   pointerWithin,
   type CollisionDetection,
@@ -14,6 +13,7 @@ import {
   useSensor,
   useSensors,
   type DragEndEvent,
+  type DragMoveEvent,
   type DragStartEvent,
 } from "@dnd-kit/core";
 import { toast } from "sonner";
@@ -50,6 +50,23 @@ import { BoardJobLink } from "./board-job-link";
 import { BookingCostCentreDialog, type CostCentreRequest, type PickedCostCentre } from "./booking-cost-centre-dialog";
 import { ScheduleExistingJobDialog } from "./schedule-existing-job-dialog";
 import type { SchedulePrefill } from "@/lib/schedule-existing-job";
+// Press and hold (or right-click) a booking for its menu — Copy, Cut, Open —
+// and the "pick, then click a technician's day" modes (23 Nov 2026).
+import {
+  NO_MODE,
+  boardModeReducer,
+  bookingMenuItems,
+  copyRefusal,
+  movedBeyond,
+  holdTolerance,
+  type BoardMode,
+  type BookingMenuAction,
+  type Pickup,
+  type Point,
+  type ScheduleJobPick,
+} from "./board-actions";
+import { BoardPointerSensor, BookingMenu, useHoldGesture } from "./booking-hold-menu";
+import { BoardScheduleDialog } from "./board-schedule-dialog";
 import {
   applyBoardMove,
   buildBoardIndex,
@@ -102,7 +119,7 @@ import {
   type ScheduleLeave,
 } from "@/lib/staff-leave";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Navigation, LayoutList, ListTodo, ChevronLeft, ChevronRight, GripVertical, CalendarDays, CalendarRange, Scissors, StickyNote, X, CalendarPlus, Plus } from "lucide-react";
+import { Navigation, LayoutList, ListTodo, ChevronLeft, ChevronRight, GripVertical, CalendarDays, CalendarRange, Scissors, StickyNote, X, CalendarPlus, Plus, Copy } from "lucide-react";
 import {
   formatTime,
   formatDate,
@@ -120,8 +137,6 @@ type StaffMember = {
   role: string;
 };
 
-/** A booking picked up — by drag or by double-click — and the cell it came from. */
-type Pickup = { bookingId: string; source: BoardCell };
 
 /**
  * An edge resize in progress. `booking` is the row as it was when the drag
@@ -363,13 +378,19 @@ function NeedsReassigningBadge() {
   );
 }
 
-/** Props every placed card shares: where it sits, who it belongs to, and the cut-mode wiring. */
+/** Props every placed card shares: where it sits, who it belongs to, and the cut/copy wiring. */
 type PlacedProps = {
   entry: BoardEntry;
   source: BoardCell;
   tag: TileTag;
+  /** The booking cut (amber) or being copied (blue) — highlighted where it was picked up. */
   cut: Pickup | null;
+  copying: boolean;
+  /** A mode is waiting for a day to be clicked: a click on a card goes to its cell, never opens the job. */
+  pickActive: boolean;
   onCut: (pickup: Pickup) => void;
+  /** Press and hold / right-click (office/admin): the booking's menu at the press. */
+  onMenu?: (pickup: Pickup, at: Point) => void;
   /** Booked on a day this technician is on leave (0112). */
   reassign: boolean;
 };
@@ -417,25 +438,52 @@ function JobCardBody({ entry, tag, reassign }: { entry: BoardEntry; tag: TileTag
 const JOB_CARD_CLASS =
   "@container block px-3 py-2.5 rounded-lg border border-slate-200 hover:border-blue-300 hover:bg-blue-50/50 transition-colors group";
 
-// Wraps a job card in a draggable node for the Day board. A long-press (past
-// the sensor's activation delay) starts a drag; a quick tap opens the job; a
-// double-click cuts it for pasting (BoardJobLink).
+/**
+ * The card's own pointer wiring beside dnd-kit's: a still press of HOLD_MS (or
+ * a right-click) opens the booking's menu; moving first is a drag (dnd-kit);
+ * a click opens the job; a double-click cuts it.
+ */
+function useCardGestures(
+  listeners: ReturnType<typeof useDraggable>["listeners"],
+  pickup: Pickup,
+  onMenu: PlacedProps["onMenu"],
+) {
+  const menu = onMenu ? (at: Point) => onMenu(pickup, at) : undefined;
+  const hold = useHoldGesture(menu);
+  return {
+    ...listeners,
+    onPointerDown: (e: React.PointerEvent<HTMLElement>) => {
+      listeners?.onPointerDown?.(e);
+      hold(e);
+    },
+    onContextMenu: (e: React.MouseEvent) => {
+      e.preventDefault();
+      menu?.({ x: e.clientX, y: e.clientY });
+    },
+  };
+}
+
+// Wraps a job card in a draggable node for the Day board. Moving a pressed
+// mouse (or a finger held 200 ms, then moved) drags it; a still hold of
+// HOLD_MS or a right-click opens its menu (office/admin); a quick tap opens
+// the job; a double-click cuts it for pasting (BoardJobLink).
 //
 // The draggable id is per PLACEMENT, not per booking: a multi-day booking
 // sits in several day cells at once and dnd-kit needs each node's id to be
 // unique.
-function DraggableJobCard({ entry, source, tag, cut, onCut, reassign }: PlacedProps) {
+function DraggableJobCard({ entry, source, tag, cut, copying, pickActive, onCut, onMenu, reassign }: PlacedProps) {
   const { job, booking } = entry;
   const { setNodeRef, listeners, isDragging } = useDraggable({
     id: `${booking.id}@${weekCellId(source.staffId, source.dateKey)}`,
     data: { bookingId: booking.id, source, entry },
   });
   const isCut = isCutHere(cut, booking.id, source);
+  const gestures = useCardGestures(listeners, { bookingId: booking.id, source }, onMenu);
   return (
     <div
       ref={setNodeRef}
-      {...listeners}
-      onContextMenu={(e) => e.preventDefault()}
+      {...gestures}
+      data-booking-card={booking.id}
       style={{
         touchAction: "none",
         WebkitTouchCallout: "none",
@@ -444,7 +492,7 @@ function DraggableJobCard({ entry, source, tag, cut, onCut, reassign }: PlacedPr
       className={cn(
         "relative cursor-grab active:cursor-grabbing select-none rounded-lg",
         isDragging && "opacity-30",
-        isCut && "ring-2 ring-amber-400 bg-amber-50/60",
+        isCut && (copying ? "ring-2 ring-blue-500 bg-blue-50/60" : "ring-2 ring-amber-400 bg-amber-50/60"),
         reassign && !isCut && "ring-2 ring-rose-500"
       )}
     >
@@ -452,7 +500,7 @@ function DraggableJobCard({ entry, source, tag, cut, onCut, reassign }: PlacedPr
       <BoardJobLink
         href={`/dashboard/jobs/${job.id}`}
         className={JOB_CARD_CLASS}
-        cutActive={!!cut}
+        cutActive={pickActive}
         onCut={() => onCut({ bookingId: booking.id, source })}
       >
         <JobCardBody entry={entry} tag={tag} reassign={reassign} />
@@ -477,6 +525,7 @@ function DroppableColumn({
   return (
     <div
       ref={setNodeRef}
+      data-cell-id={id}
       onClick={onPick ? () => onPick(id) : undefined}
       className={cn(
         className,
@@ -600,7 +649,10 @@ function DraggableWeekJobChip({
   source,
   tag,
   cut,
+  copying,
+  pickActive,
   onCut,
+  onMenu,
   reassign,
   handles,
   onResizeStart,
@@ -616,12 +668,13 @@ function DraggableWeekJobChip({
     data: { bookingId: booking.id, source, entry },
   });
   const isCut = isCutHere(cut, booking.id, source);
+  const gestures = useCardGestures(listeners, { bookingId: booking.id, source }, onMenu);
   const start = (edge: ResizeEdge, e: React.PointerEvent<HTMLElement>) => onResizeStart(entry, edge, e);
   return (
     <div
       ref={setNodeRef}
-      {...listeners}
-      onContextMenu={(e) => e.preventDefault()}
+      {...gestures}
+      data-booking-card={booking.id}
       style={{
         touchAction: "none",
         WebkitTouchCallout: "none",
@@ -630,7 +683,7 @@ function DraggableWeekJobChip({
       className={cn(
         "group/chip relative select-none rounded-md",
         isDragging && "opacity-30",
-        isCut && "ring-2 ring-amber-400 bg-amber-50/60",
+        isCut && (copying ? "ring-2 ring-blue-500 bg-blue-50/60" : "ring-2 ring-amber-400 bg-amber-50/60"),
         reassign && !isCut && !resizeState && "ring-2 ring-rose-500",
         resizeState === "preview" && "ring-2 ring-blue-400 bg-blue-50/60",
         resizeState === "removing" && "opacity-40 outline-2 outline-dashed outline-slate-400 line-through",
@@ -640,7 +693,7 @@ function DraggableWeekJobChip({
       <BoardJobLink
         href={`/dashboard/jobs/${job.id}`}
         className={WEEK_CHIP_CLASS}
-        cutActive={!!cut}
+        cutActive={pickActive}
         onCut={() => onCut({ bookingId: booking.id, source })}
       >
         <WeekJobChipBody entry={entry} tag={tag} reassign={reassign} />
@@ -682,6 +735,7 @@ function DroppableWeekCell({
     <div
       ref={setNodeRef}
       data-week-cell
+      data-cell-id={id}
       onClick={onPick ? () => onPick(id) : undefined}
       className={cn(
         "group/cell bg-white p-1.5 space-y-1 min-h-[64px] transition-colors",
@@ -796,6 +850,7 @@ export function TeamScheduleView({
   todoError,
   leave = NO_LEAVE,
   viewerRole = null,
+  viewerId = null,
 }: {
   jobs: BoardJob[];
   bookings: BoardBooking[];
@@ -807,6 +862,8 @@ export function TeamScheduleView({
   /** Staff leave around the board's dates (0112); leave_type null = withheld from this viewer. */
   leave?: ScheduleLeave[];
   viewerRole?: string | null;
+  /** The signed-in user — the Schedule dialog posts booking notes as them. */
+  viewerId?: string | null;
 }) {
   // Narrowed to the methods lib/bookings.ts uses. Not cosmetic: matching the
   // fully-generic typed client against a structural parameter makes
@@ -858,15 +915,34 @@ export function TeamScheduleView({
     setExistingFor(prefill);
     setExistingOpen(true);
   }
+  // What the next click on a technician's day does (board-actions.ts): paste a
+  // cut booking, paste a copy (until Esc), place a to-do job, or open a
+  // searched job's Schedule dialog there. One at a time.
+  const [mode, dispatchMode] = useReducer(boardModeReducer<TodoJob>, NO_MODE as BoardMode<TodoJob>);
   // A to-do job picked to place by tapping a cell (the touch path for drag-in).
-  const [placing, setPlacing] = useState<TodoJob | null>(null);
+  const placing = mode.kind === "todo" ? mode.job : null;
+  const setPlacing = useCallback(
+    (job: TodoJob | null) => dispatchMode(job ? { type: "todo", job } : { type: "clear", kind: "todo" }),
+    [],
+  );
   // The to-do job being dragged, for the overlay.
   const [activeTodo, setActiveTodo] = useState<TodoJob | null>(null);
   const jobsById = useMemo(() => new Map(boardJobs.map((j) => [j.id, j])), [boardJobs]);
   // The card being dragged, for the overlay.
   const [activeEntry, setActiveEntry] = useState<BoardEntry | null>(null);
-  // The job double-clicked for cut & paste; the next cell clicked receives it.
-  const [cut, setCut] = useState<Pickup | null>(null);
+  // The job double-clicked (or "Cut") for cut & paste; the next cell clicked
+  // receives it. While copying, the booking being copied (highlighted).
+  const cut = mode.kind === "cut" || mode.kind === "copy" ? mode.pickup : null;
+  const copyingBooking = mode.kind === "copy";
+  const setCut = useCallback(
+    (pickup: Pickup | null) => dispatchMode(pickup ? { type: "cut", pickup } : { type: "clear", kind: "cut" }),
+    [],
+  );
+  // The booking menu (press and hold / right-click), and the job whose
+  // Schedule dialog is open over the board.
+  const [menu, setMenu] = useState<{ pickup: Pickup; at: Point } | null>(null);
+  const closeMenu = useCallback(() => setMenu(null), []);
+  const [scheduleRequest, setScheduleRequest] = useState<{ jobId: string; jobNumber: number; prefill: SchedulePrefill | null } | null>(null);
   // The booking whose edge is being dragged (Week view).
   const [resize, setResize] = useState<ResizeState | null>(null);
   const gesture = useRef<ResizeGesture | null>(null);
@@ -876,9 +952,9 @@ export function TeamScheduleView({
   const [selectedDateKey, setSelectedDateKey] = useState(todayKey);
   const viewMode: "day" | "week" = tab === "day" ? "day" : "week";
 
-  const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { delay: 200, tolerance: 8 } })
-  );
+  // Mouse/pen: drag once moved 6 px (a still, held button opens the menu);
+  // touch: the old 200 ms press-and-hold. BoardPointerSensor picks per press.
+  const sensors = useSensors(useSensor(BoardPointerSensor));
 
   const staffById = useMemo(() => new Map(staff.map((s) => [s.id, s])), [staff]);
 
@@ -1004,9 +1080,9 @@ export function TeamScheduleView({
   );
 
   const cutJob = useMemo(() => {
-    const booking = cut ? bookings.find((b) => b.id === cut.bookingId) : undefined;
+    const booking = mode.kind === "cut" ? bookings.find((b) => b.id === mode.pickup.bookingId) : undefined;
     return booking ? jobsById.get(booking.job_id) ?? null : null;
-  }, [cut, bookings, jobsById]);
+  }, [mode, bookings, jobsById]);
   const isSelectedToday = selectedDateKey === todayKey;
   const isCurrentPeriod = viewMode === "week" ? weekKeySet.has(todayKey) : isSelectedToday;
   const selectedDateLabel = useMemo(
@@ -1038,15 +1114,16 @@ export function TeamScheduleView({
     };
   }, []);
 
-  // Esc leaves cut mode.
+  // Esc leaves whichever mode is on (cut, copy, placing, scheduling).
+  const modeOn = mode.kind !== "none";
   useEffect(() => {
-    if (!cut) return;
+    if (!modeOn) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setCut(null);
+      if (e.key === "Escape") dispatchMode({ type: "clear" });
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [cut]);
+  }, [modeOn]);
 
   const nameOf = useCallback(
     (staffId: string | null) => (staffId ? staffById.get(staffId)?.full_name ?? "Technician" : "Unassigned"),
@@ -1083,7 +1160,7 @@ export function TeamScheduleView({
    * instead (planBoardAdd). One row written either way, so there is no
    * half-done state to unwind — the old crew-then-dates pair needed one.
    */
-  async function moveBooking(bookingId: string, source: BoardCell, target: BoardCell, mode: "move" | "add" = "move") {
+  async function moveBooking(bookingId: string, source: BoardCell, target: BoardCell, kind: "move" | "add" = "move") {
     const booking = bookings.find((b) => b.id === bookingId);
     const job = booking ? jobsById.get(booking.job_id) : undefined;
     // A Shift-drop copy still waiting for its real id cannot be moved yet.
@@ -1095,9 +1172,34 @@ export function TeamScheduleView({
       return;
     }
 
-    if (mode === "add") {
+    if (kind === "add") {
+      if (isClosedJob(job)) {
+        toast.error(`#${job.job_number} is ${job.status} — it can't be scheduled.`);
+        return;
+      }
       const copy = planBoardAdd(booking, source, target, bookingsByJob.get(job.id) ?? []);
-      if (!copy) return; // Unassigned, or they already have exactly this booking
+      // Unassigned, or they already have exactly this booking.
+      const refusal = copyRefusal(target, copy, nameOf(target.staffId));
+      if (refusal || !copy) {
+        toast.error(refusal ?? "Nothing to copy.");
+        return;
+      }
+      // Already booked on other work then: their call, never silent.
+      const clashes = newBookingClashes(copy, bookings);
+      if (clashes.length > 0) {
+        const ok = await askConfirm(
+          `${nameOf(target.staffId)} is already booked then`,
+          [
+            `#${job.job_number} — ${job.title}`,
+            ...clashes.map((c) => {
+              const j = jobsById.get(c.job_id);
+              return `Already on #${j?.job_number ?? "?"} ${j?.title ?? ""}`.trim();
+            }),
+          ],
+          "Book anyway",
+        );
+        if (!ok) return;
+      }
       if (!(await okToBookOverLeave(job, copy))) return;
       // A stand-in until the insert returns the real row (and its id).
       const tempId = `pending:${bookingId}:${target.staffId}:${Date.now()}`;
@@ -1144,24 +1246,99 @@ export function TeamScheduleView({
     return askConfirm(`${name} isn't available then`, [`#${job.job_number} — ${job.title}`, describeLeaveConflicts(name, hits)], "Book anyway");
   }
 
-  // Paste: a click on any cell while a booking is cut.
+  // Paste: a click on any cell while a booking is cut (Shift = add a copy, as a Shift-drop).
   function placeCut(targetId: string) {
-    if (!cut) return;
-    const pickup = cut;
-    setCut(null);
+    if (mode.kind !== "cut") return;
+    const pickup = mode.pickup;
+    dispatchMode({ type: "picked" });
     const target = parseBoardTarget(targetId, selectedDateKey);
     if (target) void moveBooking(pickup.bookingId, pickup.source, target, shiftHeld.current ? "add" : "move");
   }
 
+  // Copy mode: every click on a day pastes another copy there (the Shift-drop
+  // rules — planBoardAdd), until Esc or Done.
+  function pasteCopy(targetId: string) {
+    if (mode.kind !== "copy") return;
+    const target = parseBoardTarget(targetId, selectedDateKey);
+    if (target) void moveBooking(mode.pickup.bookingId, mode.pickup.source, target, "add");
+  }
+
+  // Schedule mode: the searched job's Schedule dialog opens on the clicked
+  // technician and day (Unassigned = a booking with nobody yet).
+  function placeSchedule(targetId: string) {
+    if (mode.kind !== "schedule") return;
+    const job = mode.job;
+    const target = parseBoardTarget(targetId, selectedDateKey);
+    if (!target) return;
+    dispatchMode({ type: "picked" });
+    openScheduleDialog(job, { staffId: target.staffId, dateKey: target.dateKey });
+  }
+
+  function openScheduleDialog(job: ScheduleJobPick, prefill: SchedulePrefill | null) {
+    if (!viewerId) return;
+    setScheduleRequest({ jobId: job.id, jobNumber: job.job_number, prefill });
+  }
+
+  /** A job picked in the search: straight to its dialog when the day is known (the "+"), else pick a day. */
+  function pickedFromSearch(job: ScheduleJobPick) {
+    if (existingFor) openScheduleDialog(job, existingFor);
+    else dispatchMode({ type: "schedule", job: { id: job.id, job_number: job.job_number, title: job.title } });
+  }
+
+  // -------------------------------------------------------------------------
+  // The booking menu
+  // -------------------------------------------------------------------------
+
+  const openMenu = useCallback(
+    (pickup: Pickup, at: Point) => {
+      if (modeOn || resize) return;
+      setMenu({ pickup, at });
+    },
+    [modeOn, resize],
+  );
+
+  const menuBooking = menu ? bookings.find((b) => b.id === menu.pickup.bookingId) : undefined;
+  const menuJob = menuBooking ? jobsById.get(menuBooking.job_id) : undefined;
+
+  function onMenuAction(action: BookingMenuAction) {
+    if (!menu || !menuBooking || !menuJob) return;
+    const pickup = menu.pickup;
+    switch (action) {
+      case "copy":
+        dispatchMode({ type: "copy", pickup, jobNumber: menuJob.job_number });
+        return;
+      case "cut":
+        setCut(pickup);
+        return;
+      case "schedule":
+        openScheduleDialog(menuJob, null);
+        return;
+      case "open":
+        router.push(`/dashboard/jobs/${menuJob.id}`);
+        return;
+      case "todo":
+        void dragOut(pickup);
+        return;
+    }
+  }
+
   function handleDragStart(event: DragStartEvent) {
-    setCut(null);
-    setPlacing(null);
+    // A held mouse button that then moves is a drag, not the menu. (On touch
+    // the drag starts first and the menu may follow; handleDragMove closes it
+    // once the finger moves on.)
+    if ((event.activatorEvent as PointerEvent | null)?.pointerType !== "touch") setMenu(null);
+    dispatchMode({ type: "clear" });
     const data = event.active.data.current as { kind?: string; job?: TodoJob; entry?: BoardEntry } | undefined;
     if (data?.kind === "todo") {
       setActiveTodo(data.job ?? null);
       return;
     }
     setActiveEntry(data?.entry ?? null);
+  }
+
+  function handleDragMove(event: DragMoveEvent) {
+    const pointerType = (event.activatorEvent as PointerEvent | null)?.pointerType;
+    if (menu && movedBeyond({ x: 0, y: 0 }, event.delta, holdTolerance(pointerType))) setMenu(null);
   }
 
   function handleDragEnd(event: DragEndEvent) {
@@ -1286,7 +1463,7 @@ export function TeamScheduleView({
    * Always asks first.
    */
   async function dragOut(pickup: Pickup) {
-    setCut(null);
+    dispatchMode({ type: "clear", kind: "cut" });
     const booking = bookings.find((b) => b.id === pickup.bookingId);
     const job = booking ? jobsById.get(booking.job_id) : undefined;
     if (!booking || !job) return;
@@ -1380,16 +1557,6 @@ export function TeamScheduleView({
     if (target) void dropTodo(job, target);
   }
 
-  // Esc stops placing.
-  useEffect(() => {
-    if (!placing) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setPlacing(null);
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [placing]);
-
   /** A technician's free hours on a day (office/admin only). */
   function gapFor(staffId: string, dateKey: string): DayGap | undefined {
     if (!canTodo) return undefined;
@@ -1407,7 +1574,16 @@ export function TeamScheduleView({
     setTodoOpen(true);
   }
 
-  const onPick = cut ? placeCut : placing ? placeTodo : undefined;
+  const onPick =
+    mode.kind === "cut" ? placeCut : mode.kind === "copy" ? pasteCopy : mode.kind === "todo" ? placeTodo : mode.kind === "schedule" ? placeSchedule : undefined;
+  // What every placed card is handed for cut/copy/menu.
+  const cardWiring = {
+    cut,
+    copying: copyingBooking,
+    pickActive: !!onPick,
+    onCut: setCut,
+    onMenu: canTodo && viewerId ? openMenu : undefined,
+  };
 
   /** The name tag for a tile: its row's technician, plus whoever else is on that job that day. */
   function tagFor(entry: BoardEntry): TileTag {
@@ -1447,7 +1623,8 @@ export function TeamScheduleView({
       scroller,
       startScroll: scroller?.scrollLeft ?? 0,
     };
-    setCut(null);
+    dispatchMode({ type: "clear" });
+    setMenu(null);
     setResize({ booking: entry.booking, job: entry.job, edge, delta: 0, phase: "dragging", conflicts: [], leaveConflicts: [] });
   }
 
@@ -1670,10 +1847,11 @@ export function TeamScheduleView({
             )}
           </div>
           {canTodo && (
-            <div className="flex items-center gap-2">
-            <Button variant="outline" size="sm" className="gap-1.5" onClick={() => openExisting(null)}>
+            <div className="flex items-center gap-2 flex-wrap">
+            <span className="hidden md:inline text-xs text-slate-500">Hold a job to copy it to someone else</span>
+            <Button size="sm" className="gap-1.5" onClick={() => openExisting(null)} disabled={!viewerId}>
               <CalendarPlus className="w-4 h-4" />
-              Schedule existing job
+              Schedule
             </Button>
             <Button
               variant={todoOpen ? "secondary" : "outline"}
@@ -1721,6 +1899,52 @@ export function TeamScheduleView({
               </span>
             </p>
           </div>
+        ) : mode.kind === "copy" ? (
+          <div
+            role="status"
+            className="sticky top-0 z-20 mb-3 flex items-center justify-between gap-3 rounded-lg border border-blue-300 bg-blue-50 px-3 py-2 text-sm text-blue-900"
+          >
+            <p className="flex items-center gap-2 min-w-0">
+              <Copy className="w-4 h-4 flex-shrink-0" />
+              <span className="min-w-0">
+                Click a technician&apos;s day to paste a copy of <span className="font-semibold">#{mode.jobNumber}</span> — Esc to finish
+              </span>
+            </p>
+            <Button size="sm" className="h-7 flex-shrink-0" onClick={() => dispatchMode({ type: "clear" })}>
+              Done
+            </Button>
+          </div>
+        ) : mode.kind === "schedule" ? (
+          <div
+            role="status"
+            className="sticky top-0 z-20 mb-3 flex items-center justify-between gap-3 rounded-lg border border-blue-300 bg-blue-50 px-3 py-2 text-sm text-blue-900"
+          >
+            <p className="flex items-center gap-2 min-w-0">
+              <CalendarPlus className="w-4 h-4 flex-shrink-0" />
+              <span className="min-w-0">
+                Click a technician&apos;s day to schedule <span className="font-semibold">#{mode.job.job_number}</span>
+                <span className="hidden sm:inline"> — {mode.job.title}</span> — Esc to cancel
+              </span>
+            </p>
+            <span className="flex items-center gap-1 flex-shrink-0">
+              <Button
+                size="sm"
+                variant="ghost"
+                className="h-7"
+                onClick={() => {
+                  const job = mode.job;
+                  dispatchMode({ type: "clear" });
+                  openScheduleDialog(job, null);
+                }}
+              >
+                Open its schedule
+              </Button>
+              <Button size="sm" variant="ghost" className="h-7 gap-1" onClick={() => dispatchMode({ type: "clear" })}>
+                <X className="w-3.5 h-3.5" />
+                Cancel
+              </Button>
+            </span>
+          </div>
         ) : cutJob ? (
           <div
             role="status"
@@ -1759,11 +1983,11 @@ export function TeamScheduleView({
             {viewMode === "day"
               ? "Each card is one technician's booking. Press and hold it and drag it onto a technician — or double-click it, then click the technician — to move that booking to them. Hold Shift as you drop to book them on the same time as well."
               : "Each card is one technician's booking. Press and hold it and drag it onto another technician and/or day — or double-click it, then click the cell — to move that booking. Hold Shift as you drop on a technician to book them as well. Drag a booking's left or right edge to change its first or last day."}
-            {canTodo && " Drag a to-do job onto a day to book it; drag a booking onto the to-do list to take it off."}
+            {canTodo && " Press and hold (or right-click) a booking to copy it to someone else. Drag a to-do job onto a day to book it; drag a booking onto the to-do list to take it off."}
           </p>
         )}
 
-        <DndContext sensors={sensors} collisionDetection={boardCollision} onDragStart={handleDragStart} onDragEnd={handleDragEnd} onDragCancel={() => { setActiveEntry(null); setActiveTodo(null); }}>
+        <DndContext sensors={sensors} collisionDetection={boardCollision} onDragStart={handleDragStart} onDragMove={handleDragMove} onDragEnd={handleDragEnd} onDragCancel={() => { setActiveEntry(null); setActiveTodo(null); }}>
         <div className="flex flex-col gap-4 lg:flex-row lg:items-start">
         <div className="min-w-0 flex-1">
         {viewMode === "day" ? (
@@ -1806,7 +2030,7 @@ export function TeamScheduleView({
                           </p>
                         ) : (
                           unassigned.map((entry) => (
-                            <DraggableJobCard key={entry.booking.id} entry={entry} source={source} tag={tagFor(entry)} cut={cut} onCut={setCut} reassign={reassignOn(entry)} />
+                            <DraggableJobCard key={entry.booking.id} entry={entry} source={source} tag={tagFor(entry)} {...cardWiring} reassign={reassignOn(entry)} />
                           ))
                         )}
                       </CardContent>
@@ -1865,7 +2089,7 @@ export function TeamScheduleView({
                           </p>
                         ) : (
                           memberEntries.map((entry) => (
-                            <DraggableJobCard key={entry.booking.id} entry={entry} source={source} tag={tagFor(entry)} cut={cut} onCut={setCut} reassign={reassignOn(entry)} />
+                            <DraggableJobCard key={entry.booking.id} entry={entry} source={source} tag={tagFor(entry)} {...cardWiring} reassign={reassignOn(entry)} />
                           ))
                         )}
                       </CardContent>
@@ -1924,8 +2148,7 @@ export function TeamScheduleView({
                         entry={entry}
                         source={{ staffId: null, dateKey: key }}
                         tag={tagFor(entry)}
-                        cut={cut}
-                        onCut={setCut}
+                        {...cardWiring}
                         reassign={reassignOn(entry)}
                         handles={handlesFor(entry)}
                         onResizeStart={startResize}
@@ -1972,8 +2195,7 @@ export function TeamScheduleView({
                               entry={entry}
                               source={{ staffId: member.id, dateKey: key }}
                               tag={tagFor(entry)}
-                              cut={cut}
-                              onCut={setCut}
+                              {...cardWiring}
                               reassign={reassignOn(entry)}
                               handles={handlesFor(entry)}
                               onResizeStart={startResize}
@@ -2004,7 +2226,6 @@ export function TeamScheduleView({
               onGapInput={setGapInput}
               placingJobId={placing?.id ?? null}
               onPlace={(job) => {
-                setCut(null);
                 setPlacing(job);
                 // On a phone the panel sits above the board: fold it away so
                 // the day to tap is on screen (the banner says what's picked).
@@ -2016,9 +2237,9 @@ export function TeamScheduleView({
                 router.refresh();
               }}
               bookingDragActive={!!activeEntry}
-              cutActive={!!cut}
+              cutActive={mode.kind === "cut"}
               onCutDrop={() => {
-                if (cut) void dragOut(cut);
+                if (mode.kind === "cut") void dragOut(mode.pickup);
               }}
               onClose={() => setTodoOpen(false)}
             />
@@ -2029,7 +2250,7 @@ export function TeamScheduleView({
         <DragOverlay>
           {activeTodo ? (
             <TodoDragCard job={activeTodo} />
-          ) : activeEntry ? (
+          ) : activeEntry && !menu ? (
             viewMode === "day" ? (
               <div className="w-72 shadow-lg rounded-lg rotate-1 bg-white">
                 <div className={JOB_CARD_CLASS}>
@@ -2187,6 +2408,29 @@ export function TeamScheduleView({
           prefill={existingFor}
           staffName={existingFor?.staffId ? nameOf(existingFor.staffId) : existingFor ? "Unassigned" : null}
           onOpenChange={setExistingOpen}
+          onPick={viewerId ? pickedFromSearch : undefined}
+        />
+      )}
+      {canTodo && viewerId && (
+        <BoardScheduleDialog
+          request={scheduleRequest}
+          staff={staff.filter((s) => !s.full_name.endsWith("(inactive)"))}
+          currentUserId={viewerId}
+          onClose={() => setScheduleRequest(null)}
+        />
+      )}
+      {menu && menuBooking && menuJob && (
+        <BookingMenu
+          at={menu.at}
+          title={`#${menuJob.job_number} — ${menuBooking.staff_id ? nameOf(menuBooking.staff_id) : "Unassigned"}`}
+          items={bookingMenuItems({
+            closed: isClosedJob(menuJob) ? menuJob.status : null,
+            unsaved: menuBooking.id.startsWith("pending:") || menuBooking.id.startsWith("legacy:"),
+            readOnly: bookingsReadOnly,
+            canTodo,
+          })}
+          onAction={onMenuAction}
+          onClose={closeMenu}
         />
       )}
       {/* Booking someone onto their leave: asked, never silent. */}

@@ -20,7 +20,7 @@ import {
   type SchedulePrefill,
 } from "@/lib/schedule-existing-job";
 
-interface FoundJob {
+export interface FoundJob {
   id: string;
   job_number: number;
   title: string;
@@ -39,18 +39,26 @@ interface FoundJob {
  * Office/admin only — the board offers it to them alone; bookings are theirs
  * by RLS, and the dialog's own rules (a cost centre on every booking, leave
  * and clash warnings) apply as always.
+ *
+ * With `onPick` (the board, 23 Nov 2026) the picked job is handed back and the
+ * board opens its Schedule dialog in place — straight away when a technician's
+ * day was already chosen, else after the office clicks one. Without it the
+ * job page is opened, as before.
  */
 export function ScheduleExistingJobDialog({
   open,
   prefill,
   staffName,
   onOpenChange,
+  onPick,
 }: {
   open: boolean;
   prefill: SchedulePrefill | null;
   /** The clicked technician's name, for the title. */
   staffName?: string | null;
   onOpenChange: (open: boolean) => void;
+  /** Hand the picked job back instead of opening the job page. */
+  onPick?: (job: FoundJob) => void;
 }) {
   const router = useRouter();
   const supabase = useMemo(() => createClient(), []);
@@ -116,6 +124,10 @@ export function ScheduleExistingJobDialog({
 
   function pick(job: FoundJob) {
     onOpenChange(false);
+    if (onPick) {
+      onPick(job);
+      return;
+    }
     router.push(scheduleExistingJobHref(job.id, prefill));
   }
 
@@ -125,9 +137,12 @@ export function ScheduleExistingJobDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Schedule an existing job</DialogTitle>
+          <DialogTitle>Schedule a job</DialogTitle>
           <DialogDescription>
-            {forWhom ? `For ${forWhom}. ` : ""}Find the job, then book it in its Schedule dialog.
+            {forWhom ? `For ${forWhom}. ` : ""}
+            {onPick && !prefill
+              ? "Type the job number or a few words, pick it, then click the technician's day to book it."
+              : "Find the job, then book it in its Schedule dialog."}
           </DialogDescription>
         </DialogHeader>
         <div className="relative">

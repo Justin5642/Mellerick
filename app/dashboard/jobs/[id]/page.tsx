@@ -10,6 +10,7 @@ import { loadJobBookings } from "@/lib/bookings";
 import { loadScheduleLeave } from "@/lib/staff-leave-data";
 import { dateKeyInBusinessTZ, shiftDateKey } from "@/lib/date";
 import { loadTechVariations } from "@/lib/variations-public";
+import { appendInactiveStaff } from "@/lib/schedule-dialog-data";
 
 export default async function JobDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -33,22 +34,8 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
   // instead of their name. Fetch and append any such profile (flagged) so
   // every current assignment always displays correctly. Chained off just those
   // two reads, so it no longer waits for the whole batch.
-  const staffForDisplayPromise = Promise.all([staffPromise, jobAssignmentsPromise]).then(
-    async ([{ data: staff }, { data: jobAssignments }]) => {
-      const staffForDisplay = staff ?? [];
-      const currentAssignedIds = (jobAssignments ?? []).map((a: { staff_id: string }) => a.staff_id);
-      const missingAssignedIds = currentAssignedIds.filter((sid: string) => !staffForDisplay.some((s: any) => s.id === sid));
-      if (missingAssignedIds.length === 0) return staffForDisplay;
-      const { data: assignedProfiles } = await supabase
-        .from("profiles")
-        .select("id, full_name, role")
-        .in("id", missingAssignedIds);
-      if (!assignedProfiles) return staffForDisplay;
-      return [
-        ...staffForDisplay,
-        ...assignedProfiles.map((p) => ({ ...p, full_name: `${p.full_name} (inactive)` })),
-      ];
-    },
+  const staffForDisplayPromise = Promise.all([staffPromise, jobAssignmentsPromise]).then(([{ data: staff }, { data: jobAssignments }]) =>
+    appendInactiveStaff(supabase, staff ?? [], (jobAssignments ?? []).map((a: { staff_id: string }) => a.staff_id)),
   );
 
   // The job's bookings (each technician's own time and cost centre), named

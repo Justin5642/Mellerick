@@ -23,6 +23,11 @@ import { costPerHourOf, usageCost, type EffectiveRate } from "@/lib/fleet-costs"
 //   plant      equipment usage: hours × cost per hour, plus loads × cost per
 //              load (0091), by the usage's line — the truck's cartage on the
 //              Transport line. Untagged usage lands in "Not tagged".
+//   mistakes   job_mistakes (migration 0115, drafted — not applied when this
+//              was written; until it is, no mistakes are passed in): what a
+//              mistake cost, ex GST, by the line the office logged it
+//              against. A cost like any other — it reduces the margin — but
+//              kept as its own figure so it can be seen (Justin, 23 Nov 2026).
 //
 // Known overlap until supplier invoices are matched to POs (Stage 4): the
 // same invoice entered both as an expense and as an order's amount counts
@@ -95,6 +100,8 @@ export interface LedgerInputs {
   expenses: { amount: number | null; cost_center_id: string | null }[];
   supplierOrders: { amount: number | null; cost_center_id: string | null; status: string }[];
   plant: { cost: number; cost_center_id: string | null }[];
+  /** job_mistakes rows (office/admin only). Absent = none. */
+  mistakes?: { amount_ex_gst: number | null; cost_center_id: string | null }[];
 }
 
 export interface LedgerRow {
@@ -107,6 +114,8 @@ export interface LedgerRow {
   labour: number;
   materials: number;
   plant: number;
+  /** The cost of mistakes logged against this cost centre (ex GST). */
+  mistakes: number;
   cost: number;
   /** Supplier orders on this cost centre with no amount yet. */
   unpricedOrders: number;
@@ -116,6 +125,8 @@ export interface JobLedger {
   rows: LedgerRow[];
   budget: number;
   cost: number;
+  /** Mistakes across the job — already inside `cost`. */
+  mistakes: number;
   margin: number;
   /** null with no budget. */
   marginPct: number | null;
@@ -135,7 +146,7 @@ export function computeJobLedger(i: LedgerInputs): JobLedger {
   const row = (key: string, name: string): LedgerRow => {
     let r = rows.get(key);
     if (!r) {
-      r = { key, name, budget: 0, budgetHours: 0, hours: 0, labour: 0, materials: 0, plant: 0, cost: 0, unpricedOrders: 0 };
+      r = { key, name, budget: 0, budgetHours: 0, hours: 0, labour: 0, materials: 0, plant: 0, mistakes: 0, cost: 0, unpricedOrders: 0 };
       rows.set(key, r);
     }
     return r;
@@ -175,6 +186,11 @@ export function computeJobLedger(i: LedgerInputs): JobLedger {
 
   for (const p of i.plant) forLine(p.cost_center_id).plant += p.cost;
 
+  for (const m of i.mistakes ?? []) {
+    const amount = Number(m.amount_ex_gst ?? 0);
+    if (amount > 0) forLine(m.cost_center_id).mistakes += amount;
+  }
+
   // Company cost centres first in list order, then travel, then untagged.
   const order = (k: string) => {
     if (k === "travel") return 1e6;
@@ -191,7 +207,8 @@ export function computeJobLedger(i: LedgerInputs): JobLedger {
       labour: round(r.labour),
       materials: round(r.materials),
       plant: round(r.plant),
-      cost: round(r.labour + r.materials + r.plant),
+      mistakes: round(r.mistakes),
+      cost: round(r.labour + r.materials + r.plant + r.mistakes),
     }))
     .sort((a, b) => order(a.key) - order(b.key));
 
@@ -202,6 +219,7 @@ export function computeJobLedger(i: LedgerInputs): JobLedger {
     rows: out,
     budget,
     cost,
+    mistakes: round(out.reduce((s, r) => s + r.mistakes, 0)),
     margin: round(budget - cost),
     marginPct: budget > 0 ? round(((budget - cost) / budget) * 100) : null,
     unsplit: round(budget - split),
@@ -238,24 +256,27 @@ export interface CostCentreTotal {
   name: string;
   budget: number;
   cost: number;
+  /** Mistakes — already inside `cost`. */
+  mistakes: number;
   margin: number;
   marginPct: number | null;
 }
 
 /** The same cost centre added up across several jobs' ledgers, in first-seen order. */
 export function costCentreTotals(ledgers: Pick<JobLedger, "rows">[]): CostCentreTotal[] {
-  const totals = new Map<string, { key: string; name: string; budget: number; cost: number }>();
+  const totals = new Map<string, { key: string; name: string; budget: number; cost: number; mistakes: number }>();
   for (const l of ledgers) {
     for (const r of l.rows) {
-      const t = totals.get(r.key) ?? { key: r.key, name: r.name, budget: 0, cost: 0 };
+      const t = totals.get(r.key) ?? { key: r.key, name: r.name, budget: 0, cost: 0, mistakes: 0 };
       t.budget += r.budget;
       t.cost += r.cost;
+      t.mistakes += r.mistakes ?? 0;
       totals.set(r.key, t);
     }
   }
   return [...totals.values()].map((t) => {
     const budget = round(t.budget);
     const cost = round(t.cost);
-    return { ...t, budget, cost, margin: round(budget - cost), marginPct: rowMarginPct({ budget, cost }) };
+    return { ...t, budget, cost, mistakes: round(t.mistakes), margin: round(budget - cost), marginPct: rowMarginPct({ budget, cost }) };
   });
 }

@@ -14,13 +14,18 @@ import {
   type EquipmentInput,
   type StaffCostProfileInput,
 } from "@/lib/job-ledger";
+import { loadJobMistakes, type JobMistake } from "@/lib/job-mistakes";
 
 // The job ledger card at the top of the Costing tab (admin only, like the rest
 // of the tab — labour cost comes from payroll data). Budget per cost centre
 // from the builder's PO split, against cost so far, and the margin that
 // leaves, flagged under the company minimum. The maths is lib/job-ledger.ts.
+// Mistake costs (job_mistakes — migration 0115, a draft, not applied when
+// this was written) are read here and shown as their own column; before the
+// table exists there are none and the column stays hidden.
 
 interface Props {
+  jobId: string;
   purchaseOrders: { total_value: number | null; po_cost_centers?: { id: string; cost_centre_id?: string | null; allocated_amount: number | null; allocated_hours: number | null }[] }[];
   timeEntries: { staff_id: string; hours: number | null; cost_center_id: string | null; entry_type?: string | null }[];
   expenses: { amount: number | null; cost_center_id: string | null }[];
@@ -33,8 +38,10 @@ interface Props {
 
 const money = (n: number) => `$${Math.round(n).toLocaleString("en-AU")}`;
 
-export function JobLedger({ purchaseOrders, timeEntries, expenses, vendorOrders, equipmentUsage, equipmentOptions, staffCostProfiles, minMarginPct }: Props) {
+export function JobLedger({ jobId, purchaseOrders, timeEntries, expenses, vendorOrders, equipmentUsage, equipmentOptions, staffCostProfiles, minMarginPct }: Props) {
   const [costCentres, setCostCentres] = useState<{ id: string; name: string }[]>([]);
+  const [mistakes, setMistakes] = useState<JobMistake[]>([]);
+  const [mistakesError, setMistakesError] = useState(false);
 
   useEffect(() => {
     createClient()
@@ -43,6 +50,19 @@ export function JobLedger({ purchaseOrders, timeEntries, expenses, vendorOrders,
       .order("sort_order")
       .then(({ data }) => setCostCentres((data as { id: string; name: string }[]) ?? []));
   }, []);
+
+  useEffect(() => {
+    let live = true;
+    void loadJobMistakes(createClient(), jobId).then((r) => {
+      if (!live) return;
+      if (r.error) console.error("job ledger: mistakes load failed:", r.error);
+      setMistakes(r.mistakes);
+      setMistakesError(!!r.error);
+    });
+    return () => {
+      live = false;
+    };
+  }, [jobId]);
 
   const ledger = useMemo(
     () =>
@@ -55,8 +75,9 @@ export function JobLedger({ purchaseOrders, timeEntries, expenses, vendorOrders,
         expenses,
         supplierOrders: vendorOrders,
         plant: plantCosts(equipmentUsage, equipmentOptions),
+        mistakes,
       }),
-    [costCentres, purchaseOrders, timeEntries, staffCostProfiles, equipmentOptions, expenses, vendorOrders, equipmentUsage]
+    [costCentres, purchaseOrders, timeEntries, staffCostProfiles, equipmentOptions, expenses, vendorOrders, equipmentUsage, mistakes]
   );
 
   if (ledger.budget === 0) {
@@ -72,6 +93,7 @@ export function JobLedger({ purchaseOrders, timeEntries, expenses, vendorOrders,
   }
 
   const flagged = belowMinimumMargin(ledger, minMarginPct);
+  const showMistakes = ledger.mistakes > 0;
   const marginColour = flagged ? "text-red-600" : "text-green-700";
 
   return (
@@ -114,6 +136,7 @@ export function JobLedger({ purchaseOrders, timeEntries, expenses, vendorOrders,
                 <th className="font-medium pb-2">Labour</th>
                 <th className="font-medium pb-2">Materials</th>
                 <th className="font-medium pb-2">Plant</th>
+                {showMistakes && <th className="font-medium pb-2">Mistakes</th>}
                 <th className="font-medium pb-2">Cost</th>
                 <th className="font-medium pb-2">Margin</th>
               </tr>
@@ -142,6 +165,7 @@ export function JobLedger({ purchaseOrders, timeEntries, expenses, vendorOrders,
                     <td className="py-2 text-slate-600">{r.labour ? money(r.labour) : "—"}</td>
                     <td className="py-2 text-slate-600">{r.materials ? money(r.materials) : "—"}</td>
                     <td className="py-2 text-slate-600">{r.plant ? money(r.plant) : "—"}</td>
+                    {showMistakes && <td className="py-2 text-red-600">{r.mistakes ? money(r.mistakes) : "—"}</td>}
                     <td className="py-2 font-medium text-slate-800">{money(r.cost)}</td>
                     <td className={`py-2 font-medium ${over ? "text-red-600" : "text-slate-800"}`}>
                       {r.budget ? <>{money(left)}{pct !== null && <span className="block text-xs font-normal">{pct.toFixed(0)}% margin</span>}</> : "—"}
@@ -167,6 +191,13 @@ export function JobLedger({ purchaseOrders, timeEntries, expenses, vendorOrders,
               understated.
             </p>
           )}
+          {showMistakes && (
+            <p>
+              Mistakes ({money(ledger.mistakes)}) are counted in the cost and take that much off the margin. They are logged on the
+              Purchase Orders tab.
+            </p>
+          )}
+          {mistakesError && <p className="text-amber-700">Couldn&apos;t load this job&apos;s mistake costs, so they aren&apos;t in the cost above.</p>}
           {ledger.unpricedOrders > 0 && (
             <p>Supplier POs not priced yet aren&apos;t in the cost until their invoice amount is entered.</p>
           )}

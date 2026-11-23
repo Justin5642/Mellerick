@@ -207,8 +207,10 @@ export default async function SchedulePage() {
             )}
           </p>
         </div>
+        {/* A NEW job. An existing one is booked from the board's own
+            "Schedule" button (type the job, click a technician's day). */}
         <Link href="/dashboard/jobs/new">
-          <Button className="gap-2"><Plus className="w-4 h-4" />Schedule Job</Button>
+          <Button variant="outline" className="gap-2"><Plus className="w-4 h-4" />New Job</Button>
         </Link>
       </div>
 
@@ -221,6 +223,7 @@ export default async function SchedulePage() {
         todoError={todoError?.message ?? null}
         leave={leave}
         viewerRole={viewer?.profile?.role ?? null}
+        viewerId={viewer?.user?.id ?? null}
       />
     </div>
   );
