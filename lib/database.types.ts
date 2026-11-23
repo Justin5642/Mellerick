@@ -1924,6 +1924,77 @@ export type Database = {
           },
         ]
       }
+      job_mistakes: {
+        Row: {
+          amount_ex_gst: number
+          cause: string | null
+          cost_center_id: string | null
+          created_at: string
+          description: string
+          entered_by: string | null
+          id: string
+          job_id: string
+          occurred_on: string
+          staff_id: string | null
+          updated_at: string
+        }
+        Insert: {
+          amount_ex_gst: number
+          cause?: string | null
+          cost_center_id?: string | null
+          created_at?: string
+          description: string
+          entered_by?: string | null
+          id?: string
+          job_id: string
+          occurred_on?: string
+          staff_id?: string | null
+          updated_at?: string
+        }
+        Update: {
+          amount_ex_gst?: number
+          cause?: string | null
+          cost_center_id?: string | null
+          created_at?: string
+          description?: string
+          entered_by?: string | null
+          id?: string
+          job_id?: string
+          occurred_on?: string
+          staff_id?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "job_mistakes_cost_center_id_fkey"
+            columns: ["cost_center_id"]
+            isOneToOne: false
+            referencedRelation: "po_cost_centers"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "job_mistakes_entered_by_fkey"
+            columns: ["entered_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "job_mistakes_job_id_fkey"
+            columns: ["job_id"]
+            isOneToOne: false
+            referencedRelation: "jobs"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "job_mistakes_staff_id_fkey"
+            columns: ["staff_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       job_notes: {
         Row: {
           author_id: string | null

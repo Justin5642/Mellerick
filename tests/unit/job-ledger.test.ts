@@ -142,8 +142,64 @@ describe("per cost centre margins", () => {
       { rows: [{ key: "bgd", name: "Below Ground", budget: 2000, cost: 1700 } as never] },
     ]);
     expect(totals).toEqual([
-      { key: "bgd", name: "Below Ground", budget: 3000, cost: 2400, margin: 600, marginPct: 20 },
-      { key: "agp", name: "Above Ground", budget: 500, cost: 450, margin: 50, marginPct: 10 },
+      { key: "bgd", name: "Below Ground", budget: 3000, cost: 2400, mistakes: 0, margin: 600, marginPct: 20 },
+      { key: "agp", name: "Above Ground", budget: 500, cost: 450, mistakes: 0, margin: 50, marginPct: 10 },
     ]);
+  });
+});
+
+describe("computeJobLedger — mistakes (job_mistakes, Justin 23 Nov 2026)", () => {
+  it("counts a mistake as cost on its cost centre, shown as its own figure, and lowers the margin", () => {
+    const l = computeJobLedger(
+      base({
+        timeEntries: [{ staff_id: "tech", hours: 10, cost_center_id: "l-sewer", entry_type: "work" }],
+        mistakes: [
+          { amount_ex_gst: 400, cost_center_id: "l-sewer" },
+          { amount_ex_gst: 100, cost_center_id: "l-storm" },
+        ],
+      })
+    );
+    const bgd = l.rows.find((r) => r.key === "bgd")!;
+    expect(bgd).toMatchObject({ labour: 800, mistakes: 500, cost: 1300 });
+    expect(l.mistakes).toBe(500);
+    expect(l.cost).toBe(1300);
+    expect(l.margin).toBe(11200);
+    const without = computeJobLedger(base({ timeEntries: [{ staff_id: "tech", hours: 10, cost_center_id: "l-sewer", entry_type: "work" }] }));
+    expect(without.margin - l.margin).toBe(500);
+  });
+
+  it("puts an untagged mistake (or one on a line no longer on the job) under Not tagged", () => {
+    const l = computeJobLedger(
+      base({
+        mistakes: [
+          { amount_ex_gst: 250.5, cost_center_id: null },
+          { amount_ex_gst: 49.5, cost_center_id: "gone" },
+        ],
+      })
+    );
+    expect(l.rows.find((r) => r.key === "untagged")).toMatchObject({ mistakes: 300, cost: 300, budget: 0 });
+    expect(l.mistakes).toBe(300);
+  });
+
+  it("can push a cost centre under the minimum on its own", async () => {
+    const { rowBelowMinimum } = await import("@/lib/job-ledger");
+    const l = computeJobLedger(base({ mistakes: [{ amount_ex_gst: 400, cost_center_id: "l-cart" }] }));
+    const transport = l.rows.find((r) => r.key === "transport")!;
+    expect(transport).toMatchObject({ budget: 1500, mistakes: 400, cost: 400 });
+    expect(rowBelowMinimum(transport, 75)).toBe(true);
+    expect(rowBelowMinimum(transport, 70)).toBe(false);
+  });
+
+  it("is zero with no mistakes passed (before the table exists)", () => {
+    const l = computeJobLedger(base());
+    expect(l.mistakes).toBe(0);
+    expect(l.rows.every((r) => r.mistakes === 0)).toBe(true);
+  });
+
+  it("adds mistakes up per cost centre across jobs", async () => {
+    const { costCentreTotals } = await import("@/lib/job-ledger");
+    const a = computeJobLedger(base({ mistakes: [{ amount_ex_gst: 100, cost_center_id: "l-sewer" }] }));
+    const b = computeJobLedger(base({ mistakes: [{ amount_ex_gst: 60, cost_center_id: "l-storm" }] }));
+    expect(costCentreTotals([a, b]).find((t) => t.key === "bgd")).toMatchObject({ mistakes: 160, cost: 160, budget: 22000 });
   });
 });

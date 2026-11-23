@@ -36,6 +36,7 @@ const JobNotes = dynamic(() => import("./job-notes").then((m) => m.JobNotes), { 
 const JobSignature = dynamic(() => import("./job-signature").then((m) => m.JobSignature), { loading: TabLoading });
 const JobLedger = dynamic(() => import("./job-ledger").then((m) => m.JobLedger), { loading: TabLoading });
 const JobPO = dynamic(() => import("./job-po").then((m) => m.JobPO), { loading: TabLoading });
+const JobMistakes = dynamic(() => import("./job-mistakes").then((m) => m.JobMistakes), { loading: TabLoading });
 const JobTime = dynamic(() => import("./job-time").then((m) => m.JobTime), { loading: TabLoading });
 const JobVariations = dynamic(() => import("./job-variations").then((m) => m.JobVariations), { loading: TabLoading });
 const JobExpenses = dynamic(() => import("./job-expenses").then((m) => m.JobExpenses), { loading: TabLoading });
@@ -463,6 +464,10 @@ export function JobDetailClient({ job, currentUserId, photos: initialPhotos, doc
                 vendorOrders={vendorOrders}
                 onVendorOrdersUpdate={setVendorOrders}
               />
+              {/* Mistake costs: office and admin (this tab), never technicians. */}
+              <div className="px-6 pb-6">
+                <JobMistakes jobId={job.id} costCenters={costCenters} staff={staff} />
+              </div>
             </TabsContent>
             )}
             <TabsContent value="time" className="m-0 h-full">
@@ -490,6 +495,7 @@ export function JobDetailClient({ job, currentUserId, photos: initialPhotos, doc
                   <>
                   <div className="p-6 pb-0 max-w-3xl">
                     <JobLedger
+                      jobId={job.id}
                       purchaseOrders={purchaseOrders}
                       timeEntries={timeEntries}
                       expenses={expenses}

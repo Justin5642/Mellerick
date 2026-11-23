@@ -281,6 +281,56 @@ and 0096 then refused bookings for the other cost centres.
 - **Not changed:** the office's status drop-down itself, the PO tab's stage
   controls.
 
+**Mistake costs per cost centre (23 Nov 2026; migration `0115` DRAFT — not applied).**
+Justin: "We also need a way of tracking the expense of mistakes in each cost
+centre that will be a negative cost." His choices: the office logs them
+(office/admin only), and they reduce the job's margin, shown as their own line.
+- **Table `job_mistakes` (0115):** id, `job_id` (cascade), `cost_center_id` →
+  the job's PO line (`po_cost_centers`; null = "Not tagged"; set null when the
+  line is deleted), `occurred_on` (default Melbourne today), `amount_ex_gst`
+  (> 0), `description` (1–2000), `cause` (≤ 500, optional), `staff_id` (whose
+  mistake, optional), `entered_by` (forced to the caller), created/updated.
+  Trigger `job_mistakes_guard` refuses a cost centre from another job's PO
+  (23514). **RLS: one FOR ALL policy, `is_office_or_admin()`** in USING and
+  WITH CHECK — a technician reads and writes nothing, even on their own job.
+  Granted to authenticated + service_role, revoked from anon; asserted at the
+  end of the migration (exact policy set, grants, trigger, money-named
+  amount, NOT in the `powersync` publication). In no sync stream —
+  `sync-streams.yaml` untouched. CI's `seed-roles.sql` seeds one row so the
+  money sweep checks `amount_ex_gst` with real data.
+- **Ledger** (`lib/job-ledger.ts`): `mistakes` input; each row gets a
+  `mistakes` figure that is part of `cost`, so per-cost-centre and job
+  margins drop by it; untagged → "Not tagged". `costCentreTotals` carries it.
+  Costing tab's Job Ledger (admin) shows a **Mistakes** column when any exist
+  (it reads them itself); Reports → Job margins (admin) adds "Of which
+  mistakes" to the by-cost-centre and per-job tables.
+- **Entry** (`components/job/job-mistakes.tsx`): a **Mistakes** card under the
+  job's **Purchase Orders** tab — that tab is office AND admin (Costing is
+  admin only), never technicians. List (date, cost centre, what went wrong,
+  cause, whose, cost), Log / edit / delete, browser writes as the caller like
+  the rest of the PO tab. Rules `lib/job-mistakes.ts` (`buildMistakeRow`).
+- **Report:** Reports → **Mistakes** (`app/dashboard/reports/mistakes`,
+  office/admin, linked from the Reports header): last 12 months × company
+  cost centre (the line's `cost_centre_id`, else "Not tagged"); click a month
+  or a cell for the list with job links. Sums `lib/mistakes-report.ts`
+  (tested in `tests/unit/mistakes-report.test.ts`).
+- **No phone changes** — the office uses the website.
+- **Before 0115 is applied nothing breaks:** readers treat
+  42P01/PGRST205/42703/PGRST204 as "no mistakes"; the card and the report
+  say mistake costs aren't switched on yet; the ledger has no Mistakes column.
+- **Checked** on a scratch Postgres 16 (minimal shim: roles, `auth.uid()`
+  from `request.jwt.claims`, profiles, `is_office_or_admin`, jobs/POs/lines):
+  0115 applies twice cleanly; the gate test passes (17 scenarios) and fails,
+  naming scenarios, with an extra permissive SELECT policy, with a loose
+  FOR ALL policy in place of the office one, or with the guard trigger and
+  amount check dropped.
+- **Apply order:** paste `supabase/migrations/0115_job_mistakes.sql` → paste
+  `supabase/tests/0115_job_mistakes_test.sql` (needs an active technician and
+  an active office/admin), trust only `0115 PASSED` → change 0115's STATUS
+  line to applied, add the ledger row, regenerate types
+  (`lib/database.types.ts` has the table by hand). No PowerSync redeploy.
+  The web may merge before or after.
+
 **Load page data on the server, not in the browser.** A browser→Supabase
 query from Australia costs ~100 ms+; a server query in `sin1` costs ~2 ms. So
 My Jobs, Approvals, Staff, Fleet and Customers are server pages that pass
@@ -643,6 +693,8 @@ i.e. already under the minimum even if nothing more is spent.
   margin first. "Open" = not cancelled and not completed-and-approved.
 - Known overlap until Stage 4: one supplier invoice entered both as an expense
   and as a PO's amount counts twice.
+- Mistake costs (`job_mistakes`, 0115 draft, 23 Nov 2026) are a fifth cost
+  kind, shown as their own column — see "Mistake costs per cost centre".
 
 **Supplier invoices against POs, deliveries (Stage 4; migration `0089` applied 2026-10-31).**
 Justin: supplier bills are typed into Xero by hand. Now the office types each
@@ -2607,6 +2659,7 @@ a shippable release.
 | **Leave on the schedule: record 0112** | Justin | `0112` applied 2026-11-19 (gate test passed). Ledger row: `insert into supabase_migrations.schema_migrations (version,name) values ('0112','schedule_leave') on conflict do nothing;` No PowerSync redeploy. Who sees the leave type defaults to office + admin; change it in Settings → Leave on the schedule. Part days: add From/To times on the Leave Log entry. |
 | **Komtrax: sync and link machines** | Justin | `0113` applied 2026-11-20 (gate test passed). Ledger row: `insert into supabase_migrations.schema_migrations (version,name) values ('0113','komtrax') on conflict do nothing;` Admin → Fleet → Komtrax machines → **Sync Komtrax**, then link any Komatsu machine not linked by serial (or put its serial in the fleet item's notes). `KOMTRAX_USERNAME` / `KOMTRAX_PASSWORD` are in Vercel Production. |
 | **Customer billing addresses (0114 applied)** | Justin | `0114` applied 2026-11-21 (gate test passed). Ledger row: `insert into supabase_migrations.schema_migrations (version,name) values ('0114','customer_address_doc_folders') on conflict do nothing;` Add billing addresses to customers — they print on invoices and quotes. |
+| **Apply 0115 (mistake costs)** | Justin | `0115` is a DRAFT. Paste `supabase/migrations/0115_job_mistakes.sql`, then `supabase/tests/0115_job_mistakes_test.sql`; trust only `0115 PASSED`. Then mark its STATUS line applied and record it: `insert into supabase_migrations.schema_migrations (version,name) values ('0115','job_mistakes') on conflict do nothing;` No PowerSync redeploy. The office then logs mistakes on each job's Purchase Orders tab. |
 | **Maestro flow 02** | Avi | Needs `ADMIN_EMAIL` / `ADMIN_PASSWORD` in the environment. The login subflow deliberately skips when a session already exists, so a password never passes through a script — which is why flows 01/03/04 could be run and 02 could not. |
 
 ### QA fixture — do not delete

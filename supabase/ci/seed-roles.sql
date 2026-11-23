@@ -313,6 +313,21 @@ begin
 end;
 $$;
 
+-- Mistake costs (0115, drafted — guarded so the seed still runs before it is
+-- applied): office/admin only, one row so the sweep checks real money in
+-- job_mistakes.amount_ex_gst.
+do $$
+begin
+  if to_regclass('public.job_mistakes') is not null then
+    insert into job_mistakes (id, job_id, cost_center_id, occurred_on, amount_ex_gst, description, cause)
+    values ('a4a4a4a4-0000-0000-0000-000000000001', 'cccccccc-0000-0000-0000-000000000001',
+            '88888888-0000-0000-0000-000000000001', date '2026-11-20', 430.00,
+            'CI mistake: pit set at the wrong level', 'CI cause')
+    on conflict (id) do nothing;
+  end if;
+end;
+$$;
+
 -- category is omitted so its default ('materials') applies, for the same reason
 -- jobs.status is above: the CHECK constraint is not what this fixture tests.
 insert into job_expenses (id, job_id, supplier_name, amount, gst_amount)

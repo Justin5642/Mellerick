@@ -6,6 +6,7 @@ import { createClient } from "@/lib/supabase/server";
 import { fetchAllRows } from "@/lib/fetch-all-rows";
 import { belowMinimumMargin, computeJobLedger, costCentreTotals, loadedRatesByStaff, plantCosts, rowBelowMinimum, rowMarginPct, type JobLedger } from "@/lib/job-ledger";
 import { attachEffectiveRates } from "@/lib/fleet-rates";
+import { isMissingMistakesTable } from "@/lib/job-mistakes";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { ArrowLeft, AlertTriangle } from "lucide-react";
@@ -18,6 +19,10 @@ import { ArrowLeft, AlertTriangle } from "lucide-react";
 //
 // "In play" = not cancelled, and not completed-and-approved (those are done
 // and billed).
+//
+// Mistake costs (job_mistakes — migration 0115, a draft, not applied when
+// this was written) are part of each job's cost and shown as their own
+// column; before the table exists there are none.
 
 const EQUIPMENT_COST_COLUMNS =
   "id, assigned_to, purchase_date, created_at, purchase_cost, estimated_life_years, insurance_annual, maintenance_annual, " +
@@ -110,7 +115,18 @@ export default async function JobMarginsPage() {
       for (const x of list) (m.get(x.job_id) ?? m.set(x.job_id, []).get(x.job_id)!).push(x);
       return m;
     };
-    const [posBy, timeBy, expBy, ordBy, useBy] = [byJob(pos), byJob(time), byJob(expenses), byJob(orders), byJob(usage)];
+    // Mistakes: a missing table (before 0115 is applied) is "none".
+    type MistakeRow = { job_id: string; amount_ex_gst: number | null; cost_center_id: string | null };
+    let mistakes: MistakeRow[] = [];
+    try {
+      mistakes = await forJobs<MistakeRow>(ids, (chunk) =>
+        fetchAllRows<MistakeRow>((count) => supabase.from("job_mistakes").select("id, job_id, amount_ex_gst, cost_center_id", count).in("job_id", chunk).order("id") as never)
+      );
+    } catch (err) {
+      const probe = await supabase.from("job_mistakes").select("id").limit(1);
+      if (!isMissingMistakesTable(probe.error)) throw err;
+    }
+    const [posBy, timeBy, expBy, ordBy, useBy, misBy] = [byJob(pos), byJob(time), byJob(expenses), byJob(orders), byJob(usage), byJob(mistakes)];
 
     rows = open
       .filter((j) => priced.has(j.id))
@@ -127,6 +143,7 @@ export default async function JobMarginsPage() {
             expenses: expBy.get(job.id) ?? [],
             supplierOrders: ordBy.get(job.id) ?? [],
             plant: plantCosts(useBy.get(job.id) ?? [], equipment),
+            mistakes: misBy.get(job.id) ?? [],
           }),
         };
       })
@@ -139,7 +156,8 @@ export default async function JobMarginsPage() {
   const flaggedCount = rows.filter((r) => belowMinimumMargin(r.ledger, minMarginPct)).length;
   // Below ground, above ground, transport… each with its own margin across
   // these jobs. Travel and untagged cost have no budget of their own.
-  const byCentre = costCentreTotals(rows.map((r) => r.ledger)).filter((c) => c.budget > 0);
+  const byCentre = costCentreTotals(rows.map((r) => r.ledger)).filter((c) => c.budget > 0 || c.mistakes > 0);
+  const showMistakes = rows.some((r) => r.ledger.mistakes > 0);
 
   return (
     <div className="p-6 space-y-6 max-w-6xl">
@@ -177,6 +195,7 @@ export default async function JobMarginsPage() {
                   <th className="text-left font-medium px-4 py-2">By cost centre (these jobs)</th>
                   <th className="font-medium px-4 py-2">Budget</th>
                   <th className="font-medium px-4 py-2">Cost so far</th>
+                  {showMistakes && <th className="font-medium px-4 py-2">Of which mistakes</th>}
                   <th className="font-medium px-4 py-2">Margin left</th>
                 </tr>
               </thead>
@@ -188,8 +207,9 @@ export default async function JobMarginsPage() {
                       <td className="text-left px-4 py-2 font-medium text-slate-800">{c.name}</td>
                       <td className="px-4 py-2 text-slate-700">{money(c.budget)}</td>
                       <td className="px-4 py-2 text-slate-700">{money(c.cost)}</td>
+                      {showMistakes && <td className="px-4 py-2 text-red-600">{c.mistakes ? money(c.mistakes) : "—"}</td>}
                       <td className={`px-4 py-2 font-semibold ${low ? "text-red-600" : "text-green-700"}`}>
-                        {money(c.margin)}{c.marginPct !== null ? ` (${c.marginPct.toFixed(0)}%)` : ""}
+                        {c.budget > 0 ? <>{money(c.margin)}{c.marginPct !== null ? ` (${c.marginPct.toFixed(0)}%)` : ""}</> : "—"}
                       </td>
                     </tr>
                   );
@@ -214,6 +234,7 @@ export default async function JobMarginsPage() {
                   <th className="text-left font-medium px-4 py-2">Status</th>
                   <th className="font-medium px-4 py-2">Builder&apos;s price</th>
                   <th className="font-medium px-4 py-2">Cost so far</th>
+                  {showMistakes && <th className="font-medium px-4 py-2">Of which mistakes</th>}
                   <th className="font-medium px-4 py-2">Margin left</th>
                   <th className="text-left font-medium px-4 py-2">Needs attention</th>
                 </tr>
@@ -246,6 +267,7 @@ export default async function JobMarginsPage() {
                       <td className="text-left px-4 py-2.5 text-slate-500 capitalize">{job.status.replace("_", " ")}</td>
                       <td className="px-4 py-2.5 text-slate-700">{money(ledger.budget)}</td>
                       <td className="px-4 py-2.5 text-slate-700">{money(ledger.cost)}</td>
+                      {showMistakes && <td className="px-4 py-2.5 text-red-600">{ledger.mistakes ? money(ledger.mistakes) : "—"}</td>}
                       <td className={`px-4 py-2.5 font-semibold ${flagged ? "text-red-600" : "text-green-700"}`}>
                         {flagged && <AlertTriangle className="inline w-3.5 h-3.5 mr-1 -mt-0.5" />}
                         {money(ledger.margin)} ({ledger.marginPct?.toFixed(0)}%)
