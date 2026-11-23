@@ -74,3 +74,80 @@ export async function getOpenWorkEntryOnJob(
     }
   );
 }
+
+/**
+ * Every open work entry of this person's, with its job and whether the job's
+ * site has a map pin — for the clock prompts (lib/dwellPrompt.ts: "left the
+ * site" and "still clocked on"). Money-free: not even hours are selected.
+ */
+export const SQL_MY_OPEN_WORK_ENTRIES = `
+  SELECT te.id, te.job_id, te.clock_in, j.job_number, j.title, s.site_lat, s.site_lng
+  FROM time_entries te
+  LEFT JOIN jobs  j ON j.id = te.job_id
+  LEFT JOIN sites s ON s.id = j.site_id
+  WHERE te.staff_id = ? AND te.entry_type = 'work' AND te.clock_out IS NULL
+  ORDER BY te.clock_in DESC`;
+
+export interface MyOpenWorkEntry {
+  entryId: string;
+  jobId: string;
+  clockInIso: string;
+  jobNumber: number | null;
+  title: string;
+  pinned: boolean;
+}
+
+export interface RawOpenWorkEntryRow {
+  id: string;
+  job_id: string;
+  clock_in: string;
+  job_number: number | string | null;
+  title: string | null;
+  site_lat: number | string | null;
+  site_lng: number | string | null;
+}
+
+/** Shared by both paths. A 0/0 pin is no pin (the geofence's rule). */
+export function mapOpenWorkEntry(r: RawOpenWorkEntryRow): MyOpenWorkEntry {
+  const n = r.job_number == null ? null : Number(r.job_number);
+  return {
+    entryId: r.id,
+    jobId: r.job_id,
+    clockInIso: r.clock_in,
+    jobNumber: n != null && Number.isFinite(n) ? n : null,
+    title: r.title ?? "",
+    pinned: !!Number(r.site_lat) && !!Number(r.site_lng),
+  };
+}
+
+export async function listMyOpenWorkEntries(staffId: string): Promise<MyOpenWorkEntry[]> {
+  return fromLocalOr(
+    async (db) => (await db.getAll<RawOpenWorkEntryRow>(SQL_MY_OPEN_WORK_ENTRIES, [staffId])).map(mapOpenWorkEntry),
+    async () => {
+      const res = await supabase
+        .from("time_entries")
+        .select("id, job_id, clock_in, jobs!time_entries_job_id_fkey(job_number, title, sites(site_lat, site_lng))")
+        .eq("staff_id", staffId)
+        .eq("entry_type", "work")
+        .is("clock_out", null)
+        .order("clock_in", { ascending: false });
+      type Remote = {
+        id: string;
+        job_id: string;
+        clock_in: string;
+        jobs: { job_number: number | null; title: string | null; sites: { site_lat: number | null; site_lng: number | null } | null } | null;
+      };
+      return (unwrapRows(res as never, "listMyOpenWorkEntries") as unknown as Remote[]).map((r) =>
+        mapOpenWorkEntry({
+          id: r.id,
+          job_id: r.job_id,
+          clock_in: r.clock_in,
+          job_number: r.jobs?.job_number ?? null,
+          title: r.jobs?.title ?? null,
+          site_lat: r.jobs?.sites?.site_lat ?? null,
+          site_lng: r.jobs?.sites?.site_lng ?? null,
+        })
+      );
+    }
+  );
+}

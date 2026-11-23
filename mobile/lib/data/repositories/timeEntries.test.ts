@@ -109,6 +109,31 @@ describe("TimeEntriesRepository", () => {
     expect(sides(ops)[0].dependsOn).toBe(w.id);
   });
 
+  // The clock prompts (lib/dwellPrompt.ts) backdate: clock-on to the start of
+  // the stay, clock-off to the first fix away. Never into the future.
+  it("clockIn / clockOut take a backdated time, but never one after now", async () => {
+    const { outbox, ops } = captureOutbox();
+    const repo = new TimeEntriesRepository(outbox, seqIds(), fixedTime("2026-07-21T11:30:00.000Z"));
+    await repo.clockIn({ jobId: "j1", staffId: "s1", atIso: "2026-07-21T07:15:00.000Z" });
+    await repo.clockIn({ jobId: "j1", staffId: "s1", atIso: "2026-07-21T12:00:00.000Z" });
+    await repo.clockOut({ entryId: "te-9", clockInIso: "2026-07-21T07:15:00.000Z", atIso: "2026-07-21T10:15:00.000Z" });
+    const [a, b, c] = writes(ops);
+    expect(a.payload.clock_in).toBe("2026-07-21T07:15:00.000Z");
+    expect(b.payload.clock_in).toBe("2026-07-21T11:30:00.000Z");
+    expect(c.payload).toEqual({ clock_out: "2026-07-21T10:15:00.000Z", hours: 3 });
+  });
+
+  it("clockIn tells listeners where this phone clocked on", async () => {
+    const { onClockedIn } = jest.requireActual("../../clockEvents") as typeof import("../../clockEvents");
+    const seen: unknown[] = [];
+    const off = onClockedIn((e) => seen.push(e));
+    const { outbox } = captureOutbox();
+    const repo = new TimeEntriesRepository(outbox, seqIds(), fixedTime());
+    await repo.clockIn({ jobId: "j1", staffId: "s1", fix: { lat: 1, lng: 2, accuracy: 5 } });
+    off();
+    expect(seen).toEqual([{ entryId: "id-1", jobId: "j1", fix: { lat: 1, lng: 2, accuracy: 5 } }]);
+  });
+
   it("addManual writes every column incl. hours + edited_by/at, and returns the new id", async () => {
     const { outbox, ops } = captureOutbox();
     const repo = new TimeEntriesRepository(outbox, seqIds(), fixedTime("2026-07-21T12:00:00.000Z"));

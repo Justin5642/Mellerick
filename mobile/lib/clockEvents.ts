@@ -30,3 +30,33 @@ export function notifyClockChanged(): void {
     }
   }
 }
+
+// "This device just clocked someone on, here." The clock prompts
+// (lib/clockPrompts.ts) remember where each entry was clocked on, because the
+// technician's sync stream doesn't carry time_entries' clock_in_lat/lng and
+// the "left the site" prompt measures from that spot.
+
+export interface ClockedInEvent {
+  entryId: string;
+  jobId: string;
+  fix: { lat: number; lng: number; accuracy: number | null } | null;
+}
+type ClockedInListener = (e: ClockedInEvent) => void;
+const clockedInListeners = new Set<ClockedInListener>();
+
+export function onClockedIn(cb: ClockedInListener): () => void {
+  clockedInListeners.add(cb);
+  return () => {
+    clockedInListeners.delete(cb);
+  };
+}
+
+export function notifyClockedIn(e: ClockedInEvent): void {
+  for (const cb of clockedInListeners) {
+    try {
+      cb(e);
+    } catch (err) {
+      console.warn("[clockEvents] clocked-in listener failed:", err);
+    }
+  }
+}

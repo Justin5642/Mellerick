@@ -2,6 +2,8 @@ import * as Location from "expo-location";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { planBackgroundClockActions, type ClockAction, type LocationReading, type PendingDeparture } from "./backgroundClockPlan";
 import type { ClockFix } from "./clockFix";
+import { readPromptContext } from "./clockPrompts";
+import { promptSiteCount, todayKey } from "./dwellPrompt";
 import { CLOCK_QUEUE_KEY, parseClockQueue, type ClockQueueStore } from "./backgroundClockQueue";
 import type { TrackedSite } from "./geofenceState";
 import {
@@ -92,11 +94,11 @@ export interface BackgroundClockDeps {
 export async function applyBackgroundBatch(
   batch: LocationReading[],
   deps: BackgroundClockDeps
-): Promise<void> {
+): Promise<ClockAction[]> {
   const staffId = await deps.readStaffId();
   // Signed out. Do nothing at all — writing time entries for a user who is no
   // longer authenticated is worse than missing the readings.
-  if (!staffId) return;
+  if (!staffId) return [];
 
   const [sites, previousInside, previousDeparture] = await Promise.all([
     deps.readSites(),
@@ -131,6 +133,9 @@ export async function applyBackgroundBatch(
   // the reconciliation picks an arbitrary winner. Earlier deliveries' leftovers
   // go first, for the same reason.
   await deps.replayPending();
+  // Returned so the clock prompts (lib/clockPrompts.ts) know which jobs were
+  // just clocked off and don't ask "still clocked on?" about them.
+  return plan.actions;
 }
 
 export const storageDeps = {
@@ -238,6 +243,12 @@ export interface BackgroundGateDeps {
   /** The foreground's verdict while current (parsePublishedVerdict), else null. */
   readOnTheClock(now: Date): Promise<boolean | null>;
   readSiteWakeAt(): Promise<string | null>;
+  /**
+   * How many unpinned jobs / open entries the clock prompts can work for
+   * (lib/dwellPrompt.ts promptSiteCount). Optional: without it only the
+   * pinned sites count, as before.
+   */
+  readPromptSiteCount?(now: Date): Promise<number>;
 }
 
 /**
@@ -255,13 +266,14 @@ export interface BackgroundGateDeps {
  * task, and sign-out clears the staff id this reads.
  */
 export async function backgroundTrackingDecision(deps: BackgroundGateDeps, now: Date): Promise<TrackingDecision> {
-  const [staffId, sites, inside, departure, published, siteWakeAt] = await Promise.all([
+  const [staffId, sites, inside, departure, published, siteWakeAt, promptSites] = await Promise.all([
     deps.readStaffId(),
     deps.readSites(),
     deps.readInside(),
     deps.readPendingDeparture(),
     deps.readOnTheClock(now),
     deps.readSiteWakeAt(),
+    deps.readPromptSiteCount ? deps.readPromptSiteCount(now).catch(() => 0) : Promise.resolve(0),
   ]);
   const onTheClock =
     published === true ||
@@ -276,7 +288,7 @@ export async function backgroundTrackingDecision(deps: BackgroundGateDeps, now: 
   return decideTracking({
     userId: staffId,
     role: staffId ? "technician" : null,
-    siteCount: sites.length,
+    siteCount: sites.length + promptSites,
     onTheClock,
     now,
   });
@@ -289,6 +301,10 @@ export const backgroundGateDeps: BackgroundGateDeps = {
   readPendingDeparture: storageDeps.readPendingDeparture,
   readOnTheClock: async (now) => parsePublishedVerdict(await AsyncStorage.getItem(ON_THE_CLOCK_KEY), now.getTime()),
   readSiteWakeAt: async () => AsyncStorage.getItem(WAKE_AT_KEY),
+  readPromptSiteCount: async (now) => {
+    const [ctx, staffId] = await Promise.all([readPromptContext(), storageDeps.readStaffId()]);
+    return ctx && ctx.staffId === staffId ? promptSiteCount(ctx, todayKey(now.getTime())) : 0;
+  },
 };
 
 /** The background side's persisted state, for the foreground gate's on-the-clock check. */

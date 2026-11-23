@@ -37,11 +37,17 @@ export const expoPushGateway: PushGateway = {
 // Foreground display behaviour. Safe to call at module load; no permissions needed.
 export function configureForegroundNotifications(): void {
   Notifications.setNotificationHandler({
-    handleNotification: async () => ({
-      shouldShowBanner: true,
-      shouldShowList: true,
-      shouldPlaySound: true,
-      shouldSetBadge: false,
-    }),
+    handleNotification: async (notification) => {
+      // A clock prompt (lib/clockPrompts.ts) is asked in the app itself while
+      // it is open (components/ClockPromptSheet.tsx); a banner too would ask twice.
+      const data = notification.request.content.data as { type?: unknown } | null | undefined;
+      const inApp = data?.type === "clock_prompt";
+      return {
+        shouldShowBanner: !inApp,
+        shouldShowList: !inApp,
+        shouldPlaySound: !inApp,
+        shouldSetBadge: false,
+      };
+    },
   });
 }

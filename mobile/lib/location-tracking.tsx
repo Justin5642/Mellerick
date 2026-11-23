@@ -2,11 +2,22 @@ import { createContext, useContext, useEffect, useRef, useState, type ReactNode 
 import { Alert, AppState, Platform } from "react-native";
 import * as Location from "expo-location";
 import { supabase } from "./supabase";
-import { listMyJobSites } from "./data/reads/jobs";
+import { getJob, listMyJobSites } from "./data/reads/jobs";
 import { withMyBookings } from "./data/reads/bookings";
-import { getOpenWorkEntry } from "./data/reads/clock";
-import { onClockChanged } from "./clockEvents";
-import { fixFromCoords } from "./clockFix";
+import { getOpenWorkEntry, getOpenWorkEntryOnJob } from "./data/reads/clock";
+import { onClockChanged, onClockedIn } from "./clockEvents";
+import { currentFix, fixFromCoords } from "./clockFix";
+import { postSiteLocation } from "./siteLocation";
+import { promptSiteCount, todayKey, type ClockPrompt } from "./dwellPrompt";
+import {
+  answerClockPrompt,
+  processClockPrompts,
+  publishPromptContext,
+  rememberClockAnchor,
+} from "./clockPrompts";
+import { buildPromptContext } from "./clockPromptContext";
+import { carryOutAnswer, type ClockPromptAnswerDeps } from "./clockPromptAnswers";
+import { ClockPromptSheet, type ClockPromptAnswer } from "../components/ClockPromptSheet";
 import {
   GATE_RECHECK_MS,
   decideTracking,
@@ -163,6 +174,15 @@ export function LocationTrackingProvider({ children }: { children: ReactNode }) 
   // is mid-shift, only to restart it a moment later — and a stop discards any
   // readings the OS is still holding.
   const sitesLoadedRef = useRef(false);
+  // The clock prompts for unpinned sites (lib/dwellPrompt.ts): how many of
+  // today's jobs and open entries they can work for — counted as "sites" by
+  // the gate, or a day of nothing but unpinned jobs would never track at all.
+  const promptCountRef = useRef(0);
+  const userIdRef = useRef(userId);
+  userIdRef.current = userId;
+  const [clockPrompt, setClockPrompt] = useState<ClockPrompt | null>(null);
+  const [clockPromptBusy, setClockPromptBusy] = useState(false);
+  const clockPromptBusyRef = useRef(false);
 
   // Keep the list of this tech's active job sites fresh.
   useEffect(() => {
@@ -345,7 +365,25 @@ export function LocationTrackingProvider({ children }: { children: ReactNode }) 
       const now = new Date();
       const { onTheClock, onSite } = await readOnTheClock(now);
       if (disposed) return;
-      const decision = decideTracking({ userId: staffId, role, autoClock, siteCount: sitesRef.current.length, onTheClock, now });
+      // The clock prompts' view of the day, for this pass and for the
+      // background task. A failed build keeps the previous one.
+      try {
+        const ctx = await buildPromptContext({ staffId, role, autoClock, pinnedSites: sitesRef.current, nowMs: now.getTime() });
+        if (disposed) return;
+        await publishPromptContext(ctx);
+        promptCountRef.current = promptSiteCount(ctx, todayKey(now.getTime()));
+      } catch (e) {
+        console.warn("[clockPrompts] could not build the day's context; keeping the previous one:", e);
+      }
+      if (disposed) return;
+      const decision = decideTracking({
+        userId: staffId,
+        role,
+        autoClock,
+        siteCount: sitesRef.current.length + promptCountRef.current,
+        onTheClock,
+        now,
+      });
 
       // For the background task's own stop check, which runs headless and
       // cannot see the mirror, the outbox or the foreground cursor.
@@ -495,9 +533,14 @@ export function LocationTrackingProvider({ children }: { children: ReactNode }) 
     stopSiteWake().catch(() => {});
     stopBackgroundSync().catch(() => {});
     publishBackgroundClockContext(null, []).catch(() => {});
+    publishPromptContext(null).catch(() => {});
+    promptCountRef.current = 0;
+    setClockPrompt(null);
   }, [userId]);
 
   async function handlePosition(position: Location.LocationObject, staffId: string) {
+    // The clock prompts see every reading, pinned sites or none.
+    feedClockPrompts([position], staffId);
     // iOS "Approximate Location" gives fixes kilometres wide; say so on screen.
     if (typeof position.coords.accuracy === "number" && position.coords.accuracy > 1000) {
       setStatus((s) => (s.approximate ? s : { ...s, approximate: true }));
@@ -655,6 +698,90 @@ export function LocationTrackingProvider({ children }: { children: ReactNode }) 
   }
 
 
+  // ---------------------------------------------------------------------------
+  // CLOCK PROMPTS for sites with no map pin (lib/dwellPrompt.ts). Only while
+  // the app is on screen — the background task handles a pocketed phone, as
+  // it does for the auto-clock — so the two never write the state at once.
+  // ---------------------------------------------------------------------------
+  function feedClockPrompts(readings: { coords: Location.LocationObjectCoords; timestamp: number }[], staffId: string) {
+    if (AppState.currentState !== "active") return;
+    processClockPrompts(readings, { staffId })
+      .then((p) => {
+        if (userIdRef.current !== staffId || clockPromptBusyRef.current) return;
+        setClockPrompt((current) => (current && p && current.key === p.key ? current : p));
+      })
+      .catch((e) => console.warn("[clockPrompts] could not process readings:", e));
+  }
+
+  useEffect(() => {
+    if (!userId) return;
+    const staffId = userId;
+    const tick = () => feedClockPrompts([], staffId);
+    tick();
+    const interval = setInterval(tick, 60_000);
+    const appState = AppState.addEventListener("change", (state) => {
+      if (state === "active") tick();
+    });
+    // Where this phone clocked each entry on — the "left the site" prompt measures from it.
+    const unsubscribe = onClockedIn((e) => {
+      rememberClockAnchor(e.entryId, e.fix).catch(() => undefined);
+    });
+    return () => {
+      clearInterval(interval);
+      appState.remove();
+      unsubscribe();
+    };
+  }, [userId]);
+
+  function clockPromptDeps(layer: DataLayer, staffId: string): ClockPromptAnswerDeps {
+    return {
+      staffId,
+      getOpenWorkEntry: async () => {
+        // An offline clock-on still in the outbox counts — the mirror lags it.
+        const ops = await layer.outbox.snapshot().catch(() => []);
+        if (hasOpenWorkInOutbox(ops, staffId)) return { clockInIso: new Date().toISOString() };
+        return getOpenWorkEntry(staffId);
+      },
+      getOpenWorkEntryOnJob: (jobId) => getOpenWorkEntryOnJob(staffId, jobId),
+      getJobCostCentre: async (jobId) => (await getJob(jobId))?.scheduled_cost_center_id ?? null,
+      clockIn: (input) => layer.timeEntries.clockIn({ ...input, autoClocked: false }),
+      clockOut: (input) => layer.timeEntries.clockOut(input),
+      readSitePin: async (jobId) => {
+        if (!(await netInfoConnectivity.isOnline())) return "unknown";
+        const { data, error } = await supabase.from("jobs").select("site_id, sites(site_lat, site_lng)").eq("id", jobId).maybeSingle();
+        if (error || !data) return "unknown";
+        const row = data as unknown as { site_id: string | null; sites: { site_lat: number | null; site_lng: number | null } | null };
+        if (!row.site_id || !row.sites) return "no-site";
+        return row.sites.site_lat && row.sites.site_lng ? "pinned" : "unpinned";
+      },
+      postSiteLocation,
+      currentFix: () => currentFix(),
+    };
+  }
+
+  async function answerPrompt(answer: ClockPromptAnswer) {
+    const prompt = clockPrompt;
+    const staffId = userIdRef.current;
+    const layer = layerRef.current;
+    if (!prompt || !staffId || !layer || clockPromptBusyRef.current) return;
+    clockPromptBusyRef.current = true;
+    setClockPromptBusy(true);
+    try {
+      const outcome = await carryOutAnswer(prompt, answer, clockPromptDeps(layer, staffId));
+      // Signed out meanwhile: nothing more to record for this user.
+      if (userIdRef.current !== staffId) return;
+      await answerClockPrompt(prompt, outcome.change, { staffId });
+      if (outcome.message) Alert.alert(outcome.message.title, outcome.message.body);
+    } catch (e) {
+      console.warn("[clockPrompts] answer failed:", e);
+    } finally {
+      clockPromptBusyRef.current = false;
+      setClockPromptBusy(false);
+      setClockPrompt(null);
+      evaluateRef.current();
+    }
+  }
+
   // Tell the office whether auto clock can work on this phone (0102). On every change, and every few hours otherwise; best-effort,
   // never in the way of clocking — see lib/autoClockStatusReport.ts.
   const lastReportRef = useRef<{ report: AutoClockReport; atMs: number } | null>(null);
@@ -693,6 +820,7 @@ export function LocationTrackingProvider({ children }: { children: ReactNode }) 
         onAccept={() => answerDisclosure("accepted")}
         onDecline={() => answerDisclosure("declined")}
       />
+      <ClockPromptSheet key={clockPrompt?.key ?? "none"} prompt={clockPrompt} busy={clockPromptBusy} onAnswer={(a) => void answerPrompt(a)} />
     </LocationTrackingContext.Provider>
   );
 }

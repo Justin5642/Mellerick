@@ -22,6 +22,7 @@ import { isTransientFailure, syncError } from "./data/outbox/errors";
 import { cryptoIdGen } from "./data/ids";
 import { fixColumns, type ClockFix } from "./clockFix";
 import { reportSyncError } from "./monitoring";
+import { processClockPrompts } from "./clockPrompts";
 
 // Registration of the background location task.
 //
@@ -245,8 +246,10 @@ async function handleDelivery({ data, error }: LocationTaskBody): Promise<void> 
   // legs). It steps aside until the app is backgrounded.
   if (AppState.currentState === "active") return;
 
+  let closedJobIds: string[] = [];
   try {
-    await applyBackgroundBatch(locations, supabaseClockDeps);
+    const actions = await applyBackgroundBatch(locations, supabaseClockDeps);
+    closedJobIds = actions.filter((a) => a.type === "depart").map((a) => a.jobId);
   } catch (e) {
     // Swallowing here is deliberate and is NOT the swallowed-error bug fixed
     // elsewhere: an exception escaping a TaskManager task can make the OS stop
@@ -258,6 +261,16 @@ async function handleDelivery({ data, error }: LocationTaskBody): Promise<void> 
     // Not followed by the stop check below: the re-derivation this comment
     // promises needs a next delivery, and a stopped task gets none.
     return;
+  }
+
+  // The clock prompts for unpinned sites (lib/clockPrompts.ts): the same
+  // readings, then a notification if one is due. They never clock anyone on
+  // or off — the answer is given in the app. Swallowed for the same reason
+  // as the batch: nothing may escape a TaskManager task.
+  try {
+    await processClockPrompts(locations, { staffId: await storageDeps.readStaffId(), closedJobIds });
+  } catch (e) {
+    console.warn("[backgroundClock] clock prompts failed:", e);
   }
 
   // Headless, nothing else would ever switch tracking off (see
