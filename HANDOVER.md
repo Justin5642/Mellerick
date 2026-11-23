@@ -2787,6 +2787,92 @@ Justin chose to keep automatic clocking and fix it. What changed:
     fix within ±50 m, asks before moving an existing pin, records
     `sites.location_set_by/_at`.
 
+**Clock prompts for sites with no map pin (23 Nov 2026; no migration, no stream change).**
+Justin: many sites have no pin, so auto clock-on never fires there. He
+approved PROMPTS — the phone asks, never clocks on or off by itself. Phone
+only; reaches phones with the next build (expo-notifications is already in
+the binary for push — no new native module). Rules, all pure and tested, in
+`mobile/lib/dwellPrompt.ts` (`dwellPrompt.test.ts`); storage + notifications
+`mobile/lib/clockPrompts.ts`; what each answer does
+`mobile/lib/clockPromptAnswers.ts`; the day's context
+`mobile/lib/clockPromptContext.ts`; the in-app sheet
+`mobile/components/ClockPromptSheet.tsx`.
+- **"Stopped here" (clock on).** A technician (the gate's own role /
+  `auto_clock` rule) with one of their OWN jobs booked TODAY (Melbourne day,
+  their bookings by the 0071/0079 day rules, else the job's window — never
+  `scheduled_start` alone) whose site has no `site_lat/site_lng`, not clocked
+  into any work entry, stays within 100 m (+ up to 50 m of the fix's own
+  accuracy; fixes worse than ±75 m ignored, as `nextGeofenceState`) for
+  **15 min** → a notification and, with the app open, a sheet: "Stopped here
+  for 15 min — are you at #123 12 Smith St? Tap to clock on." Several such
+  jobs → pick one. Not asked inside a pinned site's exit fence (the
+  auto-clock's job), within **300 m of the depot (21 Quinlan Rd, Epping)**, or
+  within 200 m of a spot answered "No" today. A Yes ends prompts for that job
+  for the day; a job declined at 2 spots isn't offered again that day (a "No"
+  at a servo doesn't stop the real site asking).
+- **Yes** = a manual-style clock-on (`auto_clocked` false) through the outbox
+  (works offline), **backdated to the stay's first fix**, with that fix as the
+  0092 clock-in fix and the cost centre from `clockInCostCentre` at that time
+  (bookings, else the job's). Then — online only — the site is pinned through
+  `/api/jobs/[id]/site-location` (`postSiteLocation`) from the stay's MOST
+  accurate fix, only if ±50 m or better and only if the site still has no pin
+  (never moves one). No signal or a poor fix → clocked on, not pinned, and it
+  says so. `TimeEntriesRepository.clockIn/clockOut` take an optional `atIso`
+  (never after now).
+- **"Left the site" (clock off).** An open work entry on a job whose site has
+  no pin (or the pin save failed), and the phone definitely more than 250 m
+  (after subtracting the fix's accuracy) from where it clocked on for
+  **10 min** → "Left #123 at 3:42 pm — clock off at 3:42?" Yes = clock off
+  backdated to the first fix outside, with that fix (the existing `clockOut`,
+  hours computed; a refused close — over 24 h — says why). "Still working" =
+  not asked about that entry for 60 min, and the absence is timed afresh.
+  Pinned sites are skipped (the geofence clocks them off). Where it clocked on
+  is this phone's own record (`rememberClockAnchor`, fed by the new
+  `onClockedIn` event from `TimeEntriesRepository.clockIn`), because the
+  technician stream doesn't carry `clock_in_lat/lng`; an entry clocked on
+  elsewhere (web, another phone) has no spot and gets only the late prompt.
+- **"Still clocked on" (late).** Any work entry open at **17:00 Melbourne**
+  (`LATE_PROMPT_HOURS`) → "Still clocked on to #123 — clock off now?" with
+  Clock off now / Still working; asked once more at 19:00. Clock off = now,
+  with a current fix; never backdated, never automatic. Both hours are
+  scheduled as notifications ahead, so a parked phone still gets them.
+- **Device clock (§3).** Stays and absences are timed from the fixes' own
+  timestamps; "now" only extends one past its last fix when it is later and
+  within 4 h. A fix stamped over a minute before the previous one, or a stay
+  over 12 h, restarts it. Late prompts need the clock past the hour AND past
+  the clock-on.
+- **Background.** State (stay, absences, answers, what is scheduled) and the
+  day's context live in AsyncStorage; the foreground builds the context on
+  every gate pass (`buildPromptContext`, local-first reads incl. the new
+  `listMyOpenWorkEntries` in `reads/clock.ts`) and the background task feeds
+  each delivery to `processClockPrompts` after the auto-clock batch (jobs the
+  batch just clocked off are dropped). Foreground handles fixes only while
+  the app is active, the background only while it isn't (as the auto-clock),
+  and calls are serialised. Because a parked phone sends no fixes, the
+  notification is scheduled AHEAD at the due time (stay start + 15 min, first
+  fix outside + 10 min, 17:00/19:00) and cancelled if a later fix breaks the
+  stay or the entry closes; one identifier per question, never re-scheduled
+  for the same stay. While the app is open the notification is hidden
+  (`configureForegroundNotifications` checks `data.type === "clock_prompt"`)
+  and the sheet asks instead; tapping a notification opens the app, which
+  shows the sheet. No notification permission → no notification, the sheet
+  still asks when the app is opened.
+- **Tracking gate.** Today's unpinned jobs and open unpinned entries now count
+  as "sites" (`promptSiteCount`, foreground and the background stop check),
+  so a day of only unpinned jobs tracks in work hours instead of stopping
+  with "no sites". Off-hours wake regions are still for pinned sites only.
+- **Depot coordinates are NOT in source** — they couldn't be looked up where
+  this was written (no network). The phone looks `DEPOT_ADDRESS` up through
+  `/api/geocode` (house/building matches only) the first time it can, caches
+  it in AsyncStorage, retries a failed lookup daily and a "not found" weekly;
+  until then there is no depot exclusion.
+- **No money anywhere:** job numbers, titles, addresses and times only.
+- **Not verified on a device.** Check: a notification arrives with the phone
+  locked after 15 min parked at an unpinned site (iOS delivers the scheduled
+  one even with no fixes); driving through doesn't leave a stray one (a stay
+  restarts on every moving fix, cancelling and re-scheduling); Yes offline
+  clocks on and syncs later.
+
 **The store-review risk is real and has not gone away.** Apple and Google both
 scrutinise "Always" location. The submission needs a clear justification string
 (written, in `app.json`) and screenshots showing the Android foreground-service

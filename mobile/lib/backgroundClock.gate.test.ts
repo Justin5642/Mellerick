@@ -156,6 +156,16 @@ describe("backgroundTrackingDecision (headless stop check)", () => {
     expect((await backgroundTrackingDecision(gateDeps(), NIGHT)).track).toBe(false);
   });
 
+  it("counts the clock prompts' unpinned jobs as sites — a day of only unpinned jobs still tracks", async () => {
+    const noPins = { readSites: jest.fn().mockResolvedValue([]) };
+    expect(await backgroundTrackingDecision(gateDeps(noPins), DAY)).toEqual({ track: false, reason: "no-sites" });
+    expect((await backgroundTrackingDecision(gateDeps({ ...noPins, readPromptSiteCount: jest.fn().mockResolvedValue(2) }), DAY)).track).toBe(true);
+    // A failed read counts as none, never as a failed decision.
+    expect(
+      await backgroundTrackingDecision(gateDeps({ ...noPins, readPromptSiteCount: jest.fn().mockRejectedValue(new Error("x")) }), DAY)
+    ).toEqual({ track: false, reason: "no-sites" });
+  });
+
   it("continues off hours while the foreground said on the clock", async () => {
     expect((await backgroundTrackingDecision(gateDeps({ readOnTheClock: jest.fn().mockResolvedValue(true) }), NIGHT)).track).toBe(true);
   });

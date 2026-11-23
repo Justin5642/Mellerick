@@ -17,7 +17,7 @@ jest.mock("../../supabase", () => {
 });
 
 import { resetSourceForTests, setLocalReads, type LocalReads } from "./source";
-import { getOpenWorkEntry, SQL_LATEST_OPEN_WORK_ENTRY } from "./clock";
+import { getOpenWorkEntry, listMyOpenWorkEntries, SQL_LATEST_OPEN_WORK_ENTRY, SQL_MY_OPEN_WORK_ENTRIES } from "./clock";
 
 const norm = (s: string) => s.replace(/\s+/g, " ").trim();
 
@@ -76,5 +76,41 @@ describe("getOpenWorkEntry", () => {
     await expect(getOpenWorkEntry("tech-1")).resolves.toBeNull();
     mockAnswer = { data: null, error: { message: "offline", code: "0" } };
     await expect(getOpenWorkEntry("tech-1")).rejects.toThrow();
+  });
+});
+
+describe("listMyOpenWorkEntries (the clock prompts)", () => {
+  const expected = [
+    { entryId: "e1", jobId: "j1", clockInIso: "2026-11-23T07:00:00Z", jobNumber: 123, title: "Sewer", pinned: false },
+    { entryId: "e2", jobId: "j2", clockInIso: "2026-11-23T06:00:00Z", jobNumber: 124, title: "Storm", pinned: true },
+  ];
+
+  it("local and remote return the same shape; a 0/0 or missing pin is no pin", async () => {
+    const getAll = jest.fn();
+    const db = { ...fakeReads(null), getAll } as unknown as LocalReads;
+    getAll.mockResolvedValue([
+      { id: "e1", job_id: "j1", clock_in: "2026-11-23T07:00:00Z", job_number: 123, title: "Sewer", site_lat: 0, site_lng: 0 },
+      { id: "e2", job_id: "j2", clock_in: "2026-11-23T06:00:00Z", job_number: "124", title: "Storm", site_lat: -37.6, site_lng: 145 },
+    ]);
+    setLocalReads(db);
+    await expect(listMyOpenWorkEntries("tech-1")).resolves.toEqual(expected);
+    expect(getAll.mock.calls[0]).toEqual([SQL_MY_OPEN_WORK_ENTRIES, ["tech-1"]]);
+
+    resetSourceForTests();
+    mockAnswer = {
+      data: [
+        { id: "e1", job_id: "j1", clock_in: "2026-11-23T07:00:00Z", jobs: { job_number: 123, title: "Sewer", sites: null } },
+        { id: "e2", job_id: "j2", clock_in: "2026-11-23T06:00:00Z", jobs: { job_number: 124, title: "Storm", sites: { site_lat: -37.6, site_lng: 145 } } },
+      ],
+      error: null,
+    };
+    await expect(listMyOpenWorkEntries("tech-1")).resolves.toEqual(expected);
+    expect(mockCalls.filter((c) => c.method !== "select")).toEqual([
+      { method: "from", args: ["time_entries"] },
+      { method: "eq", args: ["staff_id", "tech-1"] },
+      { method: "eq", args: ["entry_type", "work"] },
+      { method: "is", args: ["clock_out", null] },
+      { method: "order", args: ["clock_in", { ascending: false }] },
+    ]);
   });
 });

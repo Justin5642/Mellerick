@@ -2,7 +2,7 @@ import type { Outbox } from "../outbox/outbox";
 import type { IdGen } from "../ids";
 import type { WriteOp, WriteOperation, SideEffectOperation } from "../outbox/types";
 import { systemTime, type TimeSource } from "../time";
-import { notifyClockChanged } from "../../clockEvents";
+import { notifyClockChanged, notifyClockedIn } from "../../clockEvents";
 import { fixColumns, type ClockFix } from "../../clockFix";
 
 // Re-exported for back-compat with existing importers of these from here.
@@ -49,6 +49,14 @@ export class TimeEntryRefused extends Error {
     );
     this.name = "TimeEntryRefused";
   }
+}
+
+/** `atIso` when given, valid and not after now; otherwise now. */
+function notAfterNow(atIso: string | undefined, nowIso: string): string {
+  if (!atIso) return nowIso;
+  const at = Date.parse(atIso);
+  if (!Number.isFinite(at) || at > Date.parse(nowIso)) return nowIso;
+  return new Date(at).toISOString();
 }
 
 function assertClosable(clockInIso: string, clockOutIso: string | null | undefined): void {
@@ -119,24 +127,39 @@ export class TimeEntriesRepository {
    * backgroundClockTask.ts:18-22 warns "would show up only as a disputed
    * payslip".
    */
-  async clockIn(input: { jobId: string; staffId: string; autoClocked?: boolean; costCenterId?: string | null; fix?: ClockFix | null }): Promise<string> {
+  async clockIn(input: {
+    jobId: string;
+    staffId: string;
+    autoClocked?: boolean;
+    costCenterId?: string | null;
+    fix?: ClockFix | null;
+    /** Backdate the clock-on (the "stopped here" prompt: the stay's first fix). Never in the future. */
+    atIso?: string;
+  }): Promise<string> {
     const rowId = this.ids.newId();
     const opId = await this.enqueueWrite(rowId, "insert", {
       job_id: input.jobId,
       staff_id: input.staffId,
-      clock_in: this.time.nowIso(),
+      clock_in: notAfterNow(input.atIso, this.time.nowIso()),
       auto_clocked: input.autoClocked ?? false,
       cost_center_id: input.costCenterId ?? null,
       // Where the phone was (0092) — only when known.
       ...fixColumns("clock_in", input.fix),
     });
     await this.enqueueBillingSync(rowId, opId);
+    notifyClockedIn({ entryId: rowId, jobId: input.jobId, fix: input.fix ?? null });
     return rowId;
   }
 
   /** Clock out an open entry now, computing hours from its clock-in. */
-  async clockOut(input: { entryId: string; clockInIso: string; fix?: ClockFix | null }): Promise<void> {
-    const clockOutIso = this.time.nowIso();
+  async clockOut(input: {
+    entryId: string;
+    clockInIso: string;
+    fix?: ClockFix | null;
+    /** Backdate the clock-off (the "left the site" prompt: the first fix outside). Never in the future. */
+    atIso?: string;
+  }): Promise<void> {
+    const clockOutIso = notAfterNow(input.atIso, this.time.nowIso());
     assertClosable(input.clockInIso, clockOutIso);
     const opId = await this.enqueueWrite(input.entryId, "update", {
       clock_out: clockOutIso,

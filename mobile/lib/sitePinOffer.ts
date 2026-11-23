@@ -3,6 +3,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { supabase } from "./supabase";
 import { postSiteLocation } from "./siteLocation";
 import type { ClockFix } from "./clockFix";
+import { SITE_PIN_MAX_ACCURACY_M } from "./dwellPrompt";
 
 // "This site has no map location — save where you are now?" (Justin's
 // notebook list, 20 Nov 2026). Auto clock-on needs the site's pin
@@ -17,8 +18,8 @@ import type { ClockFix } from "./clockFix";
 // once asked (Yes or No) on this phone. Online only: the site is read from
 // Supabase and the pin saved through the route; offline it simply doesn't ask.
 
-/** The server's own limit (MAX_PIN_ACCURACY_METRES in the route). */
-export const SITE_PIN_MAX_ACCURACY_M = 50;
+/** The server's own limit (MAX_PIN_ACCURACY_METRES in the route). Defined beside the clock prompts, which pin too. */
+export { SITE_PIN_MAX_ACCURACY_M };
 const ASKED_KEY = "sitePinOffer:asked:";
 
 export interface SitePinOfferInput {
