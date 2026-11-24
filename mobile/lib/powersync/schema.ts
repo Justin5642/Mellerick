@@ -304,6 +304,8 @@ const job_photos = new Table({
   simpro_file_id: column.text,
   sync_office: column.integer,
   vendor_order_id: column.text,
+  // 0116 (draft): the photo's folder. Added by hand (the generator needs a linked CLI).
+  folder: column.text,
 }, {
   indexes: {
     job: ['job_id'],

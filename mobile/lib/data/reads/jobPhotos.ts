@@ -1,6 +1,7 @@
 import { supabase } from "../../supabase";
 import { fromLocalOr } from "./source";
 import { unwrap, unwrapRows } from "./unwrap";
+import { isMissingFolderColumn } from "../../documentFolders";
 
 // Job photo list for the Photos tab. job_photos rides both the technician stream
 // (tech_job_photos — assigned jobs, named columns) and the office stream, so the
@@ -9,7 +10,9 @@ import { unwrap, unwrapRows } from "./unwrap";
 //
 // The column set is exactly what tech_job_photos syncs; caption and
 // simpro_file_id are not in the technician stream, so neither side selects them
-// (the shapes must be identical whichever side answers).
+// (the shapes must be identical whichever side answers). `folder` is 0116's
+// (draft): before it is applied the remote read retries without it and the
+// mirror holds null, so every photo reads as "Other" either way.
 export interface JobPhoto {
   id: string;
   job_id: string;
@@ -17,12 +20,14 @@ export interface JobPhoto {
   photo_type: string;
   uploaded_by: string | null;
   created_at: string;
+  folder: string | null;
 }
 
-const SELECT = "id, job_id, storage_path, photo_type, uploaded_by, created_at";
+const SELECT_BASE = "id, job_id, storage_path, photo_type, uploaded_by, created_at";
+const SELECT = `${SELECT_BASE}, folder`;
 
 export const SQL_LIST_JOB_PHOTOS = `
-  SELECT id, job_id, storage_path, photo_type, uploaded_by, created_at
+  SELECT id, job_id, storage_path, photo_type, uploaded_by, created_at, folder
   FROM job_photos WHERE job_id = ?
   ORDER BY created_at DESC, id DESC`;
 
@@ -34,13 +39,20 @@ export const SQL_LIST_JOB_PHOTOS = `
 export const SQL_JOB_IS_LOCAL = `SELECT id FROM jobs WHERE id = ?`;
 
 export async function listJobPhotos(jobId: string): Promise<JobPhoto[]> {
-  const remote = async (): Promise<JobPhoto[]> => {
-    const res = await supabase
+  const query = (columns: string) =>
+    supabase
       .from("job_photos")
-      .select(SELECT)
+      .select(columns)
       .eq("job_id", jobId)
       .order("created_at", { ascending: false })
       .order("id", { ascending: false });
+  const remote = async (): Promise<JobPhoto[]> => {
+    const res = await query(SELECT);
+    if (isMissingFolderColumn((res as { error?: { code?: string; message?: string } | null }).error)) {
+      // A database without 0116: the same rows, all under "Other".
+      const rows = unwrapRows((await query(SELECT_BASE)) as never, "listJobPhotos") as unknown as Omit<JobPhoto, "folder">[];
+      return rows.map((r) => ({ ...r, folder: null }));
+    }
     return unwrapRows(res as never, "listJobPhotos") as unknown as JobPhoto[];
   };
   return fromLocalOr(async (db) => {

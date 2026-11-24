@@ -60,6 +60,29 @@ describe("JobPhotosRepository", () => {
     expect(writes(ops)[1].payload).not.toHaveProperty("caption");
   });
 
+  it("a filed photo names its folder (0116); one under Other never names the column", async () => {
+    const { outbox, ops } = captureOutbox();
+    const repo = new JobPhotosRepository(outbox, seqIds(), fixedTime());
+    await repo.add({ jobId: "j1", uploadedBy: "u1", photoType: "general", localUri: "file:///a.jpg", folder: "rough_in" });
+    expect(writes(ops)[0].payload).toMatchObject({ folder: "rough_in" });
+    await repo.add({ jobId: "j1", uploadedBy: "u1", photoType: "general", localUri: "file:///b.jpg", folder: null });
+    await repo.add({ jobId: "j1", uploadedBy: "u1", photoType: "general", localUri: "file:///c.jpg" });
+    expect(writes(ops)[1].payload).not.toHaveProperty("folder");
+    expect(writes(ops)[2].payload).not.toHaveProperty("folder");
+  });
+
+  it("setFolder enqueues a one-column update of that row, null for Other", async () => {
+    const { outbox, ops } = captureOutbox();
+    const repo = new JobPhotosRepository(outbox, seqIds(), fixedTime());
+    await repo.setFolder({ id: "photo-7", folder: "camera_inspections" });
+    await repo.setFolder({ id: "photo-7", folder: null });
+    const [a, b] = writes(ops);
+    expect(a).toMatchObject({ op: "update", table: "job_photos", aggregate: "job_photo", rowId: "photo-7", status: "pending" });
+    expect(a.attachmentLocalPath).toBeUndefined();
+    expect(a.payload).toEqual({ folder: "camera_inspections" });
+    expect(b.payload).toEqual({ folder: null });
+  });
+
   it("add honours a non-default extension in the object key", async () => {
     const { outbox, ops } = captureOutbox();
     const repo = new JobPhotosRepository(outbox, seqIds(), fixedTime());

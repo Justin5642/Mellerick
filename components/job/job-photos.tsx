@@ -6,13 +6,23 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
-import { Image as ImageIcon, Upload, Trash2, X, ZoomIn } from "lucide-react";
+import { Image as ImageIcon, Upload, Trash2, X, ZoomIn, ChevronDown, ChevronRight, Folder } from "lucide-react";
 import { formatDate } from "@/lib/date";
 import { photoTagColors } from "@/lib/badge-colors";
 import { resizeImageForUpload } from "@/lib/image-resize";
 import { getCachedSignedUrl, putCachedSignedUrl } from "@/lib/signed-url-cache";
 import { thumbPathFor } from "@/lib/photo-thumbs";
 import { FileDropZone } from "@/components/ui/file-drop-zone";
+import {
+  DEFAULT_FOLDER_GROUP,
+  DOCUMENT_FOLDER_GROUPS,
+  documentFolderGroup,
+  documentFolderLabel,
+  folderValue,
+  groupDocumentsByFolder,
+  isFolderNotSwitchedOn,
+  type DocumentFolderGroup,
+} from "@/lib/document-folders";
 
 const SIGNED_URL_TTL_S = 3600;
 // Uploads run a few at a time rather than strictly one after another.
@@ -35,6 +45,13 @@ export function JobPhotos({ jobId, photos, onUpdate, currentUserId, readOnly = f
   const [uploading, setUploading] = useState(false);
   const [photoType, setPhotoType] = useState<string>("general");
   const [lightbox, setLightbox] = useState<string | null>(null);
+  // Folders (job_photos.folder, 0116, drafted — the same list as Documents,
+  // lib/document-folders.ts). Before 0116 the rows have no folder key: no
+  // move controls, and an upload is saved without one (under Other).
+  const [uploadFolder, setUploadFolder] = useState<DocumentFolderGroup>(DEFAULT_FOLDER_GROUP);
+  const [collapsed, setCollapsed] = useState<Set<DocumentFolderGroup>>(new Set());
+  const [moving, setMoving] = useState<string | null>(null);
+  const foldersReady = photos.length === 0 || photos.some((p) => p && "folder" in p);
   // Signed URLs keyed by storage key — a photo's original path, or its
   // thumbnail's (lib/photo-thumbs.ts). Seeded from the shared cache, so
   // revisiting the tab reuses the same URLs (and the browser's cached images).
@@ -133,12 +150,11 @@ export function JobPhotos({ jobId, photos, onUpdate, currentUserId, readOnly = f
       const { error: uploadError } = await supabase.storage.from("job-photos").upload(path, file);
       if (uploadError) { failed.push(original.name); return; }
 
-      const { error: rowError } = await supabase.from("job_photos").insert({
-        job_id: jobId,
-        uploaded_by: currentUserId,
-        storage_path: path,
-        photo_type: photoType,
-      });
+      const row = { job_id: jobId, uploaded_by: currentUserId, storage_path: path, photo_type: photoType };
+      const folder = folderValue(uploadFolder);
+      const filed: typeof row & { folder?: string } = folder ? { ...row, folder } : row;
+      let { error: rowError } = await supabase.from("job_photos").insert(filed);
+      if (folder && isFolderNotSwitchedOn(rowError)) ({ error: rowError } = await supabase.from("job_photos").insert(row));
       if (rowError) {
         console.error("job-photos: file uploaded but row not recorded", path, rowError);
         failed.push(original.name);
@@ -218,6 +234,36 @@ export function JobPhotos({ jobId, photos, onUpdate, currentUserId, readOnly = f
     onUpdate(photos.filter((p) => p.id !== photo.id));
   }
 
+  // Move a photo to another folder. Who may is job_photos' RLS (0074): the
+  // job's crew and office/admin — the same people who see this tab editable.
+  async function handleMove(photo: { id: string; folder?: string | null }, group: DocumentFolderGroup) {
+    if (documentFolderGroup(photo) === group) return;
+    const folder = folderValue(group);
+    setMoving(photo.id);
+    const { error, count } = await supabase.from("job_photos").update({ folder }, { count: "exact" }).eq("id", photo.id);
+    setMoving(null);
+    if (isFolderNotSwitchedOn(error)) {
+      toast.error("Folders aren't switched on yet.");
+      return;
+    }
+    if (error || count === 0) {
+      if (error) console.error("job-photos: move failed", error);
+      toast.error("Couldn't move the photo");
+      return;
+    }
+    onUpdate(photos.map((p) => (p.id === photo.id ? { ...p, folder } : p)));
+    toast.success(`Moved to ${documentFolderLabel(group)}`);
+  }
+
+  function toggleSection(group: DocumentFolderGroup) {
+    setCollapsed((prev) => {
+      const next = new Set(prev);
+      if (next.has(group)) next.delete(group);
+      else next.add(group);
+      return next;
+    });
+  }
+
   async function openLightbox(path: string) {
     const url = await getUrl(path);
     setLightbox(url);
@@ -241,6 +287,18 @@ export function JobPhotos({ jobId, photos, onUpdate, currentUserId, readOnly = f
         </div>
         {!readOnly && (
         <div className="flex items-center gap-2">
+          {foldersReady && (
+            <select
+              aria-label="Upload to folder"
+              value={uploadFolder}
+              onChange={(e) => setUploadFolder(e.target.value as DocumentFolderGroup)}
+              className="h-9 rounded-md border border-slate-200 bg-white px-2 text-sm text-slate-700"
+            >
+              {DOCUMENT_FOLDER_GROUPS.map((g) => (
+                <option key={g} value={g}>{documentFolderLabel(g)}</option>
+              ))}
+            </select>
+          )}
           <Select value={photoType} onValueChange={(v) => setPhotoType(v ?? "general")}>
             <SelectTrigger className="w-32 h-9 text-sm">
               <SelectValue />
@@ -270,17 +328,41 @@ export function JobPhotos({ jobId, photos, onUpdate, currentUserId, readOnly = f
           {!readOnly && <p className="text-xs mt-1">Click, drag photos here, or paste (Ctrl+V) to upload</p>}
         </div>
       ) : (
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5 gap-3">
-          {photos.map((photo) => (
-            <PhotoCard
-              key={photo.id}
-              photo={photo}
-              onOpen={() => openLightbox(photo.storage_path)}
-              onDelete={readOnly ? undefined : () => handleDelete(photo)}
-              url={signedUrls[thumbPathFor(photo.storage_path)] ?? signedUrls[photo.storage_path] ?? ""}
-              tagColors={photoTagColors}
-            />
-          ))}
+        <div className="space-y-4">
+          {groupDocumentsByFolder(photos).map((section) => {
+            const open = !collapsed.has(section.folder);
+            return (
+              <div key={section.folder} className="space-y-2">
+                <button
+                  type="button"
+                  onClick={() => toggleSection(section.folder)}
+                  className="flex w-full items-center gap-2 rounded-md px-1 py-1 text-left text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                  aria-expanded={open}
+                >
+                  {open ? <ChevronDown className="w-4 h-4 text-slate-400" /> : <ChevronRight className="w-4 h-4 text-slate-400" />}
+                  <Folder className="w-4 h-4 text-slate-400" />
+                  {section.label}
+                  <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-500">{section.documents.length}</span>
+                </button>
+                {open && (
+                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5 gap-3">
+                    {section.documents.map((photo) => (
+                      <PhotoCard
+                        key={photo.id}
+                        photo={photo}
+                        onOpen={() => openLightbox(photo.storage_path)}
+                        onDelete={readOnly ? undefined : () => handleDelete(photo)}
+                        onMove={readOnly || !foldersReady ? undefined : (g: DocumentFolderGroup) => handleMove(photo, g)}
+                        moving={moving === photo.id}
+                        url={signedUrls[thumbPathFor(photo.storage_path)] ?? signedUrls[photo.storage_path] ?? ""}
+                        tagColors={photoTagColors}
+                      />
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })}
         </div>
       )}
 
@@ -294,7 +376,7 @@ export function JobPhotos({ jobId, photos, onUpdate, currentUserId, readOnly = f
   );
 }
 
-function PhotoCard({ photo, onOpen, onDelete, url, tagColors }: any) {
+function PhotoCard({ photo, onOpen, onDelete, onMove, moving, url, tagColors }: any) {
   // The URL is the photo's thumbnail when it has one (else the original),
   // signed in one batch by JobPhotos. Lazy + async decode so a long grid only
   // downloads and decodes what is on screen.
@@ -317,8 +399,23 @@ function PhotoCard({ photo, onOpen, onDelete, url, tagColors }: any) {
           <X className="w-3 h-3" />
         </button>
       )}
-      <div className="absolute bottom-0 left-0 right-0 bg-black/50 text-white text-xs p-1 opacity-0 group-hover:opacity-100 transition-opacity truncate">
-        {formatDate(photo.created_at)}
+      <div className="absolute bottom-0 left-0 right-0 flex items-center gap-1 bg-black/50 text-white text-xs p-1 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
+        <span className="flex-1 truncate">{formatDate(photo.created_at)}</span>
+        {onMove && (
+          <select
+            aria-label="Move photo to folder"
+            title="Move to folder"
+            value={documentFolderGroup(photo)}
+            disabled={moving}
+            onClick={(e) => e.stopPropagation()}
+            onChange={(e) => onMove(e.target.value as DocumentFolderGroup)}
+            className="h-6 max-w-[60%] rounded bg-white/90 px-1 text-[11px] text-slate-700"
+          >
+            {DOCUMENT_FOLDER_GROUPS.map((g) => (
+              <option key={g} value={g}>{documentFolderLabel(g)}</option>
+            ))}
+          </select>
+        )}
       </div>
     </div>
   );

@@ -11,6 +11,7 @@ import {
   Platform,
   Modal,
   ActivityIndicator,
+  ScrollView,
 } from "react-native";
 import * as ImagePicker from "expo-image-picker";
 import { Image } from "expo-image";
@@ -27,12 +28,24 @@ import { reconcileRows } from "../../lib/data/reconcile";
 import { listJobPhotos, signJobPhotoUrls } from "../../lib/data/reads/jobPhotos";
 import { thumbPathFor } from "../../lib/photoThumbs";
 import { prepareImageForUpload } from "../../lib/imageUpload";
+import {
+  DOCUMENT_FOLDER_GROUPS,
+  DEFAULT_FOLDER_GROUP,
+  documentFolderGroup,
+  documentFolderLabel,
+  folderValue,
+  groupDocumentsByFolder,
+  type DocumentFolderGroup,
+} from "../../lib/documentFolders";
+import { lastPhotoFolder, rememberPhotoFolder } from "../../lib/photoFolderMemory";
 
 interface Photo {
   id: string;
   storage_path: string;
   photo_type: string;
   created_at: string;
+  /** job_photos.folder (0116, drafted); null/absent = Other. */
+  folder?: string | null;
 }
 
 interface PendingPhoto {
@@ -88,6 +101,15 @@ export function JobPhotosTab({
   const [viewingPhoto, setViewingPhoto] = useState<Photo | null>(null);
   const [loadError, setLoadError] = useState<unknown>(null);
   const [urlFailed, setUrlFailed] = useState<Record<string, true>>({});
+  // Folders (0116, the Documents tab's list — lib/documentFolders.ts). The
+  // folder new photos go into, remembered per job on this phone; the grid is
+  // grouped by folder; a photo can be moved (outbox update).
+  const [folder, setFolder] = useState<DocumentFolderGroup>(DEFAULT_FOLDER_GROUP);
+  const [collapsed, setCollapsed] = useState<Set<DocumentFolderGroup>>(new Set());
+  const [moveTarget, setMoveTarget] = useState<Photo | null>(null);
+  // Moves still in the outbox: the mirror shows the old folder until the
+  // update syncs, so a reload keeps the moved-to folder on screen meanwhile.
+  const pendingMoves = useRef<Map<string, string | null>>(new Map());
   const shotRef = useRef<ViewShot>(null);
   const photoLibrary = usePhotoLibrary();
   const layer = useDataLayer();
@@ -227,7 +249,12 @@ export function JobPhotosTab({
       return;
     }
     const pendingIds = layer ? await layer.outbox.pendingRowIds() : new Set<string>();
-    setPhotos((prev) => reconcileRows(prev, rows, pendingIds));
+    for (const id of [...pendingMoves.current.keys()]) if (!pendingIds.has(id)) pendingMoves.current.delete(id);
+    setPhotos((prev) =>
+      reconcileRows(prev, rows, pendingIds).map((p) =>
+        pendingMoves.current.has(p.id) ? { ...p, folder: pendingMoves.current.get(p.id) ?? null } : p
+      )
+    );
     setLoadError(null);
     await resolveSources(rows.map((p) => p.storage_path));
   }, [jobId, layer, resolveSources]);
@@ -236,16 +263,21 @@ export function JobPhotosTab({
   // file renders under its Storage key until the real signed URL replaces it on
   // reconcile (same client id => no duplicate).
   const addPhotoFromUri = useCallback(
-    async (uri: string, type: (typeof PHOTO_TYPES)[number]): Promise<void> => {
+    async (uri: string, type: (typeof PHOTO_TYPES)[number], group: DocumentFolderGroup): Promise<void> => {
       // ≤1600px JPEG before it is staged for the outbox (lib/imageUpload.ts).
       const sourceUri = await prepareImageForUpload(uri);
+      const filed = folderValue(group);
       const { id, storagePath, localUri } = await photoLibrary.addPhoto({
         jobId,
         uploadedBy: currentUserId,
         photoType: type,
         sourceUri,
+        folder: filed,
       });
-      setPhotos((prev) => [{ id, storage_path: storagePath, photo_type: type, created_at: new Date().toISOString() }, ...prev]);
+      setPhotos((prev) => [
+        { id, storage_path: storagePath, photo_type: type, created_at: new Date().toISOString(), folder: filed },
+        ...prev,
+      ]);
       setUrls((prev) => ({ ...prev, [storagePath]: localUri }));
     },
     [jobId, currentUserId, photoLibrary]
@@ -254,6 +286,46 @@ export function JobPhotosTab({
   useEffect(() => {
     void loadPhotos();
   }, [loadPhotos]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void lastPhotoFolder(jobId).then((f) => {
+      if (!cancelled) setFolder(f);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [jobId]);
+
+  function chooseFolder(next: DocumentFolderGroup) {
+    setFolder(next);
+    void rememberPhotoFolder(jobId, next);
+  }
+
+  function toggleSection(group: DocumentFolderGroup) {
+    setCollapsed((prev) => {
+      const next = new Set(prev);
+      if (next.has(group)) next.delete(group);
+      else next.add(group);
+      return next;
+    });
+  }
+
+  async function moveTo(photo: Photo, group: DocumentFolderGroup) {
+    setMoveTarget(null);
+    if (documentFolderGroup(photo) === group) return;
+    const next = folderValue(group);
+    pendingMoves.current.set(photo.id, next);
+    setPhotos((prev) => prev.map((p) => (p.id === photo.id ? { ...p, folder: next } : p)));
+    setViewingPhoto((v) => (v?.id === photo.id ? { ...v, folder: next } : v));
+    try {
+      await photoLibrary.movePhoto({ id: photo.id, folder: next });
+    } catch (e) {
+      pendingMoves.current.delete(photo.id);
+      Alert.alert("Couldn't move the photo", e instanceof Error ? e.message : "Please try again.");
+      void loadPhotos();
+    }
+  }
 
   // Reconcile after each sync drain: offline photos get their real signed URL
   // (and the row is confirmed) right when the queued upload lands.
@@ -312,7 +384,7 @@ export function JobPhotosTab({
     setUploading(true);
     try {
       for (const asset of result.assets) {
-        await addPhotoFromUri(asset.uri, type);
+        await addPhotoFromUri(asset.uri, type, folder);
       }
     } catch (e) {
       Alert.alert("Couldn't add photo", e instanceof Error ? e.message : "Please try again.");
@@ -327,7 +399,7 @@ export function JobPhotosTab({
     try {
       const capturedUri = await shotRef.current?.capture?.();
       if (!capturedUri) throw new Error("Could not stamp photo");
-      await addPhotoFromUri(capturedUri, pendingType);
+      await addPhotoFromUri(capturedUri, pendingType, folder);
       setPending(null);
     } catch (e) {
       Alert.alert("Upload failed", e instanceof Error ? e.message : "Please try again.");
@@ -361,6 +433,46 @@ export function JobPhotosTab({
     });
   }
 
+  function renderPhoto(item: Photo) {
+    const tag = photoTagColors[item.photo_type] ?? photoTagColors.general;
+    return (
+      <TouchableOpacity
+        style={styles.photoCell}
+        onPress={() => setViewingPhoto(item)}
+        onLongPress={readOnly ? undefined : () => confirmDelete(item)}
+      >
+        {thumbs[item.storage_path] || urls[item.storage_path] ? (
+          // cacheKey = storage path (the thumbnail's own path for a
+          // thumbnail): the signed URL's token changes on every sign, so
+          // keying on the URL re-downloaded the image on every visit.
+          // expo-image also decodes down to the cell size.
+          <Image
+            source={
+              thumbs[item.storage_path]
+                ? { uri: thumbs[item.storage_path], cacheKey: thumbPathFor(item.storage_path) }
+                : { uri: urls[item.storage_path], cacheKey: item.storage_path }
+            }
+            cachePolicy="memory-disk"
+            recyclingKey={item.storage_path}
+            contentFit="cover"
+            style={styles.photoImage}
+            onError={() => onImageError(item.storage_path)}
+          />
+        ) : urlFailed[item.storage_path] ? (
+          <View style={[styles.photoImage, styles.photoFailed]}>
+            <Ionicons name="cloud-offline-outline" size={16} color={colors.slate400} />
+            <Text style={styles.photoFailedText}>Didn&apos;t load</Text>
+          </View>
+        ) : (
+          <View style={[styles.photoImage, styles.photoLoading]} />
+        )}
+        <View style={[styles.photoTag, { backgroundColor: tag.bg }]}>
+          <Text style={[styles.photoTagText, { color: tag.text }]}>{item.photo_type}</Text>
+        </View>
+      </TouchableOpacity>
+    );
+  }
+
   const jobRefLine = [jobNumber ? `Job #${jobNumber}` : null, siteLabel].filter(Boolean).join(" — ");
   const loadFailure = loadError ? describeReadFailure(loadError) : null;
 
@@ -377,6 +489,13 @@ export function JobPhotosTab({
               <Text style={[styles.typeChipText, photoType === t && styles.typeChipTextActive]}>{t}</Text>
             </TouchableOpacity>
           ))}
+        </View>
+      )}
+
+      {!readOnly && (
+        <View style={styles.folderBlock}>
+          <Text style={styles.folderLabel}>New photos go in</Text>
+          <FolderChips value={folder} onChange={chooseFolder} />
         </View>
       )}
 
@@ -410,56 +529,41 @@ export function JobPhotosTab({
         </View>
       )}
 
-      <FlatList
-        data={photos}
-        keyExtractor={(p) => p.id}
-        numColumns={3}
-        scrollEnabled={false}
-        columnWrapperStyle={{ gap: 8 }}
-        contentContainerStyle={{ gap: 8, marginTop: 12 }}
+      {photos.length === 0 ? (
         // Suppressed while the read is broken: "No photos yet" about a job whose
         // photos simply didn't load is the exact lie the banner exists to stop.
-        ListEmptyComponent={loadFailure ? null : <Text style={styles.emptyText}>No photos yet</Text>}
-        renderItem={({ item }) => {
-          const tag = photoTagColors[item.photo_type] ?? photoTagColors.general;
+        loadFailure ? null : <Text style={styles.emptyText}>No photos yet</Text>
+      ) : (
+        groupDocumentsByFolder(photos).map((section) => {
+          const open = !collapsed.has(section.folder);
           return (
-            <TouchableOpacity
-              style={styles.photoCell}
-              onPress={() => setViewingPhoto(item)}
-              onLongPress={readOnly ? undefined : () => confirmDelete(item)}
-            >
-              {thumbs[item.storage_path] || urls[item.storage_path] ? (
-                // cacheKey = storage path (the thumbnail's own path for a
-                // thumbnail): the signed URL's token changes on every sign, so
-                // keying on the URL re-downloaded the image on every visit.
-                // expo-image also decodes down to the cell size.
-                <Image
-                  source={
-                    thumbs[item.storage_path]
-                      ? { uri: thumbs[item.storage_path], cacheKey: thumbPathFor(item.storage_path) }
-                      : { uri: urls[item.storage_path], cacheKey: item.storage_path }
-                  }
-                  cachePolicy="memory-disk"
-                  recyclingKey={item.storage_path}
-                  contentFit="cover"
-                  style={styles.photoImage}
-                  onError={() => onImageError(item.storage_path)}
+            <View key={section.folder} style={styles.section}>
+              <TouchableOpacity
+                style={styles.sectionHeader}
+                onPress={() => toggleSection(section.folder)}
+                accessibilityRole="button"
+                accessibilityState={{ expanded: open }}
+              >
+                <Ionicons name={open ? "chevron-down" : "chevron-forward"} size={16} color={colors.slate400} />
+                <Ionicons name="folder-outline" size={16} color={colors.slate500} />
+                <Text style={styles.sectionTitle}>{section.label}</Text>
+                <Text style={styles.sectionCount}>{section.documents.length}</Text>
+              </TouchableOpacity>
+              {open && (
+                <FlatList
+                  data={section.documents}
+                  keyExtractor={(p) => p.id}
+                  numColumns={3}
+                  scrollEnabled={false}
+                  columnWrapperStyle={{ gap: 8 }}
+                  contentContainerStyle={{ gap: 8 }}
+                  renderItem={({ item }) => renderPhoto(item)}
                 />
-              ) : urlFailed[item.storage_path] ? (
-                <View style={[styles.photoImage, styles.photoFailed]}>
-                  <Ionicons name="cloud-offline-outline" size={16} color={colors.slate400} />
-                  <Text style={styles.photoFailedText}>Didn&apos;t load</Text>
-                </View>
-              ) : (
-                <View style={[styles.photoImage, styles.photoLoading]} />
               )}
-              <View style={[styles.photoTag, { backgroundColor: tag.bg }]}>
-                <Text style={[styles.photoTagText, { color: tag.text }]}>{item.photo_type}</Text>
-              </View>
-            </TouchableOpacity>
+            </View>
           );
-        }}
-      />
+        })
+      )}
 
       <Modal visible={!!pending} animationType="slide" onRequestClose={() => !saving && setPending(null)}>
         <View style={styles.previewScreen}>
@@ -498,6 +602,7 @@ export function JobPhotosTab({
           )}
 
           <View style={styles.previewControls}>
+            <FolderChips value={folder} onChange={chooseFolder} dark />
             <View style={styles.typeRow}>
               {PHOTO_TYPES.map((t) => (
                 <TouchableOpacity
@@ -578,6 +683,16 @@ export function JobPhotosTab({
               <View style={styles.viewerBottomBar}>
                 <Text style={styles.viewerDate}>{new Date(viewingPhoto.created_at).toLocaleString("en-AU")}</Text>
                 {!readOnly && (
+                  <TouchableOpacity
+                    style={styles.viewerMoveButton}
+                    onPress={() => setMoveTarget(viewingPhoto)}
+                    accessibilityLabel="Move to another folder"
+                  >
+                    <Ionicons name="folder-open-outline" size={18} color="#fff" />
+                    <Text style={styles.viewerDeleteText}>{documentFolderLabel(documentFolderGroup(viewingPhoto))}</Text>
+                  </TouchableOpacity>
+                )}
+                {!readOnly && (
                   <TouchableOpacity style={styles.viewerDeleteButton} onPress={() => confirmDelete(viewingPhoto)}>
                     <Ionicons name="trash-outline" size={18} color="#fff" />
                     <Text style={styles.viewerDeleteText}>Delete</Text>
@@ -588,7 +703,68 @@ export function JobPhotosTab({
           )}
         </View>
       </Modal>
+
+      <Modal visible={!!moveTarget} animationType="fade" transparent onRequestClose={() => setMoveTarget(null)}>
+        <View style={styles.moveScreen}>
+          <TouchableOpacity style={styles.viewerBackdrop} activeOpacity={1} onPress={() => setMoveTarget(null)} />
+          {moveTarget && (
+            <View style={styles.moveSheet}>
+              <Text style={styles.moveTitle}>Move photo to</Text>
+              {DOCUMENT_FOLDER_GROUPS.map((g) => {
+                const current = documentFolderGroup(moveTarget) === g;
+                return (
+                  <TouchableOpacity
+                    key={g}
+                    style={styles.moveRow}
+                    onPress={() => void moveTo(moveTarget, g)}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected: current }}
+                  >
+                    <Ionicons name={current ? "folder-open" : "folder-outline"} size={18} color={current ? colors.blue600 : colors.slate500} />
+                    <Text style={[styles.moveText, current && styles.moveTextOn]}>{documentFolderLabel(g)}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+              <TouchableOpacity style={styles.moveCancel} onPress={() => setMoveTarget(null)}>
+                <Text style={styles.moveCancelText}>Cancel</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+        </View>
+      </Modal>
     </View>
+  );
+}
+
+/** One row of folder chips (the 0116 list + Other), scrolling sideways. */
+function FolderChips({
+  value,
+  onChange,
+  dark = false,
+}: {
+  value: DocumentFolderGroup;
+  onChange: (next: DocumentFolderGroup) => void;
+  dark?: boolean;
+}) {
+  return (
+    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.folderChips}>
+      {DOCUMENT_FOLDER_GROUPS.map((g) => {
+        const on = value === g;
+        return (
+          <TouchableOpacity
+            key={g}
+            style={[styles.typeChip, dark && !on && styles.folderChipDark, on && styles.typeChipActive]}
+            onPress={() => onChange(g)}
+            accessibilityRole="button"
+            accessibilityState={{ selected: on }}
+          >
+            <Text style={[styles.folderChipText, dark && !on && styles.folderChipTextDark, on && styles.typeChipTextActive]}>
+              {documentFolderLabel(g)}
+            </Text>
+          </TouchableOpacity>
+        );
+      })}
+    </ScrollView>
   );
 }
 
@@ -609,6 +785,33 @@ const styles = StyleSheet.create({
   photoFailedText: { fontSize: 9, color: colors.slate400, textAlign: "center" },
   photoTag: { position: "absolute", top: 4, left: 4, paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6 },
   photoTagText: { fontSize: 9, fontWeight: "700", textTransform: "capitalize" },
+  folderBlock: { marginBottom: 12 },
+  folderLabel: { fontSize: 12, fontWeight: "600", color: colors.slate500, marginBottom: 6 },
+  folderChips: { gap: 8, paddingRight: 8 },
+  folderChipText: { fontSize: 12, fontWeight: "600", color: colors.slate700 },
+  folderChipDark: { backgroundColor: "rgba(255,255,255,0.1)", borderColor: "rgba(255,255,255,0.25)" },
+  folderChipTextDark: { color: "#fff" },
+  section: { marginTop: 12, gap: 8 },
+  sectionHeader: { flexDirection: "row", alignItems: "center", gap: 6, paddingVertical: 4 },
+  sectionTitle: { fontSize: 14, fontWeight: "700", color: colors.slate700 },
+  sectionCount: { fontSize: 12, fontWeight: "600", color: colors.slate500, backgroundColor: colors.slate100, borderRadius: 999, paddingHorizontal: 8, paddingVertical: 1, overflow: "hidden" },
+  moveScreen: { flex: 1, backgroundColor: "rgba(0,0,0,0.5)", justifyContent: "flex-end" },
+  moveSheet: { backgroundColor: colors.card, borderTopLeftRadius: 16, borderTopRightRadius: 16, padding: 16, paddingBottom: 32 },
+  moveTitle: { fontSize: 16, fontWeight: "700", color: colors.slate900, marginBottom: 8 },
+  moveRow: { flexDirection: "row", alignItems: "center", gap: 10, paddingVertical: 12 },
+  moveText: { fontSize: 15, color: colors.slate700 },
+  moveTextOn: { color: colors.blue600, fontWeight: "700" },
+  moveCancel: { alignItems: "center", paddingVertical: 12, marginTop: 4 },
+  moveCancelText: { fontSize: 15, fontWeight: "600", color: colors.slate500 },
+  viewerMoveButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    backgroundColor: "rgba(255,255,255,0.15)",
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 8,
+  },
   emptyText: { textAlign: "center", color: colors.slate400, marginTop: 20, fontSize: 13 },
   loadError: { flexDirection: "row", gap: 8, alignItems: "flex-start", backgroundColor: colors.orange100, borderRadius: 10, padding: 10, marginTop: 12 },
   loadErrorTitle: { fontSize: 13, fontWeight: "700", color: colors.orange700 },

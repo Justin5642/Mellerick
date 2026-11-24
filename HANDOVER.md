@@ -413,7 +413,7 @@ on", and "Photos or adding docs — can't drag & drop".
   rebuilt; a plain web link gets "save it first"). Everything goes through the
   tab's existing upload path: Photos resizes (`lib/image-resize.ts`) and
   uploads 3 at a time with the Before/After/General tag picked; Documents
-  uploads to the folder chosen beside the button (default Site Documents —
+  uploads to the folder chosen beside the button (default Other since 0116; Photos the folder picked —
   move afterwards as before), not office-only, same paths and RLS. Refused
   types (the Upload button's own accept list, now also checked on drop/paste;
   folders too) are named in a toast. Pasted screenshots are renamed
@@ -425,6 +425,91 @@ on", and "Photos or adding docs — can't drag & drop".
   `pasted-….png`, a PDF + a .txt dropped on Documents with Drainage chosen
   (PDF saved to Drainage, .txt refused), Find this address → pick → pin and
   coordinates moved; an Approximate pick recentred and left the pin.
+
+**Job folders for documents AND photos (24 Nov 2026; migration `0116` DRAFT — not applied).**
+Justin: the 0114 document folders (Site Documents / Drainage / Plumbing /
+Soil) become **Drains, Soil & Rock, R1, R2, Rough In, Fit Off, Camera
+Inspections** (+ **Other** = NULL), and **photos get the same folders** on the
+website and the phone; technicians pick the folder when taking a photo.
+- **Migration `0116_job_folders.sql`:** keys `drains`, `soil_rock`, `r1`,
+  `r2`, `rough_in`, `fit_off`, `camera_inspections`. `job_documents.folder`:
+  0114's check dropped BY DEFINITION (enumerated from `pg_constraint`, not a
+  guessed name), existing rows remapped (Justin's choice: `drainage` → Drains,
+  `soil` → Soil & Rock, `site_documents` / `plumbing` → Other; nothing
+  deleted), new `job_documents_folder_check`. New `job_photos.folder text`
+  with the same check (`job_photos_folder_check`). No new grants needed —
+  both tables are granted at table level (no column grants); asserted
+  (select/insert/update for `authenticated`). Who may set a folder is the
+  existing RLS: documents 0065/0074 (office-only stay office/admin), photos
+  0074 (the job's crew and office/admin). End state asserted: exactly one
+  folder check per table with the new list, no old values left, not
+  money-named, `job_photos` still in the `powersync` publication (whole
+  table, so the column replicates).
+- **Gate test** `supabase/tests/0116_folders_test.sql` (one self-undoing DO
+  block; needs an active technician and office/admin): no document left on
+  an old key; old/unknown keys refused and all 7 new keys accepted on both
+  tables; NULL allowed; the job's technician files their job's photo, adds a
+  photo straight into a folder and files a document, but not a photo on a
+  job they aren't on nor an office-only document; office files any photo.
+  **Checked** on a scratch Postgres 16 (minimal shim: roles, `auth.uid()`
+  from `request.jwt.claims`, profiles/customers/jobs, `user_can_manage_job`,
+  the 0074 restrictive policies, 0114 applied with legacy rows): 0116 applies
+  twice cleanly, remaps (drainage→drains, soil→soil_rock, the rest Other),
+  `0116 PASSED`; fails naming scenarios with job_photos' update policy dropped
+  plus an old key allowed, and with documents left on 0114 keys under the old
+  check (re-running 0116 then fixed it and passed).
+- **Rules** (`lib/document-folders.ts`, one list for documents and photos,
+  mirrored byte for byte below the header at `mobile/lib/documentFolders.ts`,
+  `tests/unit/document-folders.test.ts` — which also pins the list to 0116's
+  two checks): labels/order, `folderValue` (Other → null),
+  `DEFAULT_FOLDER_GROUP` = **Other** (none of the stage folders is a safe
+  guess for an unsorted upload, and every legacy row is already there). The
+  old keys are **read** as 0116 maps them (so a database without 0116 shows
+  the right folders) and **accepted** from an older phone build's request
+  (mapped the same way). `isFolderNotSwitchedOn` = the column is missing, or
+  0114's check refused a new key (23514 naming folder).
+- **Web Documents tab:** the new folders; the upload picker lists them plus
+  Other (default Other). **Web Photos tab** (`components/job/job-photos.tsx`):
+  grouped by folder with counts, collapsible; a folder picker beside the
+  Before/After/General one for uploads; a "move to folder" select on each
+  photo (on hover) for everyone who can edit the tab (the crew and
+  office/admin — RLS 0074). Hidden on view-only jobs.
+- **Phone Photos tab** (`mobile/components/job/photos.tsx`): "New photos go
+  in" folder chips above the buttons (also on the timestamp camera's preview),
+  remembered per job on the phone (`mobile/lib/photoFolderMemory.ts`,
+  AsyncStorage, tested); grid grouped by folder, collapsible; the viewer has
+  a folder button → "Move photo to" sheet. Writes through the outbox: the
+  photo insert carries `folder` only when filed
+  (`JobPhotosRepository.add`), a move is a one-column update
+  (`JobPhotosRepository.setFolder`, `usePhotoLibrary().movePhoto`); a move
+  still queued stays on screen across reloads. Reads: `listJobPhotos` selects
+  `folder` (local and remote; the remote retries without it on 42703/PGRST204
+  and answers `folder: null`). **Phone Documents** (office/admin): the new
+  folders on upload and move, through the existing routes.
+- **Stream change:** `tech_job_photos` in `mobile/powersync/sync-streams.yaml`
+  now lists `folder` (no money; the contract test passes);
+  `office_job_photos` is `job_photos.*`. `folder` added to
+  `mobile/lib/powersync/schema.ts` by hand. Not validated with
+  `@powersync/service-sync-rules` here (not installed in this checkout).
+- **Before 0116 is applied nothing breaks:** document uploads that 0114's
+  check refuses are saved under Other (web browser upload and
+  `POST /api/jobs/[id]/documents`); a document move answers "folders aren't
+  switched on yet" (web toast, route 409); old document keys show in their
+  new folders; web photo uploads retry without `folder`, and with no `folder`
+  key on the rows the move controls hide; the phone's gateway drops
+  `job_photos.folder` from queued writes (`mobile/lib/data/optionalColumns.ts`)
+  — a photo lands under Other, a folder-only move is done with nothing to
+  write — so nothing dead-letters.
+- **Apply / deploy order:** paste `supabase/migrations/0116_job_folders.sql`
+  → paste `supabase/tests/0116_folders_test.sql`, trust only `0116 PASSED` →
+  change 0116's STATUS line to applied, add the ledger row, regenerate types
+  (`lib/database.types.ts` has `job_photos.folder` by hand) → **redeploy the
+  PowerSync streams** (`docs/powersync-deploy.md` — `tech_job_photos` names
+  `folder`, so not before 0116) → merge web → ship the phone build (no new
+  native module).
+- **Not done:** folders can't be renamed or added (a fixed list, a check
+  constraint); signature and docket photos are filed like any other photo
+  (under Other) — the job report and docket rules don't look at folders.
 
 **Load page data on the server, not in the browser.** A browser→Supabase
 query from Australia costs ~100 ms+; a server query in `sin1` costs ~2 ms. So
@@ -1496,7 +1581,9 @@ Five items from Justin's list, web and phone.
   (`CustomersRepository`, sent only when given) and the gateway drops the
   column on a database without it (`optionalColumns.ts`). Rules
   `lib/customer-address.ts`, mirrored at `mobile/lib/customerAddress.ts`.
-- **E. Document folders.** `job_documents.folder` (0114): `site_documents`,
+- **E. Document folders.** (Keys replaced on 24 Nov 2026 by the drafted
+  0116 — see "Job folders for documents AND photos"; the text below is the
+  0114 state.) `job_documents.folder` (0114): `site_documents`,
   `drainage`, `plumbing`, `soil`, NULL = **Other** (all legacy rows). Web
   Documents tab: grouped by folder with counts, collapsible; the upload asks
   which folder (default Site Documents); each document has a "move to folder"
@@ -1916,6 +2003,8 @@ windows) — all 16 technician-visible streams are money-free:
   `tech_sites` / `backflow_sites`, `backflow_devices`, `backflow_tests`,
   `tech_job_assignments`, `tech_job_photos`, `tech_job_notes`,
   `tech_job_stage_notes` — no monetary column in the selected sets
+  (`tech_job_photos` gains `folder` with the drafted 0116 — redeploy after
+  applying it)
 - `tech_job_bookings` (added for build 16; 0079/0080 applied 2026-10-19,
   deployed as sync config v5 on 2026-11-14) — 10 named columns: who, when, cost-centre **id**;
   plus `note` (the booking's free-text scheduling note, 0109 applied
@@ -2756,6 +2845,7 @@ a shippable release.
 | **Leave on the schedule: record 0112** | Justin | `0112` applied 2026-11-19 (gate test passed). Ledger row: `insert into supabase_migrations.schema_migrations (version,name) values ('0112','schedule_leave') on conflict do nothing;` No PowerSync redeploy. Who sees the leave type defaults to office + admin; change it in Settings → Leave on the schedule. Part days: add From/To times on the Leave Log entry. |
 | **Komtrax: sync and link machines** | Justin | `0113` applied 2026-11-20 (gate test passed). Ledger row: `insert into supabase_migrations.schema_migrations (version,name) values ('0113','komtrax') on conflict do nothing;` Admin → Fleet → Komtrax machines → **Sync Komtrax**, then link any Komatsu machine not linked by serial (or put its serial in the fleet item's notes). `KOMTRAX_USERNAME` / `KOMTRAX_PASSWORD` are in Vercel Production. |
 | **Customer billing addresses (0114 applied)** | Justin | `0114` applied 2026-11-21 (gate test passed). Ledger row: `insert into supabase_migrations.schema_migrations (version,name) values ('0114','customer_address_doc_folders') on conflict do nothing;` Add billing addresses to customers — they print on invoices and quotes. |
+| **Apply 0116 (folders)** | Justin | `0116` is a DRAFT. Paste `supabase/migrations/0116_job_folders.sql`, then `supabase/tests/0116_folders_test.sql`; trust only `0116 PASSED`. Mark its STATUS line applied and record it: `insert into supabase_migrations.schema_migrations (version,name) values ('0116','job_folders') on conflict do nothing;` **Then redeploy the PowerSync streams** (`tech_job_photos` now lists `folder`), then merge web, then the phone build. Existing Drainage/Soil documents move to Drains / Soil & Rock; Site Documents and Plumbing go to Other. |
 | **Apply 0115 (mistake costs)** | Justin | `0115` is a DRAFT. Paste `supabase/migrations/0115_job_mistakes.sql`, then `supabase/tests/0115_job_mistakes_test.sql`; trust only `0115 PASSED`. Then mark its STATUS line applied and record it: `insert into supabase_migrations.schema_migrations (version,name) values ('0115','job_mistakes') on conflict do nothing;` No PowerSync redeploy. The office then logs mistakes on each job's Purchase Orders tab. |
 | **Maestro flow 02** | Avi | Needs `ADMIN_EMAIL` / `ADMIN_PASSWORD` in the environment. The login subflow deliberately skips when a session already exists, so a password never passes through a script — which is why flows 01/03/04 could be run and 02 could not. |
 

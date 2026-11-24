@@ -49,6 +49,7 @@ const P1: JobPhoto = {
   photo_type: "after",
   uploaded_by: "u1",
   created_at: "2026-10-09T03:00:00.000Z",
+  folder: "rough_in",
 };
 const P2: JobPhoto = {
   id: "ph1",
@@ -57,6 +58,7 @@ const P2: JobPhoto = {
   photo_type: "before",
   uploaded_by: null,
   created_at: "2026-10-09T01:00:00.000Z",
+  folder: null,
 };
 
 beforeEach(() => {
@@ -78,7 +80,7 @@ describe("listJobPhotos", () => {
     expect(db.getOptional.mock.calls[0][1]).toEqual(["j1"]);
     expect(norm(db.getAll.mock.calls[0][0])).toBe(norm(SQL_LIST_JOB_PHOTOS));
     expect(norm(SQL_LIST_JOB_PHOTOS)).toBe(
-      "SELECT id, job_id, storage_path, photo_type, uploaded_by, created_at FROM job_photos WHERE job_id = ? ORDER BY created_at DESC, id DESC"
+      "SELECT id, job_id, storage_path, photo_type, uploaded_by, created_at, folder FROM job_photos WHERE job_id = ? ORDER BY created_at DESC, id DESC"
     );
     expect(db.getAll.mock.calls[0][1]).toEqual(["j1"]);
     expect(out).toEqual([P1, P2]);
@@ -100,7 +102,7 @@ describe("listJobPhotos", () => {
     // in the technician stream, so neither side may select them).
     expect(Object.keys(local[0]).sort()).toEqual(Object.keys(remote[0]).sort());
     expect(Object.keys(local[0]).sort()).toEqual(
-      ["created_at", "id", "job_id", "photo_type", "storage_path", "uploaded_by"]
+      ["created_at", "folder", "id", "job_id", "photo_type", "storage_path", "uploaded_by"]
     );
   });
 
@@ -109,7 +111,7 @@ describe("listJobPhotos", () => {
     await listJobPhotos("j1");
     const builder = (supabase.from as jest.Mock).mock.results[0].value;
     expect(supabase.from).toHaveBeenCalledWith("job_photos");
-    expect(builder.select).toHaveBeenCalledWith("id, job_id, storage_path, photo_type, uploaded_by, created_at");
+    expect(builder.select).toHaveBeenCalledWith("id, job_id, storage_path, photo_type, uploaded_by, created_at, folder");
     expect(builder.eq).toHaveBeenCalledWith("job_id", "j1");
     expect(builder.order).toHaveBeenNthCalledWith(1, "created_at", { ascending: false });
     expect(builder.order).toHaveBeenNthCalledWith(2, "id", { ascending: false });
@@ -134,6 +136,27 @@ describe("listJobPhotos", () => {
     await listJobPhotos("j1");
     expect(db.getAll).not.toHaveBeenCalled();
     expect(supabase.from).toHaveBeenCalled();
+  });
+
+  it("before 0116 the remote read retries without folder and files every photo under Other", async () => {
+    const { folder: _f1, ...bare1 } = P1;
+    const { folder: _f2, ...bare2 } = P2;
+    const results = [
+      { data: null, error: { code: "42703", message: "column job_photos.folder does not exist" } },
+      { data: [bare1, bare2], error: null },
+    ];
+    const builder = (supabase.from as jest.Mock)("job_photos");
+    (supabase.from as jest.Mock).mockClear();
+    builder.select.mockClear();
+    builder.then = (resolve: (v: unknown) => unknown) => resolve(results.shift());
+    try {
+      const out = await listJobPhotos("j1");
+      expect(builder.select).toHaveBeenNthCalledWith(1, "id, job_id, storage_path, photo_type, uploaded_by, created_at, folder");
+      expect(builder.select).toHaveBeenNthCalledWith(2, "id, job_id, storage_path, photo_type, uploaded_by, created_at");
+      expect(out).toEqual([{ ...P1, folder: null }, { ...P2, folder: null }]);
+    } finally {
+      builder.then = (resolve: (v: unknown) => unknown) => resolve(mockRemote.result);
+    }
   });
 
   it("a failed remote read throws instead of posing as 'no photos'", async () => {
