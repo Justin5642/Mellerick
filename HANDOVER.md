@@ -380,6 +380,52 @@ centre that will be a negative cost." His choices: the office logs them
   (`lib/database.types.ts` has the table by hand). No PowerSync redeploy.
   The web may merge before or after.
 
+**Address search on the map pin, drag & drop / paste on Photos and Documents (24 Nov 2026; no migration; web only).**
+Justin: "no search function to look for the address — only a map to click
+on", and "Photos or adding docs — can't drag & drop".
+- **Map pin search.** The only click-the-map picker is
+  `components/site-location-dialog.tsx` (job Overview "Set location on map /
+  Adjust map pin", and Customer → each site's **Set pin / Pin**). It now has a
+  search box prefilled with the site's address, **Search** (or Enter) and
+  one-click **Find this address**. Matches list below; a building-level match
+  moves the pin there and recentres; a street/suburb match is labelled
+  **Approximate** and only recentres the map (zoom 17) — the user clicks the
+  exact house or lot, because a street centroid can be hundreds of metres out
+  for a 150 m fence. Dragging/clicking still nudges the pin; nothing is saved
+  until **Save location** (same browser write as before, sites office-writable
+  by 0064). Server: `GET /api/geocode?search=1&q=…` — **office/admin only**
+  (`requireOfficeOrAdmin`), same per-user limit as the plain lookup, 3–200
+  chars, fixed sentences; up to 6 Australian Nominatim matches shaped by
+  `shapeAddressSuggestions` (`lib/geocode.ts`: precise first, near-duplicates
+  dropped, label "12 Smith Street, Epping, …"; tested in
+  `tests/unit/geocode.test.ts`, route in `routes-auth.test.ts`). The plain
+  `?address=` lookup, the hourly geocoder, the script and Add site keep
+  accepting building-level matches only. **No search-as-you-type** —
+  Nominatim's usage policy forbids autocomplete. The PO tab's site address and
+  the Add site dialog geocode typed text and have no map, unchanged.
+- **Drag & drop and paste.** `components/ui/file-drop-zone.tsx` wraps the
+  whole Photos tab (`job-photos.tsx`) and Documents tab (`job-documents.tsx`
+  — it replaces that tab's older list-only drop handlers): a highlighted
+  overlay while files are dragged over, several files at once, **Ctrl/Cmd+V**
+  of a screenshot or a copied file while the tab is showing (not while typing
+  in a field or with a dialog open), and an image dragged from another tab or
+  an email when the browser hands over the file (an inline `data:` image is
+  rebuilt; a plain web link gets "save it first"). Everything goes through the
+  tab's existing upload path: Photos resizes (`lib/image-resize.ts`) and
+  uploads 3 at a time with the Before/After/General tag picked; Documents
+  uploads to the folder chosen beside the button (default Site Documents —
+  move afterwards as before), not office-only, same paths and RLS. Refused
+  types (the Upload button's own accept list, now also checked on drop/paste;
+  folders too) are named in a toast. Pasted screenshots are renamed
+  `pasted-YYYYMMDD-HHMMSS.png`. Disabled on view-only jobs. Rules
+  `lib/file-drop.ts` (tested, `tests/unit/file-drop.test.ts`). The
+  single-file form box is still `components/ui/file-dropzone.tsx`.
+- Checked in Chromium with a mock Supabase: two PNGs + a PDF dropped on Photos
+  (2 uploaded, the PDF refused by name), a pasted image saved as
+  `pasted-….png`, a PDF + a .txt dropped on Documents with Drainage chosen
+  (PDF saved to Drainage, .txt refused), Find this address → pick → pin and
+  coordinates moved; an Approximate pick recentred and left the pin.
+
 **Load page data on the server, not in the browser.** A browser→Supabase
 query from Australia costs ~100 ms+; a server query in `sin1` costs ~2 ms. So
 My Jobs, Approvals, Staff, Fleet and Customers are server pages that pass

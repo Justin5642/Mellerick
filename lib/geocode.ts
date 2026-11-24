@@ -80,3 +80,61 @@ export async function geocodeAddress(
   if (!precise && !opts.approx) return null;
   return { lat: parseFloat(top.lat), lng: parseFloat(top.lon), display: top.display_name, precise };
 }
+
+// ── Address search for the "Set location on map" dialog ─────────────────────
+//
+// A PERSON picks from these and then sees the pin on the map before saving, so
+// street- and suburb-level matches are shown too — labelled approximate, so
+// they click the exact house or lot themselves. The automatic geocoders above
+// (cron, script, Add site) keep accepting building-level matches only.
+//
+// Nominatim's usage policy forbids search-as-you-type, so the dialog searches
+// only when asked (Enter or the Search button).
+
+export interface AddressSuggestion {
+  lat: number;
+  lng: number;
+  /** Nominatim's full display name. */
+  display: string;
+  /** The first parts of it — "12 Smith Street, Epping, Melbourne". */
+  label: string;
+  /** Building/address-level. false = street or suburb: click the exact spot. */
+  precise: boolean;
+}
+
+export const ADDRESS_SEARCH_LIMIT = 6;
+export const ADDRESS_SEARCH_MAX_LENGTH = 200;
+
+type NominatimRow = { lat?: string; lon?: string; display_name?: string; class?: string; type?: string; addresstype?: string };
+
+/** Nominatim rows → suggestions: unplaceable rows and near-duplicates (same point to ~10 m) dropped, precise first, at most `limit`. */
+export function shapeAddressSuggestions(rows: readonly NominatimRow[], limit = ADDRESS_SEARCH_LIMIT): AddressSuggestion[] {
+  const out: AddressSuggestion[] = [];
+  for (const r of rows) {
+    const lat = Number(r.lat);
+    const lng = Number(r.lon);
+    if (r.lat == null || r.lon == null || !Number.isFinite(lat) || !Number.isFinite(lng) || Math.abs(lat) > 90 || Math.abs(lng) > 180) continue;
+    const display = (r.display_name ?? "").trim();
+    if (!display) continue;
+    if (out.some((o) => Math.abs(o.lat - lat) < 1e-4 && Math.abs(o.lng - lng) < 1e-4)) continue;
+    const parts = display.split(",").map((p) => p.trim()).filter(Boolean);
+    // "12, Smith Street, …" → "12 Smith Street, …" (Nominatim splits the house number off).
+    if (parts.length > 1 && /^\d+[a-z]?(?:[-/]\d+[a-z]?)?$/i.test(parts[0])) parts.splice(0, 2, `${parts[0]} ${parts[1]}`);
+    out.push({ lat, lng, display, label: parts.slice(0, 3).join(", "), precise: isPreciseEnough(r) });
+  }
+  // Stable: precise matches first, Nominatim's own order within each group.
+  return [...out.filter((o) => o.precise), ...out.filter((o) => !o.precise)].slice(0, limit);
+}
+
+/** Up to ADDRESS_SEARCH_LIMIT Australian matches for a typed address, precise or not. Throws on network/HTTP failure. */
+export async function searchAddresses(query: string, opts: { signal?: AbortSignal } = {}): Promise<AddressSuggestion[]> {
+  const q = query.trim().slice(0, ADDRESS_SEARCH_MAX_LENGTH);
+  if (!q) return [];
+  const res = await fetch(
+    `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q)}&format=jsonv2&limit=${ADDRESS_SEARCH_LIMIT + 4}&countrycodes=au`,
+    { headers: { "User-Agent": NOMINATIM_USER_AGENT }, signal: opts.signal }
+  );
+  if (!res.ok) throw new Error(`Nominatim answered ${res.status}`);
+  const data = (await res.json()) as unknown;
+  return shapeAddressSuggestions(Array.isArray(data) ? (data as NominatimRow[]) : []);
+}

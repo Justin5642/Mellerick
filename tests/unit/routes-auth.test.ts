@@ -163,6 +163,29 @@ describe("GET /api/geocode (authenticated only)", () => {
     expect(fetchSpy).not.toHaveBeenCalled();
     fetchSpy.mockRestore();
   });
+
+  it("address search (?search=1) is office/admin only — a technician is refused before any outbound fetch", async () => {
+    serverGetUser.mockResolvedValue({ data: { user: { id: "u1" } } });
+    adminFrom.mockReturnValue(roleChain("technician"));
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+    const res = await geocodeGET(new NextRequest("http://test.local/api/geocode?search=1&q=12%20Smith%20St", { method: "GET" }));
+    expect(res.status).toBe(403);
+    expect(fetchSpy).not.toHaveBeenCalled();
+    fetchSpy.mockRestore();
+  });
+
+  it("address search returns shaped suggestions to the office", async () => {
+    serverGetUser.mockResolvedValue({ data: { user: { id: "u-office-search" } } });
+    adminFrom.mockReturnValue(roleChain("office"));
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify([{ lat: "-37.6", lon: "145.0", display_name: "Smith Street, Epping, Victoria", class: "highway", type: "residential", addresstype: "road" }]), { status: 200 })
+    );
+    const res = await geocodeGET(new NextRequest("http://test.local/api/geocode?search=1&q=Smith%20St%20Epping", { method: "GET" }));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.results).toEqual([{ lat: -37.6, lng: 145.0, display: "Smith Street, Epping, Victoria", label: "Smith Street, Epping, Victoria", precise: false }]);
+    fetchSpy.mockRestore();
+  });
 });
 
 describe("OAuth connect routes (admin only, both initiation and callback)", () => {
