@@ -27,7 +27,7 @@ import { quoteStatusColors } from "@/lib/badge-colors";
 
 interface Props {
   quote: any;
-  /** customers.billing_address (0114). */
+  /** customers.billing_address (0114, drafted — null until it is applied). */
   billingAddress?: string | null;
 }
 

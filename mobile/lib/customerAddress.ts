@@ -2,7 +2,7 @@
 // byte for byte below this header, pinned by tests/unit/customer-address.test.ts.
 // Change the web file first, then copy its body here.
 
-/** The longest address the database accepts (0114's check). */
+/** The longest address the database accepts (0114's check, once that drafted migration is applied). */
 export const BILLING_ADDRESS_MAX = 500;
 
 /**

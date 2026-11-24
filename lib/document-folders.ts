@@ -36,8 +36,9 @@ const LABELS: Record<DocumentFolderGroup, string> = {
 
 /**
  * The 0114 keys (Site Documents / Drainage / Plumbing / Soil) and where 0116
- * moved them. Read on a database 0116 hasn't reached yet, and accepted from
- * an older phone build's request, so neither breaks while they overlap.
+ * moved them (both drafts, not applied yet). Read on a database 0116 hasn't
+ * reached yet, and accepted from an older phone build's request, so neither
+ * breaks while they overlap.
  */
 const LEGACY_FOLDERS: Readonly<Record<string, DocumentFolder | null>> = {
   drainage: "drains",

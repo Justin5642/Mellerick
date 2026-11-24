@@ -1,6 +1,6 @@
 -- =============================================
 -- OFFICE-ONLY JOB DOCUMENTS (+ mobile expense-receipt path fix)
--- STATUS: ✅ APPLIED IN PRODUCTION (2026-10-08, via SQL editor).
+-- STATUS: ⚠ NOT in production until the 24 Nov 2026 catch-up paste (this line used to say "applied 2026-10-08"; a read-only check on 24 Nov 2026 found it missing). 0064/0065 are applied through 0117, the rest as written.
 --
 -- WHY
 -- job_documents (incl. ~3.9k files imported from Simpro) is readable by every

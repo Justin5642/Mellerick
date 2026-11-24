@@ -32,7 +32,7 @@ export default function EditCustomerPage() {
     billing_address: "",
     is_active: true,
   });
-  // False until migration 0114 adds customers.billing_address: the
+  // False until migration 0114 (drafted) adds customers.billing_address: the
   // field is then hidden and never sent.
   const [hasAddress, setHasAddress] = useState(false);
 
