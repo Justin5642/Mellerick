@@ -1,10 +1,10 @@
 // A customer's billing address on invoices and quotes (Justin's notebook list,
-// 20 Nov 2026). customers.billing_address is added by migration 0114 (applied 2026-11-21;
-// on a database without it every reader here retries without the column and the
+// 20 Nov 2026). customers.billing_address is added by migration 0114 (drafted;
+// until it is applied every reader here retries without the column and the
 // documents simply print no address). Mirrored byte for byte below this
 // header at mobile/lib/customerAddress.ts (tests/unit/customer-address.test.ts).
 
-/** The longest address the database accepts (0114's check). */
+/** The longest address the database accepts (0114's check, once that drafted migration is applied). */
 export const BILLING_ADDRESS_MAX = 500;
 
 /**

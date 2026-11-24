@@ -38,7 +38,7 @@ interface Props {
   xeroConnected: boolean;
   /** null when the invoice_payments table is not in this database yet. */
   payments: InvoicePayment[] | null;
-  /** customers.billing_address (0114). */
+  /** customers.billing_address (0114, drafted — null until it is applied). */
   billingAddress?: string | null;
 }
 

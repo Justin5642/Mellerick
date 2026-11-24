@@ -1,7 +1,7 @@
 -- ============================================================================
 -- Indexes for the filters and sorts the web dashboard actually runs.
 --
--- STATUS: ✅ APPLIED IN PRODUCTION (2026-10-15, via SQL editor).
+-- STATUS: ⚠ NOT in production until the 24 Nov 2026 catch-up paste (this line used to say "applied 2026-10-15"; a read-only check on 24 Nov 2026 found it missing). 0064, 0065 and 0066 are applied through 0117 (no temp table); 0067 and 0070 as written.
 -- Independent of 0053/0069. Plain CREATE INDEX (not CONCURRENTLY, which the SQL
 -- editor's transaction cannot run): these tables are small (jobs ~830 rows,
 -- time_entries a few thousand), so each build holds its write lock for well
