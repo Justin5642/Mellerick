@@ -33,7 +33,7 @@ export type RangeableQuery<T> = {
   range: (
     from: number,
     to: number
-  ) => PromiseLike<{ data: T[] | null; error: { message: string } | null; count?: number | null }>;
+  ) => PromiseLike<{ data: T[] | null; error: { message: string; code?: string } | null; count?: number | null }>;
 };
 
 /**
@@ -45,7 +45,8 @@ export type RangeableQuery<T> = {
  */
 export type QueryFactory<T> = (count: { count?: "exact" }) => RangeableQuery<T>;
 
-export type FetchAllResult<T> = { ok: true; rows: T[] } | { ok: false; error: string };
+/** `code` is PostgREST's / Postgres's error code when the source gave one — callers that fall back on a missing column (42703) need it. */
+export type FetchAllResult<T> = { ok: true; rows: T[] } | { ok: false; error: string; code?: string };
 
 /**
  * Read every row a query matches, in pages.
@@ -69,10 +70,10 @@ export async function fetchAllRows<T>(
     const from = page * pageSize;
     return build(count).range(from, from + pageSize - 1);
   };
-  const failed = (page: number, message: string): FetchAllResult<T> =>
+  const failed = (page: number, message: string, code?: string): FetchAllResult<T> =>
     // Deliberately discard what was collected. A partial sum is worse than no
     // sum, because it looks like a number and is quietly wrong.
-    ({ ok: false, error: `Could not read all rows (page ${page + 1}): ${message}` });
+    ({ ok: false, error: `Could not read all rows (page ${page + 1}): ${message}`, ...(code ? { code } : {}) });
   const tooManyPages: FetchAllResult<T> = {
     ok: false,
     error:
@@ -81,7 +82,7 @@ export async function fetchAllRows<T>(
   };
 
   const first = await readPage(0, { count: "exact" });
-  if (first.error) return failed(0, first.error.message);
+  if (first.error) return failed(0, first.error.message, first.error.code);
   const rows: T[] = [...(first.data ?? [])];
   let lastBatch = first.data ?? [];
   let page = 1;
@@ -93,7 +94,7 @@ export async function fetchAllRows<T>(
     const rest = await Promise.all(Array.from({ length: pageCount - 1 }, (_, i) => readPage(i + 1)));
     for (let i = 0; i < rest.length; i++) {
       const { data, error } = rest[i];
-      if (error) return failed(i + 1, error.message);
+      if (error) return failed(i + 1, error.message, error.code);
       lastBatch = data ?? [];
       rows.push(...lastBatch);
     }
@@ -109,7 +110,7 @@ export async function fetchAllRows<T>(
     // one more request settles it rather than guessing.
     if (lastBatch.length < pageSize) return { ok: true, rows };
     const { data, error } = await readPage(page);
-    if (error) return failed(page, error.message);
+    if (error) return failed(page, error.message, error.code);
     lastBatch = data ?? [];
     rows.push(...lastBatch);
   }

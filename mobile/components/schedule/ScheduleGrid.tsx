@@ -70,6 +70,7 @@ import {
   type GridRow,
   type RowItem,
 } from "../../lib/scheduleGrid";
+import { bookingOverHours, formatOverHours, type HoursByJob, type OverHours } from "../../lib/overHours";
 import { leaveColour, leaveDayLabel, leaveRangeLabel, NEEDS_REASSIGNING, type LeaveConflict, type LeaveDay, type LeaveIndex } from "../../lib/staffLeave";
 import type { DayGap } from "../../lib/todoBoard";
 
@@ -120,6 +121,8 @@ export interface ScheduleGridProps {
   leave?: LeaveIndex;
   /** Booking id → the days its technician is on leave. */
   reassign?: ReadonlyMap<string, LeaveConflict[]>;
+  /** Used vs allowed hours per job (office/admin; lib/overHours.ts) — absent/null = no "Over hours" tags. */
+  overHours?: HoursByJob | null;
   /** A leave block was tapped: show its details (read-only). */
   onOpenLeave?: (day: LeaveDay) => void;
   /** A technician's free hours on a day (office/admin's to-do list); absent = no gaps shown. */
@@ -548,6 +551,7 @@ export function ScheduleGrid(props: ScheduleGridProps) {
                       others={othersOnJobDay(p.entry, bookingsByJob.get(p.entry.booking.job_id) ?? [], bookingDays)}
                       saveState={saveStates.get(p.entry.booking.id)}
                       reassign={props.reassign?.get(p.entry.booking.id)?.some((c) => c.dateKey === p.entry.day.dateKey) ?? false}
+                      over={props.overHours ? bookingOverHours(p.entry.booking, props.overHours) : null}
                       lifted={drag?.entry.booking.id === p.entry.booking.id}
                       onOpen={onOpen}
                       onBlocked={onBlocked}
@@ -708,6 +712,8 @@ interface BlockProps {
   saveState: SaveState | undefined;
   /** Booked on a day this technician is on leave. */
   reassign: boolean;
+  /** Its job (or its cost centre) is over the allowed hours. */
+  over: OverHours | null;
   lifted: boolean;
   onOpen: (entry: BoardEntry) => void;
   onBlocked: (message: string) => void;
@@ -716,7 +722,7 @@ interface BlockProps {
   onEnd: (commit: boolean) => void;
 }
 
-function Block({ placed, top, view, rowStaffId, staffNames, others, saveState, reassign, lifted, onOpen, onBlocked, onBegin, onMove, onEnd }: BlockProps) {
+function Block({ placed, top, view, rowStaffId, staffNames, others, saveState, reassign, over, lifted, onOpen, onBlocked, onBegin, onMove, onEnd }: BlockProps) {
   const { entry, left, width } = placed;
   const { job, booking, day } = entry;
   const completed = isCompletedJob(job);
@@ -805,6 +811,7 @@ function Block({ placed, top, view, rowStaffId, staffNames, others, saveState, r
     names.join(", "),
     completed ? "completed" : null,
     reassign ? NEEDS_REASSIGNING : null,
+    over ? over.text : null,
     saveState === "saving" ? "saving" : saveState === "queued" ? "not on the server yet" : saveState === "failed" ? "not saved" : null,
   ]
     .filter(Boolean)
@@ -825,6 +832,7 @@ function Block({ placed, top, view, rowStaffId, staffNames, others, saveState, r
           completed && styles.blockDone,
           lifted && styles.blockLifted,
           saveState === "failed" && styles.blockFailed,
+          over && !reassign && styles.blockOver,
           reassign && styles.blockReassign,
         ]}
       >
@@ -842,6 +850,11 @@ function Block({ placed, top, view, rowStaffId, staffNames, others, saveState, r
         <Text style={[styles.blockTitle, completed && styles.doneText]} numberOfLines={1}>
           {completed ? "Completed · " : ""}
           {reassign ? <Text style={styles.reassignText}>{NEEDS_REASSIGNING} · </Text> : null}
+          {over ? (
+            <Text style={styles.overText}>
+              ⚠ Over {formatOverHours(over.usedHours)}/{formatOverHours(over.allowedHours)} ·{" "}
+            </Text>
+          ) : null}
           {saveState === "saving" ? "Saving… · " : saveState === "queued" ? "Not synced yet · " : saveState === "failed" ? "Not saved · " : ""}
           {view === "week" ? `${shortTime(day.startIso)} ` : ""}
           {job.title}
@@ -911,6 +924,8 @@ const styles = StyleSheet.create({
   blockDone: { backgroundColor: colors.slate100, borderColor: colors.slate400, borderStyle: "dashed", opacity: 0.85 },
   blockLifted: { opacity: 0.35 },
   blockFailed: { borderColor: colors.red600, borderWidth: 2 },
+  blockOver: { borderColor: "#d97706", borderWidth: 2, borderLeftWidth: 4 },
+  overText: { color: "#b45309", fontWeight: "800" },
   blockReassign: { borderColor: "#e11d48", borderWidth: 2, borderLeftWidth: 4 },
   reassignText: { color: "#be123c", fontWeight: "800" },
   leave: {

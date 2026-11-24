@@ -1,6 +1,7 @@
 import { supabase } from "../../supabase";
 import { fromLocalOr, OutsideSyncWindow } from "./source";
 import { unwrapRows } from "./unwrap";
+import { chunkIds, mergeResults, readAllPages } from "./pagedRows";
 import { bool } from "./rowMap";
 import { assignedOrCrewSql } from "./assignedJobs";
 import type { Booking, BookingWindow } from "../../bookings";
@@ -237,11 +238,17 @@ export async function withMyBookings<S extends { jobId: string }>(
  * applied — the tab then lists one row per job, as it always has.
  */
 export async function listOpenJobBookingsRemote(): Promise<JobBooking[] | null> {
-  const res = await supabase
-    .from("job_bookings")
-    .select(`${COLUMNS}, staff:profiles!job_bookings_staff_id_fkey(full_name), jobs!inner(status)`)
-    .not("jobs.status", "in", '("completed","cancelled")')
-    .order("starts_at");
+  // Paged: past PostgREST's 1000-row cap a single request silently dropped
+  // bookings (24 Nov 2026). Ordered by start, then id, so pages never overlap.
+  const res = await readAllPages((from, to) =>
+    supabase
+      .from("job_bookings")
+      .select(`${COLUMNS}, staff:profiles!job_bookings_staff_id_fkey(full_name), jobs!inner(status)`)
+      .not("jobs.status", "in", '("completed","cancelled")')
+      .order("starts_at")
+      .order("id")
+      .range(from, to)
+  );
   if (isMissingTable(res.error)) return null;
   const rows = unwrapRows(res as never, "listOpenJobBookingsRemote") as unknown as (RawBookingRow & {
     staff: { full_name: string } | null;
@@ -256,11 +263,22 @@ export async function listOpenJobBookingsRemote(): Promise<JobBooking[] | null> 
  */
 export async function listJobBookingsForJobsRemote(jobIds: readonly string[]): Promise<JobBooking[] | null> {
   if (jobIds.length === 0) return [];
-  const res = await supabase
-    .from("job_bookings")
-    .select(`${COLUMNS}, staff:profiles!job_bookings_staff_id_fkey(full_name)`)
-    .in("job_id", [...jobIds])
-    .order("starts_at");
+  // Chunked ids (a long .in() list outgrows the URL) and each chunk paged.
+  const res = mergeResults(
+    await Promise.all(
+      chunkIds(jobIds).map((part) =>
+        readAllPages((from, to) =>
+          supabase
+            .from("job_bookings")
+            .select(`${COLUMNS}, staff:profiles!job_bookings_staff_id_fkey(full_name)`)
+            .in("job_id", part)
+            .order("starts_at")
+            .order("id")
+            .range(from, to)
+        )
+      )
+    )
+  );
   if (isMissingTable(res.error)) return null;
   const rows = unwrapRows(res as never, "listJobBookingsForJobsRemote") as unknown as (RawBookingRow & {
     staff: { full_name: string } | null;

@@ -129,6 +129,8 @@ import {
   weekDateKeys,
 } from "@/lib/date";
 import { jobStatusColors } from "@/lib/badge-colors";
+import { bookingOverHours, jobsOverHours, type HoursByJob, type OverHours } from "@/lib/over-hours";
+import { OverHoursBadge, OverHoursSummary, type OverHoursJob } from "./over-hours-summary";
 import { cn } from "@/lib/utils";
 
 type StaffMember = {
@@ -393,18 +395,34 @@ type PlacedProps = {
   onMenu?: (pickup: Pickup, at: Point) => void;
   /** Booked on a day this technician is on leave (0112). */
   reassign: boolean;
+  /** The job is completed (or cancelled): greyed, never dragged, cut or resized. */
+  closed?: boolean;
+  /** Over its allowed hours (office/admin only; lib/over-hours.ts). */
+  over?: OverHours | null;
 };
+
+/** Said when someone tries to move (cut, drag) a completed job's booking. */
+function closedMoveMessage(job: Pick<BoardJob, "job_number" | "status">): string {
+  return `#${job.job_number} is ${job.status} — its bookings can't be moved.`;
+}
 
 function isCutHere(cut: Pickup | null, bookingId: string, source: BoardCell) {
   return !!cut && cut.bookingId === bookingId && cut.source.staffId === source.staffId && cut.source.dateKey === source.dateKey;
 }
 
-function JobCardBody({ entry, tag, reassign }: { entry: BoardEntry; tag: TileTag; reassign?: boolean }) {
+type CardBodyProps = { entry: BoardEntry; tag: TileTag; reassign?: boolean; over?: OverHours | null };
+
+function JobCardBody({ entry, tag, reassign, over }: CardBodyProps) {
   const { job, booking } = entry;
   const dayOf = dayOfLabel(entry);
   return (
     <>
-      {reassign && <div className="mb-1"><NeedsReassigningBadge /></div>}
+      {(reassign || over) && (
+        <div className="mb-1 flex flex-wrap gap-1">
+          {reassign && <NeedsReassigningBadge />}
+          {over && <OverHoursBadge over={over} />}
+        </div>
+      )}
       <div className="flex items-center justify-between gap-2 pr-4">
         <p className="text-xs font-bold text-blue-600 min-w-0 truncate">
           <EntryTime entry={entry} />
@@ -471,11 +489,13 @@ function useCardGestures(
 // The draggable id is per PLACEMENT, not per booking: a multi-day booking
 // sits in several day cells at once and dnd-kit needs each node's id to be
 // unique.
-function DraggableJobCard({ entry, source, tag, cut, copying, pickActive, onCut, onMenu, reassign }: PlacedProps) {
+function DraggableJobCard({ entry, source, tag, cut, copying, pickActive, onCut, onMenu, reassign, closed, over }: PlacedProps) {
   const { job, booking } = entry;
   const { setNodeRef, listeners, isDragging } = useDraggable({
     id: `${booking.id}@${weekCellId(source.staffId, source.dateKey)}`,
     data: { bookingId: booking.id, source, entry },
+    // A completed job's bookings stay where they are (0096 refuses the write anyway).
+    disabled: !!closed,
   });
   const isCut = isCutHere(cut, booking.id, source);
   const gestures = useCardGestures(listeners, { bookingId: booking.id, source }, onMenu);
@@ -489,21 +509,23 @@ function DraggableJobCard({ entry, source, tag, cut, copying, pickActive, onCut,
         WebkitTouchCallout: "none",
         WebkitUserSelect: "none",
       }}
+      data-closed={closed ? "true" : undefined}
       className={cn(
-        "relative cursor-grab active:cursor-grabbing select-none rounded-lg",
+        "relative select-none rounded-lg",
+        closed ? "cursor-pointer opacity-60 bg-slate-50" : "cursor-grab active:cursor-grabbing",
         isDragging && "opacity-30",
         isCut && (copying ? "ring-2 ring-blue-500 bg-blue-50/60" : "ring-2 ring-amber-400 bg-amber-50/60"),
         reassign && !isCut && "ring-2 ring-rose-500"
       )}
     >
-      <GripVertical className="w-3.5 h-3.5 text-slate-300 absolute top-2 right-2 pointer-events-none" />
+      {!closed && <GripVertical className="w-3.5 h-3.5 text-slate-300 absolute top-2 right-2 pointer-events-none" />}
       <BoardJobLink
         href={`/dashboard/jobs/${job.id}`}
         className={JOB_CARD_CLASS}
         cutActive={pickActive}
-        onCut={() => onCut({ bookingId: booking.id, source })}
+        onCut={() => (closed ? toast.error(closedMoveMessage(job)) : onCut({ bookingId: booking.id, source }))}
       >
-        <JobCardBody entry={entry} tag={tag} reassign={reassign} />
+        <JobCardBody entry={entry} tag={tag} reassign={reassign} over={over} />
       </BoardJobLink>
     </div>
   );
@@ -552,12 +574,13 @@ function BookingNoteLine({ note, className }: { note?: string | null; className:
 // Compact job entry for a single day cell in the week grid — the grid is
 // staff (rows) x day (columns), so each cell is narrow; this trades the
 // full job card's detail for a glanceable time + job + customer stack.
-function WeekJobChipBody({ entry, tag, reassign }: { entry: BoardEntry; tag: TileTag; reassign?: boolean }) {
+function WeekJobChipBody({ entry, tag, reassign, over }: CardBodyProps) {
   const { job, booking } = entry;
   const dayOf = dayOfLabel(entry);
   return (
     <>
       {reassign && <NeedsReassigningBadge />}
+      {over && <div><OverHoursBadge over={over} compact /></div>}
       <div className="flex items-start justify-between gap-1">
         <p className="text-[10px] font-bold text-blue-600 truncate min-w-0">
           {formatTime(entry.day.startIso)}
@@ -566,8 +589,9 @@ function WeekJobChipBody({ entry, tag, reassign }: { entry: BoardEntry; tag: Til
         <TileStaffTag tag={tag} />
       </div>
       <p className="text-[11px] font-medium text-slate-700 truncate">
-        #{job.job_number} {job.title}
+        {isClosedJob(job) ? "✓ " : ""}#{job.job_number} {job.title}
       </p>
+      {isClosedJob(job) && <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">{job.status === "completed" ? "Completed" : job.status}</p>}
       {booking.cost_center_name && <p className="text-[10px] font-medium text-cyan-700 truncate">{booking.cost_center_name}</p>}
       <BookingNoteLine note={booking.note} className="text-[10px]" />
       {dayOf && <p className="text-[10px] font-medium text-violet-600 truncate">{dayOf}</p>}
@@ -654,6 +678,8 @@ function DraggableWeekJobChip({
   onCut,
   onMenu,
   reassign,
+  closed,
+  over,
   handles,
   onResizeStart,
   resizeState,
@@ -666,6 +692,7 @@ function DraggableWeekJobChip({
   const { setNodeRef, listeners, isDragging } = useDraggable({
     id: `${booking.id}@${weekCellId(source.staffId, source.dateKey)}`,
     data: { bookingId: booking.id, source, entry },
+    disabled: !!closed,
   });
   const isCut = isCutHere(cut, booking.id, source);
   const gestures = useCardGestures(listeners, { bookingId: booking.id, source }, onMenu);
@@ -680,8 +707,10 @@ function DraggableWeekJobChip({
         WebkitTouchCallout: "none",
         WebkitUserSelect: "none",
       }}
+      data-closed={closed ? "true" : undefined}
       className={cn(
         "group/chip relative select-none rounded-md",
+        closed && "opacity-60 bg-slate-50",
         isDragging && "opacity-30",
         isCut && (copying ? "ring-2 ring-blue-500 bg-blue-50/60" : "ring-2 ring-amber-400 bg-amber-50/60"),
         reassign && !isCut && !resizeState && "ring-2 ring-rose-500",
@@ -694,9 +723,9 @@ function DraggableWeekJobChip({
         href={`/dashboard/jobs/${job.id}`}
         className={WEEK_CHIP_CLASS}
         cutActive={pickActive}
-        onCut={() => onCut({ bookingId: booking.id, source })}
+        onCut={() => (closed ? toast.error(closedMoveMessage(job)) : onCut({ bookingId: booking.id, source }))}
       >
-        <WeekJobChipBody entry={entry} tag={tag} reassign={reassign} />
+        <WeekJobChipBody entry={entry} tag={tag} reassign={reassign} over={over} />
       </BoardJobLink>
       {/* Two fixed slots, so a handle that stays keeps its DOM node (and its pointer capture). */}
       {handles?.start ? <ResizeHandle edge="start" onStart={start} /> : null}
@@ -851,6 +880,7 @@ export function TeamScheduleView({
   leave = NO_LEAVE,
   viewerRole = null,
   viewerId = null,
+  overHours = null,
 }: {
   jobs: BoardJob[];
   bookings: BoardBooking[];
@@ -864,6 +894,11 @@ export function TeamScheduleView({
   viewerRole?: string | null;
   /** The signed-in user — the Schedule dialog posts booking notes as them. */
   viewerId?: string | null;
+  /**
+   * Used vs allowed hours per job (lib/over-hours.ts) — office/admin only;
+   * null for a technician, or when the read failed (no badges then).
+   */
+  overHours?: HoursByJob | null;
 }) {
   // Narrowed to the methods lib/bookings.ts uses. Not cosmetic: matching the
   // fully-generic typed client against a structural parameter makes
@@ -990,6 +1025,9 @@ export function TeamScheduleView({
     const today: BoardJob[] = [];
     const upcoming: BoardJob[] = [];
     for (const job of boardJobs) {
+      // Completed jobs are on the Week/Day board (greyed), not in the List's
+      // open work — as on the phone, whose List shows open jobs only.
+      if (isClosedJob(job)) continue;
       const days = jobDays.get(job.id) ?? [];
       if (days.length === 0) continue;
       (days.some((d) => d.dateKey === liveTodayKey) ? today : upcoming).push(job);
@@ -1038,7 +1076,36 @@ export function TeamScheduleView({
   // (from today on — past days need no reassigning). Leave never moves, so
   // the resize preview doesn't change it.
   const leaveIndex = useMemo(() => buildLeaveIndex(leave, visibleKeys), [leave, visibleKeys]);
-  const reassign = useMemo(() => bookingsNeedingReassignment(bookings, leave, todayKey), [bookings, leave, todayKey]);
+  // A completed job's bookings are history: never "Needs reassigning".
+  const reassign = useMemo(
+    () =>
+      bookingsNeedingReassignment(
+        bookings.filter((b) => {
+          const job = jobsById.get(b.job_id);
+          return !job || !isClosedJob(job);
+        }),
+        leave,
+        todayKey,
+      ),
+    [bookings, jobsById, leave, todayKey],
+  );
+  const overOn = (entry: BoardEntry): OverHours | null => (overHours ? bookingOverHours(entry.booking, overHours) : null);
+  const closedOn = (entry: BoardEntry) => isClosedJob(entry.job);
+  // The header's "N jobs over their allowed hours": every job on the board
+  // (open, and completed in the board's dates), worst first.
+  const overJobs = useMemo<OverHoursJob[]>(() => {
+    if (!overHours) return [];
+    const byId = new Map(boardJobs.map((j) => [j.id, j]));
+    return jobsOverHours(boardJobs.map((j) => j.id), overHours)
+      .flatMap(({ jobId, items }) => {
+        const job = byId.get(jobId);
+        return job ? [{ id: job.id, job_number: job.job_number, title: job.title, status: job.status, items }] : [];
+      })
+      .sort((a, b) => {
+        const by = (j: OverHoursJob) => Math.max(...j.items.map((i) => i.usedHours - i.allowedHours));
+        return by(b) - by(a) || a.job_number - b.job_number;
+      });
+  }, [overHours, boardJobs]);
   const reassignOn = (entry: BoardEntry) => reassign.get(entry.booking.id)?.some((c) => c.dateKey === entry.day.dateKey) ?? false;
   const leaveOn = (staffId: string, dateKey: string) => leaveIndex.get(staffId)?.get(dateKey) ?? [];
   // The leave day whose details are open, and a pending "book anyway?" question.
@@ -1217,6 +1284,10 @@ export function TeamScheduleView({
       return;
     }
 
+    if (isClosedJob(job)) {
+      toast.error(closedMoveMessage(job));
+      return;
+    }
     const patch = planBoardMove(booking, source, target);
     if (!patch) return; // dropped back where it came from
     if (!(await okToBookOverLeave(job, applyBoardMove(booking, patch)))) return;
@@ -1818,6 +1889,7 @@ export function TeamScheduleView({
           TabsContent, so switching between them keeps the board mounted. */}
       {(tab === "week" || tab === "day") && (
       <div className="mt-4">
+        <OverHoursSummary jobs={overJobs} />
         <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
           <div className="flex items-center gap-2">
             <Button
@@ -2030,7 +2102,7 @@ export function TeamScheduleView({
                           </p>
                         ) : (
                           unassigned.map((entry) => (
-                            <DraggableJobCard key={entry.booking.id} entry={entry} source={source} tag={tagFor(entry)} {...cardWiring} reassign={reassignOn(entry)} />
+                            <DraggableJobCard key={entry.booking.id} entry={entry} source={source} tag={tagFor(entry)} {...cardWiring} reassign={reassignOn(entry)} closed={closedOn(entry)} over={overOn(entry)} />
                           ))
                         )}
                       </CardContent>
@@ -2089,7 +2161,7 @@ export function TeamScheduleView({
                           </p>
                         ) : (
                           memberEntries.map((entry) => (
-                            <DraggableJobCard key={entry.booking.id} entry={entry} source={source} tag={tagFor(entry)} {...cardWiring} reassign={reassignOn(entry)} />
+                            <DraggableJobCard key={entry.booking.id} entry={entry} source={source} tag={tagFor(entry)} {...cardWiring} reassign={reassignOn(entry)} closed={closedOn(entry)} over={overOn(entry)} />
                           ))
                         )}
                       </CardContent>
@@ -2150,6 +2222,8 @@ export function TeamScheduleView({
                         tag={tagFor(entry)}
                         {...cardWiring}
                         reassign={reassignOn(entry)}
+                        closed={closedOn(entry)}
+                        over={overOn(entry)}
                         handles={handlesFor(entry)}
                         onResizeStart={startResize}
                         resizeState={resizeStateFor(entry)}
@@ -2197,6 +2271,8 @@ export function TeamScheduleView({
                               tag={tagFor(entry)}
                               {...cardWiring}
                               reassign={reassignOn(entry)}
+                              closed={closedOn(entry)}
+                              over={overOn(entry)}
                               handles={handlesFor(entry)}
                               onResizeStart={startResize}
                               resizeState={resizeStateFor(entry)}
@@ -2254,13 +2330,13 @@ export function TeamScheduleView({
             viewMode === "day" ? (
               <div className="w-72 shadow-lg rounded-lg rotate-1 bg-white">
                 <div className={JOB_CARD_CLASS}>
-                  <JobCardBody entry={activeEntry} tag={tagFor(activeEntry)} reassign={reassignOn(activeEntry)} />
+                  <JobCardBody entry={activeEntry} tag={tagFor(activeEntry)} reassign={reassignOn(activeEntry)} over={overOn(activeEntry)} />
                 </div>
               </div>
             ) : (
               <div className="w-48 shadow-lg rounded-lg rotate-1 bg-white">
                 <div className={WEEK_CHIP_CLASS}>
-                  <WeekJobChipBody entry={activeEntry} tag={tagFor(activeEntry)} reassign={reassignOn(activeEntry)} />
+                  <WeekJobChipBody entry={activeEntry} tag={tagFor(activeEntry)} reassign={reassignOn(activeEntry)} over={overOn(activeEntry)} />
                 </div>
               </div>
             )

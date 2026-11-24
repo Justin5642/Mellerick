@@ -17,9 +17,33 @@ import {
 } from "@/lib/bookings";
 import { getViewer } from "@/lib/auth/viewer";
 import { boardLeaveRange, loadScheduleLeave } from "@/lib/staff-leave-data";
+import { fetchAllRows, type RangeableQuery } from "@/lib/fetch-all-rows";
+import { businessDayRange } from "@/lib/scheduling";
+import { loadJobHours, OVER_HOURS_CHUNK, type OverHoursClient } from "@/lib/over-hours-data";
 
 const BOARD_COLUMNS =
   "id, job_number, title, status, scheduled_start, scheduled_end, scheduled_cost_center_id, assigned_to, job_assignments(staff_id), customers(name), sites(name, address_line1, suburb, state, site_lat, site_lng)";
+
+// The select string is built at runtime (the fallbacks), so the typed client
+// can't follow it; this is the part of the builder the board's reads use.
+type JobsQuery = RangeableQuery<unknown> & {
+  not: (column: string, operator: string, value: unknown) => JobsQuery;
+  eq: (column: string, value: string) => JobsQuery;
+  lt: (column: string, value: string) => JobsQuery;
+  or: (filters: string) => JobsQuery;
+  order: (column: string, opts?: { ascending?: boolean; nullsFirst?: boolean }) => JobsQuery;
+};
+
+/** ISO without milliseconds, for a PostgREST or() filter value (as the phone's schedule). */
+function filterIso(iso: string): string {
+  return iso.replace(/\.\d{3}Z$/, "Z");
+}
+
+function chunkIds(ids: string[], size = OVER_HOURS_CHUNK): string[][] {
+  const out: string[][] = [];
+  for (let i = 0; i < ids.length; i += size) out.push(ids.slice(i, i + size));
+  return out;
+}
 
 type BoardJobRow = Omit<BoardJob, "crew"> & {
   job_assignments?: { staff_id: string | null }[] | null;
@@ -64,14 +88,29 @@ export default async function SchedulePage() {
   // A scheduled job always has a booking once bookings exist — the derived
   // scheduled_start is set from them — so the filter below still picks
   // exactly the jobs that have something to draw.
-  const loadBoardJobs = async () => {
-    const run = (columns: string) =>
-      supabase
-        .from("jobs")
-        .select(columns)
-        .not("scheduled_start", "is", null)
-        .not("status", "in", '("completed","cancelled")')
-        .order("scheduled_start", { ascending: true, nullsFirst: false });
+  //
+  // COMPLETED jobs are drawn too (Justin, 24 Nov 2026: "the same as the
+  // mobile so it's visible when jobs have been completed"), greyed and
+  // read-only, as the phone's office Schedule tab does: those whose window
+  // touches the board's dates (the leave range — 60 days back to 300 ahead).
+  // Cancelled jobs never show.
+  //
+  // Every read is PAGED (lib/fetch-all-rows.ts): PostgREST answers at most
+  // 1000 rows per request without saying so, so past 1000 scheduled jobs the
+  // board silently lost some — and different ones from the phone. Ordered by
+  // scheduled_start then id so pages never overlap or skip.
+  const leaveRange = boardLeaveRange();
+  const doneFrom = filterIso(businessDayRange(leaveRange.from).dayStartIso);
+  const doneTo = filterIso(businessDayRange(leaveRange.to).dayEndIso);
+  const loadBoardJobs = async (filter: (q: JobsQuery) => JobsQuery) => {
+    const run = async (columns: string) => {
+      const res = await fetchAllRows<unknown>((count) =>
+        filter(supabase.from("jobs").select(columns, count) as unknown as JobsQuery)
+          .order("scheduled_start", { ascending: true, nullsFirst: false })
+          .order("id"),
+      );
+      return res.ok ? { data: res.rows, error: null } : { data: null, error: { message: res.error, code: res.code } };
+    };
     // Each booking's scheduling note (0109) rides along; on a database without
     // that column the embed is retried without it before anything else falls back.
     let withBookings = await run(`${BOARD_COLUMNS}, schedule_daily, schedule_all_day, job_bookings(${BOOKING_COLUMNS}, ${BOOKING_NOTE_COLUMN})`);
@@ -84,12 +123,20 @@ export default async function SchedulePage() {
     const result = await run(`${BOARD_COLUMNS}, schedule_daily, schedule_all_day`);
     return { ...(result.error?.code === "42703" ? await run(BOARD_COLUMNS) : result), hasBookings: false };
   };
+  const openJobsFilter = (q: JobsQuery) =>
+    q.not("scheduled_start", "is", null).not("status", "in", '("completed","cancelled")');
+  const doneJobsFilter = (q: JobsQuery) =>
+    q
+      .eq("status", "completed")
+      .not("scheduled_start", "is", null)
+      .lt("scheduled_start", doneTo)
+      .or(`scheduled_end.gte.${doneFrom},and(scheduled_end.is.null,scheduled_start.gte.${doneFrom})`);
 
   // Staff leave (0112 — a draft, not applied yet's schedule_leave(): the type only for whoever the
   // setting allows — a technician gets "Unavailable"). [] before 0112.
-  const leaveRange = boardLeaveRange();
-  const [{ data: jobRows, hasBookings }, { data: staff }, { count: unscheduledCount }, { data: todoRows, error: todoError }, leave, viewer] = await Promise.all([
-    loadBoardJobs(),
+  const [{ data: jobRows, hasBookings }, { data: doneRows, hasBookings: doneHasBookings, error: doneError }, { data: staff }, { count: unscheduledCount }, { data: todoRows, error: todoError }, leave, viewer] = await Promise.all([
+    loadBoardJobs(openJobsFilter),
+    loadBoardJobs(doneJobsFilter),
     supabase
       .from("profiles")
       .select("id, full_name, role")
@@ -118,15 +165,25 @@ export default async function SchedulePage() {
 
   // The select string is built at runtime (the fallbacks), so the client
   // cannot type the rows; this is the shape every column list returns.
-  const rows = (jobRows ?? []) as unknown as BoardJobRow[];
-  const jobs: BoardJob[] = rows.map((row) => {
-    const { job_assignments, ...job } = row;
-    delete job.job_bookings; // drawn from rawBookings below, not carried on the job
-    return { ...job, crew: crewFromRow(job.assigned_to, job_assignments) };
-  });
-  const rawBookings: JobBooking[] = hasBookings
-    ? rows.flatMap((r) => r.job_bookings ?? [])
-    : jobs.flatMap((j) => bookingsFromJobWindow(j, j.crew));
+  // Completed jobs are best-effort: a failed read leaves them off (the open
+  // jobs are what the office acts on) rather than taking the board down.
+  if (doneError) console.error("[schedule] completed jobs unavailable:", doneError.message);
+  const toBoard = (list: unknown[] | null, withBookings: boolean, skip: Set<string>) => {
+    const rows = ((list ?? []) as BoardJobRow[]).filter((r) => !skip.has(r.id));
+    const jobs: BoardJob[] = rows.map((row) => {
+      const { job_assignments, ...job } = row;
+      delete job.job_bookings; // drawn from rawBookings below, not carried on the job
+      return { ...job, crew: crewFromRow(job.assigned_to, job_assignments) };
+    });
+    const bookings: JobBooking[] = withBookings
+      ? rows.flatMap((r) => r.job_bookings ?? [])
+      : jobs.flatMap((j) => bookingsFromJobWindow(j, j.crew));
+    return { jobs, bookings };
+  };
+  const open = toBoard(jobRows, hasBookings, new Set());
+  const done = toBoard(doneRows, doneHasBookings, new Set(open.jobs.map((j) => j.id)));
+  const jobs: BoardJob[] = [...open.jobs, ...done.jobs];
+  const rawBookings: JobBooking[] = [...open.bookings, ...done.bookings];
 
   // Two follow-up reads, each needing only the batch above and not each
   // other, so they run together.
@@ -149,7 +206,13 @@ export default async function SchedulePage() {
   // page is open to technicians, who cannot read po_cost_centers itself.
   const costCenterIds = Array.from(new Set(rawBookings.map((b) => b.cost_center_id).filter((id): id is string => !!id)));
 
-  const [poRows, missingProfiles, costCenterRows] = await Promise.all([
+  // "Over allowed hours" (24 Nov 2026) — office/admin only; technicians see
+  // the board as before. Read as the viewer (RLS), hours only; null = the read
+  // failed and the board shows no badges.
+  const viewerRole = viewer?.profile?.role ?? null;
+  const canSeeOverHours = viewerRole === "office" || viewerRole === "admin";
+
+  const [poRows, missingProfiles, costCenterRows, overHours] = await Promise.all([
     todoIds.length > 0
       ? supabase.from("purchase_orders_public").select("job_id, total_hours").in("job_id", todoIds).then(({ data }) => data)
       : null,
@@ -157,8 +220,15 @@ export default async function SchedulePage() {
       ? supabase.from("profiles").select("id, full_name, role").in("id", missingIds).then(({ data }) => data)
       : null,
     costCenterIds.length > 0
-      ? supabase.from("po_cost_centers_public").select("id, name").in("id", costCenterIds).then(({ data }) => data)
+      ? // Chunked: completed jobs' bookings add many ids, and a long .in() list
+        // outgrows the request URL.
+        Promise.all(
+          chunkIds(costCenterIds).map((part) =>
+            supabase.from("po_cost_centers_public").select("id, name").in("id", part).then(({ data }) => data ?? []),
+          ),
+        ).then((parts) => parts.flat())
       : null,
+    canSeeOverHours ? loadJobHours(supabase as unknown as OverHoursClient, jobs.map((j) => j.id)) : null,
   ]);
   const costCenterNames = new Map((costCenterRows ?? []).map((cc) => [cc.id, cc.name]));
   const bookings: BoardBooking[] = rawBookings.map((b) => ({
@@ -196,7 +266,7 @@ export default async function SchedulePage() {
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Schedule</h1>
           <p className="text-slate-500 text-sm mt-1">
-            {today.toLocaleDateString("en-AU", { weekday: "long", day: "numeric", month: "long", timeZone: BUSINESS_TIME_ZONE })} · {jobs.length} scheduled jobs
+            {today.toLocaleDateString("en-AU", { weekday: "long", day: "numeric", month: "long", timeZone: BUSINESS_TIME_ZONE })} · {open.jobs.length} scheduled jobs
             {(unscheduledCount ?? 0) > 0 && (
               <>
                 {" "}·{" "}
@@ -222,7 +292,8 @@ export default async function SchedulePage() {
         todoJobs={todoJobs}
         todoError={todoError?.message ?? null}
         leave={leave}
-        viewerRole={viewer?.profile?.role ?? null}
+        viewerRole={viewerRole}
+        overHours={overHours}
         viewerId={viewer?.user?.id ?? null}
       />
     </div>

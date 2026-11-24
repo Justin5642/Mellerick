@@ -56,10 +56,12 @@ export type BookingMenuAction = "copy" | "cut" | "schedule" | "open" | "todo";
 export type BookingMenuItem = { action: BookingMenuAction; label: string; disabled?: string };
 
 /**
- * What the menu offers for a booking. `closed` (completed/cancelled) and
- * `unsaved` (a stand-in still waiting for its row, or one derived from the job
- * window on a database without bookings) can only be opened; the rest is
- * shown greyed with the reason.
+ * What the menu offers for a booking. A `closed` (completed/cancelled) job's
+ * booking offers only "Open job" — the board shows completed jobs greyed
+ * beside the open ones (24 Nov 2026), and copy / cut / back to the to-do list
+ * would all be refused (0096). `unsaved` (a stand-in still waiting for its
+ * row, or one derived from the job window on a database without bookings)
+ * shows the rest greyed with the reason.
  */
 export function bookingMenuItems(opts: {
   closed: string | null;
@@ -67,6 +69,7 @@ export function bookingMenuItems(opts: {
   readOnly: boolean;
   canTodo: boolean;
 }): BookingMenuItem[] {
+  if (opts.closed) return [{ action: "open", label: "Open job" }];
   const blocked = opts.readOnly
     ? "Bookings aren't set up in this database yet"
     : opts.closed
