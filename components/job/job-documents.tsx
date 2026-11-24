@@ -8,13 +8,13 @@ import { Card, CardContent } from "@/components/ui/card";
 import { FileText, Upload, Trash2, Download, File, Lock, LockOpen, ChevronDown, ChevronRight, Folder } from "lucide-react";
 import { formatDate } from "@/lib/date";
 import {
-  DEFAULT_DOCUMENT_FOLDER,
+  DEFAULT_FOLDER_GROUP,
   DOCUMENT_FOLDER_GROUPS,
   documentFolderGroup,
   documentFolderLabel,
+  folderValue,
   groupDocumentsByFolder,
-  isMissingFolderColumn,
-  type DocumentFolder,
+  isFolderNotSwitchedOn,
   type DocumentFolderGroup,
 } from "@/lib/document-folders";
 import { FileDropZone } from "@/components/ui/file-drop-zone";
@@ -53,9 +53,9 @@ export function JobDocuments({ jobId, documents, onUpdate, currentUserId, isOffi
   const inputRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
   const [deleting, setDeleting] = useState<string | null>(null);
-  // Folders (job_documents.folder, 0114; on a database without it every
-  // document is under "Other" and uploads/moves leave the column out).
-  const [uploadFolder, setUploadFolder] = useState<DocumentFolder>(DEFAULT_DOCUMENT_FOLDER);
+  // Folders (job_documents.folder, keys from 0116, drafted — lib/document-folders.ts;
+  // before 0116 an upload the old check refuses is saved under Other).
+  const [uploadFolder, setUploadFolder] = useState<DocumentFolderGroup>(DEFAULT_FOLDER_GROUP);
   const [collapsed, setCollapsed] = useState<Set<DocumentFolderGroup>>(new Set());
   const [moving, setMoving] = useState<string | null>(null);
   const foldersReady = documents.length === 0 || documents.some((d) => d && "folder" in d);
@@ -70,7 +70,7 @@ export function JobDocuments({ jobId, documents, onUpdate, currentUserId, isOffi
 
   // The Upload button, a drop anywhere on the tab and a paste all come here
   // (components/ui/file-drop-zone.tsx). Dropped/pasted files go to the folder
-  // chosen beside the button (default Site Documents) and can be moved after.
+  // chosen beside the button (default Other) and can be moved after.
   async function uploadFiles(files: File[]) {
     if (files.length === 0) return;
     setUploading(true);
@@ -89,8 +89,8 @@ export function JobDocuments({ jobId, documents, onUpdate, currentUserId, isOffi
         file_size: file.size,
         file_type: file.type,
       };
-      let { error: dbError } = await supabase.from("job_documents").insert({ ...row, folder: uploadFolder });
-      if (isMissingFolderColumn(dbError)) ({ error: dbError } = await supabase.from("job_documents").insert(row));
+      let { error: dbError } = await supabase.from("job_documents").insert({ ...row, folder: folderValue(uploadFolder) });
+      if (isFolderNotSwitchedOn(dbError)) ({ error: dbError } = await supabase.from("job_documents").insert(row));
       if (dbError) toast.error(`Failed to save ${file.name}`);
       else saved += 1;
     }
@@ -152,11 +152,11 @@ export function JobDocuments({ jobId, documents, onUpdate, currentUserId, isOffi
   // RLS (0065/0074): office/admin any; the job's crew the ones not office-only.
   async function handleMove(doc: any, group: DocumentFolderGroup) {
     if (documentFolderGroup(doc) === group) return;
-    const folder = group === "other" ? null : group;
+    const folder = folderValue(group);
     setMoving(doc.id);
     const { error, count } = await supabase.from("job_documents").update({ folder }, { count: "exact" }).eq("id", doc.id);
     setMoving(null);
-    if (isMissingFolderColumn(error)) {
+    if (isFolderNotSwitchedOn(error)) {
       toast.error("Folders aren't switched on yet.");
       return;
     }
@@ -208,10 +208,10 @@ export function JobDocuments({ jobId, documents, onUpdate, currentUserId, isOffi
                 <select
                   aria-label="Upload to folder"
                   value={uploadFolder}
-                  onChange={(e) => setUploadFolder(e.target.value as DocumentFolder)}
+                  onChange={(e) => setUploadFolder(e.target.value as DocumentFolderGroup)}
                   className="h-9 rounded-md border border-slate-200 bg-white px-2 text-sm text-slate-700"
                 >
-                  {DOCUMENT_FOLDER_GROUPS.filter((g): g is DocumentFolder => g !== "other").map((g) => (
+                  {DOCUMENT_FOLDER_GROUPS.map((g) => (
                     <option key={g} value={g}>{documentFolderLabel(g)}</option>
                   ))}
                 </select>

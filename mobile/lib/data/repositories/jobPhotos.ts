@@ -19,6 +19,8 @@ export interface AddPhotoInput {
   /** A delivery docket: the supplier PO it belongs to (0093). */
   vendorOrderId?: string;
   caption?: string;
+  /** The photo's folder (0116, drafted — lib/documentFolders.ts); absent/null = Other. */
+  folder?: string | null;
 }
 
 // Offline-first write path for job photos. An add enqueues a single durable
@@ -57,6 +59,9 @@ export class JobPhotosRepository {
         // column a server without 0093 doesn't have.
         ...(input.vendorOrderId ? { vendor_order_id: input.vendorOrderId } : {}),
         ...(input.caption ? { caption: input.caption } : {}),
+        // Only when filed: a photo under Other never names the column, and
+        // the gateway drops it on a database without 0116 (optionalColumns).
+        ...(input.folder ? { folder: input.folder } : {}),
       },
       status: "pending",
       attempts: 0,
@@ -65,6 +70,27 @@ export class JobPhotosRepository {
     };
     await this.outbox.enqueue(write);
     return { id: rowId, storagePath };
+  }
+
+  /** Queue a move to another folder (null = Other). A plain update of one
+   * column: queued after a still-pending insert of the same row, it applies
+   * in order; RLS (0074) lets the job's crew and office/admin make it, and the
+   * gateway fails a refused one (0 rows) rather than reporting it done. */
+  async setFolder(input: { id: string; folder: string | null }): Promise<void> {
+    const write: WriteOperation = {
+      kind: "write",
+      id: this.ids.newId(),
+      rowId: input.id,
+      aggregate: "job_photo",
+      op: "update",
+      table: "job_photos",
+      payload: { folder: input.folder },
+      status: "pending",
+      attempts: 0,
+      nextAttemptAt: 0,
+      createdAt: this.time.nowMs(),
+    };
+    await this.outbox.enqueue(write);
   }
 
   /** Queue a photo delete. The processor removes the Storage object (best-effort)

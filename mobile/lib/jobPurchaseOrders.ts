@@ -222,7 +222,7 @@ export function setJobDocumentOfficeOnly(jobId: string, docId: string, officeOnl
   return callDocuments(`${base(jobId)}/documents/${enc(docId)}`, { method: "PATCH", body: JSON.stringify({ officeOnly }) });
 }
 
-/** Moves a document to a folder (0114 — null = "Other"). */
+/** Moves a document to a folder (keys from the drafted 0116 — null = "Other"). */
 export function setJobDocumentFolder(jobId: string, docId: string, folder: DocumentFolder | null): Promise<{ folder: DocumentFolder | null }> {
   return callDocuments(`${base(jobId)}/documents/${enc(docId)}`, { method: "PATCH", body: JSON.stringify({ folder }) });
 }

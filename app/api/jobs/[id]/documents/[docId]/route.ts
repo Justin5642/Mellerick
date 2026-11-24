@@ -3,13 +3,14 @@ import { requireOfficeOrAdmin } from "@/lib/api/guards";
 import { callerClient } from "@/lib/api/caller-client";
 import { reportError } from "@/lib/monitoring";
 import { isUuidLike } from "@/lib/job-purchase-orders";
-import { isMissingFolderColumn, parseDocumentFolder } from "@/lib/document-folders";
+import { isFolderNotSwitchedOn, parseDocumentFolder } from "@/lib/document-folders";
 
 // One job document, from the phone (office/admin). PATCH sets "Office only"
 // (0065: hidden from technicians, row and file — anything with prices)
-// and/or its folder (`folder`: site_documents / drainage / plumbing / soil, or
-// "other"/null — job_documents.folder, migration 0114; on a database without it
-// a folder change answers FOLDERS_OFF);
+// and/or its folder (`folder`: one of lib/document-folders.ts's keys, or
+// "other"/null — job_documents.folder, keys from migration 0116 (drafted); on a database
+// without the column, or before 0116 replaces 0114's check, a folder change
+// answers FOLDERS_OFF);
 // DELETE removes it, ROW FIRST then the file, the web's order (a refused row
 // delete must not leave a listed document whose file is gone). As the caller.
 
@@ -42,7 +43,7 @@ export async function PATCH(request: NextRequest, { params }: Ctx) {
       .update(patch, { count: "exact" })
       .eq("id", docId)
       .eq("job_id", jobId);
-    if (isMissingFolderColumn(error)) return NextResponse.json({ error: FOLDERS_OFF }, { status: 409 });
+    if (patch.folder !== undefined && isFolderNotSwitchedOn(error)) return NextResponse.json({ error: FOLDERS_OFF }, { status: 409 });
     if (error) throw error;
     if (count === 0) return NextResponse.json({ error: NOT_FOUND }, { status: 404 });
     return NextResponse.json({

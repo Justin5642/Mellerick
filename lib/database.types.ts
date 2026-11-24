@@ -2044,6 +2044,7 @@ export type Database = {
         Row: {
           caption: string | null
           created_at: string | null
+          folder: string | null
           id: string
           job_id: string
           photo_type: string | null
@@ -2056,6 +2057,7 @@ export type Database = {
         Insert: {
           caption?: string | null
           created_at?: string | null
+          folder?: string | null
           id?: string
           job_id: string
           photo_type?: string | null
@@ -2068,6 +2070,7 @@ export type Database = {
         Update: {
           caption?: string | null
           created_at?: string | null
+          folder?: string | null
           id?: string
           job_id?: string
           photo_type?: string | null

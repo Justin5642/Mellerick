@@ -19,8 +19,10 @@ export interface PhotoLibrary {
     ext?: string;
     vendorOrderId?: string;
     caption?: string;
+    folder?: string | null;
   }): Promise<{ id: string; storagePath: string; localUri: string; synced: boolean }>;
   deletePhoto(input: { id: string; storagePath: string }): Promise<{ synced: boolean }>;
+  movePhoto(input: { id: string; folder: string | null }): Promise<{ synced: boolean }>;
 }
 
 export function usePhotoLibrary(): PhotoLibrary {
@@ -38,6 +40,7 @@ export function usePhotoLibrary(): PhotoLibrary {
       ext: input.ext,
       vendorOrderId: input.vendorOrderId,
       caption: input.caption,
+      folder: input.folder,
     });
     return { id, storagePath, localUri, synced: await flush() };
   }, [layer, flush]);
@@ -48,5 +51,11 @@ export function usePhotoLibrary(): PhotoLibrary {
     return { synced: await flush() };
   }, [layer, flush]);
 
-  return { ready: !!layer, addPhoto, deletePhoto };
+  const movePhoto = useCallback<PhotoLibrary["movePhoto"]>(async (input) => {
+    if (!layer) throw new Error("Data layer not ready");
+    await layer.photos.setFolder(input);
+    return { synced: await flush() };
+  }, [layer, flush]);
+
+  return { ready: !!layer, addPhoto, deletePhoto, movePhoto };
 }

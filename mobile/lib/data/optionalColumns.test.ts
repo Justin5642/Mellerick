@@ -12,6 +12,17 @@ describe("withoutMissingOptionalColumns", () => {
     ).toEqual({});
   });
 
+  it("drops job_photos.folder before 0116, so a queued photo still lands (under Other)", () => {
+    const noFolder = { code: "PGRST204", message: "Could not find the 'folder' column of 'job_photos' in the schema cache" };
+    expect(
+      withoutMissingOptionalColumns("job_photos", { job_id: "j1", storage_path: "j1/p.jpg", folder: "r1" }, noFolder)
+    ).toEqual({ job_id: "j1", storage_path: "j1/p.jpg" });
+    // A folder-only move has nothing left: the gateway treats it as done.
+    expect(withoutMissingOptionalColumns("job_photos", { folder: "r1" }, noFolder)).toEqual({});
+    // job_documents.folder is not optional on the phone (it isn't written through the outbox).
+    expect(withoutMissingOptionalColumns("job_documents", { folder: "r1" }, noFolder)).toBeNull();
+  });
+
   it("leaves every other failure alone", () => {
     expect(withoutMissingOptionalColumns("job_bookings", { note: "Hi" }, null)).toBeNull();
     expect(withoutMissingOptionalColumns("job_bookings", { note: "Hi" }, { code: "42501", message: "note" })).toBeNull();

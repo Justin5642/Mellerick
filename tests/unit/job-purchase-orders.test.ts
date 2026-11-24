@@ -51,7 +51,7 @@ interface Op {
 type Tables = Record<string, unknown[]>;
 
 /** A Supabase client double: reads answer from `tables`, writes are recorded and succeed. */
-function fakeClient(tables: Tables, opts: { failUpdate?: boolean } = {}) {
+function fakeClient(tables: Tables, opts: { failUpdate?: boolean; refuseFolder?: { code: string; message: string } } = {}) {
   const ops: Op[] = [];
   const uploads: { bucket: string; path: string; contentType?: string }[] = [];
   const removed: string[] = [];
@@ -59,6 +59,11 @@ function fakeClient(tables: Tables, opts: { failUpdate?: boolean } = {}) {
     const op: Op = { table, action: "select", filters: [] };
     ops.push(op);
     const answer = (single: boolean) => {
+      // A database whose folder check predates 0116 refuses any non-null folder.
+      const folder = (op.payload as { folder?: unknown } | undefined)?.folder;
+      if (opts.refuseFolder && (op.action === "insert" || op.action === "update") && folder != null) {
+        return { data: null, error: opts.refuseFolder, count: null };
+      }
       if (op.action !== "select" && !(op.action === "insert" && single)) {
         const failed = op.action === "update" && opts.failUpdate;
         return { data: null, error: failed ? { message: "denied" } : null, count: failed ? 0 : 1 };
@@ -324,14 +329,30 @@ describe("job documents", () => {
     expect(fake.ops.find((o) => o.action === "update")!.payload).toEqual({ office_only: true });
   });
 
-  it("files an upload in Site Documents by default, or the folder asked for (0114)", async () => {
+  it("files an upload under Other by default, or the folder asked for (0116; an older build's 0114 key mapped)", async () => {
     const fake = fakeClient(baseTables());
     callerClient.mockResolvedValue(fake.client);
     await docPOST(req("POST", { file: PDF, fileName: "a.pdf" }), ctx({}));
-    await docPOST(req("POST", { file: PDF, fileName: "b.pdf", folder: "soil" }), ctx({}));
+    await docPOST(req("POST", { file: PDF, fileName: "b.pdf", folder: "soil_rock" }), ctx({}));
     await docPOST(req("POST", { file: PDF, fileName: "c.pdf", folder: "other" }), ctx({}));
+    await docPOST(req("POST", { file: PDF, fileName: "d.pdf", folder: "drainage" }), ctx({}));
+    await docPOST(req("POST", { file: PDF, fileName: "e.pdf", folder: "site_documents" }), ctx({}));
     const rows = fake.ops.filter((o) => o.table === "job_documents" && o.action === "insert").map((o) => (o.payload as { folder: unknown }).folder);
-    expect(rows).toEqual(["site_documents", "soil", null]);
+    expect(rows).toEqual([null, "soil_rock", null, "drains", null]);
+  });
+
+  it("before 0116, an upload the old check refuses is saved under Other and a move says folders aren't on", async () => {
+    const refuseFolder = { code: "23514", message: 'new row for relation "job_documents" violates check constraint "job_documents_folder_check"' };
+    const fake = fakeClient(baseTables(), { refuseFolder });
+    callerClient.mockResolvedValue(fake.client);
+    const res = await docPOST(req("POST", { file: PDF, fileName: "a.pdf", folder: "rough_in" }), ctx({}));
+    expect(res.status).toBe(200);
+    const inserts = fake.ops.filter((o) => o.table === "job_documents" && o.action === "insert").map((o) => o.payload as Record<string, unknown>);
+    expect(inserts.map((r) => r.folder)).toEqual(["rough_in", undefined]);
+    expect(fake.removed).toEqual([]);
+    const moved = await docPATCH(req("PATCH", { folder: "r1" }), ctx({ docId: ORDER }));
+    expect(moved.status).toBe(409);
+    expect((await moved.json()).error).toBe("Document folders aren't switched on yet.");
   });
 
   it("refuses an unknown folder before touching storage", async () => {
@@ -345,12 +366,12 @@ describe("job documents", () => {
   it("moves a document to another folder, or back to Other", async () => {
     const fake = fakeClient(baseTables());
     callerClient.mockResolvedValue(fake.client);
-    const res = await docPATCH(req("PATCH", { folder: "drainage" }), ctx({ docId: ORDER }));
+    const res = await docPATCH(req("PATCH", { folder: "camera_inspections" }), ctx({ docId: ORDER }));
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ folder: "drainage" });
+    expect(await res.json()).toEqual({ folder: "camera_inspections" });
     await docPATCH(req("PATCH", { folder: null }), ctx({ docId: ORDER }));
     const updates = fake.ops.filter((o) => o.action === "update").map((o) => o.payload);
-    expect(updates).toEqual([{ folder: "drainage" }, { folder: null }]);
+    expect(updates).toEqual([{ folder: "camera_inspections" }, { folder: null }]);
     expect((await docPATCH(req("PATCH", { folder: "money" }), ctx({ docId: ORDER }))).status).toBe(400);
     expect((await docPATCH(req("PATCH", {}), ctx({ docId: ORDER }))).status).toBe(400);
   });

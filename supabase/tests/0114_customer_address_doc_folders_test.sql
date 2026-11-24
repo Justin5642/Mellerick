@@ -31,7 +31,19 @@ declare
   off_office_folder_n int := -1;
   tech_folder_seen text;
   null_folder_ok boolean := false;
+  -- 0116 replaced 0114's folder keys. On a database that has 0116 (CI runs
+  -- every test after every migration) use its keys; the checks are the same.
+  k_a text := 'drainage';
+  k_b text := 'soil';
+  k_c text := 'plumbing';
 begin
+  if exists (
+    select 1 from pg_constraint
+    where conrelid = 'public.job_documents'::regclass and contype = 'c'
+      and pg_get_constraintdef(oid) like '%drains%'
+  ) then
+    k_a := 'drains'; k_b := 'soil_rock'; k_c := 'r1';
+  end if;
   select id into tech from profiles where role = 'technician' and coalesce(is_active, true) order by full_name limit 1;
   select id into off  from profiles where role in ('office', 'admin') and coalesce(is_active, true) order by role desc, full_name limit 1;
   if tech is null or off is null then
@@ -71,16 +83,16 @@ begin
     update customers set billing_address = E'PO Box 114\nNutfield VIC 3099' where id = cid;
     get diagnostics off_addr_n = row_count;
     select billing_address into off_addr from customers where id = cid;
-    update job_documents set folder = 'soil' where id = doc_office;
+    update job_documents set folder = k_b where id = doc_office;
     get diagnostics off_office_folder_n = row_count;
     execute 'reset role';
 
     -- Technician on the job: files the open document, not the office-only one ----
     perform set_config('request.jwt.claims', json_build_object('sub', tech, 'role', 'authenticated')::text, true);
     execute 'set local role authenticated';
-    update job_documents set folder = 'drainage' where id = doc_open;
+    update job_documents set folder = k_a where id = doc_open;
     get diagnostics tech_folder_n = row_count;
-    update job_documents set folder = 'plumbing' where id = doc_office;
+    update job_documents set folder = k_c where id = doc_office;
     get diagnostics tech_office_folder_n = row_count;
     select folder into tech_folder_seen from job_documents where id = doc_open;
     execute 'reset role';
@@ -101,7 +113,7 @@ begin
       failures := failures || 'office/admin could not set a billing address; ';
     end if;
     if off_office_folder_n <> 1 then failures := failures || 'office/admin could not file an office-only document; '; end if;
-    if tech_folder_n <> 1 or tech_folder_seen is distinct from 'drainage' then
+    if tech_folder_n <> 1 or tech_folder_seen is distinct from k_a then
       failures := failures || 'the job''s technician could not file a document; ';
     end if;
     if tech_office_folder_n <> 0 then failures := failures || 'a technician changed an office-only document (0065 broken); '; end if;

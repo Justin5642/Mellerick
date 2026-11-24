@@ -2,7 +2,9 @@
 // applied. Today: job_bookings.note (0109 — the booking's scheduling note),
 // and customers.billing_address (0114 — applied 2026-11-21; kept for a
 // database without it, where a customer keeps every other field and only
-// loses the address).
+// loses the address), and job_photos.folder (0116, draft — a queued photo
+// keeps everything else and lands under "Other"; a queued folder move has
+// nothing left to write and is done).
 //
 // Why the gateway needs this: a write sitting in the outbox is replayed as it
 // was queued. If the phone ships before 0109 is applied, an insert or edit
@@ -18,6 +20,7 @@
 export const OPTIONAL_COLUMNS: Readonly<Record<string, readonly string[]>> = {
   job_bookings: ["note"],
   customers: ["billing_address"],
+  job_photos: ["folder"],
 };
 
 /**

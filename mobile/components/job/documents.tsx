@@ -10,13 +10,12 @@ import { KeyboardSheet, KEYBOARD_SHEET_INPUT_FONT_SIZE } from "../KeyboardSheet"
 import { prepareImage } from "../../lib/imageUpload";
 import { deleteJobDocument, documentPhotoName, setJobDocumentFolder, setJobDocumentOfficeOnly, uploadJobDocument } from "../../lib/jobPurchaseOrders";
 import {
-  DEFAULT_DOCUMENT_FOLDER,
-  DOCUMENT_FOLDERS,
+  DEFAULT_FOLDER_GROUP,
   DOCUMENT_FOLDER_GROUPS,
   documentFolderGroup,
   documentFolderLabel,
+  folderValue,
   groupDocumentsByFolder,
-  type DocumentFolder,
   type DocumentFolderGroup,
 } from "../../lib/documentFolders";
 import { pickPhoto } from "../../lib/pickPhoto";
@@ -32,7 +31,7 @@ interface Document {
   // Hidden from technicians by RLS (migration 0065) — only office/admin ever
   // receive these rows, so the label is only ever seen by them.
   office_only?: boolean;
-  // Folder (job_documents.folder, 0114): null/absent = "Other".
+  // Folder (job_documents.folder, 0114; keys from 0116, drafted): null/absent = "Other".
   folder?: string | null;
 }
 
@@ -58,7 +57,7 @@ interface UploadDraft {
   uri: string;
   name: string;
   officeOnly: boolean;
-  folder: DocumentFolder;
+  folder: DocumentFolderGroup;
 }
 
 export function JobDocumentsTab({ jobId }: { jobId: string }) {
@@ -122,7 +121,7 @@ export function JobDocumentsTab({ jobId }: { jobId: string }) {
 
   async function startUpload(source: "camera" | "library") {
     const uri = await pickPhoto(source);
-    if (uri) setUpload({ uri, name: "", officeOnly: false, folder: DEFAULT_DOCUMENT_FOLDER });
+    if (uri) setUpload({ uri, name: "", officeOnly: false, folder: DEFAULT_FOLDER_GROUP });
   }
 
   async function saveUpload() {
@@ -131,7 +130,7 @@ export function JobDocumentsTab({ jobId }: { jobId: string }) {
     try {
       const { base64 } = await prepareImage(upload.uri, { base64: true });
       if (!base64) throw new Error("Couldn't prepare the photo — take it again.");
-      await uploadJobDocument(jobId, { file: base64, fileName: documentPhotoName(upload.name), officeOnly: upload.officeOnly, folder: upload.folder });
+      await uploadJobDocument(jobId, { file: base64, fileName: documentPhotoName(upload.name), officeOnly: upload.officeOnly, folder: folderValue(upload.folder) });
       setUpload(null);
       await loadDocuments();
     } catch (e) {
@@ -327,7 +326,7 @@ export function JobDocumentsTab({ jobId }: { jobId: string }) {
             <>
               <Text style={[styles.label, { marginTop: 14 }]}>Folder</Text>
               <View style={styles.chips}>
-                {DOCUMENT_FOLDERS.map((f) => (
+                {DOCUMENT_FOLDER_GROUPS.map((f) => (
                   <TouchableOpacity
                     key={f}
                     style={[styles.chip, upload.folder === f && styles.chipOn]}
