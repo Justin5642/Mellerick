@@ -17,6 +17,12 @@ import {
   type DocumentFolder,
   type DocumentFolderGroup,
 } from "@/lib/document-folders";
+import { FileDropZone } from "@/components/ui/file-drop-zone";
+
+// The Upload button's accept list — also checked for drops and pastes, which
+// the browser doesn't filter.
+const DOCUMENT_ACCEPT = ".pdf,.doc,.docx,.dwg,.dxf,.png,.jpg,.jpeg,.xlsx,.xls";
+const DOCUMENT_HINT = "PDF, Word, Excel, DWG/DXF, PNG or JPG";
 
 const fileIcons: Record<string, string> = {
   "application/pdf": "PDF",
@@ -47,7 +53,6 @@ export function JobDocuments({ jobId, documents, onUpdate, currentUserId, isOffi
   const inputRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
   const [deleting, setDeleting] = useState<string | null>(null);
-  const [dragActive, setDragActive] = useState(false);
   // Folders (job_documents.folder, 0114; on a database without it every
   // document is under "Other" and uploads/moves leave the column out).
   const [uploadFolder, setUploadFolder] = useState<DocumentFolder>(DEFAULT_DOCUMENT_FOLDER);
@@ -59,32 +64,19 @@ export function JobDocuments({ jobId, documents, onUpdate, currentUserId, isOffi
   async function handleUpload(e: React.ChangeEvent<HTMLInputElement>) {
     const files = e.target.files;
     if (!files || files.length === 0) return;
-    await uploadFiles(files);
+    await uploadFiles(Array.from(files));
     if (inputRef.current) inputRef.current.value = "";
   }
 
-  function handleDragOver(e: React.DragEvent) {
-    e.preventDefault();
-    setDragActive(true);
-  }
-
-  function handleDragLeave(e: React.DragEvent) {
-    e.preventDefault();
-    setDragActive(false);
-  }
-
-  async function handleDrop(e: React.DragEvent) {
-    e.preventDefault();
-    setDragActive(false);
-    const files = e.dataTransfer.files;
-    if (!files || files.length === 0) return;
-    await uploadFiles(files);
-  }
-
-  async function uploadFiles(files: FileList) {
+  // The Upload button, a drop anywhere on the tab and a paste all come here
+  // (components/ui/file-drop-zone.tsx). Dropped/pasted files go to the folder
+  // chosen beside the button (default Site Documents) and can be moved after.
+  async function uploadFiles(files: File[]) {
+    if (files.length === 0) return;
     setUploading(true);
+    let saved = 0;
 
-    for (const file of Array.from(files)) {
+    for (const file of files) {
       const path = `${jobId}/${Date.now()}_${file.name.replace(/[^a-zA-Z0-9._-]/g, "_")}`;
       const { error: uploadError } = await supabase.storage.from("job-documents").upload(path, file);
       if (uploadError) { toast.error(`Failed to upload ${file.name}`); continue; }
@@ -100,11 +92,15 @@ export function JobDocuments({ jobId, documents, onUpdate, currentUserId, isOffi
       let { error: dbError } = await supabase.from("job_documents").insert({ ...row, folder: uploadFolder });
       if (isMissingFolderColumn(dbError)) ({ error: dbError } = await supabase.from("job_documents").insert(row));
       if (dbError) toast.error(`Failed to save ${file.name}`);
+      else saved += 1;
     }
 
     const { data } = await supabase.from("job_documents").select("*, profiles(full_name)").eq("job_id", jobId).order("created_at", { ascending: false });
     onUpdate(data ?? []);
-    toast.success("Documents uploaded");
+    if (saved > 0) {
+      const where = foldersReady ? ` to ${documentFolderLabel(uploadFolder)}` : "";
+      toast.success(`${saved === 1 ? "Document" : `${saved} documents`} uploaded${where}`);
+    }
     setUploading(false);
   }
 
@@ -188,6 +184,15 @@ export function JobDocuments({ jobId, documents, onUpdate, currentUserId, isOffi
   }
 
   return (
+    <FileDropZone
+      onFiles={uploadFiles}
+      accept={DOCUMENT_ACCEPT}
+      hint={DOCUMENT_HINT}
+      label={foldersReady ? `Drop files to upload to ${documentFolderLabel(uploadFolder)}` : "Drop files to upload"}
+      disabled={readOnly}
+      busy={uploading}
+      className="min-h-full"
+    >
     <div className="p-6 space-y-4">
       <div className="flex items-center justify-between">
         <div>
@@ -196,7 +201,7 @@ export function JobDocuments({ jobId, documents, onUpdate, currentUserId, isOffi
         </div>
         <div>
           <input ref={inputRef} type="file" multiple className="hidden" onChange={handleUpload}
-            accept=".pdf,.doc,.docx,.dwg,.dxf,.png,.jpg,.jpeg,.xlsx,.xls" />
+            accept={DOCUMENT_ACCEPT} />
           {!readOnly && (
             <div className="flex items-center gap-2">
               {foldersReady && (
@@ -221,26 +226,18 @@ export function JobDocuments({ jobId, documents, onUpdate, currentUserId, isOffi
       </div>
 
       {documents.length === 0 ? (
-        <Card className={dragActive ? "border-blue-400 bg-blue-50/40" : undefined}>
+        <Card>
           <CardContent
-            className={`flex flex-col items-center justify-center py-16 cursor-pointer transition-colors ${dragActive ? "text-blue-500" : "text-slate-400 hover:bg-slate-50"}`}
+            className={`flex flex-col items-center justify-center py-16 transition-colors text-slate-400 ${readOnly ? "" : "cursor-pointer hover:bg-slate-50"}`}
             onClick={readOnly ? undefined : () => inputRef.current?.click()}
-            onDragOver={readOnly ? undefined : handleDragOver}
-            onDragLeave={readOnly ? undefined : handleDragLeave}
-            onDrop={readOnly ? undefined : handleDrop}
           >
             <FileText className="w-12 h-12 mb-3 opacity-40" />
-            <p className="text-sm font-medium">{dragActive ? "Drop files to upload" : "No documents yet"}</p>
-            <p className="text-xs mt-1">{dragActive ? "Release to upload" : "Click, or drag and drop, to upload plans, specs, permits and more"}</p>
+            <p className="text-sm font-medium">No documents yet</p>
+            {!readOnly && <p className="text-xs mt-1">Click, drag files here, or paste (Ctrl+V) to upload plans, specs, permits and more</p>}
           </CardContent>
         </Card>
       ) : (
-        <div
-          className={`grid grid-cols-1 gap-3 rounded-lg transition-colors ${dragActive ? "ring-2 ring-blue-400 ring-offset-2 bg-blue-50/30" : ""}`}
-          onDragOver={handleDragOver}
-          onDragLeave={handleDragLeave}
-          onDrop={handleDrop}
-        >
+        <div className="grid grid-cols-1 gap-3">
           {sections.map((section) => {
             const open = !collapsed.has(section.folder);
             return (
@@ -319,5 +316,6 @@ export function JobDocuments({ jobId, documents, onUpdate, currentUserId, isOffi
         </div>
       )}
     </div>
+    </FileDropZone>
   );
 }

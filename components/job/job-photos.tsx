@@ -12,10 +12,13 @@ import { photoTagColors } from "@/lib/badge-colors";
 import { resizeImageForUpload } from "@/lib/image-resize";
 import { getCachedSignedUrl, putCachedSignedUrl } from "@/lib/signed-url-cache";
 import { thumbPathFor } from "@/lib/photo-thumbs";
+import { FileDropZone } from "@/components/ui/file-drop-zone";
 
 const SIGNED_URL_TTL_S = 3600;
 // Uploads run a few at a time rather than strictly one after another.
 const UPLOAD_CONCURRENCY = 3;
+// The upload button's accept list — also checked for drops and pastes.
+const PHOTO_ACCEPT = "image/*";
 
 interface Props {
   jobId: string;
@@ -107,6 +110,13 @@ export function JobPhotos({ jobId, photos, onUpdate, currentUserId, readOnly = f
   async function handleUpload(e: React.ChangeEvent<HTMLInputElement>) {
     const files = e.target.files;
     if (!files || files.length === 0) return;
+    await uploadFiles(Array.from(files));
+  }
+
+  // The Upload button, a drop anywhere on the tab and a paste all come here
+  // (components/ui/file-drop-zone.tsx), so every path resizes and records alike.
+  async function uploadFiles(files: File[]) {
+    if (files.length === 0) return;
     setUploading(true);
 
     // The upload was checked and the ROW INSERT was not — the same asymmetry as
@@ -134,7 +144,7 @@ export function JobPhotos({ jobId, photos, onUpdate, currentUserId, readOnly = f
         failed.push(original.name);
       }
     };
-    const queue = Array.from(files);
+    const queue = [...files];
     await Promise.all(
       Array.from({ length: Math.min(UPLOAD_CONCURRENCY, queue.length) }, async () => {
         for (let next = queue.shift(); next; next = queue.shift()) await uploadOne(next);
@@ -146,7 +156,7 @@ export function JobPhotos({ jobId, photos, onUpdate, currentUserId, readOnly = f
     if (failed.length) {
       toast.error(`${failed.length} photo(s) did not save: ${failed.join(", ")}. Please try again.`);
     } else {
-      toast.success("Photos uploaded");
+      toast.success(files.length === 1 ? "Photo uploaded" : `${files.length} photos uploaded`);
     }
     setUploading(false);
     if (inputRef.current) inputRef.current.value = "";
@@ -214,6 +224,15 @@ export function JobPhotos({ jobId, photos, onUpdate, currentUserId, readOnly = f
   }
 
   return (
+    <FileDropZone
+      onFiles={uploadFiles}
+      accept={PHOTO_ACCEPT}
+      hint="Photos only (JPEG, PNG, HEIC…)"
+      label="Drop photos to upload"
+      disabled={readOnly}
+      busy={uploading}
+      className="min-h-full"
+    >
     <div className="p-6 space-y-4">
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
@@ -232,7 +251,7 @@ export function JobPhotos({ jobId, photos, onUpdate, currentUserId, readOnly = f
               <SelectItem value="general">General</SelectItem>
             </SelectContent>
           </Select>
-          <input ref={inputRef} type="file" multiple accept="image/*" className="hidden" onChange={handleUpload} />
+          <input ref={inputRef} type="file" multiple accept={PHOTO_ACCEPT} className="hidden" onChange={handleUpload} />
           <Button onClick={() => inputRef.current?.click()} disabled={uploading} className="gap-2 h-9">
             <Upload className="w-4 h-4" />
             {uploading ? "Uploading..." : "Upload Photos"}
@@ -248,7 +267,7 @@ export function JobPhotos({ jobId, photos, onUpdate, currentUserId, readOnly = f
         >
           <ImageIcon className="w-12 h-12 mb-3 opacity-40" />
           <p className="text-sm font-medium">No photos yet</p>
-          <p className="text-xs mt-1">Click to upload site photos</p>
+          {!readOnly && <p className="text-xs mt-1">Click, drag photos here, or paste (Ctrl+V) to upload</p>}
         </div>
       ) : (
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5 gap-3">
@@ -271,6 +290,7 @@ export function JobPhotos({ jobId, photos, onUpdate, currentUserId, readOnly = f
         </DialogContent>
       </Dialog>
     </div>
+    </FileDropZone>
   );
 }
 

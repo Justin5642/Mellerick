@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireUser } from "@/lib/api/guards";
-import { geocodeAddress } from "@/lib/geocode";
+import { requireOfficeOrAdmin, requireUser } from "@/lib/api/guards";
+import { ADDRESS_SEARCH_MAX_LENGTH, geocodeAddress, searchAddresses } from "@/lib/geocode";
 
 // Simple fixed-window in-memory rate limit, keyed per user. Nominatim's usage
 // policy is strict (1 req/sec); this also stops a compromised session from
@@ -23,6 +23,29 @@ function rateLimited(key: string): boolean {
 }
 
 export async function GET(request: NextRequest) {
+  // ?search=1&q=… — several suggestions (street/suburb matches included,
+  // labelled approximate) for the office's "Set location on map" dialog. A
+  // person picks one and confirms the pin, so vaguer matches are fine there;
+  // office/admin only, like setting a site's pin on the web (sites are
+  // office-writable, 0064). Shares the per-user limit below.
+  if (request.nextUrl.searchParams.get("search") === "1") {
+    const guard = await requireOfficeOrAdmin(request);
+    if (!guard.ok) return guard.response;
+    if (rateLimited(guard.userId)) {
+      return NextResponse.json({ error: "Rate limit exceeded, try again shortly" }, { status: 429 });
+    }
+    const q = (request.nextUrl.searchParams.get("q") ?? "").trim();
+    if (q.length < 3) return NextResponse.json({ error: "Type at least 3 characters" }, { status: 400 });
+    if (q.length > ADDRESS_SEARCH_MAX_LENGTH) return NextResponse.json({ error: "That address is too long" }, { status: 400 });
+    try {
+      const results = await searchAddresses(q, { signal: AbortSignal.timeout(10_000) });
+      return NextResponse.json({ results });
+    } catch (err) {
+      console.error("geocode: search failed", err);
+      return NextResponse.json({ error: "Address lookup is unavailable, try again shortly" }, { status: 502 });
+    }
+  }
+
   // Authenticated staff only — this was previously an open proxy to a
   // third-party geocoder under the app's shared User-Agent.
   const guard = await requireUser(request);
