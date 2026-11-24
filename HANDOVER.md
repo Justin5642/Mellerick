@@ -548,6 +548,80 @@ hidden everywhere (0067); some list pages lacked indexes (0070). 0114 (and so
   run `scripts/audit-job-documents.mjs` (dry run, then `--commit`) to flag the
   Simpro attachments that show prices as office-only.
 
+**Web and phone schedules aligned: completed jobs on the web board, "Over allowed hours", no 1,000-row cap (24 Nov 2026; no migration, no stream change).**
+Justin: "The 2 schedules not aligned … it needs to be the same as the mobile
+so it's visible when jobs have been completed, with an alert for the jobs that
+have gone over the allocated time."
+- **Completed jobs on the web board** (`app/dashboard/schedule/page.tsx`): as
+  well as every open scheduled job, the page now loads COMPLETED jobs (never
+  cancelled) whose window touches the board's dates — `boardLeaveRange()`, 60
+  days back to 300 ahead — with their bookings (the phone loads completed jobs
+  for the days on screen; same filter: `scheduled_start < to` and
+  `scheduled_end >= from`, or no end and `scheduled_start >= from`). Read-only
+  and greyed (`team-schedule-view.tsx`): dimmed card, ✓ and "Completed" on
+  the Week chip, the status pill on the Day card; dnd-kit drag disabled, no
+  resize handles (as before for closed jobs), double-click cut and paste
+  refused with "#n is completed — its bookings can't be moved.", and the hold
+  / right-click menu offers only **Open job** (`bookingMenuItems`, closed →
+  `[open]`). A click still opens the job. Like the phone, they count toward a
+  technician's booked hours that day (and so the "N h free" gap) and toward
+  "already booked then" clash prompts; unlike before on the phone, neither
+  side flags a completed job's booking **Needs reassigning** (it can't be
+  reassigned) — the phone's `reassign` now leaves completed jobs out too. The
+  List tab stays open work only (the phone's List never had completed jobs);
+  the header's "N scheduled jobs" counts open jobs.
+- **The 1,000-row cap.** PostgREST answers at most 1000 rows per request
+  (`max_rows`) without an error, so past 1000 the two schedules silently
+  dropped DIFFERENT rows. Web: the board's jobs reads (open and completed, with
+  every column fallback) go through `lib/fetch-all-rows.ts`, ordered
+  `scheduled_start, id` (its failure result now also carries the PostgREST
+  `code`, so the 42703 / missing-table fallbacks still work); the cost-centre
+  name read is chunked (100 ids). Embedded `job_bookings` aren't capped per
+  job. Phone: new `mobile/lib/data/reads/pagedRows.ts` (`readAllPages`,
+  `chunkIds`, `mergeResults`; tested) pages the Schedule tab's open-jobs read,
+  its completed-jobs read, `listOpenJobBookingsRemote` (ordered `starts_at,
+  id`) and `listJobBookingsForJobsRemote` (chunked + paged).
+- **"Over allowed hours"** — office/admin only on both (technicians see the
+  boards as before; the web page doesn't even read the hours for them). Rule
+  `lib/over-hours.ts` (pure, `tests/unit/over-hours.test.ts`), mirrored from
+  the first export at `mobile/lib/overHours.ts`
+  (`tests/unit/over-hours-mirror.test.ts`):
+  - **Allowed:** each builder PO line's `allocated_hours`
+    (`po_cost_centers_public`); the job's total = the lines' sum, or — when no
+    line has hours — the POs' `total_hours` (`purchase_orders_public`). Both
+    money-free views; no amount/value/rate column is selected anywhere
+    (pinned by `tests/unit/over-hours-data.test.ts` and the phone's
+    `reads/overHours.test.ts`).
+  - **Used:** `time_entries` on the job, WORK only (travel never counts — as
+    the technicians' hours scoreboard, `lib/hours-scoreboard.ts`); a closed
+    entry its `hours`, an open one the live time since `clock_in`. Unlike the
+    scoreboard (which takes only the first open entry), every open entry
+    counts — several crew can be clocked on at once. Per line by the entry's
+    `cost_center_id`; entries with no or another cost centre count only to
+    the job total.
+  - **Per booking:** its own cost-centre line when that line has allowed
+    hours and is over ("Over hours: 34 h of 30 h (Drainage)"), otherwise the
+    whole job when its total is over ("Over hours: 120 h of 100 h"). Over =
+    used > allowed after rounding both to 0.1 h. Nothing allowed → never
+    flagged. Completed jobs included.
+  - **Web:** the page reads hours for the board's jobs as the CALLER
+    (`lib/over-hours-data.ts` `loadJobHours`: `.in()` in chunks of 100, every
+    chunk paged; a failed read = no badges, never a partial total) and passes
+    a plain object to the board. Cards get an amber "Over 34 h/30 h" tag (the
+    full sentence on hover); above the board **"N jobs over their allowed
+    hours"** opens the list (job link, each over line / the whole job, used of
+    allowed), worst first (`components/schedule/over-hours-summary.tsx`).
+  - **Phone:** `mobile/lib/data/reads/overHours.ts` `listJobHours` (online,
+    best-effort, same reads) for every job on screen; grid blocks get an amber
+    border and "⚠ Over 34 h/30 h ·", the booking's menu sheet shows the full
+    sentence, List rows a "⚠ Over hours ·" prefix, and a bar under the to-do
+    buttons "N jobs over their allowed hours" opens the list (tap → the job).
+- Checked in Chromium with mock data (1500 px): a completed booking greyed
+  with "Completed", right-click menu = Open job only, not in the List tab; two
+  over-hours tags (a line and a whole-job alert, the completed job included)
+  and the header list. Phone not yet checked on a device; it reaches phones
+  with the next build (no native module).
+
 **Load page data on the server, not in the browser.** A browser→Supabase
 query from Australia costs ~100 ms+; a server query in `sin1` costs ~2 ms. So
 My Jobs, Approvals, Staff, Fleet and Customers are server pages that pass

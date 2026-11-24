@@ -85,6 +85,12 @@ import { todoHours } from "../../lib/todoList";
 import { closedJobScheduleMessage, isJobClosedForScheduling } from "../../lib/jobSchedulable";
 import { crewJoinWindow, crewLeaveConflicts, describeCrewLeave } from "../../lib/crewLeave";
 import { useIsAdmin, useIsOfficeOrAdmin } from "../../design/guards/useRole";
+// "Over allowed hours" (Justin, 24 Nov 2026 — the web board has it too): a tag
+// on each booking whose job or cost centre has used more hours than its POs
+// allow, and a count above the grid. Hours only; office/admin only.
+import { bookingOverHours, formatOverHours, jobsOverHours, overHoursHeadline, type HoursByJob } from "../../lib/overHours";
+import { listJobHours } from "../../lib/data/reads/overHours";
+import { readAllPages } from "../../lib/data/reads/pagedRows";
 
 interface SchedJob {
   id: string;
@@ -280,12 +286,18 @@ export default function ScheduleScreen() {
   const load = useCallback(async () => {
     try {
       setError(null);
-      const res = await supabase
-        .from("jobs")
-        .select("*, customers(name), profiles!jobs_assigned_to_fkey(full_name)")
-        .not("scheduled_start", "is", null)
-        .not("status", "in", '("completed","cancelled")')
-        .order("scheduled_start");
+      // Paged: PostgREST answers at most 1000 rows a request and says nothing,
+      // so past 1000 open jobs one request silently dropped some (24 Nov 2026).
+      const res = await readAllPages((from, to) =>
+        supabase
+          .from("jobs")
+          .select("*, customers(name), profiles!jobs_assigned_to_fkey(full_name)")
+          .not("scheduled_start", "is", null)
+          .not("status", "in", '("completed","cancelled")')
+          .order("scheduled_start")
+          .order("id")
+          .range(from, to)
+      );
       setJobs(unwrapRows(res as never, "ScheduleScreen.load") as unknown as SchedJob[]);
     } catch (e) {
       setError(e);
@@ -343,13 +355,17 @@ export default function ScheduleScreen() {
     const from = filterIso(businessDayRange(rangeFirst).dayStartIso);
     const to = filterIso(businessDayRange(rangeLast).dayEndIso);
     try {
-      const res = await supabase
-        .from("jobs")
-        .select("*, customers(name), profiles!jobs_assigned_to_fkey(full_name)")
-        .eq("status", "completed")
-        .lt("scheduled_start", to)
-        .or(`scheduled_end.gte.${from},and(scheduled_end.is.null,scheduled_start.gte.${from})`)
-        .order("scheduled_start");
+      const res = await readAllPages((first, last) =>
+        supabase
+          .from("jobs")
+          .select("*, customers(name), profiles!jobs_assigned_to_fkey(full_name)")
+          .eq("status", "completed")
+          .lt("scheduled_start", to)
+          .or(`scheduled_end.gte.${from},and(scheduled_end.is.null,scheduled_start.gte.${from})`)
+          .order("scheduled_start")
+          .order("id")
+          .range(first, last)
+      );
       const rows = unwrapRows(res as never, "ScheduleScreen.loadDone") as unknown as SchedJob[];
       setDoneJobs(rows);
       setDoneBookings(await listJobBookingsForJobsRemote(rows.map((j) => j.id)));
@@ -377,6 +393,32 @@ export default function ScheduleScreen() {
     return byId;
   }, [jobs, doneJobs]);
   const jobsById = useMemo(() => new Map([...allJobs.values()].map((j) => [j.id, toBoardJob(j)])), [allJobs]);
+
+  // Used vs allowed hours for every job on screen (open, and completed in the
+  // period) — office/admin, online, best-effort: null shows no tags.
+  const [overHours, setOverHours] = useState<HoursByJob | null>(null);
+  const overJobIds = useMemo(() => [...allJobs.keys()].sort().join(","), [allJobs]);
+  useEffect(() => {
+    if (!canTodo || !overJobIds) {
+      setOverHours(null);
+      return;
+    }
+    let live = true;
+    void listJobHours(overJobIds.split(",")).then((h) => {
+      if (live) setOverHours(h);
+    });
+    return () => {
+      live = false;
+    };
+  }, [canTodo, overJobIds]);
+  const overJobs = useMemo(() => {
+    if (!overHours) return [];
+    return jobsOverHours([...allJobs.keys()], overHours).flatMap(({ jobId, items }) => {
+      const job = allJobs.get(jobId);
+      return job ? [{ job, items }] : [];
+    });
+  }, [overHours, allJobs]);
+  const [overOpen, setOverOpen] = useState(false);
 
   // Every booking on the grid: the real ones, plus a read-only stand-in for
   // any job without bookings (job_bookings missing, or a read that failed).
@@ -413,7 +455,11 @@ export default function ScheduleScreen() {
   const board = useMemo(() => buildBoardIndex(boardBookings, jobsById, dayKeys, bookingDays), [boardBookings, jobsById, dayKeys, bookingDays]);
   const leaveIndex = useMemo(() => buildLeaveIndex(leave, dayKeys), [leave, dayKeys]);
   // Bookings on their technician's leave day, from today on.
-  const reassign = useMemo(() => bookingsNeedingReassignment(realBookings, leave, todayKey), [realBookings, leave, todayKey]);
+  // A completed job's bookings are history: never "Needs reassigning" (as the web board).
+  const reassign = useMemo(
+    () => bookingsNeedingReassignment(realBookings.filter((b) => allJobs.get(b.job_id)?.status !== "completed"), leave, todayKey),
+    [realBookings, allJobs, leave, todayKey]
+  );
   const staffNames = useMemo(() => {
     const names = new Map<string, string>();
     for (const b of realBookings) if (b.staff_id && b.staff_name) names.set(b.staff_id, b.staff_name);
@@ -1290,6 +1336,18 @@ export default function ScheduleScreen() {
           )}
         </View>
       ) : null}
+      {canTodo && overJobs.length > 0 ? (
+        <TouchableOpacity
+          style={styles.overBar}
+          onPress={() => setOverOpen(true)}
+          accessibilityRole="button"
+          accessibilityLabel={`${overHoursHeadline(overJobs.length)}. Show them.`}
+        >
+          <Ionicons name="warning-outline" size={16} color="#b45309" />
+          <Text style={styles.overBarText}>{overHoursHeadline(overJobs.length)}</Text>
+          <Ionicons name="chevron-forward" size={14} color="#b45309" />
+        </TouchableOpacity>
+      ) : null}
       {staffError && view !== "list" ? (
         <TouchableOpacity style={[styles.staffErrorRow, { marginHorizontal: 12, marginBottom: 6 }]} onPress={loadStaff}>
           <Ionicons name="alert-circle-outline" size={18} color={colors.orange700} />
@@ -1315,6 +1373,7 @@ export default function ScheduleScreen() {
           onResize={onGridResize}
           leave={leaveIndex}
           reassign={reassign}
+          overHours={canTodo ? overHours : null}
           onOpenLeave={onOpenLeave}
           gapFor={canTodo ? gapFor : undefined}
           onGapPress={onGapPress}
@@ -1343,7 +1402,7 @@ export default function ScheduleScreen() {
                 title={item.job.title}
                 // Rows under "Earlier" have no day heading above them, so they
                 // carry their own date.
-                subtitle={`${item.booking && reassign.get(item.booking.id)?.some((c) => c.dateKey === day.dateKey) ? `${NEEDS_REASSIGNING} · ` : ""}${section.earlier ? `${businessDayLabel(day.startIso)} · ` : ""}${item.job.customers?.name ?? "—"} · ${item.who ?? "Unassigned"}${count > 1 ? ` · Day ${index + 1} of ${count}` : ""}`}
+                subtitle={`${canTodo && overHours && bookingOverHours({ job_id: item.job.id, cost_center_id: item.booking?.cost_center_id ?? null }, overHours) ? "⚠ Over hours · " : ""}${item.booking && reassign.get(item.booking.id)?.some((c) => c.dateKey === day.dateKey) ? `${NEEDS_REASSIGNING} · ` : ""}${section.earlier ? `${businessDayLabel(day.startIso)} · ` : ""}${item.job.customers?.name ?? "—"} · ${item.who ?? "Unassigned"}${count > 1 ? ` · Day ${index + 1} of ${count}` : ""}`}
                 status={item.job.status}
                 leading={
                   <View style={styles.timeCol}>
@@ -1363,6 +1422,38 @@ export default function ScheduleScreen() {
       )}
 
       {/* Action menu */}
+      <Modal visible={overOpen} transparent animationType="fade" onRequestClose={() => setOverOpen(false)}>
+        <TouchableOpacity style={styles.overlay} activeOpacity={1} onPress={() => setOverOpen(false)}>
+          <View style={styles.sheet}>
+            <Text style={styles.sheetTitle}>{overHoursHeadline(overJobs.length)}</Text>
+            <ScrollView style={styles.overList}>
+              {overJobs.map(({ job, items }) => (
+                <TouchableOpacity
+                  key={job.id}
+                  style={styles.overRow}
+                  onPress={() => {
+                    setOverOpen(false);
+                    router.push({ pathname: "/job/[id]", params: { id: job.id } });
+                  }}
+                  accessibilityRole="button"
+                >
+                  <Text style={styles.overRowTitle} numberOfLines={1}>
+                    #{job.job_number} — {job.title}
+                    {job.status === "completed" ? " · Completed" : ""}
+                  </Text>
+                  {items.map((item) => (
+                    <Text key={`${item.level}:${item.costCenterId ?? ""}`} style={styles.overRowText}>
+                      {item.level === "job" ? "Whole job" : item.name ?? "Cost centre"}: {formatOverHours(item.usedHours)} used of {formatOverHours(item.allowedHours)} allowed
+                    </Text>
+                  ))}
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+            <Action icon="close" label="Close" onPress={() => setOverOpen(false)} />
+          </View>
+        </TouchableOpacity>
+      </Modal>
+
       <Modal visible={!!menuItem} transparent animationType="fade" onRequestClose={() => setMenuItem(null)}>
         <TouchableOpacity style={styles.overlay} activeOpacity={1} onPress={() => setMenuItem(null)}>
           <View style={styles.sheet}>
@@ -1375,6 +1466,12 @@ export default function ScheduleScreen() {
             </Text>
             {/* Everyone on this job that day, full names (the tile shows initials / first names). */}
             {menuNames ? <Text style={styles.sheetNames}>{menuNames}</Text> : null}
+            {menuItem && canTodo && overHours && menuItem.booking
+              ? (() => {
+                  const over = bookingOverHours(menuItem.booking, overHours);
+                  return over ? <Text style={styles.sheetOver}>⚠ {over.text}</Text> : null;
+                })()
+              : null}
             {menuItem && menuItem.job.status === "completed" ? (
               <Text style={styles.sheetDone}>Completed — its schedule can no longer be changed.</Text>
             ) : (
@@ -1607,6 +1704,25 @@ const styles = StyleSheet.create({
   noticeText: { flex: 1, fontSize: 12, color: colors.slate900, lineHeight: 16 },
   sheetNames: { fontSize: 13, color: colors.slate700, marginBottom: 6 },
   sheetDone: { fontSize: 13, color: colors.slate500, paddingVertical: 10 },
+  sheetOver: { fontSize: 13, color: "#b45309", fontWeight: "700", marginBottom: 6 },
+  overBar: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    marginHorizontal: 12,
+    marginBottom: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: "#fcd34d",
+    backgroundColor: "#fffbeb",
+  },
+  overBarText: { flex: 1, fontSize: 13, fontWeight: "700", color: "#92400e" },
+  overList: { maxHeight: 360, marginVertical: 6 },
+  overRow: { paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: colors.border },
+  overRowTitle: { fontSize: 14, fontWeight: "700", color: colors.slate700 },
+  overRowText: { fontSize: 12, color: "#92400e", marginTop: 2 },
   h1: { fontSize: 22, fontWeight: "800", color: colors.slate900 },
   sub: { fontSize: 13, color: colors.slate500, marginTop: 2 },
   leaveHead: { fontSize: 12, fontWeight: "700", color: "#9f1239", paddingHorizontal: 16, paddingBottom: 4 },

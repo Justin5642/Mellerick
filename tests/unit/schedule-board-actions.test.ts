@@ -79,10 +79,9 @@ describe("bookingMenuItems", () => {
     expect(bookingMenuItems({ closed: null, unsaved: false, readOnly: false, canTodo: true }).every((i) => !i.disabled)).toBe(true);
   });
 
-  it("a closed job can only be opened", () => {
+  it("a closed job's booking offers only Open job — no copy, cut, schedule or to-do", () => {
     const items = bookingMenuItems({ closed: "completed", unsaved: false, readOnly: false, canTodo: true });
-    expect(items.filter((i) => !i.disabled).map((i) => i.action)).toEqual(["open"]);
-    expect(items.find((i) => i.action === "copy")?.disabled).toMatch(/completed/);
+    expect(items).toEqual([{ action: "open", label: "Open job" }]);
   });
 
   it("a booking still saving can't be copied or moved yet, but its job's schedule opens", () => {
