@@ -1,6 +1,6 @@
 -- =============================================
 -- BACKFLOW-CERTIFICATES STORAGE: CONVERGE THE POLICIES, FIX MOBILE SIGNATURE UPSERT
--- STATUS: ⚠ NOT in production until the 24 Nov 2026 catch-up paste (this line used to say "applied 2026-10-08"; a read-only check on 24 Nov 2026 found it missing). 0064/0065 are applied through 0117, the rest as written.
+-- STATUS: ⚠ NOT in production until the 24 Nov 2026 catch-up paste (this line used to say "applied 2026-10-08"; a read-only check on 24 Nov 2026 found it missing). 0064, 0065 and 0066 are applied through 0117 (no temp table); 0067 and 0070 as written.
 --
 -- WHERE THIS STARTS. 0047's "DELIBERATELY DOES NOT DO" item 2 says this bucket
 -- has RLS on and no policy, so the browser signature upload is refused. That
