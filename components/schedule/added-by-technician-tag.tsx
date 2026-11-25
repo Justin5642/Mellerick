@@ -1,7 +1,7 @@
 import { ADDED_BY_TECHNICIAN } from "@/lib/self-start-booking";
 
 // The "Added by technician" tag on a board card (Justin, 25 Nov 2026): a
-// technician started work on the job themselves (migration 0118 (draft)). While they
+// technician started work on the job themselves (migration 0118). While they
 // are still clocked on the booking has no end yet, and the board draws it
 // running ("· on now"). Its own file so the board's card markup only gains
 // one element.

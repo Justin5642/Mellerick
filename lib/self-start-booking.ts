@@ -1,6 +1,6 @@
 // A technician starts work on a job they're not booked on (Justin, 25 Nov
 // 2026): "search the job, clock onto it … we need it to show up in schedule".
-// The booking is made by self_start_job_booking() (migration 0118 (draft)) and then
+// The booking is made by self_start_job_booking() (migration 0118) and then
 // follows their clock: its start is the clock-on, its end the clock-off.
 //
 // Pure, names and ids only — never an amount (technicians use this). Mirrored
@@ -71,7 +71,7 @@ export interface TaggableBooking {
 
 /**
  * "Added by technician": a technician booked THEMSELVES. Only
- * self_start_job_booking() (0118 (draft)) does that — office bookings carry the
+ * self_start_job_booking() (0118) does that — office bookings carry the
  * office user as created_by, and job_bookings is office-written by RLS.
  * `roleOf` answers a profile's role; an unknown creator is not tagged.
  */
@@ -102,7 +102,7 @@ export function runningBookingEnd(startsAtIso: string, nowMs: number): string {
 /**
  * The bookings as the boards draw them: a self-started booking with no end
  * yet ends at runningBookingEnd() and is marked `running`. Nothing is
- * written — the clock-off sets the real end (0118 (draft)'s trigger).
+ * written — the clock-off sets the real end (0118's trigger).
  */
 export function withRunningEnds<B extends TaggableBooking & { starts_at: string; ends_at: string | null; daily: boolean }>(
   bookings: B[],

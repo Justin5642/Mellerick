@@ -238,7 +238,7 @@ export default async function SchedulePage() {
     canSeeOverHours ? loadJobHours(supabase as unknown as OverHoursClient, jobs.map((j) => j.id)) : null,
   ]);
   const costCenterNames = new Map((costCenterRows ?? []).map((cc) => [cc.id, cc.name]));
-  // "Added by technician" (25 Nov 2026, 0118 (draft)): a technician who started work
+  // "Added by technician" (25 Nov 2026, 0118): a technician who started work
   // on the job booked themselves (created_by = staff_id, a technician). Still
   // clocked on = no end yet; it is drawn running to now (at least 15:30, never
   // past its day — lib/self-start-booking.ts). created_by exists since 0079.

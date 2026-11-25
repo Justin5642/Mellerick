@@ -37,7 +37,7 @@ export async function listJobClockStages(jobId: string): Promise<ClockStage[] | 
 /**
  * The completed stage ids of several jobs, for the auto-clock's sites and the
  * clock prompts: po_cost_centers_public.completed_at (added to the view by
- * 0118 (draft)). Null before 0118 (draft), offline, or on any failure — the auto paths then
+ * 0118). Null before 0118, offline, or on any failure — the auto paths then
  * keep their old rule.
  */
 export async function completedStageIdsByJob(jobIds: readonly string[]): Promise<Map<string, string[]> | null> {
@@ -47,7 +47,7 @@ export async function completedStageIdsByJob(jobIds: readonly string[]): Promise
       .from("purchase_orders_public")
       .select("job_id, po_cost_centers_public(id, completed_at)")
       .in("job_id", [...jobIds]);
-    // unwrapRows throws on an error (before 0118 (draft): no completed_at column);
+    // unwrapRows throws on an error (before 0118: no completed_at column);
     // caught below and answered "not known".
     const rows = unwrapRows(res as never, "completedStageIdsByJob");
     const out = new Map<string, string[]>();

@@ -3,7 +3,7 @@ import type { StartStage } from "./selfStartBooking";
 
 // "Start work on this job" (Justin, 25 Nov 2026): a technician on a job they
 // are not booked on picks the stage and clocks on; the booking shows on the
-// schedule straight away and ends when they clock off (migration 0118 (draft)).
+// schedule straight away and ends when they clock off (migration 0118).
 // ONLINE only — the booking (and so their place on the crew, which RLS needs
 // before their clock-on can be written) must exist on the server first. Not
 // the outbox. Calls the web's /api/jobs/[id]/self-start with the Bearer token.

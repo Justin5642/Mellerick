@@ -40,7 +40,7 @@ export interface Booking {
   note?: string | null;
   /**
    * Who made the booking (0079). A technician's own id = they started work
-   * on the job themselves (0118 (draft), "Added by technician"). Read only by the
+   * on the job themselves (0118, "Added by technician"). Read only by the
    * office Schedule tab; absent elsewhere.
    */
   created_by?: string | null;

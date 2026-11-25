@@ -10,7 +10,7 @@ import { closedJobSentence, parseSelfStartBody, selfStartRpcError, SELF_START_SE
 // "Start work on this job" (Justin, 25 Nov 2026): a technician who pops into
 // a job they're not booked on picks the stage they're working on and clocks
 // on; the booking appears on the schedule from that moment ("Added by
-// technician") and ends when they clock off (migration 0118 (draft)).
+// technician") and ends when they clock off (migration 0118).
 //
 //   GET  — the job's stages, for the picker: ids, names, the company cost
 //          centre's name and whether each is complete. NEVER an amount.

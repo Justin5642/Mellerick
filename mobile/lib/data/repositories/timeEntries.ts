@@ -137,7 +137,7 @@ export class TimeEntriesRepository {
     atIso?: string;
     /**
      * The entry's id, when the caller already gave it to the server — "Start
-     * work on this job" links the technician's new booking to it (0118 (draft)), so
+     * work on this job" links the technician's new booking to it (0118), so
      * the booking ends when this entry is clocked off. Otherwise a new id.
      */
     id?: string;

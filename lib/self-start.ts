@@ -1,7 +1,7 @@
 // POST /api/jobs/[id]/self-start — a technician starts work on a job they are
 // not booked on (Justin, 25 Nov 2026). Request parsing and the fixed
 // sentences the route answers with; the database function
-// self_start_job_booking() (migration 0118 (draft)) makes the decision and the row.
+// self_start_job_booking() (migration 0118) makes the decision and the row.
 // Pure.
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;

@@ -57,7 +57,7 @@ describe("TimeEntriesRepository", () => {
     });
   });
 
-  // "Start work on this job" (0118 (draft)): the server's booking already names the
+  // "Start work on this job" (0118): the server's booking already names the
   // entry id, so the clock-on must use it — the booking ends when it closes.
   it("clockIn uses the id it is given", async () => {
     const { outbox, ops } = captureOutbox();

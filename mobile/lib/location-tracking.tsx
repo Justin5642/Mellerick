@@ -203,7 +203,7 @@ export function LocationTrackingProvider({ children }: { children: ReactNode }) 
       // Each site carries the technician's own bookings on it (best-effort —
       // see withMyBookings), so an arrival clocks in against the booking it
       // falls in rather than the job's single scheduled cost centre.
-      // And each site's completed stages (best-effort, online — 0118 (draft)), so an
+      // And each site's completed stages (best-effort, online — 0118), so an
       // arrival never clocks onto a stage already marked complete.
       const sites = await withCompletedStages(await withMyBookings(userId as string, await listMyJobSites(userId as string)));
       if (cancelled) return;

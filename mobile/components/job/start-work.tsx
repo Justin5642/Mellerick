@@ -24,7 +24,7 @@ import {
 // 2026): "they can pop in and see a job needs something done … search the
 // job, clock onto it … we need it to show up in schedule". Pick the stage
 // (mandatory: the only open one is preselected, with several NOTHING is), a
-// confirm naming it, then the server makes their booking from now (0118 (draft)) and
+// confirm naming it, then the server makes their booking from now (0118) and
 // the phone clocks on to the same stage through the outbox. The booking ends
 // when they clock off. Online only.
 

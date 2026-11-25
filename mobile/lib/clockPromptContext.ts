@@ -35,7 +35,7 @@ export async function buildPromptContext(input: {
     input.staffId,
     jobs.map((j) => ({ ...j, jobId: j.id }))
   );
-  // Completed stages (best-effort, online — 0118 (draft)): a prompted clock-on never
+  // Completed stages (best-effort, online — 0118): a prompted clock-on never
   // lands on a stage already marked complete.
   const candidates = unpinnedJobsToday(await withCompletedStages(withBookings), day);
   const [open, anchors, depot] = await Promise.all([

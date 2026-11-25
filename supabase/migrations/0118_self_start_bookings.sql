@@ -1,7 +1,7 @@
 -- ============================================================================
 -- Technicians start work on a job themselves; the booking follows the clock.
 --
--- STATUS: DRAFT — NOT APPLIED
+-- STATUS: ✅ APPLIED 2026-11-25 (gate test passed).
 --
 -- WHY (Justin, 25 Nov 2026)
 -- "Quite often we have technicians in the area and they can pop in and see a

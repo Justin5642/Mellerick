@@ -431,7 +431,7 @@ export default function ScheduleScreen() {
       seen.add(b.id);
       out.push(b);
     }
-    // "Added by technician" (25 Nov 2026, 0118 (draft)): a technician who started
+    // "Added by technician" (25 Nov 2026, 0118): a technician who started
     // work booked themselves. Still clocked on = no end yet; drawn running
     // to now (at least 15:30, never past its day — lib/selfStartBooking.ts).
     const roles = new Map(staff.map((s) => [s.id, s.role]));
