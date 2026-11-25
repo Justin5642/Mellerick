@@ -2,7 +2,7 @@
 -- Cost of mistakes, stages 1–4: crew raise, office costs, links to the costs
 -- the CRM already holds, recovery, and an admin-only "whose mistake".
 --
--- STATUS: DRAFT — NOT APPLIED.
+-- STATUS: ✅ APPLIED 2026-11-25 (gate test passed).
 -- How: paste this file into the SQL editor, then the gate test
 -- supabase/tests/0119_mistake_tracking_test.sql, and trust only the final
 -- "0119 PASSED" row. Then change this line to applied and add the ledger row:
