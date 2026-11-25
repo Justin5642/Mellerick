@@ -4,12 +4,6 @@ import * as ImagePicker from "expo-image-picker";
 import { colors } from "../../lib/theme";
 import { BUSINESS_TIME_ZONE, dateKeyInBusinessTZ, formatBusinessTime } from "../../lib/date";
 
-const formatTime = formatBusinessTime;
-/** "Tue 25 Nov" — a date key or an instant, in Melbourne. */
-function formatDate(value: string): string {
-  const d = /^\d{4}-\d{2}-\d{2}$/.test(value) ? new Date(`${value}T12:00:00Z`) : new Date(value);
-  return d.toLocaleDateString("en-AU", { weekday: "short", day: "numeric", month: "short", timeZone: BUSINESS_TIME_ZONE });
-}
 import { cryptoIdGen } from "../../lib/data/ids";
 import { prepareImage } from "../../lib/imageUpload";
 import { KeyboardSheet, KEYBOARD_SHEET_INPUT_FONT_SIZE } from "../KeyboardSheet";
@@ -25,6 +19,13 @@ import {
   myMistakeSummary,
   type RaiseMistakeForm,
 } from "../../lib/mistakeRaise";
+
+const formatTime = formatBusinessTime;
+/** "Tue 25 Nov" — a date key or an instant, in Melbourne. */
+function formatDate(value: string): string {
+  const d = /^\d{4}-\d{2}-\d{2}$/.test(value) ? new Date(`${value}T12:00:00Z`) : new Date(value);
+  return d.toLocaleDateString("en-AU", { weekday: "short", day: "numeric", month: "short", timeZone: BUSINESS_TIME_ZONE });
+}
 
 // "Mistakes" on the job (Justin, 25 Nov 2026: crew raise, office costs;
 // migration 0119 (a draft, not applied yet)). Anyone on the job — and office — logs a mistake: what kind,
