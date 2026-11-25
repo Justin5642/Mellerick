@@ -20,9 +20,12 @@ import { boardLeaveRange, loadScheduleLeave } from "@/lib/staff-leave-data";
 import { fetchAllRows, type RangeableQuery } from "@/lib/fetch-all-rows";
 import { businessDayRange } from "@/lib/scheduling";
 import { loadJobHours, OVER_HOURS_CHUNK, type OverHoursClient } from "@/lib/over-hours-data";
+import { boardTextForViewer } from "@/lib/schedule-hover";
 
 const BOARD_COLUMNS =
-  "id, job_number, title, status, scheduled_start, scheduled_end, scheduled_cost_center_id, assigned_to, job_assignments(staff_id), customers(name), sites(name, address_line1, suburb, state, site_lat, site_lng)";
+  // priority, description, customers.company and the site's full address +
+  // notes feed the hover card (25 Nov 2026; lib/schedule-hover.ts) — no money.
+  "id, job_number, title, status, priority, description, scheduled_start, scheduled_end, scheduled_cost_center_id, assigned_to, job_assignments(staff_id), customers(name, company), sites(name, address_line1, address_line2, suburb, state, postcode, notes, site_lat, site_lng)";
 
 // The select string is built at runtime (the fallbacks), so the typed client
 // can't follow it; this is the part of the builder the board's reads use.
@@ -182,7 +185,10 @@ export default async function SchedulePage() {
   };
   const open = toBoard(jobRows, hasBookings, new Set());
   const done = toBoard(doneRows, doneHasBookings, new Set(open.jobs.map((j) => j.id)));
-  const jobs: BoardJob[] = [...open.jobs, ...done.jobs];
+  // The description and site notes are trimmed, and a technician gets them
+  // only for jobs they're on (lib/schedule-hover.ts boardTextForViewer).
+  const textViewer = { role: viewer?.profile?.role ?? null, id: viewer?.user?.id ?? null };
+  const jobs: BoardJob[] = [...open.jobs, ...done.jobs].map((j) => boardTextForViewer(j, textViewer));
   const rawBookings: JobBooking[] = [...open.bookings, ...done.bookings];
 
   // Two follow-up reads, each needing only the batch above and not each

@@ -622,6 +622,80 @@ have gone over the allocated time."
   and the header list. Phone not yet checked on a device; it reaches phones
   with the next build (no native module).
 
+**Web board drawn like the phone's schedule, and a hover card with the job's details (25 Nov 2026; no migration, no stream change; web only).**
+Justin: "Confirm that the web and the mobile app have the same looking
+schedule. We prefer the mobile app's schedule … hover over it on the web app
+with the mouse, it brings up all the job's details … the full address and
+everything."
+- **What differed** (before this change): web **Day** was a column of big
+  cards per technician (avatar header, time, status pill, title, cost centre,
+  note, "Day 2 of 3", customer, Waze link), not a timeline; the phone's Day is
+  technicians down the side × hours across, each booking a block spanning its
+  hours, overlaps in lanes, a red now-line. Web **Week** had the same row ×
+  day grid as the phone, but white cards with five lines of text, an avatar
+  per name and a two-line day header; the phone's blocks are tinted in the
+  job status's colour with a thick left edge, "#123" + technician tag, then
+  flags (✓/Completed, Needs reassigning, ⚠ Over x/y) and the title (Week: the
+  start time first). Completed: phone slate + dashed border, web faded. Over
+  hours / leave: phone amber / rose border + inline text, web badges and a
+  ring.
+- **Now the web uses the phone's model:** Day is a timeline
+  (`team-schedule-view.tsx`, `DroppableTimelineRow`) laid out by the phone's
+  own rules — `dayTimelineHours` (6:00–19:00, widened to fit) and
+  `layoutDayRow` (positions + lanes, leave in the top lane). Those rules moved
+  to **`lib/schedule-grid.ts`**, the web file first; `mobile/lib/scheduleGrid.ts`
+  is its byte-identical copy below the imports
+  (`tests/unit/schedule-grid-mirror.test.ts`). The only change to the rules:
+  `layoutDayRow` takes optional `GridSizes` (hour width, lane height) — the
+  phone passes none and is unchanged; the web draws 84 px per hour and a
+  62 px lane. Unassigned row first, then busiest; names pinned left, hours
+  pinned on top. Every block (Day, Week, drag overlay) is one
+  `DraggableBlock` + `BlockBody` in the phone's order and colours
+  (`lib/schedule-block-tones.ts` = the phone's `statusColors`, pinned by the
+  same test). Week name cells lose their avatars; the day header is one line;
+  each cell stacks leave first, then bookings, with hours / "N h free" / "+"
+  underneath (where the phone has its gap strip).
+- **Kept / deliberately different:** the web block has a third line (cost
+  centre · booking note) — the phone shows those in its sheet; the Week view
+  is still a CSS grid (equal row heights do what `layoutWeekRow` does); Week
+  times read "07:00 am" (the web's `formatTime`). Every behaviour is as
+  before: drag (a Day drop on a row changes the technician only, as on the
+  phone and as the web Day columns did), Shift-copy, Week edge resize,
+  double-click cut / paste, press-and-hold / right-click menu, copy mode,
+  to-do drag in/out and tap-to-place, gaps, leave tiles and the leave confirm,
+  completed read-only, over-hours, notes, List tab. The customer name and
+  Waze link left the blocks — they are on the hover card (and the List tab).
+- **Hover card** (`components/schedule/booking-hover-card.tsx`, content
+  `lib/schedule-hover.ts`, tested in `tests/unit/schedule-hover.test.ts`):
+  rest the mouse on a booking 350 ms (mouse only — touch keeps hold-for-menu;
+  Tab focus shows it too) → job number/title, status, priority (unless
+  normal), customer billed as on invoices (`billingName` + Attn), the **full
+  site address** (site name, street, line 2, suburb state postcode) with
+  Navigate, the site's contact/access notes (`sites.notes`), technician,
+  day/time and "Day 2 of 3 · Mon 23 – Wed 25 Nov", cost centre, the booking
+  note, everyone else on the job that day with their hours, the description
+  (trimmed) and the over-hours / leave flags, plus **Open job**. It closes on
+  leaving (150 ms grace to reach Open job), any press, scroll, Esc, and never
+  shows during a drag, resize, the menu or a pick mode. **No money** —
+  nothing in it can carry an amount (asserted in the test).
+- **Data:** the page's board select adds `jobs.priority, description`,
+  `customers.company`, `sites.address_line2, postcode, notes` (all baseline
+  columns; no extra request, still paged). Description and site notes are
+  trimmed to 600 characters on the server, and a technician receives them
+  only for jobs they're on (`boardTextForViewer`) — the board draws only
+  those jobs' bookings for them anyway (0107). `BoardJob` (both mirrors)
+  gained the optional fields.
+- **Per-booking tags** (e.g. a future "Added by technician"): render them in
+  `BlockBody` (web, `team-schedule-view.tsx` — used by Day, Week and the drag
+  overlay) and in `Block` (phone, `mobile/components/schedule/ScheduleGrid.tsx`,
+  the `blockTitle` line).
+- Checked in Chromium with mock data at 1500 px: Week and Day draw like the
+  phone; hover shows the card with the full address; right-click menu; drag
+  onto a technician's row (the leave confirm on a sick day, the write
+  otherwise); Week edge resize; completed greyed; over-hours tagged; Tab
+  focus opens the card. Not tried on a real touch device (touch paths are
+  unchanged).
+
 **Load page data on the server, not in the browser.** A browser→Supabase
 query from Australia costs ~100 ms+; a server query in `sin1` costs ~2 ms. So
 My Jobs, Approvals, Staff, Fleet and Customers are server pages that pass

@@ -3,6 +3,11 @@
 // is, which cell a finger is over, and what a resize or move would clash
 // with. No React, no I/O — tested in scheduleGrid.test.ts.
 //
+// MIRROR of the web board's layout, lib/schedule-grid.ts (25 Nov 2026 — the
+// web board now draws the phone's layout). Everything BELOW THE IMPORTS is
+// pinned byte-identical by tests/unit/schedule-grid-mirror.test.ts: change
+// the web file first, then copy its body here.
+//
 // WHERE a booking lands (technician × day, hours per tech, what a move
 // changes) is NOT decided here: that is ./boardModel.ts, the byte-identical
 // mirror of the web board's model. This file only turns its answers into
@@ -333,7 +338,7 @@ export function bookingClashes(after: BoardBooking, all: readonly BoardBooking[]
 }
 
 // ---------------------------------------------------------------------------
-// Rows with staff leave (migration 0112 — a draft, not applied yet)
+// Rows with staff leave (migration 0112, applied 2026-11-19)
 // ---------------------------------------------------------------------------
 // Leave sits in the technician's row as its own block — read-only, never
 // dragged — so it takes a lane like a booking does: on the Day timeline it
@@ -355,24 +360,35 @@ export function leaveSpan(day: LeaveDay): ScheduleDay {
 // whole-day leave always takes the top lane.
 const LEAVE_FIRST = 0.001;
 
+/**
+ * The units a grid is drawn in. The phone uses the defaults (points); the web
+ * board draws the same layout in CSS pixels with a taller lane, so a block
+ * can carry a third line (cost centre / note) — the positions and lanes are
+ * the same rule either way.
+ */
+export type GridSizes = { hourWidth?: number; laneHeight?: number };
+
 /** Day view: a row's bookings and leave on one day, packed into lanes. */
 export function layoutDayRow(
   entries: readonly BoardEntry[],
   leave: readonly LeaveDay[],
   range: { startHour: number; endHour: number },
+  sizes: GridSizes = {},
 ): { items: RowItem[]; height: number } {
-  const leaveGeo = leave.map((day, i) => ({ kind: "leave" as const, id: `leave:${day.dateKey}:${i}`, day, ...dayBlockGeometry(leaveSpan(day), range) }));
-  const bookingGeo = entries.map((entry) => ({ kind: "booking" as const, id: entry.booking.id, entry, ...dayBlockGeometry(entry.day, range) }));
+  const hourWidth = sizes.hourWidth ?? HOUR_WIDTH;
+  const laneHeight = sizes.laneHeight ?? LANE_HEIGHT;
+  const leaveGeo = leave.map((day, i) => ({ kind: "leave" as const, id: `leave:${day.dateKey}:${i}`, day, ...dayBlockGeometry(leaveSpan(day), range, hourWidth) }));
+  const bookingGeo = entries.map((entry) => ({ kind: "booking" as const, id: entry.booking.id, entry, ...dayBlockGeometry(entry.day, range, hourWidth) }));
   const { lane, lanes } = packLanes([
     ...leaveGeo.map((g) => ({ id: g.id, left: g.left - LEAVE_FIRST, width: g.width + LEAVE_FIRST })),
     ...bookingGeo.map((g) => ({ id: g.id, left: g.left, width: g.width })),
   ]);
-  const top = (id: string) => ROW_PADDING + (lane.get(id) ?? 0) * LANE_HEIGHT;
+  const top = (id: string) => ROW_PADDING + (lane.get(id) ?? 0) * laneHeight;
   const items: RowItem[] = [
     ...leaveGeo.map((g) => ({ ...g, top: top(g.id) })),
     ...bookingGeo.map((g) => ({ ...g, top: top(g.id) })),
   ];
-  return { items, height: rowHeight(lanes) };
+  return { items, height: Math.max(1, lanes) * laneHeight + ROW_PADDING * 2 };
 }
 
 /** Week view: per day column, the leave chips first, then the bookings. */

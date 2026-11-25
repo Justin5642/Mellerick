@@ -44,7 +44,8 @@ export type BoardJob = {
   assigned_to: string | null;
   /** Every current assignee — job_assignments ∪ assigned_to. Only the no-bookings-table fallback reads it. */
   crew: string[];
-  customers?: { name?: string } | null;
+  /** The board's hover card bills the company (lib/customer-billing.ts) when there is one. */
+  customers?: { name?: string; company?: string | null } | null;
   // Nullable, not optional. These are database columns that are NULL when a
   // site has no coordinates, and the generated types said so the moment the
   // client was typed (item 3.3). Declaring them `?: number` claimed the field
@@ -52,11 +53,18 @@ export type BoardJob = {
   sites?: {
     name?: string;
     address_line1?: string | null;
+    address_line2?: string | null;
     suburb?: string | null;
     state?: string | null;
+    postcode?: string | null;
+    /** Contact and access notes (labelled lines in sites.notes). */
+    notes?: string | null;
     site_lat?: number | null;
     site_lng?: number | null;
   } | null;
+  // The web board's hover card (25 Nov 2026). Never money.
+  priority?: string | null;
+  description?: string | null;
 };
 
 /** A booking on the board. The cost centre's name rides along for the card. */
