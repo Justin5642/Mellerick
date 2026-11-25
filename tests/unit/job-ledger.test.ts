@@ -203,3 +203,35 @@ describe("computeJobLedger — mistakes (job_mistakes, Justin 23 Nov 2026)", () 
     expect(costCentreTotals([a, b]).find((t) => t.key === "bgd")).toMatchObject({ mistakes: 160, cost: 160, budget: 22000 });
   });
 });
+
+describe("computeJobLedger — mistake tracking (0119: don't double-count)", () => {
+  const work = { staff_id: "tech", hours: 10, cost_center_id: "l-sewer", entry_type: "work" };
+
+  it("shows a LINKED cost as part of the mistakes figure but never adds it to cost again", () => {
+    const plain = computeJobLedger(base({ timeEntries: [work] }));
+    const l = computeJobLedger(base({ timeEntries: [work], mistakes: [{ cost_center_id: "l-sewer", manual: 0, linked: 800, recovered: 0 }] }));
+    expect(l.cost).toBe(plain.cost);
+    expect(l.margin).toBe(plain.margin);
+    expect(l.mistakes).toBe(800);
+    expect(l.mistakesAdded).toBe(0);
+    expect(l.rows.find((r) => r.key === "bgd")).toMatchObject({ labour: 800, mistakes: 800, mistakesAdded: 0, cost: 800 });
+  });
+
+  it("adds only MANUAL lines to cost, less recovery received", () => {
+    const l = computeJobLedger(base({ timeEntries: [work], mistakes: [{ cost_center_id: "l-sewer", manual: 300, linked: 800, recovered: 100 }] }));
+    expect(l.rows.find((r) => r.key === "bgd")).toMatchObject({ mistakes: 1100, mistakesAdded: 200, cost: 1000 });
+    expect(l.cost).toBe(1000);
+    expect(l.mistakesAdded).toBe(200);
+  });
+
+  it("a recovery on a linked cost brings the cost down", () => {
+    const l = computeJobLedger(base({ timeEntries: [work], mistakes: [{ cost_center_id: "l-sewer", manual: 0, linked: 800, recovered: 300 }] }));
+    expect(l.cost).toBe(500);
+    expect(l.mistakesAdded).toBe(-300);
+  });
+
+  it("treats a 0115-only row (amount_ex_gst) as a manual line", () => {
+    const l = computeJobLedger(base({ mistakes: [{ cost_center_id: "l-cart", amount_ex_gst: 400 }] }));
+    expect(l.rows.find((r) => r.key === "transport")).toMatchObject({ mistakes: 400, mistakesAdded: 400, cost: 400 });
+  });
+});

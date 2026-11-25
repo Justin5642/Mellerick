@@ -1929,50 +1929,103 @@ export type Database = {
       }
       job_mistakes: {
         Row: {
-          amount_ex_gst: number
+          amount_ex_gst: number | null
+          category_id: string | null
           cause: string | null
+          cause_code: string | null
+          closed_at: string | null
           cost_center_id: string | null
+          cost_centre_id: string | null
           created_at: string
           description: string
           entered_by: string | null
           id: string
-          job_id: string
+          job_id: string | null
           occurred_on: string
+          raised_at: string | null
+          raised_by: string | null
+          recovered_ex_gst: number | null
+          recovery_claimed_ex_gst: number | null
+          recovery_claimed_on: string | null
+          recovery_note: string | null
+          recovery_source: string | null
           staff_id: string | null
+          status: string
+          supplier_id: string | null
           updated_at: string
         }
         Insert: {
-          amount_ex_gst: number
+          amount_ex_gst?: number | null
+          category_id?: string | null
           cause?: string | null
+          cause_code?: string | null
+          closed_at?: string | null
           cost_center_id?: string | null
+          cost_centre_id?: string | null
           created_at?: string
           description: string
           entered_by?: string | null
           id?: string
-          job_id: string
+          job_id?: string | null
           occurred_on?: string
+          raised_at?: string | null
+          raised_by?: string | null
+          recovered_ex_gst?: number | null
+          recovery_claimed_ex_gst?: number | null
+          recovery_claimed_on?: string | null
+          recovery_note?: string | null
+          recovery_source?: string | null
           staff_id?: string | null
+          status?: string
+          supplier_id?: string | null
           updated_at?: string
         }
         Update: {
-          amount_ex_gst?: number
+          amount_ex_gst?: number | null
+          category_id?: string | null
           cause?: string | null
+          cause_code?: string | null
+          closed_at?: string | null
           cost_center_id?: string | null
+          cost_centre_id?: string | null
           created_at?: string
           description?: string
           entered_by?: string | null
           id?: string
-          job_id?: string
+          job_id?: string | null
           occurred_on?: string
+          raised_at?: string | null
+          raised_by?: string | null
+          recovered_ex_gst?: number | null
+          recovery_claimed_ex_gst?: number | null
+          recovery_claimed_on?: string | null
+          recovery_note?: string | null
+          recovery_source?: string | null
           staff_id?: string | null
+          status?: string
+          supplier_id?: string | null
           updated_at?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "job_mistakes_category_id_fkey"
+            columns: ["category_id"]
+            isOneToOne: false
+            referencedRelation: "mistake_categories"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "job_mistakes_cost_center_id_fkey"
             columns: ["cost_center_id"]
             isOneToOne: false
             referencedRelation: "po_cost_centers"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "job_mistakes_cost_centre_id_fkey"
+            columns: ["cost_centre_id"]
+            isOneToOne: false
+            referencedRelation: "cost_centres"
             referencedColumns: ["id"]
           },
           {
@@ -1990,10 +2043,24 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "job_mistakes_raised_by_fkey"
+            columns: ["raised_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
             foreignKeyName: "job_mistakes_staff_id_fkey"
             columns: ["staff_id"]
             isOneToOne: false
             referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "job_mistakes_supplier_id_fkey"
+            columns: ["supplier_id"]
+            isOneToOne: false
+            referencedRelation: "suppliers"
             referencedColumns: ["id"]
           },
         ]
@@ -2669,6 +2736,162 @@ export type Database = {
           user_id?: string
         }
         Relationships: []
+      }
+      mistake_categories: {
+        Row: {
+          created_at: string
+          id: string
+          is_active: boolean
+          name: string
+          sort_order: number
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          name: string
+          sort_order?: number
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          name?: string
+          sort_order?: number
+        }
+        Relationships: [
+        ]
+      }
+      mistake_cost_lines: {
+        Row: {
+          amount_ex_gst: number | null
+          created_at: string
+          created_by: string | null
+          hours: number | null
+          id: string
+          kind: string
+          legacy: boolean
+          mistake_id: string
+          note: string | null
+          source: string
+          source_id: string | null
+          updated_at: string
+        }
+        Insert: {
+          amount_ex_gst?: number | null
+          created_at?: string
+          created_by?: string | null
+          hours?: number | null
+          id?: string
+          kind: string
+          legacy?: boolean
+          mistake_id: string
+          note?: string | null
+          source: string
+          source_id?: string | null
+          updated_at?: string
+        }
+        Update: {
+          amount_ex_gst?: number | null
+          created_at?: string
+          created_by?: string | null
+          hours?: number | null
+          id?: string
+          kind?: string
+          legacy?: boolean
+          mistake_id?: string
+          note?: string | null
+          source?: string
+          source_id?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "mistake_cost_lines_mistake_id_fkey"
+            columns: ["mistake_id"]
+            isOneToOne: false
+            referencedRelation: "job_mistakes"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "mistake_cost_lines_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      mistake_photos: {
+        Row: {
+          created_at: string
+          created_by: string | null
+          id: string
+          mistake_id: string
+          storage_path: string
+        }
+        Insert: {
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          mistake_id: string
+          storage_path: string
+        }
+        Update: {
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          mistake_id?: string
+          storage_path?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "mistake_photos_mistake_id_fkey"
+            columns: ["mistake_id"]
+            isOneToOne: false
+            referencedRelation: "job_mistakes"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      mistake_responsibility: {
+        Row: {
+          mistake_id: string
+          note: string | null
+          set_at: string
+          set_by: string | null
+          staff_id: string
+        }
+        Insert: {
+          mistake_id: string
+          note?: string | null
+          set_at?: string
+          set_by?: string | null
+          staff_id: string
+        }
+        Update: {
+          mistake_id?: string
+          note?: string | null
+          set_at?: string
+          set_by?: string | null
+          staff_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "mistake_responsibility_mistake_id_fkey"
+            columns: ["mistake_id"]
+            isOneToOne: false
+            referencedRelation: "job_mistakes"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "mistake_responsibility_staff_id_fkey"
+            columns: ["staff_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       po_cost_centers: {
         Row: {

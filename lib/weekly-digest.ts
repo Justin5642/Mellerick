@@ -27,6 +27,16 @@ export interface DigestInput {
   awaitingInvoice: { count: number; oldest: DigestAwaitingInvoice[] };
   /** Komtrax fault codes in the last 7 days (0113); null/undefined = Komtrax not set up, section left out. */
   machineFaults?: DigestMachineFault[] | null;
+  /** Mistakes (0119, a draft not applied yet): logged in the last 7 days, and credits claimed but not yet received. null/undefined = not switched on, left out. */
+  mistakes?: DigestMistakes | null;
+}
+
+export interface DigestMistakes {
+  newThisWeek: number;
+  /** Mistakes not closed. */
+  open: number;
+  /** Recovery claimed and not yet received, ex GST. */
+  openRecoverable: number;
 }
 
 /** One machine + fault code seen in the last week (lib/komtrax-data.ts groupFaults). */
@@ -81,6 +91,13 @@ export function buildDigest(i: DigestInput): { subject: string; html: string; te
     "",
     `SUPPLIER POs STILL WAITING FOR THEIR INVOICE: ${i.awaitingInvoice.count}`,
     ...i.awaitingInvoice.oldest.map((p) => `  - ${p.poNumber}  ${p.supplier}  ordered ${p.orderedOn ?? "?"}`),
+    ...(i.mistakes
+      ? [
+          "",
+          `MISTAKES: ${i.mistakes.newThisWeek} logged this week, ${i.mistakes.open} not closed, ${money(i.mistakes.openRecoverable)} claimed back and not yet received`,
+          `Review them: ${i.appUrl}/dashboard/reports/mistakes`,
+        ]
+      : []),
     ...(faultsHeading
       ? [
           "",
@@ -111,6 +128,12 @@ ${h(`Overdue debtors: ${i.overdue.count} invoices, ${money(i.overdue.total)}`)}
 ${table(i.overdue.top.map((d) => row([escapeHtml(d.customer), `#${escapeHtml(String(d.invoiceNumber))}`, `due ${escapeHtml(d.dueDate ?? "?")}`, money(d.balance)])))}
 ${h(`Supplier POs still waiting for their invoice: ${i.awaitingInvoice.count}`)}
 ${table(i.awaitingInvoice.oldest.map((p) => row([escapeHtml(p.poNumber), escapeHtml(p.supplier), `ordered ${escapeHtml(p.orderedOn ?? "?")}`])))}
+${
+  i.mistakes
+    ? `${h(`Mistakes: ${i.mistakes.newThisWeek} logged this week`)}
+<p style="font-size:14px;margin:0;">${i.mistakes.open} not closed · ${money(i.mistakes.openRecoverable)} claimed back and not yet received · <a href="${escapeHtml(`${i.appUrl}/dashboard/reports/mistakes`)}">Review them</a></p>`
+    : ""
+}
 ${
   faults
     ? `${h(`Active machine faults (last 7 days): ${faults.length === 0 ? "none" : faults.length}`)}

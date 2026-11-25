@@ -23,11 +23,15 @@ import { costPerHourOf, usageCost, type EffectiveRate } from "@/lib/fleet-costs"
 //   plant      equipment usage: hours × cost per hour, plus loads × cost per
 //              load (0091), by the usage's line — the truck's cartage on the
 //              Transport line. Untagged usage lands in "Not tagged".
-//   mistakes   job_mistakes (migration 0115, drafted — not applied when this
-//              was written; until it is, no mistakes are passed in): what a
-//              mistake cost, ex GST, by the line the office logged it
-//              against. A cost like any other — it reduces the margin — but
-//              kept as its own figure so it can be seen (Justin, 23 Nov 2026).
+//   mistakes   job_mistakes (0115) and their cost lines (0119, a draft not applied yet), by the PO
+//              line the mistake is on (lib/mistake-costs.ts). DON'T
+//              DOUBLE-COUNT (Justin, 25 Nov 2026): a LINKED line (a time
+//              entry, expense, supplier PO… marked as part of a mistake) is
+//              already counted above, so mistakes are shown as a SUBSET of
+//              cost — the "mistakes" figure — and only MANUAL lines add cost,
+//              less any recovery received (a supplier credit, a builder
+//              recharge, insurance) — the "mistakesAdded" figure. A 0115-only
+//              row ({ amount_ex_gst }) is a manual line.
 //
 // Known overlap until supplier invoices are matched to POs (Stage 4): the
 // same invoice entered both as an expense and as an order's amount counts
@@ -100,8 +104,13 @@ export interface LedgerInputs {
   expenses: { amount: number | null; cost_center_id: string | null }[];
   supplierOrders: { amount: number | null; cost_center_id: string | null; status: string }[];
   plant: { cost: number; cost_center_id: string | null }[];
-  /** job_mistakes rows (office/admin only). Absent = none. */
-  mistakes?: { amount_ex_gst: number | null; cost_center_id: string | null }[];
+  /**
+   * Mistakes (office/admin only), each on the PO line it was logged against:
+   * manual (adds cost), linked (already in cost) and recovery received
+   * (lib/mistake-costs.ts ledgerMistake). A 0115-only row passes amount_ex_gst,
+   * counted as manual. Absent = none.
+   */
+  mistakes?: { cost_center_id: string | null; amount_ex_gst?: number | null; manual?: number; linked?: number; recovered?: number }[];
 }
 
 export interface LedgerRow {
@@ -114,8 +123,10 @@ export interface LedgerRow {
   labour: number;
   materials: number;
   plant: number;
-  /** The cost of mistakes logged against this cost centre (ex GST). */
+  /** What mistakes on this cost centre cost (ex GST) — linked and manual; shown as part of cost. */
   mistakes: number;
+  /** What mistakes ADD to cost here: manual lines less recovery received (linked lines are already counted). */
+  mistakesAdded: number;
   cost: number;
   /** Supplier orders on this cost centre with no amount yet. */
   unpricedOrders: number;
@@ -125,8 +136,10 @@ export interface JobLedger {
   rows: LedgerRow[];
   budget: number;
   cost: number;
-  /** Mistakes across the job — already inside `cost`. */
+  /** Mistakes across the job (linked + manual) — a subset of `cost`. */
   mistakes: number;
+  /** What mistakes add to the job's cost: manual lines less recovery received. Already inside `cost`. */
+  mistakesAdded: number;
   margin: number;
   /** null with no budget. */
   marginPct: number | null;
@@ -146,7 +159,7 @@ export function computeJobLedger(i: LedgerInputs): JobLedger {
   const row = (key: string, name: string): LedgerRow => {
     let r = rows.get(key);
     if (!r) {
-      r = { key, name, budget: 0, budgetHours: 0, hours: 0, labour: 0, materials: 0, plant: 0, mistakes: 0, cost: 0, unpricedOrders: 0 };
+      r = { key, name, budget: 0, budgetHours: 0, hours: 0, labour: 0, materials: 0, plant: 0, mistakes: 0, mistakesAdded: 0, cost: 0, unpricedOrders: 0 };
       rows.set(key, r);
     }
     return r;
@@ -187,8 +200,13 @@ export function computeJobLedger(i: LedgerInputs): JobLedger {
   for (const p of i.plant) forLine(p.cost_center_id).plant += p.cost;
 
   for (const m of i.mistakes ?? []) {
-    const amount = Number(m.amount_ex_gst ?? 0);
-    if (amount > 0) forLine(m.cost_center_id).mistakes += amount;
+    const manual = m.manual !== undefined ? Number(m.manual) || 0 : Math.max(0, Number(m.amount_ex_gst ?? 0) || 0);
+    const linked = Number(m.linked ?? 0) || 0;
+    const recovered = Number(m.recovered ?? 0) || 0;
+    if (!manual && !linked && !recovered) continue;
+    const r = forLine(m.cost_center_id);
+    r.mistakes += manual + linked;
+    r.mistakesAdded += manual - recovered;
   }
 
   // Company cost centres first in list order, then travel, then untagged.
@@ -208,7 +226,8 @@ export function computeJobLedger(i: LedgerInputs): JobLedger {
       materials: round(r.materials),
       plant: round(r.plant),
       mistakes: round(r.mistakes),
-      cost: round(r.labour + r.materials + r.plant + r.mistakes),
+      mistakesAdded: round(r.mistakesAdded),
+      cost: round(r.labour + r.materials + r.plant + r.mistakesAdded),
     }))
     .sort((a, b) => order(a.key) - order(b.key));
 
@@ -220,6 +239,7 @@ export function computeJobLedger(i: LedgerInputs): JobLedger {
     budget,
     cost,
     mistakes: round(out.reduce((s, r) => s + r.mistakes, 0)),
+    mistakesAdded: round(out.reduce((s, r) => s + r.mistakesAdded, 0)),
     margin: round(budget - cost),
     marginPct: budget > 0 ? round(((budget - cost) / budget) * 100) : null,
     unsplit: round(budget - split),
@@ -256,7 +276,7 @@ export interface CostCentreTotal {
   name: string;
   budget: number;
   cost: number;
-  /** Mistakes — already inside `cost`. */
+  /** Mistakes (linked + manual) — a subset of `cost`. */
   mistakes: number;
   margin: number;
   marginPct: number | null;

@@ -328,6 +328,23 @@ begin
 end;
 $$;
 
+-- Mistake tracking (0119, drafted — guarded the same way): a manual cost line
+-- and a recovery, so the sweep checks mistake_cost_lines.amount_ex_gst and
+-- job_mistakes.recovery_claimed_ex_gst / recovered_ex_gst with real money.
+do $$
+begin
+  if to_regclass('public.mistake_cost_lines') is not null then
+    insert into mistake_cost_lines (id, mistake_id, kind, source, amount_ex_gst, note)
+    values ('a5a5a5a5-0000-0000-0000-000000000001', 'a4a4a4a4-0000-0000-0000-000000000001',
+            'material', 'manual', 120.00, 'CI replacement pit riser')
+    on conflict (id) do nothing;
+    update job_mistakes
+       set recovery_source = 'supplier_credit', recovery_claimed_ex_gst = 120.00, recovered_ex_gst = 60.00
+     where id = 'a4a4a4a4-0000-0000-0000-000000000001';
+  end if;
+end;
+$$;
+
 -- category is omitted so its default ('materials') applies, for the same reason
 -- jobs.status is above: the CHECK constraint is not what this fixture tests.
 insert into job_expenses (id, job_id, supplier_name, amount, gst_amount)

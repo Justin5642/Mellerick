@@ -6,7 +6,7 @@ import { createClient } from "@/lib/supabase/server";
 import { fetchAllRows } from "@/lib/fetch-all-rows";
 import { belowMinimumMargin, computeJobLedger, costCentreTotals, loadedRatesByStaff, plantCosts, rowBelowMinimum, rowMarginPct, type JobLedger } from "@/lib/job-ledger";
 import { attachEffectiveRates } from "@/lib/fleet-rates";
-import { isMissingMistakesTable } from "@/lib/job-mistakes";
+import { ledgerMistakes, loadCostSources, loadMistakes } from "@/lib/mistakes-data";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { ArrowLeft, AlertTriangle } from "lucide-react";
@@ -20,9 +20,10 @@ import { ArrowLeft, AlertTriangle } from "lucide-react";
 // "In play" = not cancelled, and not completed-and-approved (those are done
 // and billed).
 //
-// Mistake costs (job_mistakes — migration 0115, a draft, not applied when
-// this was written) are part of each job's cost and shown as their own
-// column; before the table exists there are none.
+// Mistakes (0115/0119 (a draft, not applied yet)) are shown as their own column, a SUBSET of each job's
+// cost: linked costs are already counted; only manual mistake lines, less money
+// recovered, add cost (lib/job-ledger.ts, lib/mistakes-data.ts). Before the
+// tables exist there are none.
 
 const EQUIPMENT_COST_COLUMNS =
   "id, assigned_to, purchase_date, created_at, purchase_cost, estimated_life_years, insurance_annual, maintenance_annual, " +
@@ -116,16 +117,12 @@ export default async function JobMarginsPage() {
       return m;
     };
     // Mistakes: a missing table (before 0115 is applied) is "none".
-    type MistakeRow = { job_id: string; amount_ex_gst: number | null; cost_center_id: string | null };
-    let mistakes: MistakeRow[] = [];
-    try {
-      mistakes = await forJobs<MistakeRow>(ids, (chunk) =>
-        fetchAllRows<MistakeRow>((count) => supabase.from("job_mistakes").select("id, job_id, amount_ex_gst, cost_center_id", count).in("job_id", chunk).order("id") as never)
-      );
-    } catch (err) {
-      const probe = await supabase.from("job_mistakes").select("id").limit(1);
-      if (!isMissingMistakesTable(probe.error)) throw err;
-    }
+    const loadedMistakes = await loadMistakes(supabase as never, { jobIds: ids });
+    if (loadedMistakes.error) throw new Error(loadedMistakes.error);
+    const { sources: mistakeSources } = await loadCostSources(supabase as never, loadedMistakes.lines, { withRates: true });
+    const mistakes = ledgerMistakes(loadedMistakes.mistakes, loadedMistakes.lines, mistakeSources).filter(
+      (m): m is typeof m & { job_id: string } => !!m.job_id
+    );
     const [posBy, timeBy, expBy, ordBy, useBy, misBy] = [byJob(pos), byJob(time), byJob(expenses), byJob(orders), byJob(usage), byJob(mistakes)];
 
     rows = open

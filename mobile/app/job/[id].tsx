@@ -28,6 +28,7 @@ import { JobVariationsTab } from "../../components/job/variations";
 import { JobSupplierOrdersTab } from "../../components/job/supplier-orders";
 import { JobDayWorksTab } from "../../components/job/day-works";
 import { JobPurchaseOrdersTab } from "../../components/job/purchase-orders";
+import { JobMistakesTab } from "../../components/job/mistakes";
 import { ScheduleJobModal } from "../../components/job/schedule-job-modal";
 import { isJobClosedForScheduling } from "../../lib/jobSchedulable";
 import { parseSchedulePrefill, type SchedulePrefill } from "../../lib/scheduleExistingJob";
@@ -51,6 +52,7 @@ const TABS = [
   { key: "variations", label: "Variations" },
   { key: "orders", label: "Orders" },
   { key: "pos", label: "POs" },
+  { key: "mistakes", label: "Mistakes" },
   { key: "photos", label: "Photos" },
   { key: "documents", label: "Documents" },
   { key: "notes", label: "Notes" },
@@ -70,6 +72,7 @@ const VIEW_ONLY_TABS = new Set<TabKey>(["overview", "orders", "photos", "documen
 // Day Works / Hire (Stage 2, Nov 2026): only for the job's crew and the office
 // — the server's requireOnJob refuses anyone else — and never on a view-only
 // job (it is not in VIEW_ONLY_TABS). Online only; offline it says it needs signal.
+// Mistakes (0119, a draft not applied yet) follow the same rule: on the job (or office), never view-only.
 
 const JOB_STATUSES = ["pending", "scheduled", "in_progress", "on_hold", "completed", "cancelled"] as const;
 const JOB_PRIORITIES = ["low", "normal", "high", "urgent"] as const;
@@ -417,7 +420,7 @@ export default function JobDetailScreen() {
   const onJob =
     isOfficeOrAdmin || (!!userId && (job.assigned_to === userId || assignedStaff.some((a) => a.id === userId)));
   const visibleTabs = (viewOnly ? TABS.filter((t) => VIEW_ONLY_TABS.has(t.key)) : TABS).filter(
-    (t) => (t.key !== "dayworks" || onJob) && (t.key !== "pos" || isOfficeOrAdmin)
+    (t) => (t.key !== "dayworks" || onJob) && (t.key !== "mistakes" || onJob) && (t.key !== "pos" || isOfficeOrAdmin)
   );
   const activeTab: TabKey = visibleTabs.some((t) => t.key === tab) ? tab : "overview";
 
@@ -591,6 +594,8 @@ export default function JobDetailScreen() {
           />
         )}
         {activeTab === "pos" && isOfficeOrAdmin && <JobPurchaseOrdersTab jobId={job.id} />}
+        {/* Log mistake (0119): the crew on the job, and office. No money; online only. */}
+        {activeTab === "mistakes" && userId && onJob && <JobMistakesTab jobId={job.id} />}
         {activeTab === "documents" && <JobDocumentsTab jobId={job.id} />}
         {activeTab === "notes" && userId && <JobNotesTab jobId={job.id} currentUserId={userId} readOnly={viewOnly} canEditAll={isOfficeOrAdmin} />}
         {activeTab === "signature" && userId && (

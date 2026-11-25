@@ -38,6 +38,7 @@ const JobSignature = dynamic(() => import("./job-signature").then((m) => m.JobSi
 const JobLedger = dynamic(() => import("./job-ledger").then((m) => m.JobLedger), { loading: TabLoading });
 const JobPO = dynamic(() => import("./job-po").then((m) => m.JobPO), { loading: TabLoading });
 const JobMistakes = dynamic(() => import("./job-mistakes").then((m) => m.JobMistakes), { loading: TabLoading });
+const CrewMistakes = dynamic(() => import("./crew-mistakes").then((m) => m.CrewMistakes), { ssr: false });
 const JobTime = dynamic(() => import("./job-time").then((m) => m.JobTime), { loading: TabLoading });
 const JobVariations = dynamic(() => import("./job-variations").then((m) => m.JobVariations), { loading: TabLoading });
 const JobExpenses = dynamic(() => import("./job-expenses").then((m) => m.JobExpenses), { loading: TabLoading });
@@ -436,6 +437,12 @@ export function JobDetailClient({ job, currentUserId, photos: initialPhotos, doc
                 onEditSchedule={isOffice ? openSchedule : undefined}
                 canEditSite={isOffice}
               />
+              {/* "Log mistake" for the crew on a job they're on (0119): no money. Office logs and costs on the PO tab. */}
+              {!isOffice && !viewOnly && (
+                <div className="px-6 pb-6 max-w-3xl">
+                  <CrewMistakes jobId={job.id} />
+                </div>
+              )}
             </TabsContent>
             {isOffice && (
             <TabsContent value="po" className="m-0 h-full">
@@ -456,18 +463,18 @@ export function JobDetailClient({ job, currentUserId, photos: initialPhotos, doc
               />
               {/* Mistake costs: office and admin (this tab), never technicians. */}
               <div className="px-6 pb-6">
-                <JobMistakes jobId={job.id} costCenters={costCenters} staff={staff} />
+                <JobMistakes jobId={job.id} costCenters={costCenters} staff={staff} isAdmin={isAdmin} />
               </div>
             </TabsContent>
             )}
             <TabsContent value="time" className="m-0 h-full">
-              <JobTime jobId={job.id} currentUserId={currentUserId} timeEntries={timeEntries} site={job.sites} costCenters={costCenters} isAdmin={isAdmin} staff={staff} onUpdate={setTimeEntries} scheduledCostCenterId={job.scheduled_cost_center_id} />
+              <JobTime jobId={job.id} currentUserId={currentUserId} timeEntries={timeEntries} site={job.sites} costCenters={costCenters} isAdmin={isAdmin} staff={staff} onUpdate={setTimeEntries} scheduledCostCenterId={job.scheduled_cost_center_id} canLinkMistakes={isOffice} />
             </TabsContent>
             <TabsContent value="variations" className="m-0 h-full">
               <JobVariations jobId={job.id} variations={variations} variationTypes={variationTypes} canPrice={canPriceVariations} currentUserId={currentUserId} onUpdate={setVariations} highlightVariationId={highlightVariationId} />
             </TabsContent>
             <TabsContent value="expenses" className="m-0 h-full">
-              <JobExpenses jobId={job.id} jobNumber={job.job_number} expenses={expenses} onUpdate={setExpenses} currentUserId={currentUserId} costCenters={costCenters} />
+              <JobExpenses jobId={job.id} jobNumber={job.job_number} expenses={expenses} onUpdate={setExpenses} currentUserId={currentUserId} costCenters={costCenters} canLinkMistakes={isOffice} />
             </TabsContent>
             <TabsContent value="equipment" className="m-0 h-full">
               {equipmentOptions ? (

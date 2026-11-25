@@ -1,5 +1,7 @@
 "use client";
 
+import { LinkToMistakeButton } from "@/components/mistakes/link-to-mistake-button";
+
 import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { toast } from "sonner";
@@ -749,6 +751,8 @@ export function JobPO({ jobId, jobNumber, customerName, site, pos: initialPos, t
                 <option key={s} value={s}>{VENDOR_ORDER_STATUS_LABELS[s]}</option>
               ))}
             </select>
+            {/* Wrong material ordered / supplied → part of a mistake (0119). The PO tab is office/admin only. */}
+            <LinkToMistakeButton jobId={jobId} source="vendor_order" sourceId={vo.id} className="text-slate-300 hover:text-amber-600" />
             <button onClick={() => deleteVendorOrder(vo.id)} className="text-slate-300 hover:text-red-400 transition-colors">
               <Trash2 className="w-3 h-3" />
             </button>

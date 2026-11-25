@@ -1,5 +1,7 @@
 "use client";
 
+import { LinkToMistakeButton } from "@/components/mistakes/link-to-mistake-button";
+
 import { useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { toast } from "sonner";
@@ -49,9 +51,11 @@ interface Props {
   onUpdate: (expenses: Expense[]) => void;
   currentUserId: string;
   costCenters: CostCenterOption[];
+  /** Office/admin: the "part of a mistake?" tick on each expense (0119, a draft not applied yet). */
+  canLinkMistakes?: boolean;
 }
 
-export function JobExpenses({ jobId, jobNumber, expenses: initialExpenses, onUpdate, currentUserId, costCenters }: Props) {
+export function JobExpenses({ jobId, jobNumber, expenses: initialExpenses, onUpdate, currentUserId, costCenters, canLinkMistakes }: Props) {
   const supabase = createClient();
   const [expenses, setExpenses] = useState<Expense[]>(initialExpenses);
   const [showForm, setShowForm] = useState(false);
@@ -230,9 +234,12 @@ export function JobExpenses({ jobId, jobNumber, expenses: initialExpenses, onUpd
                   </span>
                 )}
               </div>
-              <button onClick={() => deleteExpense(expense)} className="text-slate-300 hover:text-red-400 transition-colors p-1 shrink-0">
-                <Trash2 className="w-4 h-4" />
-              </button>
+              <div className="flex items-center shrink-0">
+                {canLinkMistakes && <LinkToMistakeButton jobId={jobId} source="job_expense" sourceId={expense.id} />}
+                <button onClick={() => deleteExpense(expense)} className="text-slate-300 hover:text-red-400 transition-colors p-1 shrink-0">
+                  <Trash2 className="w-4 h-4" />
+                </button>
+              </div>
             </div>
           </CardHeader>
           <CardContent className="pt-0 space-y-3">

@@ -1,7 +1,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { CheckCircle2, XCircle, ExternalLink, CalendarDays, Wrench, Layers, Truck } from "lucide-react";
+import { CheckCircle2, XCircle, ExternalLink, CalendarDays, Wrench, Layers, Truck, AlertTriangle } from "lucide-react";
 import Link from "next/link";
 import { GoogleCalendarSyncButton } from "@/components/settings/google-calendar-sync-button";
 import { XeroExpenseAccountCode } from "@/components/settings/xero-expense-account-code";
@@ -261,6 +261,25 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
           <Link href="/dashboard/settings/cost-centre-templates">
             <Button variant="outline" className="gap-2">
               <ExternalLink className="w-4 h-4" /> Manage Cost Centres
+            </Button>
+          </Link>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <div>
+            <CardTitle className="text-base flex items-center gap-2">
+              <AlertTriangle className="w-4 h-4 text-blue-600" />
+              Mistake categories
+            </CardTitle>
+            <CardDescription className="mt-1">The list the crew pick from when they log a mistake on a job</CardDescription>
+          </div>
+        </CardHeader>
+        <CardContent>
+          <Link href="/dashboard/settings/mistake-categories">
+            <Button variant="outline" className="gap-2">
+              <ExternalLink className="w-4 h-4" /> Manage Mistake Categories
             </Button>
           </Link>
         </CardContent>
