@@ -34,7 +34,9 @@ export class VariationsRepository {
     unit: string;
     loggedBy: string;
     photo?: { localUri: string; ext?: string } | null;
-  }): Promise<{ id: string }> {
+    /** An operation to wait for (switching while clocked on: the clock-off). */
+    dependsOn?: string | null;
+  }): Promise<{ id: string; opId: string }> {
     const rowId = this.ids.newId();
     const photoPath = input.photo ? `${input.jobId}/variations/${rowId}.${input.photo.ext ?? "jpg"}` : null;
     const payload: Record<string, unknown> = {
@@ -49,22 +51,26 @@ export class VariationsRepository {
       logged_at: this.time.nowIso(),
     };
     if (input.photo) payload.bucket = "job-photos"; // transport-only; stripped before the row write
+    // The op id is handed back so a clock-on against this NEW variation can
+    // wait for it (time_entries.variation_id references it — 0120, draft).
+    const opId = this.ids.newId();
     const op: WriteOperation = {
       kind: "write",
-      id: this.ids.newId(),
+      id: opId,
       rowId,
       aggregate: "job_variation",
       op: "insert",
       table: "job_variations",
       payload,
       ...(input.photo ? { attachmentLocalPath: input.photo.localUri, attachmentPathField: "photo_storage_path" } : {}),
+      ...(input.dependsOn ? { dependsOn: input.dependsOn } : {}),
       status: "pending",
       attempts: 0,
       nextAttemptAt: 0,
       createdAt: this.time.nowMs(),
     };
     await this.outbox.enqueue(op);
-    return { id: rowId };
+    return { id: rowId, opId };
   }
 
   /** Price a pending variation and approve it (total = rate × quantity). */

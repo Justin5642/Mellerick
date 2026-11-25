@@ -7,6 +7,8 @@ import { fetchAllRows } from "@/lib/fetch-all-rows";
 import { belowMinimumMargin, computeJobLedger, costCentreTotals, loadedRatesByStaff, plantCosts, rowBelowMinimum, rowMarginPct, type JobLedger } from "@/lib/job-ledger";
 import { attachEffectiveRates } from "@/lib/fleet-rates";
 import { ledgerMistakes, loadCostSources, loadMistakes } from "@/lib/mistakes-data";
+import { linkIndex, loadVariationLinks, withLinkedVariation } from "@/lib/variation-links";
+import { isMissingVariationColumn, variationName } from "@/lib/variation-time";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { ArrowLeft, AlertTriangle } from "lucide-react";
@@ -24,6 +26,12 @@ import { ArrowLeft, AlertTriangle } from "lucide-react";
 // cost: linked costs are already counted; only manual mistake lines, less money
 // recovered, add cost (lib/job-ledger.ts, lib/mistakes-data.ts). Before the
 // tables exist there are none.
+//
+// Variations (0120 (draft)): each job's approved variations add to its price, and the
+// time tagged to a variation (time_entries.variation_id) and the costs the
+// office linked to one (variation_cost_links) are costed on the variation, not
+// its stage. Across jobs they add up into one "Variations" row. Before 0120 (draft)
+// there is no tag and no link, and nothing changes.
 
 const EQUIPMENT_COST_COLUMNS =
   "id, assigned_to, purchase_date, created_at, purchase_cost, estimated_life_years, insurance_annual, maintenance_annual, " +
@@ -82,13 +90,39 @@ export default async function JobMarginsPage() {
     const priced = new Set(pos.filter((p) => Number(p.total_value ?? 0) > 0).map((p) => p.job_id));
     const ids = openIds.filter((id) => priced.has(id));
 
-    type TimeRow = { job_id: string; staff_id: string; hours: number | null; cost_center_id: string | null; entry_type: string | null };
-    type ExpenseRow = { job_id: string; amount: number | null; cost_center_id: string | null };
-    type OrderRow = { job_id: string; amount: number | null; cost_center_id: string | null; status: string };
-    type UsageRow = { job_id: string; equipment_id: string; hours: number; loads: number | null; days: number | null; cost_center_id: string | null };
-    const [time, expenses, orders, usage, equipmentRes, profilesRes, centresRes, configRes] = await Promise.all([
+    type TimeRow = { job_id: string; staff_id: string; hours: number | null; cost_center_id: string | null; entry_type: string | null; variation_id?: string | null };
+    type VariationRow = {
+      id: string;
+      job_id: string;
+      status: string;
+      custom_name: string | null;
+      rate: number | null;
+      quantity: number | null;
+      total_amount: number | null;
+      variation_types: { name: string | null } | null;
+    };
+    // With 0120 (draft)'s variation_id; without it on a database that lacks the column.
+    const readTime = (columns: string) =>
       forJobs<TimeRow>(ids, (chunk) =>
-        fetchAllRows<TimeRow>((count) => supabase.from("time_entries").select("id, job_id, staff_id, hours, cost_center_id, entry_type", count).in("job_id", chunk).order("id") as never)
+        fetchAllRows<TimeRow>((count) => supabase.from("time_entries").select(columns, count).in("job_id", chunk).order("id") as never)
+      );
+    const readTimeWithVariation = async () => {
+      try {
+        return await readTime("id, job_id, staff_id, hours, cost_center_id, entry_type, variation_id");
+      } catch (e) {
+        if (!isMissingVariationColumn({ code: "42703", message: e instanceof Error ? e.message : String(e) })) throw e;
+        return readTime("id, job_id, staff_id, hours, cost_center_id, entry_type");
+      }
+    };
+    type ExpenseRow = { id: string; job_id: string; amount: number | null; cost_center_id: string | null };
+    type OrderRow = { id: string; job_id: string; amount: number | null; cost_center_id: string | null; status: string };
+    type UsageRow = { id: string; job_id: string; equipment_id: string; hours: number; loads: number | null; days: number | null; cost_center_id: string | null };
+    const [time, variationRows, expenses, orders, usage, equipmentRes, profilesRes, centresRes, configRes] = await Promise.all([
+      readTimeWithVariation(),
+      forJobs<VariationRow>(ids, (chunk) =>
+        fetchAllRows<VariationRow>((count) =>
+          supabase.from("job_variations").select("id, job_id, status, custom_name, rate, quantity, total_amount, variation_types(name)", count).in("job_id", chunk).order("id") as never
+        )
       ),
       forJobs<ExpenseRow>(ids, (chunk) =>
         fetchAllRows<ExpenseRow>((count) => supabase.from("job_expenses").select("id, job_id, amount, cost_center_id", count).in("job_id", chunk).order("id") as never)
@@ -123,7 +157,28 @@ export default async function JobMarginsPage() {
     const mistakes = ledgerMistakes(loadedMistakes.mistakes, loadedMistakes.lines, mistakeSources).filter(
       (m): m is typeof m & { job_id: string } => !!m.job_id
     );
-    const [posBy, timeBy, expBy, ordBy, useBy, misBy] = [byJob(pos), byJob(time), byJob(expenses), byJob(orders), byJob(usage), byJob(mistakes)];
+    // The office's cost links to variations (0120 (draft)); none before it is applied.
+    const linksRes = await loadVariationLinks(supabase as never, variationRows.map((v) => v.id));
+    if (linksRes.error) throw new Error(linksRes.error);
+    const links = linkIndex(linksRes.links);
+    const ledgerVariations = variationRows.map((v) => ({
+      job_id: v.job_id,
+      id: v.id,
+      name: `Variation: ${variationName(v)}`,
+      status: v.status,
+      rate: v.rate,
+      quantity: v.quantity,
+      total_amount: v.total_amount,
+    }));
+    const [posBy, timeBy, expBy, ordBy, useBy, misBy, varBy] = [
+      byJob(pos),
+      byJob(time),
+      byJob(withLinkedVariation(expenses, "job_expense", links)),
+      byJob(withLinkedVariation(orders, "vendor_order", links)),
+      byJob(withLinkedVariation(usage, "equipment_usage", links)),
+      byJob(mistakes),
+      byJob(ledgerVariations),
+    ];
 
     rows = open
       .filter((j) => priced.has(j.id))
@@ -141,6 +196,7 @@ export default async function JobMarginsPage() {
             supplierOrders: ordBy.get(job.id) ?? [],
             plant: plantCosts(useBy.get(job.id) ?? [], equipment),
             mistakes: misBy.get(job.id) ?? [],
+            variations: varBy.get(job.id) ?? [],
           }),
         };
       })

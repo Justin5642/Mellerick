@@ -8,7 +8,7 @@ import { onClockChanged } from "../../lib/clockEvents";
 import { offerSitePinAfterClockOn } from "../../lib/sitePinOffer";
 import { currentFix } from "../../lib/clockFix";
 import { type BookingWindow } from "../../lib/bookings";
-import { useClockOnCostCentre } from "./clock-on-stage-picker";
+import { useClockOnTarget } from "./clock-on-stage-picker";
 import { loadSupplierOrders } from "../../lib/supplierOrders";
 import { todaySteps, type StepKey, type TodayStep } from "../../lib/todaySteps";
 
@@ -58,7 +58,7 @@ export function JobTodayCard({
   onGo: (tab: Tab) => void;
 }) {
   const timeClock = useTimeClock();
-  const { chooseCostCentre, sheet: stageSheet } = useClockOnCostCentre(jobId);
+  const { chooseClockOn, sheet: stageSheet } = useClockOnTarget(jobId, currentUserId);
   const [clockedInSince, setClockedInSince] = useState<string | null>(null);
   const [orders, setOrders] = useState<{ status: string; deliveredAt?: string | null }[] | null>(null);
   const [clocking, setClocking] = useState(false);
@@ -84,10 +84,18 @@ export function JobTodayCard({
       // The same cost centre as the Time tab: the booking covering now, then
       // the nearest one today, then the job's — and with none of those and
       // several open stages, it asks (never a completed stage).
-      const costCenterId = await chooseCostCentre(myBookings, scheduledCostCenterId);
-      if (costCenterId === undefined) return; // cancelled the picker
+      // The job's open variations are offered too (0120, draft).
+      const pick = await chooseClockOn(myBookings, scheduledCostCenterId);
+      if (pick === undefined) return; // cancelled the picker
       const fix = await currentFix(3000);
-      await timeClock.clockIn({ jobId, staffId: currentUserId, costCenterId, fix });
+      await timeClock.clockIn({
+        jobId,
+        staffId: currentUserId,
+        costCenterId: pick.costCenterId,
+        variationId: pick.variationId,
+        newVariation: pick.newVariation,
+        fix,
+      });
       setClockedInSince(new Date().toISOString());
       // No map pin on this site? Offer to save this fix (asks, once per job).
       void offerSitePinAfterClockOn(jobId, fix);

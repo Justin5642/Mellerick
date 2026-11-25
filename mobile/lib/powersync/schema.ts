@@ -351,6 +351,8 @@ const job_variations = new Table({
   invoice_id: column.text,
   attachment_storage_path: column.text,
   attachment_file_name: column.text,
+  // 0120 (draft — added by hand; regenerate after applying): office stream job_variations.*
+  is_hourly: column.integer,
   sync_office: column.integer,
 }, {
   indexes: {
@@ -565,6 +567,8 @@ const time_entries = new Table({
   clock_out_lng: column.real,
   clock_out_accuracy: column.real,
   invoice_id: column.text,
+  // 0120 (draft — added by hand; regenerate after applying): tech_time_entries lists it, office time_entries.*
+  variation_id: column.text,
 }, {
   indexes: {
     job_staff: ['job_id', 'staff_id'],

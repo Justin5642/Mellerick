@@ -141,17 +141,32 @@ export class TimeEntriesRepository {
      * the booking ends when this entry is clocked off. Otherwise a new id.
      */
     id?: string;
+    /**
+     * Time against a variation (0120, draft). Sent only when set, so every
+     * existing clock-on's payload is unchanged; on a database without the
+     * column the gateway drops it (optionalColumns.ts) and the time lands as
+     * the stage's.
+     */
+    variationId?: string | null;
+    /** An operation this clock-on must wait for — a NEW variation's insert, or the clock-off it follows. */
+    dependsOn?: string | null;
   }): Promise<string> {
     const rowId = input.id ?? this.ids.newId();
-    const opId = await this.enqueueWrite(rowId, "insert", {
-      job_id: input.jobId,
-      staff_id: input.staffId,
-      clock_in: notAfterNow(input.atIso, this.time.nowIso()),
-      auto_clocked: input.autoClocked ?? false,
-      cost_center_id: input.costCenterId ?? null,
-      // Where the phone was (0092) — only when known.
-      ...fixColumns("clock_in", input.fix),
-    });
+    const opId = await this.enqueueWrite(
+      rowId,
+      "insert",
+      {
+        job_id: input.jobId,
+        staff_id: input.staffId,
+        clock_in: notAfterNow(input.atIso, this.time.nowIso()),
+        auto_clocked: input.autoClocked ?? false,
+        cost_center_id: input.costCenterId ?? null,
+        ...(input.variationId ? { variation_id: input.variationId } : {}),
+        // Where the phone was (0092) — only when known.
+        ...fixColumns("clock_in", input.fix),
+      },
+      input.dependsOn ?? null
+    );
     await this.enqueueBillingSync(rowId, opId);
     notifyClockedIn({ entryId: rowId, jobId: input.jobId, fix: input.fix ?? null });
     return rowId;
@@ -165,6 +180,11 @@ export class TimeEntriesRepository {
     /** Backdate the clock-off (the "left the site" prompt: the first fix outside). Never in the future. */
     atIso?: string;
   }): Promise<void> {
+    await this.clockOutOp(input);
+  }
+
+  /** clockOut, handing back the operation id (a switch's next steps wait for it). */
+  async clockOutOp(input: { entryId: string; clockInIso: string; fix?: ClockFix | null; atIso?: string }): Promise<string> {
     const clockOutIso = notAfterNow(input.atIso, this.time.nowIso());
     assertClosable(input.clockInIso, clockOutIso);
     const opId = await this.enqueueWrite(input.entryId, "update", {
@@ -173,6 +193,53 @@ export class TimeEntriesRepository {
       ...fixColumns("clock_out", input.fix),
     });
     await this.enqueueBillingSync(input.entryId, opId);
+    return opId;
+  }
+
+  /**
+   * "Switch to a variation" (or back to the stage) while clocked on (0120,
+   * draft): the open entry is clocked off and a new one clocked on, tagged to
+   * the target, at the SAME instant — through the outbox, so it works offline.
+   * The clock-on waits for the clock-off (one open work entry per job, 0090).
+   * Returns the new entry's id. (Switching to a NEW variation is three steps —
+   * clockOutOp, the variation's insert waiting for it, then clockIn waiting
+   * for that — see useTimeClock.switchClock.)
+   */
+  async switchClock(input: {
+    open: { id: string; jobId: string; staffId: string; clockInIso: string };
+    costCenterId: string | null;
+    variationId: string | null;
+    atIso: string;
+    fix?: ClockFix | null;
+  }): Promise<string> {
+    const offOp = await this.clockOutOp({ entryId: input.open.id, clockInIso: input.open.clockInIso, fix: input.fix, atIso: input.atIso });
+    const rowId = this.ids.newId();
+    const onOp = await this.enqueueWrite(
+      rowId,
+      "insert",
+      {
+        job_id: input.open.jobId,
+        staff_id: input.open.staffId,
+        clock_in: notAfterNow(input.atIso, this.time.nowIso()),
+        auto_clocked: false,
+        cost_center_id: input.costCenterId,
+        ...(input.variationId ? { variation_id: input.variationId } : {}),
+        ...fixColumns("clock_in", input.fix),
+      },
+      offOp
+    );
+    await this.enqueueBillingSync(rowId, onOp);
+    notifyClockedIn({ entryId: rowId, jobId: input.open.jobId, fix: input.fix ?? null });
+    return rowId;
+  }
+
+  /**
+   * Move an entry onto a variation, or back to the stage (null) — 0120, draft.
+   * The technician on their own entries, office/admin on anyone's (RLS). No
+   * billing resync: what an entry bills doesn't depend on it here.
+   */
+  async setVariation(entryId: string, variationId: string | null): Promise<void> {
+    await this.enqueueWrite(entryId, "update", { variation_id: variationId });
   }
 
   /** Add a backdated manual entry (used when auto clock-in/out didn't fire). */
@@ -243,7 +310,8 @@ export class TimeEntriesRepository {
   private async enqueueWrite(
     rowId: string,
     op: WriteOp,
-    payload: Record<string, unknown>
+    payload: Record<string, unknown>,
+    dependsOn: string | null = null
   ): Promise<string> {
     const id = this.ids.newId();
     const write: WriteOperation = {
@@ -254,6 +322,7 @@ export class TimeEntriesRepository {
       op,
       table: "time_entries",
       payload,
+      ...(dependsOn ? { dependsOn } : {}),
       status: "pending",
       attempts: 0,
       nextAttemptAt: 0,

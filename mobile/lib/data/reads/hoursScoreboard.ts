@@ -1,7 +1,8 @@
 import { supabase } from "../../supabase";
 import { fromLocalOr, type LocalReads } from "./source";
 import { num, numOrNull } from "./rowMap";
-import { unwrapRows } from "./unwrap";
+import { unwrapRows, type SupabaseResult } from "./unwrap";
+import { isMissingVariationColumn } from "../../variationTime";
 
 // Reads behind components/job/hours-scoreboard.tsx — allocated hours (from the
 // job's purchase orders) vs logged WORK hours (time_entries). HOURS ONLY: no
@@ -32,6 +33,11 @@ export interface WorkTimeEntry {
   clock_out: string | null;
 }
 
+// Time against a VARIATION (time_entries.variation_id, 0120 (draft)) is priced on the
+// variation and never eats into the stage's allocation, so it is left out on
+// both paths. Locally the column is null until the streams carry it (then it
+// counts, as before); remotely a database without 0120 (draft) is read without it.
+
 export const SQL_JOB_PO_HOURS = `
   SELECT total_hours FROM purchase_orders WHERE job_id = ?`;
 
@@ -41,17 +47,18 @@ export const SQL_JOB_IN_MIRROR = `
 /** Office/admin: every work entry on the job (RLS gives them all rows). */
 export const SQL_JOB_WORK_ENTRIES_ALL = `
   SELECT hours, clock_in, clock_out FROM time_entries
-  WHERE job_id = ? AND entry_type = 'work'`;
+  WHERE job_id = ? AND entry_type = 'work' AND variation_id IS NULL`;
 
 /** Technician: only their own — the same rows RLS returns them remotely. */
 export const SQL_JOB_WORK_ENTRIES_OWN = `
   SELECT hours, clock_in, clock_out FROM time_entries
-  WHERE job_id = ? AND entry_type = 'work' AND staff_id = ?`;
+  WHERE job_id = ? AND entry_type = 'work' AND staff_id = ? AND variation_id IS NULL`;
 
 interface RawEntry {
   hours: number | string | null;
   clock_in: string | null;
   clock_out: string | null;
+  variation_id?: string | null;
 }
 
 const mapEntry = (r: RawEntry): WorkTimeEntry => ({
@@ -81,12 +88,13 @@ export async function getJobAllocatedHours(jobId: string): Promise<number> {
  */
 export async function listJobWorkTimeEntries(jobId: string, userId: string | null): Promise<WorkTimeEntry[]> {
   const remote = async (): Promise<WorkTimeEntry[]> => {
-    const res = await supabase
-      .from("time_entries")
-      .select("hours, clock_in, clock_out")
-      .eq("job_id", jobId)
-      .eq("entry_type", "work");
-    return (unwrapRows(res as never, "listJobWorkTimeEntries") as RawEntry[]).map(mapEntry);
+    const read = (columns: string) =>
+      supabase.from("time_entries").select(columns).eq("job_id", jobId).eq("entry_type", "work");
+    let res = (await read("hours, clock_in, clock_out, variation_id")) as unknown as SupabaseResult<RawEntry[]>;
+    if (isMissingVariationColumn(res.error)) res = (await read("hours, clock_in, clock_out")) as unknown as SupabaseResult<RawEntry[]>;
+    return unwrapRows(res, "listJobWorkTimeEntries")
+      .filter((r) => !r.variation_id)
+      .map(mapEntry);
   };
   return fromLocalOr(async (db: LocalReads) => {
     if (!(await db.getOptional<{ id: string }>(SQL_JOB_IN_MIRROR, [jobId]))) return remote();

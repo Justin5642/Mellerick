@@ -36,3 +36,16 @@ export const TIME_ENTRY_COLUMNS =
  */
 export const TIME_ENTRY_SELECT_WITH_STAFF =
   `${TIME_ENTRY_COLUMNS}, profiles!time_entries_staff_id_fkey(full_name)` as const;
+
+/**
+ * Columns a database may not have yet (0120's variation_id — a draft) — read with
+ * the `…_WITH_VARIATION` lists, falling back to the plain list on 42703 /
+ * PGRST204. Mirrors lib/time-entry-columns.ts (pinned by
+ * tests/unit/time-entry-columns.test.ts).
+ */
+export const TIME_ENTRY_OPTIONAL_COLUMNS = ["variation_id"] as const;
+
+export const TIME_ENTRY_COLUMNS_WITH_VARIATION = `${TIME_ENTRY_COLUMNS}, variation_id` as const;
+
+export const TIME_ENTRY_SELECT_WITH_STAFF_AND_VARIATION =
+  `${TIME_ENTRY_COLUMNS_WITH_VARIATION}, profiles!time_entries_staff_id_fkey(full_name)` as const;

@@ -21,6 +21,9 @@ export const OPTIONAL_COLUMNS: Readonly<Record<string, readonly string[]>> = {
   job_bookings: ["note"],
   customers: ["billing_address"],
   job_photos: ["folder"],
+  // 0120 (draft): time against a variation. Without the column a queued
+  // clock-on still lands, as the stage's own time.
+  time_entries: ["variation_id"],
 };
 
 /**

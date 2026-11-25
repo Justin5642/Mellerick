@@ -15,9 +15,11 @@ import { netInfoConnectivity } from "../../lib/data/net/connectivity";
 import { useDataLayer } from "../../lib/data/DataProvider";
 import { useSyncSettled } from "../../lib/data/hooks/useSyncSettled";
 import { reconcileRows } from "../../lib/data/reconcile";
-import { TIME_ENTRY_SELECT_WITH_STAFF } from "../../lib/timeEntryColumns";
+import { TIME_ENTRY_SELECT_WITH_STAFF, TIME_ENTRY_SELECT_WITH_STAFF_AND_VARIATION } from "../../lib/timeEntryColumns";
 import { type BookingWindow } from "../../lib/bookings";
-import { useClockOnCostCentre } from "./clock-on-stage-picker";
+import { useClockOnTarget } from "./clock-on-stage-picker";
+import { isMissingVariationColumn, isOpenVariation, planClockSwitch } from "../../lib/variationTime";
+import type { ClockVariation } from "../../lib/data/reads/clockVariations";
 import { useRole } from "../../design/guards/useRole";
 import { clockPlace } from "../../lib/clockLocation";
 import { RATE_CHOICES, canEditEntry, rateOverrideFor, type RateChoice } from "../../lib/timeEntryOffice";
@@ -40,6 +42,8 @@ interface TimeEntry {
   clock_out_lat?: number | null;
   clock_out_lng?: number | null;
   clock_out_accuracy?: number | null;
+  /** Time against a variation (0120, draft); absent on a database without it. */
+  variation_id?: string | null;
 }
 
 interface EditingEntry {
@@ -90,8 +94,15 @@ function formatDateTime(d: Date) {
 // visible immediately (including fully offline). It carries the same
 // client-generated id as the queued write, so when the outbox syncs and the
 // server list reloads, the real row replaces this one with no duplicate.
-function optimisticEntry(id: string, staffId: string, clockInIso: string, costCenterId: string | null = null): TimeEntry {
+function optimisticEntry(
+  id: string,
+  staffId: string,
+  clockInIso: string,
+  costCenterId: string | null = null,
+  variationId: string | null = null
+): TimeEntry {
   return {
+    variation_id: variationId,
     id,
     staff_id: staffId,
     clock_in: clockInIso,
@@ -157,6 +168,67 @@ function CostCenterPicker({
                     {item.name}
                     {"po_number" in item && item.po_number ? ` (PO #${item.po_number})` : ""}
                   </Text>
+                  {(value ?? "none") === item.id && <Ionicons name="checkmark" size={18} color={colors.blue600} />}
+                </TouchableOpacity>
+              )}
+            />
+          </View>
+        </TouchableOpacity>
+      </Modal>
+    </>
+  );
+}
+
+/** The server has time_entries.variation_id (0120, draft) — learnt from the last online read this session. */
+let variationColumnSeen = false;
+
+// Move an entry onto a variation, or back to the stage (0120, draft). Same
+// tap-to-open sheet as the stage picker. Names and statuses only — no price.
+function VariationPicker({
+  value,
+  variations,
+  disabled,
+  onChange,
+}: {
+  value: string | null;
+  variations: ClockVariation[];
+  disabled?: boolean;
+  onChange: (value: string | null) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const current = variations.find((v) => v.id === value);
+  const options: { id: string; name: string }[] = [
+    { id: "none", name: "Stage work (not a variation)" },
+    ...variations.filter((v) => isOpenVariation(v) || v.id === value).map((v) => ({ id: v.id, name: `Variation: ${v.name}` })),
+  ];
+  return (
+    <>
+      <TouchableOpacity
+        style={[styles.stageField, value ? styles.variationField : null, disabled && styles.stageFieldDisabled]}
+        onPress={() => !disabled && setOpen(true)}
+        accessibilityLabel="Variation"
+      >
+        <Text style={styles.stageFieldText} numberOfLines={1}>
+          {value ? `Variation: ${current?.name ?? "Variation"} — not in the stage's hours` : "Stage work · move onto a variation…"}
+        </Text>
+        <Ionicons name="chevron-down" size={14} color={colors.slate400} />
+      </TouchableOpacity>
+      <Modal visible={open} transparent animationType="fade" onRequestClose={() => setOpen(false)}>
+        <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={() => setOpen(false)}>
+          <View style={styles.modalSheet}>
+            <Text style={styles.modalTitle}>Stage work or a variation?</Text>
+            <FlatList
+              data={options}
+              keyExtractor={(o) => o.id}
+              renderItem={({ item }) => (
+                <TouchableOpacity
+                  style={styles.modalRow}
+                  onPress={() => {
+                    onChange(item.id === "none" ? null : item.id);
+                    setOpen(false);
+                  }}
+                >
+                  <Text style={[styles.modalRowText, (value ?? "none") === item.id && styles.modalRowTextActive]}>{item.name}</Text>
                   {(value ?? "none") === item.id && <Ionicons name="checkmark" size={18} color={colors.blue600} />}
                 </TouchableOpacity>
               )}
@@ -449,7 +521,12 @@ export function JobTimeTab({
   const [error, setError] = useState<unknown>(null);
   const [costCentersFailed, setCostCentersFailed] = useState(false);
   const timeClock = useTimeClock();
-  const { chooseCostCentre, sheet: stageSheet } = useClockOnCostCentre(jobId);
+  const { chooseClockOn, chooseSwitch, variations, sheet: stageSheet } = useClockOnTarget(jobId, currentUserId);
+  // The server knows variation_id (0120, draft) once a read came back with it.
+  // Remembered for the session (variationColumnSeen), so the variation
+  // controls still work offline after one online read this session.
+  const [variationColumn, setVariationColumn] = useState(variationColumnSeen);
+  const [movingId, setMovingId] = useState<string | null>(null);
   const layer = useDataLayer();
   const role = useRole();
   const isOffice = role === "office" || role === "admin";
@@ -502,15 +579,22 @@ export function JobTimeTab({
     try {
       setError(null);
       if (!(await netInfoConnectivity.isOnline())) return;
-      const res = await supabase
-        .from("time_entries")
-        // Explicit columns, NOT `*` — migration 0045 uses column-level SELECT
-        // grants, under which `select *` is refused outright. See
-        // lib/timeEntryColumns.ts.
-        .select(TIME_ENTRY_SELECT_WITH_STAFF)
-        .eq("job_id", jobId)
-        .order("clock_in", { ascending: false });
+      // Explicit columns, NOT `*` — migration 0045 uses column-level SELECT
+      // grants, under which `select *` is refused outright. See
+      // lib/timeEntryColumns.ts. With 0120's variation_id (draft); a database
+      // without it is read without, and every entry is the stage's.
+      const read = (columns: string) =>
+        supabase
+          .from("time_entries")
+          .select(columns as typeof TIME_ENTRY_SELECT_WITH_STAFF)
+          .eq("job_id", jobId)
+          .order("clock_in", { ascending: false });
+      let res = await read(TIME_ENTRY_SELECT_WITH_STAFF_AND_VARIATION);
+      const hasColumn = !(res.error && isMissingVariationColumn(res.error));
+      if (!hasColumn) res = await read(TIME_ENTRY_SELECT_WITH_STAFF);
       const rows = unwrapRows(res as never, "JobTimeTab.loadEntries") as unknown as TimeEntry[];
+      variationColumnSeen = hasColumn;
+      setVariationColumn(hasColumn);
       const pending = layer ? await layer.outbox.pendingRowIds() : new Set<string>();
       setEntries((prev) => reconcileRows(prev, rows, pending));
     } catch (e) {
@@ -548,13 +632,14 @@ export function JobTimeTab({
   const totalHours = workEntries.reduce((sum, e) => sum + (e.hours ? Number(e.hours) : 0), 0);
   const totalTravelHours = travelEntries.reduce((sum, e) => sum + (e.hours ? Number(e.hours) : 0), 0);
 
-  async function clockIn() {
+  async function clockIn(opts?: { toVariation?: boolean }) {
     if (myOpenEntry || loading || !timeClock.ready) return;
     setLoading(true);
     // Their booking's stage; with none and several open stages it asks
-    // (never a completed stage) — components/job/clock-on-stage-picker.tsx.
-    const costCenterId = await chooseCostCentre(myBookings, scheduledCostCenterId);
-    if (costCenterId === undefined) {
+    // (never a completed stage) — and the job's open variations are offered
+    // (0120, draft) — components/job/clock-on-stage-picker.tsx.
+    const pick = await chooseClockOn(myBookings, scheduledCostCenterId, { force: opts?.toVariation });
+    if (pick === undefined) {
       setLoading(false);
       return;
     }
@@ -562,10 +647,17 @@ export function JobTimeTab({
     const clockInIso = now.toISOString();
     // Where the phone is (0092): a few seconds at most, never blocks.
     const fix = await currentFix(3000);
-    const { id } = await timeClock.clockIn({ jobId, staffId: currentUserId, costCenterId, fix });
+    const { id, variationId } = await timeClock.clockIn({
+      jobId,
+      staffId: currentUserId,
+      costCenterId: pick.costCenterId,
+      variationId: pick.variationId,
+      newVariation: pick.newVariation,
+      fix,
+    });
     // Optimistic: show immediately (this is also the offline display path). The
     // server row reconciles in via useSyncSettled once the write lands.
-    setEntries((prev) => [optimisticEntry(id, currentUserId, clockInIso, costCenterId), ...prev]);
+    setEntries((prev) => [optimisticEntry(id, currentUserId, clockInIso, pick.costCenterId, variationId), ...prev]);
     setLoading(false);
     // No map pin on this site? Offer to save this fix (asks, once per job).
     void offerSitePinAfterClockOn(jobId, fix);
@@ -586,6 +678,49 @@ export function JobTimeTab({
     const hours = hoursBetween(open.clock_in, clockOutIso);
     setEntries((prev) => prev.map((e) => (e.id === open.id ? { ...e, clock_out: clockOutIso, hours } : e)));
     setLoading(false);
+  }
+
+  // "Switch to a variation" / "Back to the stage" while clocked on (0120,
+  // draft): the open entry ends and a new one starts at the same instant,
+  // through the outbox (works offline).
+  async function switchVariation() {
+    const open = myOpenEntry;
+    if (!open || loading || !timeClock.ready) return;
+    setLoading(true);
+    try {
+      const pick = await chooseSwitch({ variation_id: open.variation_id ?? null, cost_center_id: open.cost_center_id });
+      if (pick === undefined) return;
+      const plan = planClockSwitch(open, { costCenterId: pick.costCenterId, variationId: pick.newVariation ? "new" : pick.variationId }, new Date().toISOString());
+      if (!plan) return;
+      const fix = await currentFix(3000);
+      const { id, variationId } = await timeClock.switchClock({
+        open: { id: open.id, jobId, staffId: currentUserId, clockInIso: open.clock_in },
+        atIso: plan.clockOutIso,
+        costCenterId: pick.costCenterId,
+        variationId: pick.variationId,
+        newVariation: pick.newVariation,
+        fix,
+      });
+      const hours = hoursBetween(open.clock_in, plan.clockOutIso);
+      setEntries((prev) => [
+        optimisticEntry(id, currentUserId, plan.clockInIso, pick.costCenterId, variationId),
+        ...prev.map((e) => (e.id === open.id ? { ...e, clock_out: plan.clockOutIso, hours } : e)),
+      ]);
+    } catch (e) {
+      Alert.alert("Can't switch like this", e instanceof Error ? e.message : "The switch couldn't be saved.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  // Move an entry onto a variation or back to the stage (0120, draft): their
+  // own entries for a technician, anyone's for office/admin.
+  async function moveVariation(entryId: string, variationId: string | null) {
+    if (!timeClock.ready) return;
+    setMovingId(entryId);
+    await timeClock.setVariation(entryId, variationId);
+    setMovingId(null);
+    setEntries((prev) => prev.map((e) => (e.id === entryId ? { ...e, variation_id: variationId } : e)));
   }
 
   async function assignCostCenter(entryId: string, costCenterId: string | null) {
@@ -723,9 +858,16 @@ export function JobTimeTab({
       {stageSheet}
       <View style={styles.clockRow}>
         {!myOpenEntry ? (
-          <TouchableOpacity testID="clock-in" style={styles.clockInButton} onPress={clockIn} disabled={loading}>
-            <Text style={styles.clockInText}>{loading ? "..." : "Clock In"}</Text>
-          </TouchableOpacity>
+          <>
+            <TouchableOpacity testID="clock-in" style={styles.clockInButton} onPress={() => void clockIn()} disabled={loading}>
+              <Text style={styles.clockInText}>{loading ? "..." : "Clock In"}</Text>
+            </TouchableOpacity>
+            {variationColumn && (
+              <TouchableOpacity onPress={() => void clockIn({ toVariation: true })} disabled={loading} accessibilityLabel="Clock on to a variation">
+                <Text style={styles.linkText}>Clock on to a variation…</Text>
+              </TouchableOpacity>
+            )}
+          </>
         ) : (
           <>
             <TouchableOpacity testID="clock-out" style={styles.clockOutButton} onPress={clockOut} disabled={loading}>
@@ -735,6 +877,19 @@ export function JobTimeTab({
           </>
         )}
       </View>
+      {myOpenEntry && variationColumn && (
+        <View style={styles.switchRow}>
+          {myOpenEntry.variation_id && (
+            <Text style={styles.onVariation}>
+              On a variation: {variations?.find((v) => v.id === myOpenEntry.variation_id)?.name ?? "Variation"}
+            </Text>
+          )}
+          <TouchableOpacity style={styles.switchButton} onPress={() => void switchVariation()} disabled={loading} accessibilityLabel="Switch to a variation">
+            <Ionicons name="swap-horizontal" size={16} color={colors.orange700} />
+            <Text style={styles.switchButtonText}>{myOpenEntry.variation_id ? "Switch variation / back to the stage" : "Switch to a variation (e.g. hit rock)"}</Text>
+          </TouchableOpacity>
+        </View>
+      )}
 
       <View style={styles.logHeader}>
         <Text style={styles.logTitle}>Time Log</Text>
@@ -803,6 +958,14 @@ export function JobTimeTab({
                   options={costCenters}
                   disabled={assigningId === item.id}
                   onChange={(v) => assignCostCenter(item.id, v)}
+                />
+              )}
+              {!isTravel && variationColumn && (item.variation_id || (variations ?? []).some(isOpenVariation)) && (
+                <VariationPicker
+                  value={item.variation_id ?? null}
+                  variations={variations ?? []}
+                  disabled={!canEdit || movingId === item.id}
+                  onChange={(v) => void moveVariation(item.id, v)}
                 />
               )}
             </View>
@@ -917,4 +1080,9 @@ const styles = StyleSheet.create({
   placeRow: { flexDirection: "row", flexWrap: "wrap", gap: 12 },
   placeText: { fontSize: 11, color: colors.slate500 },
   placeWarn: { color: colors.orange700, fontWeight: "700" },
+  variationField: { borderColor: colors.orange700, backgroundColor: colors.orange100 },
+  switchRow: { gap: 6, marginTop: -6, marginBottom: 14 },
+  onVariation: { fontSize: 13, fontWeight: "700", color: colors.orange700 },
+  switchButton: { flexDirection: "row", alignItems: "center", gap: 6, alignSelf: "flex-start", paddingVertical: 8, paddingHorizontal: 12, borderRadius: 10, backgroundColor: colors.orange100 },
+  switchButtonText: { fontSize: 14, fontWeight: "600", color: colors.orange700 },
 });

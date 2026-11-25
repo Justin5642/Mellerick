@@ -2231,6 +2231,7 @@ export type Database = {
           description: string | null
           id: string
           invoice_id: string | null
+          is_hourly: boolean | null
           job_id: string
           logged_at: string | null
           logged_by: string | null
@@ -2254,6 +2255,7 @@ export type Database = {
           description?: string | null
           id?: string
           invoice_id?: string | null
+          is_hourly?: boolean | null
           job_id: string
           logged_at?: string | null
           logged_by?: string | null
@@ -2277,6 +2279,7 @@ export type Database = {
           description?: string | null
           id?: string
           invoice_id?: string | null
+          is_hourly?: boolean | null
           job_id?: string
           logged_at?: string | null
           logged_by?: string | null
@@ -3744,6 +3747,7 @@ export type Database = {
           staff_id: string
           sync_office: boolean
           travel_from_job_id: string | null
+          variation_id: string | null
         }
         Insert: {
           auto_clocked?: boolean | null
@@ -3769,6 +3773,7 @@ export type Database = {
           staff_id: string
           sync_office?: boolean
           travel_from_job_id?: string | null
+          variation_id?: string | null
         }
         Update: {
           auto_clocked?: boolean | null
@@ -3794,6 +3799,7 @@ export type Database = {
           staff_id?: string
           sync_office?: boolean
           travel_from_job_id?: string | null
+          variation_id?: string | null
         }
         Relationships: [
           {
@@ -3876,6 +3882,41 @@ export type Database = {
           time_entry_id?: string
         }
         Relationships: []
+      }
+      variation_cost_links: {
+        Row: {
+          created_at: string
+          created_by: string | null
+          id: string
+          source: string
+          source_id: string
+          variation_id: string
+        }
+        Insert: {
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          source: string
+          source_id: string
+          variation_id: string
+        }
+        Update: {
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          source?: string
+          source_id?: string
+          variation_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "variation_cost_links_variation_id_fkey"
+            columns: ["variation_id"]
+            isOneToOne: false
+            referencedRelation: "job_variations"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       variation_types: {
         Row: {

@@ -18,6 +18,8 @@ export interface ScoreboardTimeEntry {
   clock_in: string | null;
   clock_out: string | null;
   entry_type?: string | null;
+  /** Variation time (0120 (draft)) — priced on the variation, so it never eats into the allocation. */
+  variation_id?: string | null;
 }
 
 export type ScoreboardTone = "green" | "orange" | "red";
@@ -50,8 +52,9 @@ export function computeHoursScoreboard(
   entries: readonly ScoreboardTimeEntry[],
   nowMs: number,
 ): HoursScoreboard {
-  // Travel time is tracked separately and does not eat into the budget.
-  const work = entries.filter((e) => e.entry_type !== "travel");
+  // Travel time is tracked separately and does not eat into the budget; nor
+  // does time against a variation (0120 (draft)), which is priced on its own.
+  const work = entries.filter((e) => e.entry_type !== "travel" && !e.variation_id);
   const closedHours = work
     .filter((e) => e.clock_out)
     .reduce((sum, e) => sum + (Number(e.hours) || 0), 0);

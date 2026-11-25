@@ -25,6 +25,7 @@ import {
   type RateDefaults,
 } from "@/lib/approved-hours";
 import { DEFAULT_LABOUR_RATE_CONFIG } from "@/lib/labour-billing";
+import { isMissingVariationColumn } from "@/lib/variation-time";
 
 // Column list, not `*`: time_entries has column-level grants (0045) and `*`
 // is refused outright. invoice_id needs 0098.
@@ -36,20 +37,28 @@ function must<T>(res: { data: T; error: { message?: string } | null }, what: str
   return res.data;
 }
 
-/** Closed work entries for each job, keyed by job id. */
+/**
+ * Closed work entries for each job, keyed by job id. Time against a variation
+ * (time_entries.variation_id, 0120 (draft)) is left out: it is billed through its
+ * variation, and billing it as hours too would charge it twice. A database
+ * without 0120 (draft) (the filter names a missing column) is read as before.
+ */
 export async function loadJobHours(db: SupabaseClient, jobIds: string[]): Promise<Map<string, HoursEntry[]>> {
   const byJob = new Map<string, HoursEntry[]>();
   if (jobIds.length === 0) return byJob;
-  const rows = must(
-    await db
+  const read = (stageOnly: boolean) => {
+    let q = db
       .from("time_entries")
       .select(HOURS_SELECT)
       .in("job_id", jobIds)
       .eq("entry_type", "work")
-      .not("clock_out", "is", null)
-      .order("clock_in"),
-    "Time entries"
-  ) as any[];
+      .not("clock_out", "is", null);
+    if (stageOnly) q = q.is("variation_id", null);
+    return q.order("clock_in");
+  };
+  let res = await read(true);
+  if (res.error && isMissingVariationColumn(res.error)) res = await read(false);
+  const rows = must(res, "Time entries") as any[];
   // Entries already priced by an auto "Labour" job item (pre-0086).
   const labourRows = must(
     await db.from("job_items").select("time_entry_id").in("job_id", jobIds).not("time_entry_id", "is", null),
