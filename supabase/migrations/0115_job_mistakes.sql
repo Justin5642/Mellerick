@@ -1,8 +1,8 @@
 -- ============================================================================
 -- Mistake costs on a job, per cost centre (office/admin only).
 --
--- STATUS: DRAFT — NOT APPLIED. Justin pastes it into the Supabase SQL editor,
--- then the gate test supabase/tests/0115_job_mistakes_test.sql, and trusts
+-- STATUS: ✅ APPLIED IN PRODUCTION (2026-11-25, via SQL editor; gate test passed; confirmed by a read-only check).
+-- How: this file was pasted into the SQL editor, then the gate test supabase/tests/0115_job_mistakes_test.sql, and trusts
 -- only the final "0115 PASSED" row. Then change this line to applied and add
 -- the ledger row:
 --   insert into supabase_migrations.schema_migrations (version,name)

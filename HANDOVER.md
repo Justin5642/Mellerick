@@ -330,7 +330,7 @@ and 0096 then refused bookings for the other cost centres.
 - **Not changed:** the office's status drop-down itself, the PO tab's stage
   controls.
 
-**Mistake costs per cost centre (23 Nov 2026; migration `0115` DRAFT — not applied).**
+**Mistake costs per cost centre (23 Nov 2026; migration `0115` applied 2026-11-25).**
 Justin: "We also need a way of tracking the expense of mistakes in each cost
 centre that will be a negative cost." His choices: the office logs them
 (office/admin only), and they reduce the job's margin, shown as their own line.
@@ -426,7 +426,7 @@ on", and "Photos or adding docs — can't drag & drop".
   (PDF saved to Drainage, .txt refused), Find this address → pick → pin and
   coordinates moved; an Approximate pick recentred and left the pin.
 
-**Job folders for documents AND photos (24 Nov 2026; migration `0116` DRAFT — not applied).**
+**Job folders for documents AND photos (24 Nov 2026; migration `0116` applied 2026-11-25; PowerSync streams to redeploy).**
 Justin: the 0114 document folders (Site Documents / Drainage / Plumbing /
 Soil) become **Drains, Soil & Rock, R1, R2, Rough In, Fit Off, Camera
 Inspections** (+ **Other** = NULL), and **photos get the same folders** on the
@@ -511,7 +511,7 @@ website and the phone; technicians pick the folder when taking a photo.
   constraint); signature and docket photos are filed like any other photo
   (under Other) — the job report and docket rules don't look at folders.
 
-**Five October migrations were never applied (found 24 Nov 2026; catch-up `0117` DRAFT).**
+**Five October migrations were never applied (found 24 Nov 2026; catch-up `0117` applied 2026-11-24 — `CATCH-UP PASSED`, then a read-only check of production found nothing from 0060–0116 missing after 0114–0116 went in on 25 Nov).**
 A read-only check against production (every migration 0060–0116 by a column,
 table, index, trigger or policy it creates) found **0064, 0065, 0066, 0067 and
 0070 missing**, although their headers and this file said "applied 8–15 Oct".
@@ -544,7 +544,7 @@ hidden everywhere (0067); some list pages lacked indexes (0070). 0114 (and so
 - **Lesson:** a header saying "applied" is not evidence. Check production
   for an object the migration creates (the check query is in this PR's
   conversation; `npm run check:migrations` compares headers to the ledger).
-- **After applying:** mark the five headers, 0114, 0117 applied; ledger rows;
+- **Applied** 2026-11-24 (catch-up) and 2026-11-25 (0114, 0116, 0115); headers marked. Still to do: ledger rows (§7), and
   run `scripts/audit-job-documents.mjs` (dry run, then `--commit`) to flag the
   Simpro attachments that show prices as office-only.
 
@@ -1634,7 +1634,7 @@ directly as before; the routes are there for them to share.
   phones with the next build (no new native module); the web routes must be
   deployed first.
 
-**Notebook list (20 Nov 2026): existing jobs on the schedule, Copy job, site pin at clock-on, customer billing address, document folders (migration `0114` DRAFT — not applied; needs the 0117 catch-up first, see "Five October migrations were never applied").**
+**Notebook list (20 Nov 2026): existing jobs on the schedule, Copy job, site pin at clock-on, customer billing address, document folders (migration `0114` applied 2026-11-25, after the 0117 catch-up — an earlier note wrongly said 21 Nov).**
 Five items from Justin's list, web and phone.
 - **A. Schedule an existing job.** The board only offered New Job. Web board
   (`components/schedule/team-schedule-view.tsx`, office/admin): a
@@ -2955,9 +2955,7 @@ a shippable release.
 | **Truck loads: set rates (0111 applied)** | Justin | `0111` applied 2026-11-19 (gate test passed). Ledger row: `insert into supabase_migrations.schema_migrations (version,name) values ('0111','cartage_loads') on conflict do nothing;` Then: Fleet → Hire setup on each truck, add **Cartage per tonne** and/or **per m³** and **per km** rates; Settings → Truck loads, check the margin (15% by default); on jobs where quarry product is NOT in the quote, set the Day Works tab's "Quarry product on this job" to Extra. |
 | **Leave on the schedule: record 0112** | Justin | `0112` applied 2026-11-19 (gate test passed). Ledger row: `insert into supabase_migrations.schema_migrations (version,name) values ('0112','schedule_leave') on conflict do nothing;` No PowerSync redeploy. Who sees the leave type defaults to office + admin; change it in Settings → Leave on the schedule. Part days: add From/To times on the Leave Log entry. |
 | **Komtrax: sync and link machines** | Justin | `0113` applied 2026-11-20 (gate test passed). Ledger row: `insert into supabase_migrations.schema_migrations (version,name) values ('0113','komtrax') on conflict do nothing;` Admin → Fleet → Komtrax machines → **Sync Komtrax**, then link any Komatsu machine not linked by serial (or put its serial in the fleet item's notes). `KOMTRAX_USERNAME` / `KOMTRAX_PASSWORD` are in Vercel Production. |
-| **Catch-up, then 0114 → 0116 → 0115** | Justin | `0114` was NOT applied (an earlier note said so wrongly). First paste the catch-up (0067 + 0070 + 0117, trust only `CATCH-UP PASSED`), then 0114, 0116, 0115, each trusting only its `PASSED` row. Then the ledger rows for 0064–0067, 0070, 0114–0117 and the PowerSync redeploy for 0116. 0114 ledger row: `insert into supabase_migrations.schema_migrations (version,name) values ('0114','customer_address_doc_folders') on conflict do nothing;` Add billing addresses to customers — they print on invoices and quotes. |
-| **Apply 0116 (folders)** | Justin | `0116` is a DRAFT. Paste `supabase/migrations/0116_job_folders.sql`, then `supabase/tests/0116_folders_test.sql`; trust only `0116 PASSED`. Mark its STATUS line applied and record it: `insert into supabase_migrations.schema_migrations (version,name) values ('0116','job_folders') on conflict do nothing;` **Then redeploy the PowerSync streams** (`tech_job_photos` now lists `folder`), then merge web, then the phone build. Existing Drainage/Soil documents move to Drains / Soil & Rock; Site Documents and Plumbing go to Other. |
-| **Apply 0115 (mistake costs)** | Justin | `0115` is a DRAFT. Paste `supabase/migrations/0115_job_mistakes.sql`, then `supabase/tests/0115_job_mistakes_test.sql`; trust only `0115 PASSED`. Then mark its STATUS line applied and record it: `insert into supabase_migrations.schema_migrations (version,name) values ('0115','job_mistakes') on conflict do nothing;` No PowerSync redeploy. The office then logs mistakes on each job's Purchase Orders tab. |
+| **Record the 24–25 Nov migrations; redeploy PowerSync** | Justin | The catch-up (0067 + 0070 + 0117, which did 0064–0066's job) and 0114, 0116, 0115 are applied and confirmed by a read-only check (nothing from 0060–0116 missing). Ledger rows: `insert into supabase_migrations.schema_migrations (version,name) values ('0064','restrict_site_writes_to_office_admin'),('0065','office_only_job_documents'),('0066','backflow_certificate_storage_policies'),('0067','job_todo_list'),('0070','page_load_indexes'),('0114','customer_address_doc_folders'),('0115','job_mistakes'),('0116','job_folders'),('0117','catch_up_sites_and_office_only_documents') on conflict do nothing;` Then **redeploy the PowerSync streams** (`tech_job_photos` lists `folder`; docs/powersync-deploy.md), then the phone build. Run `scripts/audit-job-documents.mjs` to mark priced Simpro attachments office-only. Add billing addresses to customers. |
 | **Maestro flow 02** | Avi | Needs `ADMIN_EMAIL` / `ADMIN_PASSWORD` in the environment. The login subflow deliberately skips when a session already exists, so a password never passes through a script — which is why flows 01/03/04 could be run and 02 could not. |
 
 ### QA fixture — do not delete
@@ -3394,13 +3392,13 @@ FK-failing delete can be queued.
 must be redeployed with `sites` selecting `is_active`, or devices never receive
 the archived flag (they treat a missing value as active).
 
-**Site write permissions (migration `0064`; NOT applied until the 24 Nov 2026 catch-up, through 0117):** RLS on
+**Site write permissions (migration `0064`; applied 2026-11-24 through the 0117 catch-up — not before):** RLS on
 `sites` now lets every signed-in user read and add sites, but only office/admin
 update (edit/archive) or delete them. It drops the old policies by enumeration
 and asserts the end state. `tests/rls/sites.test.ts`
 proves it on the CI stack.
 
-**Office-only job documents (migration `0065`; NOT applied until the 24 Nov 2026 catch-up, through 0117):**
+**Office-only job documents (migration `0065`; applied 2026-11-24 through the 0117 catch-up — not before):**
 `job_documents.office_only` hides a document — row and file — from technicians;
 office/admin toggle it on the web Documents tab (lock icon). The same migration
 fixes mobile expense receipts (`<job>/expense-<id>.jpg`), which 0047's path
@@ -3408,7 +3406,7 @@ check missed. Run `scripts/audit-job-documents.mjs` (dry run
 first, then `--commit`) to flag the ~3.9k imported Simpro attachments that show
 prices; review the CSV it writes to `scripts/data/`.
 
-**Backflow signature storage (migration `0066`; NOT applied until the 24 Nov 2026 catch-up, through 0117):**
+**Backflow signature storage (migration `0066`; applied 2026-11-24 through the 0117 catch-up — not before):**
 0047's note that `backflow-certificates` has no policy is stale — 0048 added
 INSERT for `<deviceId>/signatures/…`, which fixed the web upload. But the mobile
 outbox uploads with `upsert: true`, which storage needs SELECT + UPDATE for, so a
@@ -3419,7 +3417,7 @@ office/admin read and delete everything; anon nothing.
 `tests/rls/backflow-certificates.test.ts` proves it on the CI stack. Confirm
 on a device that a signed test logged from the mobile app settles.
 
-**Job to-do list (migration `0067`; NOT applied until the 24 Nov 2026 catch-up — the to-do list never worked in production before it):** office can set
+**Job to-do list (migration `0067`; applied 2026-11-24 in the catch-up — the to-do list never worked in production before it):** office can set
 jobs aside to fill a schedule gap. Web job page header (office/admin only) →
 "Add to to-do list", asking for optional estimated hours (prefilled from the
 job's estimate or its PO allocated hours); a listed job shows "On to-do list ·

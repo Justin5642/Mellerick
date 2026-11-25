@@ -1,7 +1,7 @@
 -- ============================================================================
 -- Customer billing address (on invoices and quotes) and job document folders.
 --
--- STATUS: DRAFT — NOT applied (an earlier note said "applied 2026-11-21"; that was wrong — needs 0065, via the 0117 catch-up, first).
+-- STATUS: ✅ APPLIED IN PRODUCTION (2026-11-25, via SQL editor; gate test passed; confirmed by a read-only check). An earlier note said "applied 2026-11-21" — that was wrong.
 -- Ledger row, if not yet recorded:
 --   insert into supabase_migrations.schema_migrations (version,name)
 --   values ('0114','customer_address_doc_folders') on conflict do nothing;
