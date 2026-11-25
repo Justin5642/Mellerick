@@ -57,6 +57,18 @@ describe("TimeEntriesRepository", () => {
     });
   });
 
+  // "Start work on this job" (0118 (draft)): the server's booking already names the
+  // entry id, so the clock-on must use it — the booking ends when it closes.
+  it("clockIn uses the id it is given", async () => {
+    const { outbox, ops } = captureOutbox();
+    const repo = new TimeEntriesRepository(outbox, seqIds(), fixedTime());
+    const id = await repo.clockIn({ jobId: "j1", staffId: "s1", costCenterId: "cc", id: "given-entry" });
+    expect(id).toBe("given-entry");
+    const [w] = writes(ops);
+    expect(w.rowId).toBe("given-entry");
+    expect(w.payload).toMatchObject({ cost_center_id: "cc" });
+  });
+
   // The FOREGROUND geofence auto-clock calls clockIn(), which hardcoded
   // auto_clocked: false — so every automatic clock-in was recorded as though the
   // technician had typed it. The BACKGROUND task writes auto_clocked: true

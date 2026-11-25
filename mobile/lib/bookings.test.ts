@@ -4,6 +4,7 @@ import {
   bookingColumns,
   bookingWindow,
   clockInCostCentre,
+  manualClockOnCostCentre,
   mergePendingBookings,
   myJobEntries,
   splitMyJobEntries,
@@ -175,6 +176,51 @@ describe("bookingAt / clockInCostCentre", () => {
   it("a chosen booking without a cost centre falls through to the job level", () => {
     const none = booking({ job_id: "j1", cost_center_id: null });
     expect(clockInCostCentre([none], ms("2026-10-19", "09:00"), "job-cc")).toBe("job-cc");
+  });
+
+  it("never clocks onto a completed stage (25 Nov 2026)", () => {
+    // 13:00 is inside the afternoon (fit) booking; fit is complete → the morning's rough.
+    expect(clockInCostCentre([morning, afternoon], ms("2026-10-19", "13:00"), "job-cc", ["fit"])).toBe("rough");
+    expect(clockInCostCentre([morning, afternoon], ms("2026-10-19", "13:00"), "job-cc", new Set(["fit", "rough"]))).toBe("job-cc");
+    expect(clockInCostCentre([morning, afternoon], ms("2026-10-19", "13:00"), "job-cc", ["fit", "rough", "job-cc"])).toBeNull();
+    expect(clockInCostCentre([], ms("2026-10-20", "08:00"), "job-cc", ["job-cc"])).toBeNull();
+    // Not known = as before.
+    expect(clockInCostCentre([morning, afternoon], ms("2026-10-19", "13:00"), "job-cc", null)).toBe("fit");
+  });
+});
+
+describe("manualClockOnCostCentre", () => {
+  const morning = booking({ job_id: "j1", cost_center_id: "rough", starts_at: at("2026-10-19", "07:00"), ends_at: at("2026-10-19", "11:00") });
+  const open = (id: string) => ({ id, completed_at: null });
+  const done = (id: string) => ({ id, completed_at: "2026-10-18T00:00:00Z" });
+  const nine = ms("2026-10-19", "09:00");
+
+  it("their own booking's stage first", () => {
+    expect(manualClockOnCostCentre([morning], nine, null, [open("rough"), open("fit")])).toEqual({ kind: "use", costCenterId: "rough" });
+  });
+
+  it("then the office's job-level stage, when open", () => {
+    expect(manualClockOnCostCentre([], nine, "fit", [open("rough"), open("fit")])).toEqual({ kind: "use", costCenterId: "fit" });
+    expect(manualClockOnCostCentre([], nine, "fit", [open("rough"), open("drain"), done("fit")])).toEqual({ kind: "ask", options: ["rough", "drain"] });
+  });
+
+  it("no booking and several open stages: asks, never guesses", () => {
+    expect(manualClockOnCostCentre(null, nine, null, [open("rough"), done("x"), open("fit")])).toEqual({ kind: "ask", options: ["rough", "fit"] });
+  });
+
+  it("one open stage: that one; none: no cost centre", () => {
+    expect(manualClockOnCostCentre(null, nine, null, [done("rough"), open("fit")])).toEqual({ kind: "use", costCenterId: "fit" });
+    expect(manualClockOnCostCentre(null, nine, null, [done("rough")])).toEqual({ kind: "use", costCenterId: null });
+    expect(manualClockOnCostCentre(null, nine, null, [])).toEqual({ kind: "use", costCenterId: null });
+  });
+
+  it("a booking on a completed stage is passed over", () => {
+    expect(manualClockOnCostCentre([morning], nine, null, [done("rough"), open("fit"), open("drain")])).toEqual({ kind: "ask", options: ["fit", "drain"] });
+  });
+
+  it("stages unknown (offline): as before", () => {
+    expect(manualClockOnCostCentre([], nine, "job-cc", null)).toEqual({ kind: "use", costCenterId: "job-cc" });
+    expect(manualClockOnCostCentre([], nine, null, undefined)).toEqual({ kind: "use", costCenterId: null });
   });
 });
 

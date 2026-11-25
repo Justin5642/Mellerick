@@ -38,6 +38,7 @@
 // to-do job is being placed, a tap anywhere on the grid picks that
 // technician × day (Day view: the technician row) and hands it to onPlace —
 // tap-to-place, because dragging out of a sheet is awkward on a phone.
+import { ADDED_BY_TECHNICIAN } from "../../lib/selfStartBooking";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Animated, Pressable, StyleSheet, Text, View, type GestureResponderEvent, type LayoutChangeEvent } from "react-native";
 import { Gesture, GestureDetector, RefreshControl, ScrollView as GHScrollView } from "react-native-gesture-handler";
@@ -811,6 +812,7 @@ function Block({ placed, top, view, rowStaffId, staffNames, others, saveState, r
     names.join(", "),
     completed ? "completed" : null,
     reassign ? NEEDS_REASSIGNING : null,
+    booking.added_by_technician ? ADDED_BY_TECHNICIAN : null,
     over ? over.text : null,
     saveState === "saving" ? "saving" : saveState === "queued" ? "not on the server yet" : saveState === "failed" ? "not saved" : null,
   ]
@@ -850,6 +852,12 @@ function Block({ placed, top, view, rowStaffId, staffNames, others, saveState, r
         <Text style={[styles.blockTitle, completed && styles.doneText]} numberOfLines={1}>
           {completed ? "Completed · " : ""}
           {reassign ? <Text style={styles.reassignText}>{NEEDS_REASSIGNING} · </Text> : null}
+          {booking.added_by_technician ? (
+            <Text style={styles.selfStartText}>
+              {ADDED_BY_TECHNICIAN}
+              {booking.running ? " · on now" : ""} ·{" "}
+            </Text>
+          ) : null}
           {over ? (
             <Text style={styles.overText}>
               ⚠ Over {formatOverHours(over.usedHours)}/{formatOverHours(over.allowedHours)} ·{" "}
@@ -928,6 +936,7 @@ const styles = StyleSheet.create({
   overText: { color: "#b45309", fontWeight: "800" },
   blockReassign: { borderColor: "#e11d48", borderWidth: 2, borderLeftWidth: 4 },
   reassignText: { color: "#be123c", fontWeight: "800" },
+  selfStartText: { color: "#047857", fontWeight: "800" },
   leave: {
     position: "absolute",
     borderRadius: 8,

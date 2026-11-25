@@ -11,7 +11,7 @@ import type { ClockFix } from "../../clockFix";
 // (online) or keep its optimistic local state (offline).
 export interface TimeClock {
   ready: boolean;
-  clockIn(input: { jobId: string; staffId: string; costCenterId?: string | null; fix?: ClockFix | null }): Promise<{ id: string; synced: boolean }>;
+  clockIn(input: { jobId: string; staffId: string; costCenterId?: string | null; fix?: ClockFix | null; id?: string }): Promise<{ id: string; synced: boolean }>;
   clockOut(input: { entryId: string; clockInIso: string; fix?: ClockFix | null }): Promise<{ synced: boolean }>;
   addManual(input: ManualEntryInput): Promise<{ id: string; synced: boolean }>;
   editEntry(input: EditEntryInput): Promise<{ synced: boolean }>;

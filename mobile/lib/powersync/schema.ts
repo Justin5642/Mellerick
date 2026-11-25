@@ -233,6 +233,10 @@ const job_bookings = new Table({
   sync_office: column.integer,
   // 0109 (DRAFT): added by hand, as the generator emits it once applied.
   note: column.text,
+  // 0118 (DRAFT): added by hand, as the generator emits it once applied
+  // (office_job_bookings is job_bookings.*; tech_job_bookings lists its columns
+  // and does not carry it).
+  clock_entry_id: column.text,
 }, {
   indexes: {
     job_start: ['job_id', 'starts_at'],

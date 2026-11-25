@@ -53,6 +53,8 @@ export interface TrackedSite {
    * or a site list loaded before bookings exist, simply has none.
    */
   bookings?: BookingWindow[];
+  /** The job's stages already marked complete (0095), when known — never clocked onto. */
+  completedCostCentreIds?: string[];
   /** This site's own arrival fence in metres; absent = the standard 150 m. */
   radiusM?: number;
   /**
@@ -66,7 +68,7 @@ export interface TrackedSite {
 /** The cost centre an arrival at `site` at `atMs` clocks in against. */
 export function arrivalCostCentre(site: TrackedSite | undefined, atMs: number): string | null {
   if (!site) return null;
-  return clockInCostCentre(site.bookings, atMs, site.scheduledCostCenterId);
+  return clockInCostCentre(site.bookings, atMs, site.scheduledCostCenterId, site.completedCostCentreIds);
 }
 
 export interface Coords {

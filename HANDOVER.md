@@ -2153,6 +2153,145 @@ decides), money only through `MoneyText`. Reach phones with the next build
   `?staff=<id>`, which opens that person's editor where the phone's Leave log
   is. Office users still get the read-only alert.
 
+**Technicians start work on a job themselves; the right cost centre on every clock-on (25 Nov 2026; migration `0118` DRAFT — NOT APPLIED; no stream change).**
+Justin: "technicians in the area … pop in and see a job needs something done.
+We need them to be able to search the job, clock onto it, but … it [must]
+show up in schedule rather than it being very office heavy." And: "It is also
+critical that they clock on to the correct cost centre." His decisions: the
+booking runs from clock-on to clock-off; any open job; they pick the stage; the
+office sees an "Added by technician" tag on both schedules (no push).
+- **Phone — "Start work on this job"** (`mobile/components/job/start-work.tsx`,
+  on the Overview of a VIEW-ONLY open job, i.e. one they found by Search and
+  aren't on; technicians only). Online only ("Starting work needs signal").
+  It loads the job's stages from `GET /api/jobs/[id]/self-start` (ids, names,
+  company cost centre, completion — never money) and shows the OPEN ones:
+  exactly one open → preselected but still shown; several → nothing
+  preselected, they must tap one; none → "This job has no open cost centre to
+  clock on to. Ask the office to add one before you start." and no button.
+  Confirm: "Clock on to #123 — Stage 2 (Drainage)?". Then `POST
+  /api/jobs/[id]/self-start` with the phone's booking id and clock-on entry
+  id (both kept for a retry), then the ordinary outbox clock-on
+  (`TimeEntriesRepository.clockIn` now takes an optional `id`) with that
+  entry id and the same cost centre. The screen switches to the full tabs and
+  the Time tab at once (crew + booking set locally; the job reaches the
+  phone's mirror with the next sync). Rules `lib/self-start-booking.ts`
+  (stage list, preselect, label, the tag and running-end rules), mirrored at
+  `mobile/lib/selfStartBooking.ts` (byte for byte from the imports,
+  `tests/unit/self-start-booking.test.ts`); calls `mobile/lib/startWork.ts`.
+  **Not on the web job page** — phone first; the route works for any caller
+  with a Bearer token or cookie, so a web button is a UI-only follow-up.
+- **The route** (`app/api/jobs/[id]/self-start/route.ts`, sentences in
+  `lib/self-start.ts`): POST is `requireRole(["technician"])`, refuses a
+  limited-access account (0110), an unknown job, a closed job with 0096's own
+  sentence, a job with no open stage, and a cost centre that isn't one of
+  THIS job's open lines — then calls `self_start_job_booking()` through
+  `callerClient` (as the CALLER; never the service role for the write).
+  Service role only for reads after the guard: the job's status/number and
+  the stages via `listJobStages` (names + completion, field by field). Errors
+  are fixed sentences (`42883`/`PGRST202` → "isn't switched on yet").
+  `tests/unit/self-start-route.test.ts` walks both answers for money keys and
+  the PO line's amount.
+- **Migration `0118_self_start_bookings.sql` (DRAFT):**
+  - `job_bookings.clock_entry_id uuid` (unique when set, no FK — the booking
+    is made before the queued clock-on reaches the server): the time entry a
+    self-started booking follows.
+  - `self_start_job_booking(booking, job, cost centre, entry)` — SECURITY
+    DEFINER, `authenticated` may execute, anon not. It re-checks everything:
+    active TECHNICIAN, not limited-access; job exists and is open (MJ001,
+    0096's words); the cost centre is a PO line of that job (MJ114) and not
+    completed (MJ115); idempotent on the booking id (MJ112 if the id is
+    someone else's). Inserts the caller's booking: today from now (to the
+    minute), no end, `created_by = staff_id = auth.uid()`. 0079 then puts
+    them on the crew (so RLS 0074 lets their clock-on in). On a job with no
+    lead, 0059 makes them the lead, which 0074's
+    `enforce_job_assignment_office_only` refuses for a technician — so that
+    one insert runs with the role claim set to `service_role` (sub unchanged,
+    so 0077 still doesn't push them their own assignment) and the claim is
+    put back. job_bookings RLS is unchanged (office/admin writes).
+  - Trigger `time_entries_follow_booking` (after insert/update of clock_in,
+    clock_out, staff_id): the linked booking's start = clock_in, end =
+    clock_out. So EVERY clock-off path ends it — the phone button, a queued
+    offline clock-off, the web Time tab, an office correction, the geofence,
+    a clock prompt — with no client code. Written as a follow-on
+    (`app.booking_sync = 'on'`), so 0096 doesn't refuse it when the job was
+    signed off before the clock-off. An entry re-attributed to someone else
+    stops steering the booking. Deleting the entry leaves the booking.
+  - `po_cost_centers_public` re-created with `completed_at` appended (no
+    money; 0110's limited-account filter kept), so phones can skip completed
+    stages in batch.
+  - End state asserted (column, trigger, SECURITY DEFINER + grants, every
+    job_bookings write policy still office/admin, the view's exact columns,
+    its filter, no money-named column).
+- **The schedule.** The booking shows at once on the web board and the
+  phone's office Schedule tab with an **"Added by technician"** tag (web:
+  `components/schedule/added-by-technician-tag.tsx`, one element in each of
+  the board's two card variants in `team-schedule-view.tsx`, right under
+  the booking note line; phone: in the block's title line in
+  `mobile/components/schedule/ScheduleGrid.tsx`). Rule
+  `isAddedByTechnician`: `created_by === staff_id` and the creator's role is
+  technician (from the staff list both boards already read; the board embed
+  and the phone's two office booking reads now select `created_by`, which
+  exists since 0079 — no new fallback). While they are still clocked on
+  (`ends_at` null) the boards draw it **running**: to now, at least to 15:30
+  of its day, never past its day (a forgotten clock-off doesn't paint the
+  week), at least 30 min — tagged "· on now" (`withRunningEnds`, nothing
+  written). An office drag of a running booking writes the drawn end, and
+  the clock-off then overwrites the window with the real times. No calendar
+  event is pushed for a self-started booking (its end isn't known yet); the
+  next calendar sync of the job adds one.
+- **The right cost centre on every clock-on (item 3).** Rules in
+  `mobile/lib/bookings.ts`, tested:
+  - `clockInCostCentre(bookings, at, jobLevel, completedIds?)` — the
+    automatic paths (geofence arrival `arrivalCostCentre`, the clock prompts'
+    `promptCostCentre`) keep their rule (own booking covering now, else the
+    nearest that day, else the job-level stage) but a booking on a completed
+    stage is passed over and a completed job-level stage gives null. The
+    completed ids come from `po_cost_centers_public.completed_at`
+    (`mobile/lib/data/reads/clockStages.ts withCompletedStages`, online,
+    best-effort) attached to the geofence's sites (`location-tracking.tsx`,
+    also handed to the background task) and the prompt candidates
+    (`clockPromptContext.ts`). Before 0118, offline or on a failed read:
+    unknown, exactly as before.
+  - `manualClockOnCostCentre` — the Time tab's Clock on and the Today card's
+    (`components/job/clock-on-stage-picker.tsx useClockOnCostCentre`): their
+    booking's open stage, else the office's job-level stage if open, else the
+    only open stage, else — two or more open — a sheet **"Which cost centre
+    are you working on?"** listing the open ones, nothing preselected, Clock
+    on disabled until one is tapped; Cancel clocks nothing. Stages from `GET
+    /api/jobs/[id]/stages` (crew/office, names + completion; refreshed at
+    the tap, at most 4 s wait). Offline / unknown → the old rule. Completed
+    stages are never chosen or offered.
+  - **Not changed:** the per-entry stage picker on the Time tab (re-tagging an
+    existing entry still lists every line), backdated "Add entry", the web
+    job page's own Clock in (`components/job/job-time.tsx`, still the
+    job-level stage) — follow-ups if wanted.
+- **Before 0118 is applied nothing breaks:** the Start-work POST answers
+  "Starting work on a job isn't switched on yet — ask the office to book you
+  on." (409) and nothing is written; the GET (stage list) works; the boards'
+  tag reads only `created_by`; the completed-stage batch read answers
+  "unknown"; the manual clock-on picker already works (it uses the stages
+  route).
+- **Checked** on a scratch Postgres 16 with the full chain 0000–0117 and CI's
+  seed: 0118 applies twice cleanly; `supabase/tests/0118_self_start_bookings_test.sql`
+  passes (27 scenarios: direct insert blocked, completed stage / another
+  job's line / no line / closed job refused, the booking is the caller's own
+  with no end and linked, crew joined, retry idempotent, clock-on sets the
+  start, clock-off the end, a clock-off after sign-off still saves and ends
+  the booking, technicians see completion through the view, office and a
+  limited account refused) and fails naming scenarios with the trigger
+  dropped (3) or the completed-stage check removed (6). Not tried against
+  PostgREST or on a device.
+- **Apply / deploy order:** paste `0118_self_start_bookings.sql` → paste
+  `supabase/tests/0118_self_start_bookings_test.sql` (needs an active
+  technician and office/admin), trust only `0118 PASSED` → mark 0118's
+  STATUS line applied, add the ledger row (`('0118','self_start_bookings')`),
+  regenerate types (`lib/database.types.ts` has `clock_entry_id` and the
+  view's `completed_at` by hand) → deploy the web (the route) → ship the
+  phone build (no native module; `mobile/lib/powersync/schema.ts` has
+  `clock_entry_id` by hand for `office_job_bookings`' `job_bookings.*`).
+  **No PowerSync redeploy** — `tech_job_bookings` lists its columns and
+  needs none of the new ones.
+
 ---
 
 ## 2. The one rule that must never break
@@ -3029,6 +3168,7 @@ a shippable release.
 | **Truck loads: set rates (0111 applied)** | Justin | `0111` applied 2026-11-19 (gate test passed). Ledger row: `insert into supabase_migrations.schema_migrations (version,name) values ('0111','cartage_loads') on conflict do nothing;` Then: Fleet → Hire setup on each truck, add **Cartage per tonne** and/or **per m³** and **per km** rates; Settings → Truck loads, check the margin (15% by default); on jobs where quarry product is NOT in the quote, set the Day Works tab's "Quarry product on this job" to Extra. |
 | **Leave on the schedule: record 0112** | Justin | `0112` applied 2026-11-19 (gate test passed). Ledger row: `insert into supabase_migrations.schema_migrations (version,name) values ('0112','schedule_leave') on conflict do nothing;` No PowerSync redeploy. Who sees the leave type defaults to office + admin; change it in Settings → Leave on the schedule. Part days: add From/To times on the Leave Log entry. |
 | **Komtrax: sync and link machines** | Justin | `0113` applied 2026-11-20 (gate test passed). Ledger row: `insert into supabase_migrations.schema_migrations (version,name) values ('0113','komtrax') on conflict do nothing;` Admin → Fleet → Komtrax machines → **Sync Komtrax**, then link any Komatsu machine not linked by serial (or put its serial in the fleet item's notes). `KOMTRAX_USERNAME` / `KOMTRAX_PASSWORD` are in Vercel Production. |
+| **Technicians start work themselves: apply 0118** | Justin | Draft, not applied. Paste `supabase/migrations/0118_self_start_bookings.sql`, then `supabase/tests/0118_self_start_bookings_test.sql`; trust only `0118 PASSED`. Mark the header applied; ledger: `insert into supabase_migrations.schema_migrations (version,name) values ('0118','self_start_bookings') on conflict do nothing;` Deploy the web, then the phone build. No PowerSync redeploy. |
 | **Record the 24–25 Nov migrations; redeploy PowerSync** | Justin | The catch-up (0067 + 0070 + 0117, which did 0064–0066's job) and 0114, 0116, 0115 are applied and confirmed by a read-only check (nothing from 0060–0116 missing). Ledger rows: `insert into supabase_migrations.schema_migrations (version,name) values ('0064','restrict_site_writes_to_office_admin'),('0065','office_only_job_documents'),('0066','backflow_certificate_storage_policies'),('0067','job_todo_list'),('0070','page_load_indexes'),('0114','customer_address_doc_folders'),('0115','job_mistakes'),('0116','job_folders'),('0117','catch_up_sites_and_office_only_documents') on conflict do nothing;` Then **redeploy the PowerSync streams** (`tech_job_photos` lists `folder`; docs/powersync-deploy.md), then the phone build. Run `scripts/audit-job-documents.mjs` to mark priced Simpro attachments office-only. Add billing addresses to customers. |
 | **Maestro flow 02** | Avi | Needs `ADMIN_EMAIL` / `ADMIN_PASSWORD` in the environment. The login subflow deliberately skips when a session already exists, so a password never passes through a script — which is why flows 01/03/04 could be run and 02 could not. |
 

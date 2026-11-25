@@ -7,7 +7,8 @@ import { useTimeClock } from "../../lib/data/hooks/useTimeClock";
 import { onClockChanged } from "../../lib/clockEvents";
 import { offerSitePinAfterClockOn } from "../../lib/sitePinOffer";
 import { currentFix } from "../../lib/clockFix";
-import { clockInCostCentre, type BookingWindow } from "../../lib/bookings";
+import { type BookingWindow } from "../../lib/bookings";
+import { useClockOnCostCentre } from "./clock-on-stage-picker";
 import { loadSupplierOrders } from "../../lib/supplierOrders";
 import { todaySteps, type StepKey, type TodayStep } from "../../lib/todaySteps";
 
@@ -57,6 +58,7 @@ export function JobTodayCard({
   onGo: (tab: Tab) => void;
 }) {
   const timeClock = useTimeClock();
+  const { chooseCostCentre, sheet: stageSheet } = useClockOnCostCentre(jobId);
   const [clockedInSince, setClockedInSince] = useState<string | null>(null);
   const [orders, setOrders] = useState<{ status: string; deliveredAt?: string | null }[] | null>(null);
   const [clocking, setClocking] = useState(false);
@@ -79,15 +81,13 @@ export function JobTodayCard({
     if (clocking || !timeClock.ready) return;
     setClocking(true);
     try {
-      // The same default cost centre as the Time tab: the booking covering now,
-      // then the nearest one today, then the job's.
+      // The same cost centre as the Time tab: the booking covering now, then
+      // the nearest one today, then the job's — and with none of those and
+      // several open stages, it asks (never a completed stage).
+      const costCenterId = await chooseCostCentre(myBookings, scheduledCostCenterId);
+      if (costCenterId === undefined) return; // cancelled the picker
       const fix = await currentFix(3000);
-      await timeClock.clockIn({
-        jobId,
-        staffId: currentUserId,
-        costCenterId: clockInCostCentre(myBookings, Date.now(), scheduledCostCenterId),
-        fix,
-      });
+      await timeClock.clockIn({ jobId, staffId: currentUserId, costCenterId, fix });
       setClockedInSince(new Date().toISOString());
       // No map pin on this site? Offer to save this fix (asks, once per job).
       void offerSitePinAfterClockOn(jobId, fix);
@@ -110,6 +110,7 @@ export function JobTodayCard({
 
   return (
     <View style={styles.card}>
+      {stageSheet}
       <Text style={styles.heading}>Today</Text>
       {steps.map((step, n) => {
         const done = step.state === "done";

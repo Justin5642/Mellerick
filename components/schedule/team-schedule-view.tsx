@@ -66,6 +66,7 @@ import {
 } from "./board-actions";
 import { BoardPointerSensor, BookingMenu, useHoldGesture } from "./booking-hold-menu";
 import { BoardScheduleDialog } from "./board-schedule-dialog";
+import { AddedByTechnicianTag } from "./added-by-technician-tag";
 import {
   applyBoardMove,
   buildBoardIndex,
@@ -460,6 +461,7 @@ function BlockBody({ entry, tag, reassign, over, view }: BlockBodyProps) {
           )}
         </p>
       )}
+      <AddedByTechnicianTag booking={booking} className="text-[10px]" />
     </>
   );
 }

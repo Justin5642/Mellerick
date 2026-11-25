@@ -68,7 +68,13 @@ export type BoardJob = {
 };
 
 /** A booking on the board. The cost centre's name rides along for the card. */
-export type BoardBooking = JobBooking & { cost_center_name?: string | null };
+export type BoardBooking = JobBooking & {
+  cost_center_name?: string | null;
+  /** A technician booked themselves by starting work (0118 (draft)) — the "Added by technician" tag. */
+  added_by_technician?: boolean;
+  /** Self-started and still clocked on: drawn to lib/self-start-booking.ts runningBookingEnd(). */
+  running?: boolean;
+};
 
 /**
  * The crew of a job row as the page reads it: the primary assignee first, then

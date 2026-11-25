@@ -1634,6 +1634,7 @@ export type Database = {
       job_bookings: {
         Row: {
           all_day: boolean
+          clock_entry_id: string | null
           cost_center_id: string | null
           created_at: string
           created_by: string | null
@@ -1650,6 +1651,7 @@ export type Database = {
         }
         Insert: {
           all_day?: boolean
+          clock_entry_id?: string | null
           cost_center_id?: string | null
           created_at?: string
           created_by?: string | null
@@ -1666,6 +1668,7 @@ export type Database = {
         }
         Update: {
           all_day?: boolean
+          clock_entry_id?: string | null
           cost_center_id?: string | null
           created_at?: string
           created_by?: string | null
@@ -4153,6 +4156,7 @@ export type Database = {
         Row: {
           allocated_hours: number | null
           code: string | null
+          completed_at: string | null
           created_at: string | null
           id: string | null
           name: string | null
@@ -4162,6 +4166,7 @@ export type Database = {
         Insert: {
           allocated_hours?: number | null
           code?: string | null
+          completed_at?: string | null
           created_at?: string | null
           id?: string | null
           name?: string | null
@@ -4171,6 +4176,7 @@ export type Database = {
         Update: {
           allocated_hours?: number | null
           code?: string | null
+          completed_at?: string | null
           created_at?: string | null
           id?: string | null
           name?: string | null
