@@ -17,6 +17,7 @@ import { lineInputFromSaved, planBuilderPo, planBuilderPoEdit, planBuilderPoLine
 import { BuilderPoLines, blankLine, type StageOption } from "@/components/job/builder-po-lines";
 import { SupplierPicker, OTHER_SUPPLIER } from "@/components/job/supplier-picker";
 import { recentSupplierIds } from "@/lib/supplier-picker";
+import { poInvoiceState, type PoInvoiceRef } from "@/lib/po-invoice";
 
 interface CostCenter {
   id: string;
@@ -160,6 +161,21 @@ export function JobPO({ jobId, jobNumber, customerName, site, pos: initialPos, t
   // Docket photos the crew took against each order (0093). A failed read just
   // shows no docket links.
   const [dockets, setDockets] = useState<Record<string, string[]>>({});
+
+  // The job's invoices, to show which POs are already invoiced (Emma, 25 Nov
+  // 2026). A failed read shows every PO as not invoiced, as before.
+  const [poInvoices, setPoInvoices] = useState<PoInvoiceRef[]>([]);
+  useEffect(() => {
+    supabase
+      .from("invoices")
+      .select("id, invoice_number, subtotal, status, customer_po")
+      .eq("job_id", jobId)
+      .then(({ data, error }) => {
+        if (error) { console.error("PO invoices load failed:", error); return; }
+        setPoInvoices((data ?? []) as PoInvoiceRef[]);
+      });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [jobId]);
 
   useEffect(() => {
     supabase
@@ -995,13 +1011,36 @@ export function JobPO({ jobId, jobNumber, customerName, site, pos: initialPos, t
                 <Button variant="outline" size="sm" className="gap-1.5 h-8 text-xs" onClick={() => openEditPO(po)}>
                   <Pencil className="w-3.5 h-3.5" />Edit
                 </Button>
-                {Number(po.total_value) > 0 && (
-                  <a href={`/dashboard/invoices/new?job_id=${jobId}&po_id=${po.id}`}>
-                    <Button variant="outline" size="sm" className="gap-1.5 h-8 text-xs">
-                      <FileText className="w-3.5 h-3.5" />Invoice this PO
-                    </Button>
-                  </a>
-                )}
+                {Number(po.total_value) > 0 && (() => {
+                  const inv = poInvoiceState(po, poInvoices);
+                  const money = (n: number) => n.toLocaleString("en-AU", { style: "currency", currency: "AUD" });
+                  const links = inv.invoices.map((i) => (
+                    <a key={i.id} href={`/dashboard/invoices/${i.id}`} className="underline hover:text-emerald-900">
+                      {i.invoice_number ? `#${i.invoice_number}` : "invoice"}
+                    </a>
+                  ));
+                  if (inv.status === "full") {
+                    return (
+                      <span className="inline-flex items-center gap-1 rounded-md border border-emerald-200 bg-emerald-50 px-2 h-8 text-xs font-medium text-emerald-800" title="This PO's value is already on invoices">
+                        <FileText className="w-3.5 h-3.5" />Invoiced {links.map((l, k) => <span key={k}>{k > 0 ? ", " : ""}{l}</span>)}
+                      </span>
+                    );
+                  }
+                  return (
+                    <>
+                      {inv.status === "part" && (
+                        <span className="text-xs text-amber-700" title="Progress claims so far">
+                          Invoiced {money(inv.invoiced)} of {money(Number(po.total_value))} ({links.map((l, k) => <span key={k}>{k > 0 ? ", " : ""}{l}</span>)})
+                        </span>
+                      )}
+                      <a href={`/dashboard/invoices/new?job_id=${jobId}&po_id=${po.id}`}>
+                        <Button variant="outline" size="sm" className="gap-1.5 h-8 text-xs">
+                          <FileText className="w-3.5 h-3.5" />{inv.status === "part" ? "Invoice next claim" : "Invoice this PO"}
+                        </Button>
+                      </a>
+                    </>
+                  );
+                })()}
                 <button onClick={() => deletePO(po.id)} className="text-slate-300 hover:text-red-400 transition-colors p-1" aria-label="Delete PO">
                   <Trash2 className="w-4 h-4" />
                 </button>

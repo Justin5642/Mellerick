@@ -73,6 +73,8 @@ export interface JobPurchaseOrdersState {
   spentByLine: Record<string, number>;
   inUse: Record<string, string>;
   invoicedPos: Record<string, string>;
+  /** PO id → how much of it is invoiced; absent = not invoiced (missing on an older web). */
+  poInvoiced?: Record<string, { status: "part" | "full"; invoiced: number; numbers: string[] }>;
   /** A saved-but-check-it message (part not split, a partial save). */
   warning?: string;
 }

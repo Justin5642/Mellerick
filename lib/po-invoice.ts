@@ -61,3 +61,43 @@ export function poForCustomerPo<T extends JobPo>(pos: T[], customerPo: string | 
 export function claimBuilderPo(pos: JobPo[], picked: JobPo | null): { poNumber: string; value: number } | null {
   return pos.length > 1 && picked ? { poNumber: picked.po_number, value: Number(picked.total_value) } : null;
 }
+
+// Has this PO been invoiced? (Emma, 25 Nov 2026: the sewer PO for Lot 827 was
+// invoiced and pushed to Xero, yet the job still offered it to invoice.) An
+// invoice is against a PO when its customer_po is the PO's number — "Invoice
+// this PO" and the New Invoice PO picker both set it. Cancelled invoices don't
+// count. Progress claims add up: "part" until the claims reach the PO's value,
+// then "full". Figures are ex GST on both sides (invoice subtotal, PO value).
+
+export interface PoInvoiceRef {
+  id: string;
+  invoice_number: string | number | null;
+  subtotal: number | string | null;
+  status: string | null;
+  customer_po: string | null;
+}
+
+export interface PoInvoiceState {
+  status: "none" | "part" | "full";
+  invoiced: number;
+  remaining: number;
+  invoices: PoInvoiceRef[];
+}
+
+const samePo = (a: string | null | undefined, b: string | null | undefined) =>
+  (a ?? "").trim().toLowerCase() !== "" && (a ?? "").trim().toLowerCase() === (b ?? "").trim().toLowerCase();
+
+/** How much of one PO's value is already on invoices. */
+export function poInvoiceState(po: JobPo, invoices: PoInvoiceRef[]): PoInvoiceState {
+  const mine = invoices.filter((i) => i.status !== "cancelled" && samePo(i.customer_po, po.po_number));
+  const invoicedCents = mine.reduce((s, i) => s + cents(Number(i.subtotal) || 0), 0);
+  const valueCents = cents(Number(po.total_value) || 0);
+  const status: PoInvoiceState["status"] =
+    mine.length === 0 ? "none" : valueCents <= 0 || invoicedCents >= valueCents ? "full" : "part";
+  return {
+    status,
+    invoiced: invoicedCents / 100,
+    remaining: Math.max(0, valueCents - invoicedCents) / 100,
+    invoices: mine,
+  };
+}

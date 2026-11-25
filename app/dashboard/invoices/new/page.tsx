@@ -15,7 +15,7 @@ import { ArrowLeft, Plus, Trash2, GitPullRequestArrow } from "lucide-react";
 import Link from "next/link";
 import { CustomerPicker } from "@/components/customer-picker";
 import { PaymentTermsField } from "@/components/invoice/payment-terms-field";
-import { claimBuilderPo, poForCustomerPo, poInvoiceLines, pricedPos } from "@/lib/po-invoice";
+import { claimBuilderPo, poForCustomerPo, poInvoiceLines, poInvoiceState, pricedPos, type PoInvoiceRef } from "@/lib/po-invoice";
 import { melbourneDay } from "@/lib/invoice-terms";
 import { moneyTotals } from "@/lib/replace-line-items";
 import { variationLineDescription } from "@/lib/variation-qty";
@@ -235,6 +235,8 @@ function NewInvoiceForm() {
   // The job's builder POs (Stage 2: one per stage). Picking one puts its number
   // on the invoice and, for a progress claim, claims against that PO's value.
   const [jobPos, setJobPos] = useState<{ id: string; po_number: string; total_value: number }[]>([]);
+  // The job's invoices, to mark POs already invoiced (Emma, 25 Nov 2026).
+  const [jobInvoices, setJobInvoices] = useState<PoInvoiceRef[]>([]);
   useEffect(() => {
     if (!form.job_id) { setJobPos([]); return; }
     supabase
@@ -243,9 +245,15 @@ function NewInvoiceForm() {
       .eq("job_id", form.job_id)
       .order("created_at")
       .then(({ data }) => setJobPos(pricedPos((data ?? []) as { id: string; po_number: string; total_value: number }[])));
+    supabase
+      .from("invoices")
+      .select("id, invoice_number, subtotal, status, customer_po")
+      .eq("job_id", form.job_id)
+      .then(({ data, error }) => setJobInvoices(error ? [] : ((data ?? []) as PoInvoiceRef[])));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [form.job_id]);
   const pickedPo = poForCustomerPo(jobPos, form.customer_po);
+  const pickedPoInvoiced = pickedPo ? poInvoiceState(pickedPo, jobInvoices) : null;
 
   // "Invoice this PO": the PO's number, a title naming it, and its value as
   // the lines (lib/po-invoice.ts). Says so when this PO already has an invoice.
@@ -600,11 +608,22 @@ function NewInvoiceForm() {
                   maxLength={CUSTOMER_PO_MAX}
                   placeholder="e.g. 4500123"
                 />
-                {poAlreadyInvoiced && (
+                {pickedPoInvoiced?.status === "full" ? (
+                  <p className="text-xs font-medium text-red-600">
+                    PO {pickedPo!.po_number} is already fully invoiced
+                    ({pickedPoInvoiced.invoices.map((i) => (i.invoice_number ? `#${i.invoice_number}` : "an invoice")).join(", ")}).
+                    Saving this makes a second invoice for it.
+                  </p>
+                ) : pickedPoInvoiced?.status === "part" ? (
+                  <p className="text-xs text-orange-600">
+                    PO {pickedPo!.po_number} has ${pickedPoInvoiced.invoiced.toLocaleString("en-AU", { minimumFractionDigits: 2 })} invoiced so far;
+                    ${pickedPoInvoiced.remaining.toLocaleString("en-AU", { minimumFractionDigits: 2 })} left to claim.
+                  </p>
+                ) : poAlreadyInvoiced ? (
                   <p className="text-xs text-orange-600">
                     This PO already has an invoice{poAlreadyInvoiced !== "yes" ? ` (${poAlreadyInvoiced})` : ""}. Check before sending another.
                   </p>
-                )}
+                ) : null}
                 {jobPos.length > 1 && (
                   <select
                     value={pickedPo?.id ?? ""}
@@ -619,7 +638,7 @@ function NewInvoiceForm() {
                   >
                     <option value="" disabled>Which of this job&apos;s POs is this for?</option>
                     {jobPos.map((p) => (
-                      <option key={p.id} value={p.id}>{p.po_number} — ${Number(p.total_value).toLocaleString("en-AU")}</option>
+                      <option key={p.id} value={p.id}>{p.po_number} — ${Number(p.total_value).toLocaleString("en-AU")}{(() => { const s = poInvoiceState(p, jobInvoices).status; return s === "full" ? " (invoiced)" : s === "part" ? " (part invoiced)" : ""; })()}</option>
                     ))}
                   </select>
                 )}

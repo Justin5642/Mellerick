@@ -1,3 +1,4 @@
+import { poInvoiceState, type PoInvoiceRef } from "./po-invoice";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { nextJobPoNumber } from "@/lib/job-po-number";
 import { siteOneLine, type JobSiteParts } from "@/lib/job-site";
@@ -57,6 +58,12 @@ export interface VendorOrderView {
   items: { description: string; quantity: number }[];
 }
 
+export interface PoInvoicedSummary {
+  status: "part" | "full";
+  invoiced: number;
+  numbers: string[];
+}
+
 export interface JobPurchaseOrdersState {
   job: { id: string; jobNumber: number | null; title: string | null };
   /** What a new PO starts with: <job>-n, the client, the job site. */
@@ -71,6 +78,8 @@ export interface JobPurchaseOrdersState {
   inUse: Record<string, string>;
   /** PO number → the invoice already raised for it on this job. */
   invoicedPos: Record<string, string>;
+  /** PO id → how much of it is invoiced; absent = not invoiced. */
+  poInvoiced: Record<string, PoInvoicedSummary>;
 }
 
 /** The job's site and coordinates, for a new PO's defaults and its pin. */
@@ -254,7 +263,7 @@ export async function loadJobPurchaseOrders(supabase: SupabaseClient, jobId: str
     supabase.from("vendor_orders").select(ORDER_SELECT).eq("job_id", jobId).order("created_at", { ascending: false }),
     supabase.from("time_entries").select("cost_center_id, hours, entry_type").eq("job_id", jobId),
     supabase.from("job_expenses").select("cost_center_id, amount").eq("job_id", jobId),
-    supabase.from("invoices").select("invoice_number, customer_po").eq("job_id", jobId).not("customer_po", "is", null),
+    supabase.from("invoices").select("id, invoice_number, subtotal, status, customer_po").eq("job_id", jobId).not("customer_po", "is", null),
   ]);
   let posRes = posFirst;
   if (posRes.error?.code === "42703") posRes = await readPos(PO_SELECT_NO_COMPLETED);
@@ -275,9 +284,19 @@ export async function loadJobPurchaseOrders(supabase: SupabaseClient, jobId: str
   );
   const ordersByLine: Record<string, number> = {};
   for (const o of orders) ordersByLine[o.cost_center_id] = (ordersByLine[o.cost_center_id] ?? 0) + 1;
+  const invoiceRows = (invoicesRes.data ?? []) as PoInvoiceRef[];
   const invoicedPos: Record<string, string> = {};
-  for (const i of (invoicesRes.data ?? []) as { invoice_number: string | number | null; customer_po: string | null }[]) {
+  for (const i of invoiceRows) {
     if (i.customer_po && !invoicedPos[i.customer_po]) invoicedPos[i.customer_po] = String(i.invoice_number ?? "") || "yes";
+  }
+  // How much of each PO is invoiced (Emma, 25 Nov 2026) — office/admin only,
+  // like everything this route answers.
+  const poInvoiced: Record<string, PoInvoicedSummary> = {};
+  for (const po of pos) {
+    const s = poInvoiceState(po, invoiceRows);
+    if (s.status !== "none") {
+      poInvoiced[po.id] = { status: s.status, invoiced: s.invoiced, numbers: s.invoices.map((i) => String(i.invoice_number ?? "")).filter(Boolean) };
+    }
   }
 
   return {
@@ -294,6 +313,7 @@ export async function loadJobPurchaseOrders(supabase: SupabaseClient, jobId: str
     spentByLine,
     inUse: linesInUse(pos.flatMap((p) => p.lines.map((l) => l.id)), ordersByLine, hoursByLine, spentByLine),
     invoicedPos,
+    poInvoiced,
   };
 }
 
