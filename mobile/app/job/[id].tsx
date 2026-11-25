@@ -18,6 +18,7 @@ import { JobNotesTab } from "../../components/job/notes";
 import { JobPhotosTab } from "../../components/job/photos";
 import { JobTimeTab } from "../../components/job/time";
 import { JobTodayCard } from "../../components/job/today-card";
+import { StartWorkButton } from "../../components/job/start-work";
 import { AutoClockStatus } from "../../components/job/auto-clock-status";
 import { JobPlantUsage } from "../../components/job/plant-usage";
 import { JobSignatureTab } from "../../components/job/signature";
@@ -528,6 +529,23 @@ export default function JobDetailScreen() {
           <View style={styles.viewOnlyBanner}>
             <Text style={styles.viewOnlyText}>View only — you're not assigned to this job.</Text>
           </View>
+        )}
+        {/* Popped in to do something (25 Nov 2026): book themselves on from
+            now and clock on to the stage they pick — online, technicians on
+            an open job they're not on. Overview only, like the Today card. */}
+        {viewOnly && activeTab === "overview" && userId && !isJobClosedForScheduling(job.status) && (
+          <StartWorkButton
+            jobId={job.id}
+            jobNumber={job.job_number ?? null}
+            currentUserId={userId}
+            onStarted={(booking) => {
+              // On the crew now (0079 did it on the server): the full tabs at
+              // once — the job reaches this phone's mirror with the next sync.
+              setAssignedStaff((prev) => (prev.some((a) => a.id === userId) ? prev : [...prev, { id: userId, full_name: "You" }]));
+              setBookings((prev) => [...(prev ?? []).filter((b) => b.id !== booking.id), { ...booking, note: null, staff_name: null }]);
+              setTab("time");
+            }}
+          />
         )}
         {/* The day's steps first (Stage 6): what's done and what's next. Not in view-only. */}
         {activeTab === "overview" && !viewOnly && userId && (

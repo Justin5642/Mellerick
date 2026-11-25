@@ -111,6 +111,8 @@ export interface PromptCandidate {
   scheduledCostCenterId: string | null;
   /** This technician's own bookings on the job, when known. */
   bookings?: BookingWindow[];
+  /** The job's stages already marked complete, when known — never clocked onto. */
+  completedCostCentreIds?: string[];
 }
 
 /** One of this technician's open work entries. */
@@ -276,6 +278,8 @@ export interface JobForPrompt {
   sites: { name?: string | null; address_line1?: string | null; suburb?: string | null; site_lat?: number | string | null; site_lng?: number | string | null } | null;
   /** This technician's own bookings, when known (undefined = couldn't be read). */
   bookings?: BookingWindow[];
+  /** The job's completed stages, when known (undefined = couldn't be read). */
+  completedCostCentreIds?: string[];
 }
 
 function hasPin(site: JobForPrompt["sites"]): boolean {
@@ -311,6 +315,7 @@ export function unpinnedJobsToday(jobs: JobForPrompt[], dayKey: string): PromptC
       place: placeOf(j.sites),
       scheduledCostCenterId: j.scheduled_cost_center_id ?? null,
       ...(j.bookings ? { bookings: j.bookings } : {}),
+      ...(j.completedCostCentreIds ? { completedCostCentreIds: j.completedCostCentreIds } : {}),
     }));
 }
 
@@ -322,7 +327,7 @@ function placeOf(site: JobForPrompt["sites"]): string | null {
 
 /** The cost centre a prompted clock-on uses (the manual/geofence rule). */
 export function promptCostCentre(c: PromptCandidate, atMs: number): string | null {
-  return clockInCostCentre(c.bookings, atMs, c.scheduledCostCenterId);
+  return clockInCostCentre(c.bookings, atMs, c.scheduledCostCenterId, c.completedCostCentreIds);
 }
 
 /** Prompts can only work for these: how many the tracking gate should count as "sites". */

@@ -66,6 +66,7 @@ interface RawBookingRow {
   daily: boolean | number | null;
   all_day: boolean | number | null;
   note?: string | null;
+  created_by?: string | null;
 }
 
 function mapBooking(r: RawBookingRow): Booking {
@@ -79,6 +80,7 @@ function mapBooking(r: RawBookingRow): Booking {
     daily: bool(r.daily) ?? false,
     all_day: bool(r.all_day) ?? false,
     note: r.note ?? null,
+    ...(r.created_by !== undefined ? { created_by: r.created_by ?? null } : {}),
   };
 }
 
@@ -243,7 +245,7 @@ export async function listOpenJobBookingsRemote(): Promise<JobBooking[] | null> 
   const res = await readAllPages((from, to) =>
     supabase
       .from("job_bookings")
-      .select(`${COLUMNS}, staff:profiles!job_bookings_staff_id_fkey(full_name), jobs!inner(status)`)
+      .select(`${COLUMNS}, created_by, staff:profiles!job_bookings_staff_id_fkey(full_name), jobs!inner(status)`)
       .not("jobs.status", "in", '("completed","cancelled")')
       .order("starts_at")
       .order("id")
@@ -270,7 +272,7 @@ export async function listJobBookingsForJobsRemote(jobIds: readonly string[]): P
         readAllPages((from, to) =>
           supabase
             .from("job_bookings")
-            .select(`${COLUMNS}, staff:profiles!job_bookings_staff_id_fkey(full_name)`)
+            .select(`${COLUMNS}, created_by, staff:profiles!job_bookings_staff_id_fkey(full_name)`)
             .in("job_id", part)
             .order("starts_at")
             .order("id")

@@ -1,3 +1,4 @@
+import { isAddedByTechnician, withRunningEnds } from "../../lib/selfStartBooking";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   View,
@@ -422,7 +423,7 @@ export default function ScheduleScreen() {
 
   // Every booking on the grid: the real ones, plus a read-only stand-in for
   // any job without bookings (job_bookings missing, or a read that failed).
-  const realBookings = useMemo<JobBooking[]>(() => {
+  const realBookings = useMemo<(JobBooking & Pick<BoardBooking, "added_by_technician" | "running">)[]>(() => {
     const seen = new Set<string>();
     const out: JobBooking[] = [];
     for (const b of [...(bookings ?? []), ...(doneBookings ?? [])]) {
@@ -430,8 +431,13 @@ export default function ScheduleScreen() {
       seen.add(b.id);
       out.push(b);
     }
-    return out;
-  }, [bookings, doneBookings]);
+    // "Added by technician" (25 Nov 2026, 0118): a technician who started
+    // work booked themselves. Still clocked on = no end yet; drawn running
+    // to now (at least 15:30, never past its day — lib/selfStartBooking.ts).
+    const roles = new Map(staff.map((s) => [s.id, s.role]));
+    const roleOf = (id: string) => roles.get(id) ?? null;
+    return withRunningEnds(out, roleOf, Date.now()).map((b) => ({ ...b, added_by_technician: isAddedByTechnician(b, roleOf) }));
+  }, [bookings, doneBookings, staff]);
   const boardBookings = useMemo<BoardBooking[]>(() => {
     const openIds = new Set(jobs.map((j) => j.id));
     const open = jobs.map(toBoardJob);

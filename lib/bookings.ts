@@ -40,6 +40,8 @@ export interface JobBooking {
    * returned (insertBookings selects BOOKING_COLUMNS).
    */
   note?: string | null;
+  /** Who made the booking (0079). A technician's own id = they started work themselves (0118). Board reads only. */
+  created_by?: string | null;
 }
 
 export interface JobBookingWithNames extends JobBooking {

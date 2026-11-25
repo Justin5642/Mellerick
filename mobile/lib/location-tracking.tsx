@@ -4,6 +4,7 @@ import * as Location from "expo-location";
 import { supabase } from "./supabase";
 import { getJob, listMyJobSites } from "./data/reads/jobs";
 import { withMyBookings } from "./data/reads/bookings";
+import { withCompletedStages } from "./data/reads/clockStages";
 import { getOpenWorkEntry, getOpenWorkEntryOnJob } from "./data/reads/clock";
 import { onClockChanged, onClockedIn } from "./clockEvents";
 import { currentFix, fixFromCoords } from "./clockFix";
@@ -202,7 +203,9 @@ export function LocationTrackingProvider({ children }: { children: ReactNode }) 
       // Each site carries the technician's own bookings on it (best-effort —
       // see withMyBookings), so an arrival clocks in against the booking it
       // falls in rather than the job's single scheduled cost centre.
-      const sites = await withMyBookings(userId as string, await listMyJobSites(userId as string));
+      // And each site's completed stages (best-effort, online — 0118), so an
+      // arrival never clocks onto a stage already marked complete.
+      const sites = await withCompletedStages(await withMyBookings(userId as string, await listMyJobSites(userId as string)));
       if (cancelled) return;
 
       sitesRef.current = sites;

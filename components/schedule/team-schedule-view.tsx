@@ -29,7 +29,6 @@ import { pushJobToCalendar } from "@/lib/schedule-dispatch";
 import { bookingWindow, deleteBooking, insertBookings, updateBooking, type BookingWriteClient } from "@/lib/bookings";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { TodoListPanel, type TodoJob } from "./todo-list-panel";
 import { TodoBoardPanel, TodoDragCard } from "./todo-board-panel";
@@ -67,6 +66,7 @@ import {
 } from "./board-actions";
 import { BoardPointerSensor, BookingMenu, useHoldGesture } from "./booking-hold-menu";
 import { BoardScheduleDialog } from "./board-schedule-dialog";
+import { AddedByTechnicianTag } from "./added-by-technician-tag";
 import {
   applyBoardMove,
   buildBoardIndex,
@@ -119,7 +119,7 @@ import {
   type ScheduleLeave,
 } from "@/lib/staff-leave";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Navigation, LayoutList, ListTodo, ChevronLeft, ChevronRight, GripVertical, CalendarDays, CalendarRange, Scissors, StickyNote, X, CalendarPlus, Plus, Copy } from "lucide-react";
+import { Navigation, LayoutList, ListTodo, ChevronLeft, ChevronRight, CalendarDays, CalendarRange, Scissors, StickyNote, X, CalendarPlus, Plus, Copy } from "lucide-react";
 import {
   formatTime,
   formatDate,
@@ -129,8 +129,16 @@ import {
   weekDateKeys,
 } from "@/lib/date";
 import { jobStatusColors } from "@/lib/badge-colors";
-import { bookingOverHours, jobsOverHours, type HoursByJob, type OverHours } from "@/lib/over-hours";
-import { OverHoursBadge, OverHoursSummary, type OverHoursJob } from "./over-hours-summary";
+import { scheduleBlockTones } from "@/lib/schedule-block-tones";
+import { bookingOverHours, formatOverHours, jobsOverHours, type HoursByJob, type OverHours } from "@/lib/over-hours";
+import { OverHoursSummary, type OverHoursJob } from "./over-hours-summary";
+// The phone's layout (25 Nov 2026): Day is a time-of-day timeline per
+// technician, blocks sized by their hours with lanes for overlaps — the same
+// rules as the phone's grid (lib/schedule-grid.ts ↔ mobile/lib/scheduleGrid.ts).
+import { dayTimelineHours, layoutDayRow, minutesIntoDay } from "@/lib/schedule-grid";
+// Rest the mouse on a booking: the job's details without opening it.
+import { BookingHoverCard, hoverHandlers, useHoverCard, useHoverCardId } from "./booking-hover-card";
+import { hoverCardDetails, statusLabel } from "@/lib/schedule-hover";
 import { cn } from "@/lib/utils";
 
 type StaffMember = {
@@ -219,27 +227,6 @@ function WazeButton({ site }: { site: BoardJob["sites"] }) {
   );
 }
 
-function initials(name: string) {
-  return name
-    .split(" ")
-    .map((n) => n[0])
-    .join("")
-    .toUpperCase()
-    .slice(0, 2);
-}
-
-// Small deterministic accent so each column is visually distinct without
-// needing a per-staff color field in the database.
-const accents = [
-  "bg-blue-500", "bg-emerald-500", "bg-amber-500", "bg-violet-500",
-  "bg-rose-500", "bg-cyan-500", "bg-orange-500", "bg-teal-500",
-];
-function accentFor(id: string) {
-  let hash = 0;
-  for (let i = 0; i < id.length; i++) hash = (hash * 31 + id.charCodeAt(i)) >>> 0;
-  return accents[hash % accents.length];
-}
-
 // AU/ISO convention: weeks in the week view run Monday-Sunday, matching
 // weekDateKeys()/startOfWeekKey() in lib/date.ts.
 function formatWeekRangeLabel(weekKeys: string[]) {
@@ -249,25 +236,6 @@ function formatWeekRangeLabel(weekKeys: string[]) {
   const startLabel = formatDate(start, sameMonth ? { day: "numeric" } : { day: "numeric", month: "short" });
   const endLabel = formatDate(end, { day: "numeric", month: "short", year: "numeric" });
   return `${startLabel} – ${endLabel}`;
-}
-
-/**
- * The hours on the card's own day. For a multi-day booking that is that day's
- * block (7:00–15:30), not the first-day start and last-day end the row holds.
- */
-function EntryTime({ entry }: { entry: BoardEntry }) {
-  const { startIso, endIso } = entry.day;
-  return (
-    <>
-      {formatTime(startIso)}
-      {endIso !== startIso && (
-        <span className="text-slate-400 font-medium">
-          {" "}–{" "}
-          {formatTime(endIso)}
-        </span>
-      )}
-    </>
-  );
 }
 
 /**
@@ -343,7 +311,18 @@ function TileStaffTag({ tag }: { tag: TileTag }) {
  * no resize handles, never a drop of its own; a click opens the leave
  * details and never reaches the cell (so it can't paste a cut booking).
  */
-function LeaveTile({ day, compact, onOpen }: { day: LeaveDay; compact?: boolean; onOpen: (day: LeaveDay) => void }) {
+function LeaveTile({
+  day,
+  compact,
+  position,
+  onOpen,
+}: {
+  day: LeaveDay;
+  compact?: boolean;
+  /** Day timeline: where it sits in the row (lib/schedule-grid.ts layoutDayRow). */
+  position?: { left: number; top: number; width: number };
+  onOpen: (day: LeaveDay) => void;
+}) {
   const c = leaveColour(day.leave.leave_type);
   return (
     <button
@@ -357,8 +336,14 @@ function LeaveTile({ day, compact, onOpen }: { day: LeaveDay; compact?: boolean;
         onOpen(day);
       }}
       onDoubleClick={stopEvent}
-      className={cn("block w-full text-left rounded-md border border-l-4 font-semibold cursor-pointer", compact ? "px-2 py-1" : "px-3 py-2")}
+      className={cn(
+        "block text-left rounded-lg border border-l-4 font-semibold cursor-pointer overflow-hidden",
+        position ? "absolute z-[1]" : "w-full",
+        compact ? "px-1.5 py-[3px]" : "px-3 py-2"
+      )}
       style={{
+        ...(position ? { left: position.left, top: position.top, width: position.width } : null),
+        height: BLOCK_HEIGHT,
         background: `repeating-linear-gradient(135deg, ${c.bg} 0 7px, #ffffff 7px 10px)`,
         borderColor: c.border,
         color: c.text,
@@ -372,13 +357,8 @@ function LeaveTile({ day, compact, onOpen }: { day: LeaveDay; compact?: boolean;
   );
 }
 
-function NeedsReassigningBadge() {
-  return (
-    <span className="inline-block rounded bg-rose-600 px-1 text-[10px] font-bold leading-4 text-white" title="This technician is on leave this day">
-      {NEEDS_REASSIGNING}
-    </span>
-  );
-}
+/** Hover-card wiring for one placed booking (mouse rest / keyboard focus → the job's details). */
+type HoverWiring = ReturnType<typeof hoverHandlers<BoardEntry>>;
 
 /** Props every placed card shares: where it sits, who it belongs to, and the cut/copy wiring. */
 type PlacedProps = {
@@ -393,6 +373,8 @@ type PlacedProps = {
   onCut: (pickup: Pickup) => void;
   /** Press and hold / right-click (office/admin): the booking's menu at the press. */
   onMenu?: (pickup: Pickup, at: Point) => void;
+  /** The hover card's pointer/focus handlers for this booking. */
+  hoverFor?: (entry: BoardEntry) => HoverWiring;
   /** Booked on a day this technician is on leave (0112). */
   reassign: boolean;
   /** The job is completed (or cancelled): greyed, never dragged, cut or resized. */
@@ -410,51 +392,79 @@ function isCutHere(cut: Pickup | null, bookingId: string, source: BoardCell) {
   return !!cut && cut.bookingId === bookingId && cut.source.staffId === source.staffId && cut.source.dateKey === source.dateKey;
 }
 
-type CardBodyProps = { entry: BoardEntry; tag: TileTag; reassign?: boolean; over?: OverHours | null };
+// ---------------------------------------------------------------------------
+// A booking block — drawn like the phone's (mobile/components/schedule/
+// ScheduleGrid.tsx Block, 25 Nov 2026): tinted in its job status's colour
+// with a thick left edge, "#123" and the technician tag on top, then the
+// flags (Completed / Needs reassigning / ⚠ Over), the start time in Week view
+// and the title. The web adds a third line for the cost centre and the
+// booking's note (the phone shows those in its booking sheet; here the
+// hover card has the rest).
+// ---------------------------------------------------------------------------
 
-function JobCardBody({ entry, tag, reassign, over }: CardBodyProps) {
+/** One lane of the board, in CSS px — the phone's 52 pt lane plus room for the third line. */
+const WEB_LANE_HEIGHT = 62;
+const BLOCK_HEIGHT = WEB_LANE_HEIGHT - 6;
+/** The Day timeline's width per hour (the phone's HOUR_WIDTH is 72 pt). */
+const WEB_HOUR_WIDTH = 84;
+const NAME_COLUMN_WIDTH = 168;
+
+/** The phone's block colours: status tint, completed slate + dashed, over amber, on leave rose. */
+function blockStyle(job: BoardJob, over: OverHours | null | undefined, reassign: boolean): React.CSSProperties {
+  const completed = isClosedJob(job);
+  const tone = completed ? null : scheduleBlockTones[job.status] ?? null;
+  const style: React.CSSProperties = {
+    backgroundColor: tone?.bg ?? scheduleBlockTones.scheduled.bg,
+    borderColor: tone?.text ?? scheduleBlockTones.scheduled.text,
+    borderStyle: "solid",
+    borderWidth: 1,
+    borderLeftWidth: 4,
+  };
+  if (completed) Object.assign(style, { backgroundColor: "#f1f5f9", borderColor: "#94a3b8", borderStyle: "dashed", opacity: 0.85 });
+  if (over && !reassign) Object.assign(style, { borderColor: "#d97706", borderWidth: 2, borderLeftWidth: 4 });
+  if (reassign) Object.assign(style, { borderColor: "#e11d48", borderWidth: 2, borderLeftWidth: 4 });
+  return style;
+}
+
+type BlockBodyProps = { entry: BoardEntry; tag: TileTag; reassign?: boolean; over?: OverHours | null; view: "day" | "week" };
+
+function BlockBody({ entry, tag, reassign, over, view }: BlockBodyProps) {
   const { job, booking } = entry;
-  const dayOf = dayOfLabel(entry);
+  const completed = isClosedJob(job);
   return (
     <>
-      {(reassign || over) && (
-        <div className="mb-1 flex flex-wrap gap-1">
-          {reassign && <NeedsReassigningBadge />}
-          {over && <OverHoursBadge over={over} />}
-        </div>
-      )}
-      <div className="flex items-center justify-between gap-2 pr-4">
-        <p className="text-xs font-bold text-blue-600 min-w-0 truncate">
-          <EntryTime entry={entry} />
+      <div className="flex items-center justify-between gap-1">
+        <p className={cn("min-w-0 truncate text-xs font-extrabold leading-4", completed ? "text-slate-500" : "text-slate-900")}>
+          {completed ? "✓ " : ""}#{job.job_number}
         </p>
-        <span className="flex items-center gap-1 flex-shrink-0">
-          <TileStaffTag tag={tag} />
-          <span
-            className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium capitalize flex-shrink-0 ${jobStatusColors[job.status] ?? ""}`}
-          >
-            {job.status.replace("_", " ")}
-          </span>
-        </span>
+        <TileStaffTag tag={tag} />
       </div>
-      <p className="text-sm font-medium mt-1 group-hover:text-blue-600 transition-colors truncate">
-        #{job.job_number} — {job.title}
+      <p className={cn("truncate text-[11px] leading-4", completed ? "text-slate-500" : "text-slate-700")}>
+        {completed ? (job.status === "completed" ? "Completed · " : `${statusLabel(job.status)} · `) : ""}
+        {reassign && <span className="font-extrabold text-rose-700" title="This technician is on leave this day">{NEEDS_REASSIGNING} · </span>}
+        {over && (
+          <span className="font-extrabold text-amber-700" title={over.text} data-over-hours={over.level}>
+            ⚠ Over {formatOverHours(over.usedHours)}/{formatOverHours(over.allowedHours)} ·{" "}
+          </span>
+        )}
+        {view === "week" ? <span className="font-semibold">{formatTime(entry.day.startIso)} </span> : null}
+        {job.title}
       </p>
-      {booking.cost_center_name && (
-        <p className="text-xs font-medium text-cyan-700 truncate">{booking.cost_center_name}</p>
+      {(booking.cost_center_name || booking.note) && (
+        <p className="flex min-w-0 items-center gap-1 truncate text-[10px] leading-4">
+          {booking.cost_center_name && <span className="truncate font-medium text-cyan-700">{booking.cost_center_name}</span>}
+          {booking.note && (
+            <span className="flex min-w-0 items-center gap-0.5 text-amber-700" title={booking.note}>
+              <StickyNote className="h-2.5 w-2.5 flex-shrink-0" aria-hidden />
+              <span className="truncate">{booking.note}</span>
+            </span>
+          )}
+        </p>
       )}
-      <BookingNoteLine note={booking.note} className="text-xs" />
-      <p className="text-xs text-slate-500 truncate">
-        {dayOf && <span className="font-medium text-violet-600">{dayOf}</span>}
-        {dayOf && job.customers?.name && " · "}
-        {job.customers?.name}
-      </p>
-      <div className="mt-1"><WazeButton site={job.sites} /></div>
+      <AddedByTechnicianTag booking={booking} className="text-[10px]" />
     </>
   );
 }
-
-const JOB_CARD_CLASS =
-  "@container block px-3 py-2.5 rounded-lg border border-slate-200 hover:border-blue-300 hover:bg-blue-50/50 transition-colors group";
 
 /**
  * The card's own pointer wiring beside dnd-kit's: a still press of HOLD_MS (or
@@ -480,129 +490,6 @@ function useCardGestures(
     },
   };
 }
-
-// Wraps a job card in a draggable node for the Day board. Moving a pressed
-// mouse (or a finger held 200 ms, then moved) drags it; a still hold of
-// HOLD_MS or a right-click opens its menu (office/admin); a quick tap opens
-// the job; a double-click cuts it for pasting (BoardJobLink).
-//
-// The draggable id is per PLACEMENT, not per booking: a multi-day booking
-// sits in several day cells at once and dnd-kit needs each node's id to be
-// unique.
-function DraggableJobCard({ entry, source, tag, cut, copying, pickActive, onCut, onMenu, reassign, closed, over }: PlacedProps) {
-  const { job, booking } = entry;
-  const { setNodeRef, listeners, isDragging } = useDraggable({
-    id: `${booking.id}@${weekCellId(source.staffId, source.dateKey)}`,
-    data: { bookingId: booking.id, source, entry },
-    // A completed job's bookings stay where they are (0096 refuses the write anyway).
-    disabled: !!closed,
-  });
-  const isCut = isCutHere(cut, booking.id, source);
-  const gestures = useCardGestures(listeners, { bookingId: booking.id, source }, onMenu);
-  return (
-    <div
-      ref={setNodeRef}
-      {...gestures}
-      data-booking-card={booking.id}
-      style={{
-        touchAction: "none",
-        WebkitTouchCallout: "none",
-        WebkitUserSelect: "none",
-      }}
-      data-closed={closed ? "true" : undefined}
-      className={cn(
-        "relative select-none rounded-lg",
-        closed ? "cursor-pointer opacity-60 bg-slate-50" : "cursor-grab active:cursor-grabbing",
-        isDragging && "opacity-30",
-        isCut && (copying ? "ring-2 ring-blue-500 bg-blue-50/60" : "ring-2 ring-amber-400 bg-amber-50/60"),
-        reassign && !isCut && "ring-2 ring-rose-500"
-      )}
-    >
-      {!closed && <GripVertical className="w-3.5 h-3.5 text-slate-300 absolute top-2 right-2 pointer-events-none" />}
-      <BoardJobLink
-        href={`/dashboard/jobs/${job.id}`}
-        className={JOB_CARD_CLASS}
-        cutActive={pickActive}
-        onCut={() => (closed ? toast.error(closedMoveMessage(job)) : onCut({ bookingId: booking.id, source }))}
-      >
-        <JobCardBody entry={entry} tag={tag} reassign={reassign} over={over} />
-      </BoardJobLink>
-    </div>
-  );
-}
-
-function DroppableColumn({
-  id,
-  className,
-  onPick,
-  children,
-}: {
-  id: string;
-  className?: string;
-  /** Set while a job is cut: a click anywhere in the column pastes it here. */
-  onPick?: (id: string) => void;
-  children: React.ReactNode;
-}) {
-  const { setNodeRef, isOver } = useDroppable({ id });
-  return (
-    <div
-      ref={setNodeRef}
-      data-cell-id={id}
-      onClick={onPick ? () => onPick(id) : undefined}
-      className={cn(
-        className,
-        isOver && "ring-2 ring-blue-400 ring-offset-2",
-        onPick && "cursor-copy hover:ring-2 hover:ring-amber-400 hover:ring-offset-2"
-      )}
-    >
-      {children}
-    </div>
-  );
-}
-
-/** The booking's scheduling note (0109), one truncated line; the whole note on hover. */
-function BookingNoteLine({ note, className }: { note?: string | null; className: string }) {
-  if (!note) return null;
-  return (
-    <p className={cn(className, "text-amber-700 truncate flex items-center gap-1")} title={note}>
-      <StickyNote className="w-3 h-3 flex-shrink-0" aria-hidden />
-      <span className="truncate">{note}</span>
-    </p>
-  );
-}
-
-// Compact job entry for a single day cell in the week grid — the grid is
-// staff (rows) x day (columns), so each cell is narrow; this trades the
-// full job card's detail for a glanceable time + job + customer stack.
-function WeekJobChipBody({ entry, tag, reassign, over }: CardBodyProps) {
-  const { job, booking } = entry;
-  const dayOf = dayOfLabel(entry);
-  return (
-    <>
-      {reassign && <NeedsReassigningBadge />}
-      {over && <div><OverHoursBadge over={over} compact /></div>}
-      <div className="flex items-start justify-between gap-1">
-        <p className="text-[10px] font-bold text-blue-600 truncate min-w-0">
-          {formatTime(entry.day.startIso)}
-          {entry.day.endIso !== entry.day.startIso && `–${formatTime(entry.day.endIso)}`}
-        </p>
-        <TileStaffTag tag={tag} />
-      </div>
-      <p className="text-[11px] font-medium text-slate-700 truncate">
-        {isClosedJob(job) ? "✓ " : ""}#{job.job_number} {job.title}
-      </p>
-      {isClosedJob(job) && <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">{job.status === "completed" ? "Completed" : job.status}</p>}
-      {booking.cost_center_name && <p className="text-[10px] font-medium text-cyan-700 truncate">{booking.cost_center_name}</p>}
-      <BookingNoteLine note={booking.note} className="text-[10px]" />
-      {dayOf && <p className="text-[10px] font-medium text-violet-600 truncate">{dayOf}</p>}
-      {job.customers?.name && <p className="text-[10px] text-slate-400 truncate">{job.customers.name}</p>}
-    </>
-  );
-}
-
-// px-2.5 leaves room at each side for the resize handles.
-const WEEK_CHIP_CLASS =
-  "@container block px-2.5 py-1 rounded-md border border-slate-200 hover:border-blue-300 hover:bg-blue-50/50 transition-colors";
 
 const stopEvent = (e: React.SyntheticEvent) => {
   e.preventDefault();
@@ -648,7 +535,7 @@ function ResizeHandle({
       style={{ touchAction: "none" }}
       className={cn(
         "absolute inset-y-0 z-10 flex w-2.5 cursor-ew-resize items-center justify-center pointer-coarse:w-3.5",
-        edge === "start" ? "left-0 rounded-l-md" : "right-0 rounded-r-md"
+        edge === "start" ? "left-0 rounded-l-lg" : "right-0 rounded-r-lg"
       )}
     >
       <span className="h-5 w-[3px] rounded-full bg-blue-400 opacity-0 transition-opacity group-hover/chip:opacity-100 pointer-coarse:bg-slate-400 pointer-coarse:opacity-80" />
@@ -656,19 +543,30 @@ function ResizeHandle({
   );
 }
 
-// Draggable wrapper for a week chip — same long-press-to-drag and
-// double-click-to-cut pattern as DraggableJobCard on the day board. One per
-// placement: two technicians each booked Mon–Wed on a job show six chips.
-//
-// Resize handles sit on the booking's OUTER edges only: the left one on its
-// first day's chip, the right one on its last day's (a single-day booking
-// has both). A day in the middle of a multi-day booking has none — its edges
-// are not the booking's edges.
+// Resize handles sit on the booking's OUTER edges only (Week view): the left
+// one on its first day's block, the right one on its last day's (a
+// single-day booking has both). A day in the middle of a multi-day booking
+// has none — its edges are not the booking's edges.
 type ChipHandles = { start: boolean; end: boolean };
 /** This chip's booking is being resized: a previewed day, a day the preview drops, or its save in flight. */
 type ChipResizeState = "preview" | "removing" | "saving" | null;
 
-function DraggableWeekJobChip({
+/**
+ * One placed booking, Day or Week view. Moving a pressed mouse (or a finger
+ * held 200 ms, then moved) drags it; a still hold of HOLD_MS or a right-click
+ * opens its menu (office/admin); a quick click opens the job; a double-click
+ * cuts it for pasting (BoardJobLink); resting the mouse on it shows the hover
+ * card.
+ *
+ * In Day view it is positioned on the timeline (`position`, from
+ * lib/schedule-grid.ts layoutDayRow); in Week view it stacks in its cell.
+ *
+ * The draggable id is per PLACEMENT, not per booking: a multi-day booking
+ * sits in several day cells at once and dnd-kit needs each node's id to be
+ * unique. (A per-booking tag — e.g. "Added by technician" — belongs in
+ * BlockBody, which both views and the drag overlay draw.)
+ */
+function DraggableBlock({
   entry,
   source,
   tag,
@@ -677,61 +575,126 @@ function DraggableWeekJobChip({
   pickActive,
   onCut,
   onMenu,
+  hoverFor,
   reassign,
   closed,
   over,
-  handles,
+  view,
+  position,
+  handles = null,
   onResizeStart,
-  resizeState,
+  resizeState = null,
 }: PlacedProps & {
-  handles: ChipHandles | null;
-  onResizeStart: (entry: BoardEntry, edge: ResizeEdge, e: React.PointerEvent<HTMLElement>) => void;
-  resizeState: ChipResizeState;
+  view: "day" | "week";
+  /** Day view: where the block sits in its row (px). */
+  position?: { left: number; top: number; width: number };
+  handles?: ChipHandles | null;
+  onResizeStart?: (entry: BoardEntry, edge: ResizeEdge, e: React.PointerEvent<HTMLElement>) => void;
+  resizeState?: ChipResizeState;
 }) {
   const { job, booking } = entry;
   const { setNodeRef, listeners, isDragging } = useDraggable({
     id: `${booking.id}@${weekCellId(source.staffId, source.dateKey)}`,
     data: { bookingId: booking.id, source, entry },
+    // A completed job's bookings stay where they are (0096 refuses the write anyway).
     disabled: !!closed,
   });
   const isCut = isCutHere(cut, booking.id, source);
   const gestures = useCardGestures(listeners, { bookingId: booking.id, source }, onMenu);
-  const start = (edge: ResizeEdge, e: React.PointerEvent<HTMLElement>) => onResizeStart(entry, edge, e);
+  const hover = hoverFor?.(entry);
+  const start = (edge: ResizeEdge, e: React.PointerEvent<HTMLElement>) => onResizeStart?.(entry, edge, e);
   return (
     <div
       ref={setNodeRef}
       {...gestures}
+      {...hover}
       data-booking-card={booking.id}
       style={{
         touchAction: "none",
         WebkitTouchCallout: "none",
         WebkitUserSelect: "none",
+        ...(position ? { position: "absolute", left: position.left, top: position.top, width: position.width } : null),
+        height: BLOCK_HEIGHT,
       }}
       data-closed={closed ? "true" : undefined}
       className={cn(
-        "group/chip relative select-none rounded-md",
-        closed && "opacity-60 bg-slate-50",
+        "group/chip select-none rounded-lg",
+        position ? "z-[1]" : "relative",
+        closed ? "cursor-pointer" : "cursor-grab active:cursor-grabbing",
         isDragging && "opacity-30",
-        isCut && (copying ? "ring-2 ring-blue-500 bg-blue-50/60" : "ring-2 ring-amber-400 bg-amber-50/60"),
-        reassign && !isCut && !resizeState && "ring-2 ring-rose-500",
-        resizeState === "preview" && "ring-2 ring-blue-400 bg-blue-50/60",
+        isCut && (copying ? "ring-2 ring-blue-500" : "ring-2 ring-amber-400"),
+        resizeState === "preview" && "ring-2 ring-blue-400",
         resizeState === "removing" && "opacity-40 outline-2 outline-dashed outline-slate-400 line-through",
-        resizeState === "saving" && "ring-2 ring-blue-300 bg-blue-50/60 animate-pulse"
+        resizeState === "saving" && "ring-2 ring-blue-300 animate-pulse"
       )}
     >
       <BoardJobLink
         href={`/dashboard/jobs/${job.id}`}
-        className={WEEK_CHIP_CLASS}
+        className="block h-full rounded-lg focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-blue-600"
         cutActive={pickActive}
         onCut={() => (closed ? toast.error(closedMoveMessage(job)) : onCut({ bookingId: booking.id, source }))}
       >
-        <WeekJobChipBody entry={entry} tag={tag} reassign={reassign} over={over} />
+        <div
+          className={cn("@container h-full overflow-hidden rounded-lg py-[3px] hover:brightness-[0.97]", handles ? "px-2.5" : "px-1.5")}
+          style={blockStyle(job, over, reassign)}
+        >
+          <BlockBody entry={entry} tag={tag} reassign={reassign} over={over} view={view} />
+        </div>
       </BoardJobLink>
       {/* Two fixed slots, so a handle that stays keeps its DOM node (and its pointer capture). */}
       {handles?.start ? <ResizeHandle edge="start" onStart={start} /> : null}
       {handles?.end ? <ResizeHandle edge="end" onStart={start} /> : null}
     </div>
   );
+}
+
+/**
+ * A technician's row on the Day timeline (or Unassigned) — the drop / paste
+ * target for "give this booking to them" (a Day move changes the technician,
+ * never the time, as on the phone). Hour lines are drawn as a background.
+ */
+function DroppableTimelineRow({
+  id,
+  width,
+  height,
+  onPick,
+  children,
+}: {
+  id: string;
+  width: number;
+  height: number;
+  /** Set while a pick mode is on: a click anywhere in the row places it here. */
+  onPick?: (id: string) => void;
+  children: React.ReactNode;
+}) {
+  const { setNodeRef, isOver } = useDroppable({ id });
+  return (
+    <div
+      ref={setNodeRef}
+      data-cell-id={id}
+      data-timeline-row
+      onClick={onPick ? () => onPick(id) : undefined}
+      className={cn(
+        "relative flex-shrink-0 border-b border-slate-200 bg-white",
+        isOver && "bg-blue-50 ring-2 ring-inset ring-blue-400",
+        onPick && "cursor-copy hover:bg-amber-50/60 hover:ring-2 hover:ring-inset hover:ring-amber-400"
+      )}
+      style={{
+        width,
+        height,
+        backgroundImage: `repeating-linear-gradient(to right, transparent 0 ${WEB_HOUR_WIDTH - 1}px, #f1f5f9 ${WEB_HOUR_WIDTH - 1}px ${WEB_HOUR_WIDTH}px)`,
+      }}
+    >
+      {children}
+    </div>
+  );
+}
+
+/** The red "now" line on today's Day timeline. Redrawn with the board; a minute of drift is fine. */
+function NowLine({ dayKey, startHour, width }: { dayKey: string; startHour: number; width: number }) {
+  const x = (minutesIntoDay(new Date().toISOString(), dayKey) / 60 - startHour) * WEB_HOUR_WIDTH;
+  if (x <= 0 || x >= width) return null;
+  return <div aria-hidden className="pointer-events-none absolute inset-y-0 z-[2] w-0.5 bg-red-600/60" style={{ left: x }} />;
 }
 
 // A single (staff-or-unassigned) x (day) cell in the week grid — droppable
@@ -767,14 +730,17 @@ function DroppableWeekCell({
       data-cell-id={id}
       onClick={onPick ? () => onPick(id) : undefined}
       className={cn(
-        "group/cell bg-white p-1.5 space-y-1 min-h-[64px] transition-colors",
+        // As the phone's Week cell: leave first, then the bookings, one lane
+        // each from the top; the "N h free" strip underneath.
+        "group/cell flex flex-col gap-1.5 bg-white px-1 py-1.5 min-h-[76px] transition-colors",
         isToday && "bg-blue-50/40",
         isOver && "ring-2 ring-inset ring-blue-400 bg-blue-50/70",
         onPick && "cursor-copy hover:ring-2 hover:ring-inset hover:ring-amber-400"
       )}
     >
+      {children}
       {((hours !== undefined && hours > 0) || (gap?.kind === "free" && gap.hours > 0) || (onAddJob && !onPick)) && (
-        <div className="flex items-center justify-between gap-1 leading-none">
+        <div className="mt-auto flex items-center justify-between gap-1 leading-none">
           {gap?.kind === "free" && gap.hours > 0 ? <GapButton hours={gap.hours} onClick={onGapClick} compact /> : <span />}
           <span className="flex items-center gap-1">
             {hours !== undefined && hours > 0 && <span className="text-[10px] font-semibold text-slate-500">{formatHours(hours)}</span>}
@@ -782,7 +748,6 @@ function DroppableWeekCell({
           </span>
         </div>
       )}
-      {children}
     </div>
   );
 }
@@ -1145,6 +1110,16 @@ export function TeamScheduleView({
       }),
     [staff, savedHours],
   );
+
+  // Day view's timeline: 6:00–19:00, widened to whole hours to fit any block
+  // that starts earlier or ends later (the phone's rule — dayTimelineHours).
+  const dayRange = useMemo(() => {
+    const days = [];
+    for (const byDay of board.byStaff.values()) for (const e of byDay.get(selectedDateKey) ?? []) days.push(e.day);
+    for (const e of board.unassigned.get(selectedDateKey) ?? []) days.push(e.day);
+    return dayTimelineHours(days, selectedDateKey);
+  }, [board, selectedDateKey]);
+  const dayTimelineWidth = (dayRange.endHour - dayRange.startHour) * WEB_HOUR_WIDTH;
 
   const cutJob = useMemo(() => {
     const booking = mode.kind === "cut" ? bookings.find((b) => b.id === mode.pickup.bookingId) : undefined;
@@ -1647,13 +1622,26 @@ export function TeamScheduleView({
 
   const onPick =
     mode.kind === "cut" ? placeCut : mode.kind === "copy" ? pasteCopy : mode.kind === "todo" ? placeTodo : mode.kind === "schedule" ? placeSchedule : undefined;
-  // What every placed card is handed for cut/copy/menu.
+  // The hover card (mouse rest / keyboard focus on a booking). None while a
+  // booking is dragged or resized, the booking menu is open, or a pick mode
+  // waits for a click — it would sit over the day you're aiming for.
+  const hoverCard = useHoverCard<BoardEntry>(!!activeEntry || !!activeTodo || !!resize || !!menu || !!onPick);
+  const hoverCardId = useHoverCardId();
+  const hoverFor = (entry: BoardEntry) =>
+    hoverHandlers(
+      hoverCard,
+      entry,
+      hoverCard.target?.item.booking.id === entry.booking.id && hoverCard.target.item.day.dateKey === entry.day.dateKey ? hoverCardId : undefined,
+    );
+
+  // What every placed card is handed for cut/copy/menu/hover.
   const cardWiring = {
     cut,
     copying: copyingBooking,
     pickActive: !!onPick,
     onCut: setCut,
     onMenu: canTodo && viewerId ? openMenu : undefined,
+    hoverFor,
   };
 
   /** The name tag for a tile: its row's technician, plus whoever else is on that job that day. */
@@ -2064,115 +2052,96 @@ export function TeamScheduleView({
         <div className="min-w-0 flex-1">
         {viewMode === "day" ? (
           <>
-            <div className="flex gap-4 overflow-x-auto pb-2">
-              {(() => {
-                const unassigned = board.unassigned.get(selectedDateKey) ?? [];
-                const source: BoardCell = { staffId: null, dateKey: selectedDateKey };
-                return (
-                  <DroppableColumn
-                    id={columnId(null)}
-                    onPick={onPick}
-                    className="w-72 flex-shrink-0 rounded-xl sticky left-0 z-10 bg-slate-50 shadow-[4px_0_8px_-4px_rgba(0,0,0,0.08)]"
+            {/* The phone's Day view (25 Nov 2026): technicians down the side,
+                the hours across the top, each booking a block spanning its
+                hours, overlaps in lanes (lib/schedule-grid.ts layoutDayRow).
+                Names stay pinned on the left and the hours on top while the
+                timeline scrolls. A drop on a technician's row gives them the
+                booking at the same time, as before. */}
+            <div
+              className="overflow-auto pb-2 max-h-[calc(100vh_-_13rem)] rounded-xl border border-slate-200 bg-white"
+              data-board-scroller
+              data-day-timeline
+            >
+              <div style={{ width: NAME_COLUMN_WIDTH + dayTimelineWidth }}>
+                <div className="sticky top-0 z-20 flex border-b border-slate-200 bg-white">
+                  <div
+                    className="sticky left-0 z-30 flex-shrink-0 border-r border-slate-200 bg-white px-2 py-2 text-[11px] font-bold uppercase text-slate-500"
+                    style={{ width: NAME_COLUMN_WIDTH }}
                   >
-                    <Card className={cn("h-full", unassigned.length > 0 ? "border-amber-300" : "")}>
-                      <CardHeader className="pb-3">
-                        <div className="flex items-center gap-2">
-                          <div
-                            className={cn(
-                              "w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0",
-                              unassigned.length > 0 ? "bg-amber-100" : "bg-slate-100"
-                            )}
-                          >
-                            <span className={cn("text-xs font-bold", unassigned.length > 0 ? "text-amber-700" : "text-slate-400")}>!</span>
-                          </div>
-                          <div className="min-w-0">
-                            <CardTitle className="text-sm truncate">Unassigned</CardTitle>
-                            <p className={cn("text-xs", unassigned.length > 0 ? "text-amber-600" : "text-slate-400")}>
-                              {unassigned.length === 0
-                                ? "Move a booking here to unassign it"
-                                : `${unassigned.length} booking${unassigned.length === 1 ? "" : "s"} need a tech`}
-                            </p>
-                          </div>
-                        </div>
-                      </CardHeader>
-                      <CardContent className="space-y-2">
-                        {unassigned.length === 0 ? (
-                          <p className="text-slate-400 text-xs text-center py-6 border border-dashed border-slate-200 rounded-lg">
-                            No unassigned bookings
-                          </p>
-                        ) : (
-                          unassigned.map((entry) => (
-                            <DraggableJobCard key={entry.booking.id} entry={entry} source={source} tag={tagFor(entry)} {...cardWiring} reassign={reassignOn(entry)} closed={closedOn(entry)} over={overOn(entry)} />
-                          ))
-                        )}
-                      </CardContent>
-                    </Card>
-                  </DroppableColumn>
-                );
-              })()}
+                    Technician
+                  </div>
+                  {Array.from({ length: dayRange.endHour - dayRange.startHour }, (_, i) => (
+                    <div
+                      key={i}
+                      className="flex-shrink-0 border-r border-slate-200 px-1.5 py-2 text-xs font-bold text-slate-700"
+                      style={{ width: WEB_HOUR_WIDTH }}
+                    >
+                      {`${dayRange.startHour + i}:00`}
+                    </div>
+                  ))}
+                </div>
 
-              {sortedStaff.map((member) => {
-                const memberEntries = board.byStaff.get(member.id)?.get(selectedDateKey) ?? [];
-                const hours = periodHours.get(member.id) ?? 0;
-                const source: BoardCell = { staffId: member.id, dateKey: selectedDateKey };
-                return (
-                  <DroppableColumn key={member.id} id={columnId(member.id)} onPick={onPick} className="w-72 flex-shrink-0 rounded-xl">
-                    <Card className="h-full">
-                      <CardHeader className="pb-3">
-                        <div className="flex items-center gap-2">
-                          <Avatar className="w-8 h-8 flex-shrink-0">
-                            <AvatarFallback className={`text-white text-xs ${accentFor(member.id)}`}>
-                              {initials(member.full_name)}
-                            </AvatarFallback>
-                          </Avatar>
-                          <div className="min-w-0">
-                            <CardTitle className="text-sm truncate">{member.full_name}</CardTitle>
-                            <p className="text-xs text-slate-400">
-                              {memberEntries.length === 0 ? (
-                                leaveOn(member.id, selectedDateKey).length > 0 ? leaveLabel(leaveOn(member.id, selectedDateKey)[0].leave.leave_type) : "Free"
-                              ) : (
-                                <>
-                                  <span className="font-semibold text-slate-600">{formatHours(hours)}</span>
-                                  {` · ${memberEntries.length} job${memberEntries.length === 1 ? "" : "s"}`}
-                                </>
-                              )}
-                            </p>
-                            {(() => {
-                              const gap = gapFor(member.id, selectedDateKey);
-                              const showGap = gap?.kind === "free" && gap.hours > 0;
-                              const showAdd = canTodo && !onPick && selectedDateKey >= todayKey;
-                              return showGap || showAdd ? (
-                                <div className="mt-1 flex items-center gap-1">
-                                  {showGap && gap ? <GapButton hours={gap.hours} onClick={filterToGap} /> : null}
-                                  {showAdd ? <AddExistingJobButton onClick={() => openExisting({ staffId: member.id, dateKey: selectedDateKey })} /> : null}
-                                </div>
-                              ) : null;
-                            })()}
+                {[{ staffId: null as string | null, name: "Unassigned" }, ...sortedStaff.map((m) => ({ staffId: m.id as string | null, name: m.full_name }))].map((row) => {
+                  const entries = (row.staffId ? board.byStaff.get(row.staffId)?.get(selectedDateKey) : board.unassigned.get(selectedDateKey)) ?? [];
+                  const rowLeave = row.staffId ? leaveOn(row.staffId, selectedDateKey) : [];
+                  const { items, height } = layoutDayRow(entries, rowLeave, dayRange, { hourWidth: WEB_HOUR_WIDTH, laneHeight: WEB_LANE_HEIGHT });
+                  const source: BoardCell = { staffId: row.staffId, dateKey: selectedDateKey };
+                  const hours = row.staffId ? periodHours.get(row.staffId) ?? 0 : 0;
+                  const gap = row.staffId ? gapFor(row.staffId, selectedDateKey) : undefined;
+                  const showGap = gap?.kind === "free" && gap.hours > 0;
+                  const showAdd = canTodo && !onPick && selectedDateKey >= todayKey;
+                  return (
+                    <div key={row.staffId ?? "unassigned"} className="flex">
+                      <div
+                        className="group/cell sticky left-0 z-10 flex flex-shrink-0 flex-col justify-center border-b border-r border-slate-200 bg-white px-2 py-1 shadow-[4px_0_6px_-4px_rgba(0,0,0,0.12)]"
+                        style={{ width: NAME_COLUMN_WIDTH, height }}
+                      >
+                        <p className={cn("truncate text-[13px] font-bold", row.staffId ? "text-slate-900" : "text-orange-700")}>{row.name}</p>
+                        <p className="truncate text-[11px] text-slate-500">
+                          {row.staffId
+                            ? hours > 0
+                              ? formatHours(hours)
+                              : rowLeave.length > 0
+                                ? leaveLabel(rowLeave[0].leave.leave_type)
+                                : "Free"
+                            : entries.length > 0
+                              ? `${entries.length} booking${entries.length === 1 ? "" : "s"} need a tech`
+                              : "Move a booking here to unassign it"}
+                        </p>
+                        {(showGap || showAdd) && (
+                          <div className="mt-0.5 flex items-center gap-1">
+                            {showGap && gap ? <GapButton hours={gap.hours} onClick={filterToGap} compact /> : null}
+                            {showAdd ? <AddExistingJobButton onClick={() => openExisting({ staffId: row.staffId, dateKey: selectedDateKey })} compact /> : null}
                           </div>
-                        </div>
-                      </CardHeader>
-                      <CardContent className="space-y-2">
-                        {leaveOn(member.id, selectedDateKey).map((day) => (
-                          <LeaveTile key={`leave-${day.leave.start_date}-${day.startIso}`} day={day} onOpen={setOpenLeave} />
-                        ))}
-                        {memberEntries.length === 0 ? (
-                          <p className="text-slate-400 text-xs text-center py-6 border border-dashed border-slate-200 rounded-lg">
-                            No jobs scheduled
-                          </p>
-                        ) : (
-                          memberEntries.map((entry) => (
-                            <DraggableJobCard key={entry.booking.id} entry={entry} source={source} tag={tagFor(entry)} {...cardWiring} reassign={reassignOn(entry)} closed={closedOn(entry)} over={overOn(entry)} />
-                          ))
                         )}
-                      </CardContent>
-                    </Card>
-                  </DroppableColumn>
-                );
-              })}
-
-              {sortedStaff.length === 0 && (
-                <p className="text-slate-400 text-sm py-8">No active staff found.</p>
-              )}
+                      </div>
+                      <DroppableTimelineRow id={columnId(row.staffId)} width={dayTimelineWidth} height={height} onPick={onPick}>
+                        {selectedDateKey === liveTodayKey && <NowLine dayKey={selectedDateKey} startHour={dayRange.startHour} width={dayTimelineWidth} />}
+                        {items.map((it) =>
+                          it.kind === "leave" ? (
+                            <LeaveTile key={it.id} day={it.day} compact position={{ left: it.left, top: it.top, width: it.width }} onOpen={setOpenLeave} />
+                          ) : (
+                            <DraggableBlock
+                              key={it.id}
+                              entry={it.entry}
+                              source={source}
+                              tag={tagFor(it.entry)}
+                              {...cardWiring}
+                              reassign={reassignOn(it.entry)}
+                              closed={closedOn(it.entry)}
+                              over={overOn(it.entry)}
+                              view="day"
+                              position={{ left: it.left, top: it.top, width: it.width }}
+                            />
+                          ),
+                        )}
+                      </DroppableTimelineRow>
+                    </div>
+                  );
+                })}
+              </div>
+              {sortedStaff.length === 0 && <p className="text-slate-400 text-sm p-4">No active staff found.</p>}
             </div>
           </>
         ) : (
@@ -2191,20 +2160,14 @@ export function TeamScheduleView({
                 <div className="bg-white p-2 sticky top-0 left-0 z-30" />
                 {weekKeys.map((key) => (
                   <div key={key} className={cn("bg-white p-2 text-center sticky top-0 z-20 shadow-[0_1px_0_0_rgb(226_232_240)]", key === todayKey && "bg-blue-50")}>
-                    <p className="text-xs font-semibold text-slate-900">
-                      {formatDate(anchorForDateKey(key), { weekday: "short" })}
-                    </p>
-                    <p className="text-[11px] text-slate-400">
-                      {formatDate(anchorForDateKey(key), { day: "numeric", month: "short" })}
+                    <p className={cn("text-xs font-bold", key === todayKey ? "text-blue-600" : "text-slate-700")}>
+                      {formatDate(anchorForDateKey(key), { weekday: "short", day: "numeric", month: "short" })}
                     </p>
                   </div>
                 ))}
 
                 <div className={PINNED_NAME}>
-                  <div className="w-6 h-6 rounded-full bg-amber-100 flex items-center justify-center flex-shrink-0">
-                    <span className="text-[10px] font-bold text-amber-700">!</span>
-                  </div>
-                  <span className="text-xs font-medium text-slate-700 truncate">Unassigned</span>
+                  <span className="text-[13px] font-bold text-orange-700 truncate">Unassigned</span>
                 </div>
                 {weekKeys.map((key) => (
                   <DroppableWeekCell
@@ -2215,7 +2178,7 @@ export function TeamScheduleView({
                   onAddJob={canTodo && key >= todayKey ? () => openExisting({ staffId: null, dateKey: key }) : undefined}
                 >
                     {(board.unassigned.get(key) ?? []).map((entry) => (
-                      <DraggableWeekJobChip
+                      <DraggableBlock
                         key={entry.booking.id}
                         entry={entry}
                         source={{ staffId: null, dateKey: key }}
@@ -2224,6 +2187,7 @@ export function TeamScheduleView({
                         reassign={reassignOn(entry)}
                         closed={closedOn(entry)}
                         over={overOn(entry)}
+                        view="week"
                         handles={handlesFor(entry)}
                         onResizeStart={startResize}
                         resizeState={resizeStateFor(entry)}
@@ -2239,14 +2203,9 @@ export function TeamScheduleView({
                   return (
                     <Fragment key={member.id}>
                       <div className={PINNED_NAME}>
-                        <Avatar className="w-6 h-6 flex-shrink-0">
-                          <AvatarFallback className={`text-white text-[10px] ${accentFor(member.id)}`}>
-                            {initials(member.full_name)}
-                          </AvatarFallback>
-                        </Avatar>
                         <div className="min-w-0">
-                          <p className="text-xs font-medium text-slate-700 truncate">{member.full_name}</p>
-                          <p className="text-[10px] text-slate-400">{weekHours > 0 ? `${formatHours(weekHours)} this week` : "Free"}</p>
+                          <p className="text-[13px] font-bold text-slate-900 truncate">{member.full_name}</p>
+                          <p className="text-[11px] text-slate-500">{weekHours > 0 ? `${formatHours(weekHours)} this week` : "Free"}</p>
                         </div>
                       </div>
                       {weekKeys.map((key) => (
@@ -2264,7 +2223,7 @@ export function TeamScheduleView({
                             <LeaveTile key={`leave-${day.leave.start_date}-${day.startIso}`} day={day} compact onOpen={setOpenLeave} />
                           ))}
                           {(memberDays?.get(key) ?? []).map((entry) => (
-                            <DraggableWeekJobChip
+                            <DraggableBlock
                               key={entry.booking.id}
                               entry={entry}
                               source={{ staffId: member.id, dateKey: key }}
@@ -2273,7 +2232,8 @@ export function TeamScheduleView({
                               reassign={reassignOn(entry)}
                               closed={closedOn(entry)}
                               over={overOn(entry)}
-                              handles={handlesFor(entry)}
+                              view="week"
+                        handles={handlesFor(entry)}
                               onResizeStart={startResize}
                               resizeState={resizeStateFor(entry)}
                             />
@@ -2327,19 +2287,11 @@ export function TeamScheduleView({
           {activeTodo ? (
             <TodoDragCard job={activeTodo} />
           ) : activeEntry && !menu ? (
-            viewMode === "day" ? (
-              <div className="w-72 shadow-lg rounded-lg rotate-1 bg-white">
-                <div className={JOB_CARD_CLASS}>
-                  <JobCardBody entry={activeEntry} tag={tagFor(activeEntry)} reassign={reassignOn(activeEntry)} over={overOn(activeEntry)} />
-                </div>
+            <div className="w-48 rounded-lg bg-white shadow-lg rotate-1" style={{ height: BLOCK_HEIGHT }}>
+              <div className="h-full overflow-hidden rounded-lg px-1.5 py-[3px]" style={blockStyle(activeEntry.job, overOn(activeEntry), reassignOn(activeEntry))}>
+                <BlockBody entry={activeEntry} tag={tagFor(activeEntry)} reassign={reassignOn(activeEntry)} over={overOn(activeEntry)} view={viewMode} />
               </div>
-            ) : (
-              <div className="w-48 shadow-lg rounded-lg rotate-1 bg-white">
-                <div className={WEEK_CHIP_CLASS}>
-                  <WeekJobChipBody entry={activeEntry} tag={tagFor(activeEntry)} reassign={reassignOn(activeEntry)} over={overOn(activeEntry)} />
-                </div>
-              </div>
-            )
+            </div>
           ) : null}
         </DragOverlay>
         </DndContext>
@@ -2495,6 +2447,25 @@ export function TeamScheduleView({
           onClose={() => setScheduleRequest(null)}
         />
       )}
+      {hoverCard.target && (() => {
+        const entry = hoverCard.target.item;
+        const over = overOn(entry);
+        const leaveHits = reassign.get(entry.booking.id)?.filter((c) => c.dateKey === entry.day.dateKey) ?? [];
+        return (
+          <BookingHoverCard
+            id={hoverCardId}
+            anchor={hoverCard.target.anchor}
+            details={hoverCardDetails(entry, bookingsByJob.get(entry.job.id) ?? [], shownDays, nameOf)}
+            href={`/dashboard/jobs/${entry.job.id}`}
+            navigateUrl={wazeUrl(entry.job.sites)}
+            completed={isClosedJob(entry.job)}
+            overText={over?.text ?? null}
+            leaveText={leaveHits.length > 0 ? `${NEEDS_REASSIGNING} — ${leaveDayLabel(leaveHits[0].leaveDay)}` : null}
+            onPointerEnter={hoverCard.keep}
+            onPointerLeave={hoverCard.leave}
+          />
+        );
+      })()}
       {menu && menuBooking && menuJob && (
         <BookingMenu
           at={menu.at}

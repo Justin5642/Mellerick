@@ -38,6 +38,12 @@ export interface Booking {
    * sync streams predate it.
    */
   note?: string | null;
+  /**
+   * Who made the booking (0079). A technician's own id = they started work
+   * on the job themselves (0118, "Added by technician"). Read only by the
+   * office Schedule tab; absent elsewhere.
+   */
+  created_by?: string | null;
 }
 
 /** job_bookings_note_length (0109). */
@@ -288,10 +294,61 @@ export function bookingAt<B extends BookingWindow>(bookings: B[], atMs: number):
 export function clockInCostCentre(
   myBookings: BookingWindow[] | null | undefined,
   atMs: number,
-  jobLevelCostCentreId: string | null | undefined
+  jobLevelCostCentreId: string | null | undefined,
+  /**
+   * Stages already marked complete (po_cost_centers.completed_at, 0095), when
+   * known. A completed stage is never clocked onto (Justin, 25 Nov 2026: "it
+   * is critical that they clock on to the correct cost centre"): a booking on
+   * one is passed over for their next booking that day, and a completed
+   * job-level stage gives null. Absent = not known, behaves as before.
+   */
+  completedCostCentreIds?: ReadonlySet<string> | readonly string[] | null
 ): string | null {
-  const chosen = myBookings && myBookings.length ? bookingAt(myBookings, atMs) : null;
-  return chosen?.cost_center_id ?? jobLevelCostCentreId ?? null;
+  const done = completedCostCentreIds ? new Set(completedCostCentreIds) : null;
+  const usable = (id: string | null | undefined) => (id && !(done && done.has(id)) ? id : null);
+  const live = (myBookings ?? []).filter((b) => !done || !b.cost_center_id || !done.has(b.cost_center_id));
+  const chosen = live.length ? bookingAt(live, atMs) : null;
+  return usable(chosen?.cost_center_id) ?? usable(jobLevelCostCentreId) ?? null;
+}
+
+/** A job stage as the clock-on needs it: id and whether it is complete. */
+export interface ClockOnStage {
+  id: string;
+  /** null/absent = open. */
+  completed_at?: string | null;
+}
+
+export type ClockOnChoice =
+  /** Clock on to this (null = no cost centre: the job has none, or they couldn't be read). */
+  | { kind: "use"; costCenterId: string | null }
+  /** Don't guess: ask which of these open stages they're working on. */
+  | { kind: "ask"; options: string[] };
+
+/**
+ * The cost centre a MANUAL clock-on (the Time tab, the Today card) uses —
+ * the same as clockInCostCentre(), except that it never guesses:
+ *   1. their own booking covering now (else their nearest that day), on an
+ *      open stage;
+ *   2. else the job-level stage the office set, if it's open;
+ *   3. else, when the job's stages are known: the only open one, or — with
+ *      two or more open — ASK; with none, no cost centre;
+ *   4. stages not known (offline, or the read failed): as before.
+ * Completed stages are never chosen nor offered.
+ */
+export function manualClockOnCostCentre(
+  myBookings: BookingWindow[] | null | undefined,
+  atMs: number,
+  jobLevelCostCentreId: string | null | undefined,
+  stages: ClockOnStage[] | null | undefined
+): ClockOnChoice {
+  const completed = (stages ?? []).filter((s) => !!s.completed_at).map((s) => s.id);
+  const known = clockInCostCentre(myBookings, atMs, jobLevelCostCentreId, completed);
+  if (known) return { kind: "use", costCenterId: known };
+  if (!stages) return { kind: "use", costCenterId: null };
+  const open = stages.filter((s) => !s.completed_at).map((s) => s.id);
+  if (open.length === 1) return { kind: "use", costCenterId: open[0] };
+  if (open.length >= 2) return { kind: "ask", options: open };
+  return { kind: "use", costCenterId: null };
 }
 
 // ---------------------------------------------------------------------------

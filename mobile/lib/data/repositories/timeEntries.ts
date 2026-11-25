@@ -135,8 +135,14 @@ export class TimeEntriesRepository {
     fix?: ClockFix | null;
     /** Backdate the clock-on (the "stopped here" prompt: the stay's first fix). Never in the future. */
     atIso?: string;
+    /**
+     * The entry's id, when the caller already gave it to the server — "Start
+     * work on this job" links the technician's new booking to it (0118), so
+     * the booking ends when this entry is clocked off. Otherwise a new id.
+     */
+    id?: string;
   }): Promise<string> {
-    const rowId = this.ids.newId();
+    const rowId = input.id ?? this.ids.newId();
     const opId = await this.enqueueWrite(rowId, "insert", {
       job_id: input.jobId,
       staff_id: input.staffId,

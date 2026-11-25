@@ -1,3 +1,4 @@
+import { isAddedByTechnician, withRunningEnds } from "@/lib/self-start-booking";
 import { createClient } from "@/lib/supabase/server";
 import { Button } from "@/components/ui/button";
 import { Plus } from "lucide-react";
@@ -20,9 +21,12 @@ import { boardLeaveRange, loadScheduleLeave } from "@/lib/staff-leave-data";
 import { fetchAllRows, type RangeableQuery } from "@/lib/fetch-all-rows";
 import { businessDayRange } from "@/lib/scheduling";
 import { loadJobHours, OVER_HOURS_CHUNK, type OverHoursClient } from "@/lib/over-hours-data";
+import { boardTextForViewer } from "@/lib/schedule-hover";
 
 const BOARD_COLUMNS =
-  "id, job_number, title, status, scheduled_start, scheduled_end, scheduled_cost_center_id, assigned_to, job_assignments(staff_id), customers(name), sites(name, address_line1, suburb, state, site_lat, site_lng)";
+  // priority, description, customers.company and the site's full address +
+  // notes feed the hover card (25 Nov 2026; lib/schedule-hover.ts) — no money.
+  "id, job_number, title, status, priority, description, scheduled_start, scheduled_end, scheduled_cost_center_id, assigned_to, job_assignments(staff_id), customers(name, company), sites(name, address_line1, address_line2, suburb, state, postcode, notes, site_lat, site_lng)";
 
 // The select string is built at runtime (the fallbacks), so the typed client
 // can't follow it; this is the part of the builder the board's reads use.
@@ -113,9 +117,9 @@ export default async function SchedulePage() {
     };
     // Each booking's scheduling note (0109) rides along; on a database without
     // that column the embed is retried without it before anything else falls back.
-    let withBookings = await run(`${BOARD_COLUMNS}, schedule_daily, schedule_all_day, job_bookings(${BOOKING_COLUMNS}, ${BOOKING_NOTE_COLUMN})`);
+    let withBookings = await run(`${BOARD_COLUMNS}, schedule_daily, schedule_all_day, job_bookings(${BOOKING_COLUMNS}, created_by, ${BOOKING_NOTE_COLUMN})`);
     if (isMissingNoteColumn(withBookings.error)) {
-      withBookings = await run(`${BOARD_COLUMNS}, schedule_daily, schedule_all_day, job_bookings(${BOOKING_COLUMNS})`);
+      withBookings = await run(`${BOARD_COLUMNS}, schedule_daily, schedule_all_day, job_bookings(${BOOKING_COLUMNS}, created_by)`);
     }
     if (!isBookingsTableMissing(withBookings.error) && withBookings.error?.code !== "42703") {
       return { ...withBookings, hasBookings: true };
@@ -182,7 +186,10 @@ export default async function SchedulePage() {
   };
   const open = toBoard(jobRows, hasBookings, new Set());
   const done = toBoard(doneRows, doneHasBookings, new Set(open.jobs.map((j) => j.id)));
-  const jobs: BoardJob[] = [...open.jobs, ...done.jobs];
+  // The description and site notes are trimmed, and a technician gets them
+  // only for jobs they're on (lib/schedule-hover.ts boardTextForViewer).
+  const textViewer = { role: viewer?.profile?.role ?? null, id: viewer?.user?.id ?? null };
+  const jobs: BoardJob[] = [...open.jobs, ...done.jobs].map((j) => boardTextForViewer(j, textViewer));
   const rawBookings: JobBooking[] = [...open.bookings, ...done.bookings];
 
   // Two follow-up reads, each needing only the batch above and not each
@@ -231,9 +238,18 @@ export default async function SchedulePage() {
     canSeeOverHours ? loadJobHours(supabase as unknown as OverHoursClient, jobs.map((j) => j.id)) : null,
   ]);
   const costCenterNames = new Map((costCenterRows ?? []).map((cc) => [cc.id, cc.name]));
-  const bookings: BoardBooking[] = rawBookings.map((b) => ({
+  // "Added by technician" (25 Nov 2026, 0118): a technician who started work
+  // on the job booked themselves (created_by = staff_id, a technician). Still
+  // clocked on = no end yet; it is drawn running to now (at least 15:30, never
+  // past its day — lib/self-start-booking.ts). created_by exists since 0079.
+  const roles = new Map<string, string | null>(
+    [...activeStaff, ...((missingProfiles ?? []) as { id: string; role: string | null }[])].map((p) => [p.id, p.role ?? null]),
+  );
+  const roleOf = (id: string) => roles.get(id) ?? null;
+  const bookings: BoardBooking[] = withRunningEnds(rawBookings, roleOf, Date.now()).map((b) => ({
     ...b,
     cost_center_name: b.cost_center_id ? costCenterNames.get(b.cost_center_id) ?? null : null,
+    added_by_technician: isAddedByTechnician(b, roleOf),
   }));
 
   const poHours = todoIds.length > 0 ? allocatedHoursByJob(poRows ?? []) : new Map<string, number>();

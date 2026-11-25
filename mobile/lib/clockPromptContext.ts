@@ -1,5 +1,6 @@
 import { listMyJobs } from "./data/reads/jobs";
 import { withMyBookings } from "./data/reads/bookings";
+import { withCompletedStages } from "./data/reads/clockStages";
 import { listMyOpenWorkEntries } from "./data/reads/clock";
 import { depotCoords, readClockAnchors } from "./clockPrompts";
 import { geocodeSiteAddress } from "./officeActions";
@@ -34,7 +35,9 @@ export async function buildPromptContext(input: {
     input.staffId,
     jobs.map((j) => ({ ...j, jobId: j.id }))
   );
-  const candidates = unpinnedJobsToday(withBookings, day);
+  // Completed stages (best-effort, online — 0118): a prompted clock-on never
+  // lands on a stage already marked complete.
+  const candidates = unpinnedJobsToday(await withCompletedStages(withBookings), day);
   const [open, anchors, depot] = await Promise.all([
     listMyOpenWorkEntries(input.staffId),
     readClockAnchors(),

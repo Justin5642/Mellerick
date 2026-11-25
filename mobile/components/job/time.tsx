@@ -16,7 +16,8 @@ import { useDataLayer } from "../../lib/data/DataProvider";
 import { useSyncSettled } from "../../lib/data/hooks/useSyncSettled";
 import { reconcileRows } from "../../lib/data/reconcile";
 import { TIME_ENTRY_SELECT_WITH_STAFF } from "../../lib/timeEntryColumns";
-import { clockInCostCentre, type BookingWindow } from "../../lib/bookings";
+import { type BookingWindow } from "../../lib/bookings";
+import { useClockOnCostCentre } from "./clock-on-stage-picker";
 import { useRole } from "../../design/guards/useRole";
 import { clockPlace } from "../../lib/clockLocation";
 import { RATE_CHOICES, canEditEntry, rateOverrideFor, type RateChoice } from "../../lib/timeEntryOffice";
@@ -448,6 +449,7 @@ export function JobTimeTab({
   const [error, setError] = useState<unknown>(null);
   const [costCentersFailed, setCostCentersFailed] = useState(false);
   const timeClock = useTimeClock();
+  const { chooseCostCentre, sheet: stageSheet } = useClockOnCostCentre(jobId);
   const layer = useDataLayer();
   const role = useRole();
   const isOffice = role === "office" || role === "admin";
@@ -549,9 +551,15 @@ export function JobTimeTab({
   async function clockIn() {
     if (myOpenEntry || loading || !timeClock.ready) return;
     setLoading(true);
+    // Their booking's stage; with none and several open stages it asks
+    // (never a completed stage) — components/job/clock-on-stage-picker.tsx.
+    const costCenterId = await chooseCostCentre(myBookings, scheduledCostCenterId);
+    if (costCenterId === undefined) {
+      setLoading(false);
+      return;
+    }
     const now = new Date();
     const clockInIso = now.toISOString();
-    const costCenterId = clockInCostCentre(myBookings, now.getTime(), scheduledCostCenterId);
     // Where the phone is (0092): a few seconds at most, never blocks.
     const fix = await currentFix(3000);
     const { id } = await timeClock.clockIn({ jobId, staffId: currentUserId, costCenterId, fix });
@@ -712,6 +720,7 @@ export function JobTimeTab({
 
   return (
     <View style={styles.container}>
+      {stageSheet}
       <View style={styles.clockRow}>
         {!myOpenEntry ? (
           <TouchableOpacity testID="clock-in" style={styles.clockInButton} onPress={clockIn} disabled={loading}>
