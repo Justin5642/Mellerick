@@ -2,7 +2,6 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { scheduleBlockTones } from "@/lib/schedule-block-tones";
-import { statusColors } from "../../mobile/lib/theme";
 
 // The web board draws the phone's schedule layout (25 Nov 2026 — Justin: "We
 // prefer the mobile app's schedule"). Both must place a booking's block at
@@ -36,7 +35,22 @@ describe("lib/schedule-grid.ts and mobile/lib/scheduleGrid.ts", () => {
 });
 
 describe("schedule block colours", () => {
+  // Read as text: importing mobile/lib/theme.ts from the web suite pulls in the
+  // phone's tsconfig (expo), which CI's web job doesn't install.
   it("are the phone's status colours (mobile/lib/theme.ts statusColors)", () => {
-    expect(scheduleBlockTones).toEqual(statusColors);
+    const theme = readFileSync(join(process.cwd(), "mobile/lib/theme.ts"), "utf8");
+    const hex = (name: string) => {
+      const m = theme.match(new RegExp(`\\b${name}:\\s*"(#[0-9a-fA-F]{6})"`));
+      if (!m) throw new Error(`colour ${name} not found in mobile/lib/theme.ts`);
+      return m[1].toLowerCase();
+    };
+    const block = theme.slice(theme.indexOf("export const statusColors"));
+    const body = block.slice(0, block.indexOf("};"));
+    const phone: Record<string, { bg: string; text: string }> = {};
+    for (const m of body.matchAll(/(\w+):\s*\{\s*bg:\s*colors\.(\w+),\s*text:\s*colors\.(\w+)\s*\}/g)) {
+      phone[m[1]] = { bg: hex(m[2]), text: hex(m[3]) };
+    }
+    expect(Object.keys(phone).length).toBeGreaterThan(0);
+    expect(scheduleBlockTones).toEqual(phone);
   });
 });
