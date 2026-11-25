@@ -2,8 +2,8 @@
 -- Job folders for documents AND photos: Drains, Soil & Rock, R1, R2,
 -- Rough In, Fit Off, Camera Inspections (+ Other = NULL).
 --
--- STATUS: DRAFT — NOT APPLIED. Justin pastes it into the Supabase SQL editor,
--- then the gate test supabase/tests/0116_folders_test.sql, and trusts only
+-- STATUS: ✅ APPLIED IN PRODUCTION (2026-11-25, via SQL editor; gate test passed; confirmed by a read-only check). PowerSync streams must be redeployed for tech_job_photos.folder.
+-- How: this file was pasted into the SQL editor, then the gate test supabase/tests/0116_folders_test.sql, and trusts only
 -- the final "0116 PASSED" row. Then change this line to applied and add the
 -- ledger row:
 --   insert into supabase_migrations.schema_migrations (version,name)

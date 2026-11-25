@@ -1,6 +1,6 @@
 -- =============================================
 -- JOB TO-DO LIST: JOBS OFFICE CAN PULL IN TO FILL A SCHEDULE GAP
--- STATUS: ⚠ NOT in production until the 24 Nov 2026 catch-up paste (this line used to say "applied 2026-10-09"; a read-only check on 24 Nov 2026 found it missing). 0064, 0065 and 0066 are applied through 0117 (no temp table); 0067 and 0070 as written.
+-- STATUS: ✅ APPLIED IN PRODUCTION (2026-11-24, in the catch-up paste; confirmed by a read-only check). It was NOT in production before then, although this line said "applied 2026-10-09".
 --
 -- Asked for by the owner: "add jobs to a to do list so that they can be
 -- assigned when we have a hole to fill." Decisions already made:

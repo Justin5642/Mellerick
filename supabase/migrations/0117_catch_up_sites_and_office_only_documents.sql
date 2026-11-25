@@ -1,6 +1,6 @@
 -- =============================================
 -- CATCH-UP: what 0064, 0065 and 0066 were meant to do, on today's database
--- STATUS: DRAFT — not applied.
+-- STATUS: ✅ APPLIED IN PRODUCTION (2026-11-24, catch-up paste returned CATCH-UP PASSED; confirmed by a read-only check).
 --
 -- WHY
 -- A read-only check on 24 Nov 2026 found 0064, 0065, 0066, 0067 and 0070
