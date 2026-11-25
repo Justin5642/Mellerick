@@ -423,6 +423,11 @@ function PurchaseOrders({ jobId }: { jobId: string }) {
           </Text>
           <Text style={styles.figure}>{po.total_hours} h allowed</Text>
         </View>
+        {view.poInvoiced?.[po.id]?.status === "part" && (
+          <Text style={styles.small}>
+            Invoiced so far <MoneyText amount={view.poInvoiced[po.id].invoiced} /> (#{view.poInvoiced[po.id].numbers.join(", #")})
+          </Text>
+        )}
         {split.kind !== "split" && (
           <Text style={split.kind === "over" ? styles.over : styles.unsplit}>
             <MoneyText amount={split.amount} /> {split.kind === "over" ? "over the PO value" : "not split yet"}
@@ -456,10 +461,19 @@ function PurchaseOrders({ jobId }: { jobId: string }) {
             <Ionicons name="add" size={15} color={colors.blue600} />
             <Text style={styles.actionText}>Add cost centre</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={styles.actionBtn} onPress={() => invoicePo(po)} disabled={busy}>
-            <Ionicons name="document-text-outline" size={15} color={colors.blue600} />
-            <Text style={styles.actionText}>Invoice this PO</Text>
-          </TouchableOpacity>
+          {view.poInvoiced?.[po.id]?.status === "full" ? (
+            <View style={styles.invoicedChip}>
+              <Ionicons name="checkmark-circle" size={15} color={colors.green600} />
+              <Text style={styles.invoicedText}>
+                Invoiced{view.poInvoiced[po.id].numbers.length ? ` #${view.poInvoiced[po.id].numbers.join(", #")}` : ""}
+              </Text>
+            </View>
+          ) : (
+            <TouchableOpacity style={styles.actionBtn} onPress={() => invoicePo(po)} disabled={busy}>
+              <Ionicons name="document-text-outline" size={15} color={colors.blue600} />
+              <Text style={styles.actionText}>{view.poInvoiced?.[po.id]?.status === "part" ? "Invoice next claim" : "Invoice this PO"}</Text>
+            </TouchableOpacity>
+          )}
           <TouchableOpacity style={styles.actionBtn} onPress={() => confirmDeletePo(po)} disabled={busy} accessibilityLabel={`Remove PO ${po.po_number}`}>
             <Ionicons name="trash-outline" size={15} color={colors.red600} />
           </TouchableOpacity>
@@ -702,6 +716,8 @@ const styles = StyleSheet.create({
   actions: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 8 },
   actionBtn: { flexDirection: "row", alignItems: "center", gap: 4, borderWidth: 1, borderColor: colors.blue100, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 8 },
   actionText: { fontSize: 13, fontWeight: "600", color: colors.blue600 },
+  invoicedChip: { flexDirection: "row", alignItems: "center", gap: 4, paddingVertical: 6, paddingHorizontal: 8, borderRadius: 8, backgroundColor: colors.green100 },
+  invoicedText: { fontSize: 13, fontWeight: "600", color: colors.green600 },
   primaryBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 4, backgroundColor: colors.blue600, borderRadius: 8, paddingHorizontal: 14, paddingVertical: 10 },
   primaryBtnText: { color: colors.white, fontWeight: "700", fontSize: 14 },
   secondaryBtn: { alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: colors.border, borderRadius: 8, paddingHorizontal: 14, paddingVertical: 10, backgroundColor: colors.card },

@@ -2292,6 +2292,30 @@ office sees an "Added by technician" tag on both schedules (no push).
   **No PowerSync redeploy** — `tech_job_bookings` lists its columns and
   needs none of the new ones.
 
+**An invoiced PO stops offering "Invoice this PO" (25 Nov 2026; no migration, no stream change).**
+Emma: the sewer PO for Lot 827 Ribbonwood (Luxton Homes) was invoiced and
+pushed to Xero, yet the job's PO tab still offered it to invoice. Rule
+`poInvoiceState` in `lib/po-invoice.ts` (mirrored at `mobile/lib/poInvoice.ts`,
+tested in `tests/unit/po-invoice.test.ts`): an invoice is against a PO when its
+`customer_po` is the PO's number (trimmed, any case) — "Invoice this PO" and
+the New Invoice picker both set it; cancelled invoices don't count; subtotals
+(ex GST) add up against the PO's value → `none` / `part` (progress claims so
+far) / `full`.
+- **Web PO tab** (`components/job/job-po.tsx`, reads the job's invoices as the
+  caller): a fully invoiced PO shows a green "Invoiced #n" (linking to the
+  invoice) instead of the button; part-invoiced shows "Invoiced $x of $y" and
+  "Invoice next claim".
+- **New Invoice** (`app/dashboard/invoices/new/page.tsx`): the PO picker marks
+  "(invoiced)" / "(part invoiced)"; picking a fully invoiced PO says in red it
+  is already invoiced and that saving makes a second invoice (not blocked —
+  a re-issue after a cancelled one in Xero still works).
+- **Phone POs tab** (office/admin): `GET /api/jobs/[id]/purchase-orders` adds
+  `poInvoiced` (per PO: status, amount, invoice numbers — office-only route);
+  a fully invoiced PO shows "Invoiced #n" instead of the button, a part one
+  "Invoiced so far $x" (MoneyText) and "Invoice next claim". Next build.
+- **Not caught:** an invoice raised without the PO number in Customer PO
+  (typed by hand on New Invoice with no PO picked) — it can't be tied to a PO.
+
 **Cost of mistakes, stages 1–4 (25 Nov 2026; migration `0119` applied 2026-11-25; no stream change).**
 Justin: record every mistake — rework, wrong materials, damage, callbacks,
 mis-quotes, missed inspections — against a job and cost centre with its true
