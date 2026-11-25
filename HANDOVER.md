@@ -2292,6 +2292,113 @@ office sees an "Added by technician" tag on both schedules (no push).
   **No PowerSync redeploy** — `tech_job_bookings` lists its columns and
   needs none of the new ones.
 
+**Cost of mistakes, stages 1–4 (25 Nov 2026; migration `0119` applied 2026-11-25; no stream change).**
+Justin: record every mistake — rework, wrong materials, damage, callbacks,
+mis-quotes, missed inspections — against a job and cost centre with its true
+cost, so he sees where money leaks and why. **Don't double-enter cost**: a
+mistake is a tag plus LINKS over costs the CRM already holds, plus a manual
+line only where no record exists. His decisions: crew raise, office costs; no
+Rework cost centre (tag only); callbacks are a mistake on the original job
+(closed jobs included); stages 1–4 only (no pattern flags).
+- **Migration `0119_mistake_tracking.sql`** evolves 0115's `job_mistakes`
+  (0115 untouched): `job_id` nullable (a mistake with no job — truck/plant
+  overhead — then needs `cost_centre_id`, the COMPANY cost centre; on a job it
+  is derived from the PO line by the guard), `category_id`
+  (`mistake_categories`, editable, 10 seeded), `cause_code` (fixed list:
+  quoting, ordering, supplier, install, communication_handover,
+  plans_builder_change, site_conditions, other; the old free-text `cause`
+  stays as cause notes), `raised_by/raised_at`, `status` open → costed →
+  closed (`closed_at`), `supplier_id`, and the recovery columns
+  (`recovery_source` supplier_credit/builder_recharge/insurance/other,
+  `recovery_claimed_ex_gst`, `recovered_ex_gst`, `recovery_claimed_on`,
+  `recovery_note`). New tables: `mistake_cost_lines` (office/admin; a LINK to
+  a time_entry / job_expense / vendor_order / equipment_usage / hire_entry —
+  no amount stored, a record links to at most one mistake, the guard checks
+  it is on the mistake's own job, deleting the record deletes the link — or
+  MANUAL: amount ex GST, optional hours), `mistake_photos` (job-photos bucket
+  `<job>/mistakes/<id>/…`; office/admin RLS), `mistake_responsibility`
+  (whose mistake — **ADMIN ONLY**, not office; 0115's `staff_id` moved here
+  and is always null from now on: a trigger moves an admin's write and drops
+  anyone else's). `job_mistakes` keeps 0115's single office/admin FOR ALL
+  policy, so **technicians read nothing** in any mistake table but the
+  categories. **`amount_ex_gst` is deprecated**: each 0115 amount became one
+  `legacy` manual line, and triggers keep the two in step both ways, so the
+  web build from before 0119 still reads/writes correct totals in the gap.
+- **The crew's door:** `raise_job_mistake()` (SECURITY DEFINER; caller active
+  and `user_can_manage_job`, or office; category active; stage on that job;
+  date not in the future; their OWN work time entries on that job become
+  linked labour lines; idempotent on the client id; returns only the id),
+  `my_job_mistakes()` (what the caller raised, money-free columns),
+  `add_job_mistake_photo()` (raiser or office; path must be the mistake's).
+  Errors MJ120–MJ134 → fixed sentences (`lib/mistake-raise.ts`).
+- **Routes:** `GET/POST /api/jobs/[id]/mistakes` (`requireOnJob`; categories,
+  stage names via `listJobStages`, the caller's own work entries, their
+  mistakes; POST runs the function as the CALLER) and `POST
+  …/mistakes/[mistakeId]/photos` (base64 ≤ 3 MB, sniffed, uploaded to
+  job-photos as the caller, then filed; the file is removed if refused).
+  `tests/unit/mistakes-routes.test.ts` walks both answers for money keys and
+  amount values.
+- **Costing** (`lib/mistake-costs.ts`, pure): a link is costed from its source
+  every time, the ledger's way — time entry hours (or the line's partial
+  hours, capped) × loaded rate (payroll — **admin only**; office sees hours,
+  "admin sees cost", counted $0), expense amount, supplier PO amount
+  (unpriced flagged, cancelled $0), equipment usage `usageCost`, Day Works
+  line at today's hire rates (hire isn't in the Job Ledger yet, so this only
+  shows in the mistake's own cost). Net = lines − recovery received. Reads in
+  `lib/mistakes-data.ts` (three modes: missing / legacy 0115 / tracking).
+- **Ledger fixed** (`lib/job-ledger.ts`): mistakes are now a SUBSET — the row's
+  `mistakes` = linked + manual; only `mistakesAdded` = manual − recovered
+  goes into `cost`. Costing tab's Job Ledger and Reports → Job margins use it.
+- **Web:** crew (technicians on a job they're on) — a **Mistakes** card on the
+  Overview with **Log mistake** (`components/job/crew-mistakes.tsx`,
+  `log-mistake-dialog.tsx`: category, stage, cause, date, description, photos,
+  own time as rework; no money). Office — the PO tab card
+  (`components/job/job-mistakes.tsx` → `components/mistakes/mistakes-panel.tsx`):
+  each mistake's details, photos, cost lines, **Link existing cost**
+  (`link-cost-dialog.tsx`, anything on the job not yet linked; partial hours
+  for time), manual cost, money back, whose (admin), status. Before 0119 it
+  falls back to the old 0115 card (`job-mistakes-0115.tsx`, unchanged). A
+  **"part of a mistake?"** ⚠ button (`link-to-mistake-button.tsx`) on each
+  finished work entry (Time tab), each expense and each supplier PO (office):
+  link to a mistake on the job or a new one; unlink. Equipment usage and Day
+  Works lines are linked from the mistake's own picker. **Settings → Mistake
+  categories.** **Approvals** shows "N mistakes to review" linking to the report.
+- **Reports → Mistakes** (office/admin): the month × company cost centre table
+  now on each mistake's cost (jobless ones under their own centre), by
+  category, cause, supplier (claimed vs received), by job (net as % of the
+  builder PO value), **by person (admin only)**, open items (net > 0, nothing
+  claimed), the month list with status/net, "Log a mistake with no job", and
+  the **review** of every mistake not closed. Sums in `lib/mistakes-report.ts`.
+- **Monday email:** "Mistakes: N logged this week, N not closed, $X claimed
+  back and not yet received" (`lib/mistakes-digest.ts`; a failure never stops
+  the email; left out before 0119).
+- **Phone:** a **Mistakes** tab on the job (on the job or office; never
+  view-only), online only — `mobile/components/job/mistakes.tsx`, calls
+  `mobile/lib/mistakes.ts`; photos from camera/library via `prepareImage`.
+  Rules mirrored: `mobile/lib/mistakeRaise.ts` = `lib/mistake-raise.ts` from
+  the first export (`tests/unit/mistake-tracking.test.ts`). No money on the
+  phone (costing is on the web). Next build; no native module; the web first.
+- **Checked** on a scratch Postgres 16 (full chain 0000–0118 + CI seed): 0119
+  applies three times cleanly; `supabase/tests/0119_mistake_tracking_test.sql`
+  passes (44 scenarios) and fails naming scenarios with a permissive SELECT
+  policy on `job_mistakes`, with whose-mistake opened to office, and with the
+  cost-line guard disabled plus a readable `mistake_cost_lines`; the money
+  sweep stays intact with the seeded cost line and recovery. Not tried against
+  PostgREST, in a browser or on a device.
+- **Not done / to know:** supplier credits aren't matched to Xero credit notes;
+  a linked supplier PO / expense is the WHOLE record (a part of it → unlink and
+  add a manual line, which then counts as new cost); hire lines in a mistake
+  aren't in the Job Ledger (as hire isn't); job-less mistakes have no photos;
+  stage 5 (pattern flags) not built.
+- **Apply / deploy order:** paste `0119_mistake_tracking.sql` → paste
+  `supabase/tests/0119_mistake_tracking_test.sql` (needs an active technician
+  and an active admin; office-only checks need an office user), trust only
+  `0119 PASSED` → change 0119's STATUS line to applied, add the ledger row,
+  regenerate types (`lib/database.types.ts` has the tables/columns by hand) →
+  deploy the web → ship the phone build. **No PowerSync redeploy.** Before it
+  is applied: the PO tab shows the 0115 card, the crew card hides, Log mistake
+  says it isn't switched on, the report and ledgers use 0115's amounts.
+
 ---
 
 ## 2. The one rule that must never break
@@ -3169,6 +3276,7 @@ a shippable release.
 | **Leave on the schedule: record 0112** | Justin | `0112` applied 2026-11-19 (gate test passed). Ledger row: `insert into supabase_migrations.schema_migrations (version,name) values ('0112','schedule_leave') on conflict do nothing;` No PowerSync redeploy. Who sees the leave type defaults to office + admin; change it in Settings → Leave on the schedule. Part days: add From/To times on the Leave Log entry. |
 | **Komtrax: sync and link machines** | Justin | `0113` applied 2026-11-20 (gate test passed). Ledger row: `insert into supabase_migrations.schema_migrations (version,name) values ('0113','komtrax') on conflict do nothing;` Admin → Fleet → Komtrax machines → **Sync Komtrax**, then link any Komatsu machine not linked by serial (or put its serial in the fleet item's notes). `KOMTRAX_USERNAME` / `KOMTRAX_PASSWORD` are in Vercel Production. |
 | **Technicians start work themselves: record 0118** | Justin | `0118` applied 2026-11-25 (gate test passed). Ledger row if not yet run: `insert into supabase_migrations.schema_migrations (version,name) values ('0118','self_start_bookings') on conflict do nothing;` Deploy the web, then the phone build. No PowerSync redeploy. |
+| **Cost of mistakes: record 0119** | Justin | `0119` applied 2026-11-25 (gate test passed). Ledger row if not yet run: `insert into supabase_migrations.schema_migrations (version,name) values ('0119','mistake_tracking') on conflict do nothing;` Deploy the web, then the phone build. No PowerSync redeploy. Check Settings → Mistake categories. |
 | **Record the 24–25 Nov migrations; redeploy PowerSync** | Justin | The catch-up (0067 + 0070 + 0117, which did 0064–0066's job) and 0114, 0116, 0115 are applied and confirmed by a read-only check (nothing from 0060–0116 missing). Ledger rows: `insert into supabase_migrations.schema_migrations (version,name) values ('0064','restrict_site_writes_to_office_admin'),('0065','office_only_job_documents'),('0066','backflow_certificate_storage_policies'),('0067','job_todo_list'),('0070','page_load_indexes'),('0114','customer_address_doc_folders'),('0115','job_mistakes'),('0116','job_folders'),('0117','catch_up_sites_and_office_only_documents') on conflict do nothing;` Then **redeploy the PowerSync streams** (`tech_job_photos` lists `folder`; docs/powersync-deploy.md), then the phone build. Run `scripts/audit-job-documents.mjs` to mark priced Simpro attachments office-only. Add billing addresses to customers. |
 | **Maestro flow 02** | Avi | Needs `ADMIN_EMAIL` / `ADMIN_PASSWORD` in the environment. The login subflow deliberately skips when a session already exists, so a password never passes through a script — which is why flows 01/03/04 could be run and 02 could not. |
 

@@ -14,15 +14,16 @@ import {
   type EquipmentInput,
   type StaffCostProfileInput,
 } from "@/lib/job-ledger";
-import { loadJobMistakes, type JobMistake } from "@/lib/job-mistakes";
+import { ledgerMistakes, loadCostSources, loadMistakes } from "@/lib/mistakes-data";
 
 // The job ledger card at the top of the Costing tab (admin only, like the rest
 // of the tab — labour cost comes from payroll data). Budget per cost centre
 // from the builder's PO split, against cost so far, and the margin that
 // leaves, flagged under the company minimum. The maths is lib/job-ledger.ts.
-// Mistake costs (job_mistakes — migration 0115, a draft, not applied when
-// this was written) are read here and shown as their own column; before the
-// table exists there are none and the column stays hidden.
+// Mistakes (0115/0119 (a draft, not applied yet), lib/mistakes-data.ts) are read here and shown as their
+// own column, a SUBSET of cost: linked costs (time, expenses, POs… marked as
+// part of a mistake) are already in the other columns; only manual lines, less
+// money recovered, add to the cost. With no mistakes the column stays hidden.
 
 interface Props {
   jobId: string;
@@ -40,7 +41,7 @@ const money = (n: number) => `$${Math.round(n).toLocaleString("en-AU")}`;
 
 export function JobLedger({ jobId, purchaseOrders, timeEntries, expenses, vendorOrders, equipmentUsage, equipmentOptions, staffCostProfiles, minMarginPct }: Props) {
   const [costCentres, setCostCentres] = useState<{ id: string; name: string }[]>([]);
-  const [mistakes, setMistakes] = useState<JobMistake[]>([]);
+  const [mistakes, setMistakes] = useState<ReturnType<typeof ledgerMistakes>>([]);
   const [mistakesError, setMistakesError] = useState(false);
 
   useEffect(() => {
@@ -53,12 +54,24 @@ export function JobLedger({ jobId, purchaseOrders, timeEntries, expenses, vendor
 
   useEffect(() => {
     let live = true;
-    void loadJobMistakes(createClient(), jobId).then((r) => {
+    void (async () => {
+      const supabase = createClient();
+      const r = await loadMistakes(supabase, { jobId });
       if (!live) return;
-      if (r.error) console.error("job ledger: mistakes load failed:", r.error);
-      setMistakes(r.mistakes);
-      setMistakesError(!!r.error);
-    });
+      if (r.error) {
+        console.error("job ledger: mistakes load failed:", r.error);
+        setMistakesError(true);
+        return;
+      }
+      try {
+        // The Costing tab is admin only, so labour on rework time is costed at payroll rates.
+        const { sources } = await loadCostSources(supabase, r.lines, { withRates: true });
+        if (live) setMistakes(ledgerMistakes(r.mistakes, r.lines, sources));
+      } catch (err) {
+        console.error("job ledger: mistake costs load failed:", err);
+        if (live) setMistakesError(true);
+      }
+    })();
     return () => {
       live = false;
     };
@@ -193,8 +206,9 @@ export function JobLedger({ jobId, purchaseOrders, timeEntries, expenses, vendor
           )}
           {showMistakes && (
             <p>
-              Mistakes ({money(ledger.mistakes)}) are counted in the cost and take that much off the margin. They are logged on the
-              Purchase Orders tab.
+              Mistakes cost {money(ledger.mistakes)} — already part of the cost above (rework time, expenses and POs linked to a mistake
+              are counted once, in their own column). Manual mistake costs less money recovered add {money(ledger.mistakesAdded)}. They
+              are reviewed on the Purchase Orders tab.
             </p>
           )}
           {mistakesError && <p className="text-amber-700">Couldn&apos;t load this job&apos;s mistake costs, so they aren&apos;t in the cost above.</p>}

@@ -6,6 +6,7 @@ import { redirect } from "next/navigation";
 import type { UnbilledVariation } from "@/components/approvals/unbilled-variations";
 import { ApprovalsClient, type JobHoursSummary } from "@/components/approvals/approvals-client";
 import { approvalHoursByJob } from "@/lib/invoice-hours";
+import Link from "next/link";
 
 export default async function ApprovalsPage() {
   const supabase = await createClient();
@@ -46,7 +47,27 @@ export default async function ApprovalsPage() {
   // Same read the phone uses (GET /api/approvals/hours).
   const hoursByJob: Record<string, JobHoursSummary> = await approvalHoursByJob(supabase as any, jobIds);
 
+  // Mistakes waiting for the office to cost and close (0119, a draft not applied yet) — office/admin.
+  // Before 0119 (no status column) or on any error the banner is left out.
+  const role = viewer.profile?.role ?? null;
+  let openMistakes = 0;
+  if (role === "office" || role === "admin") {
+    const { count, error } = await supabase.from("job_mistakes").select("id", { count: "exact", head: true }).neq("status", "closed");
+    if (!error) openMistakes = count ?? 0;
+  }
+
   return (
+    <>
+    {openMistakes > 0 && (
+      <div className="mx-6 mt-6 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 flex flex-wrap items-center justify-between gap-2">
+        <span>
+          {openMistakes} mistake{openMistakes === 1 ? "" : "s"} to review — cost them, record any money back and close them.
+        </span>
+        <Link href="/dashboard/reports/mistakes" className="font-medium underline">
+          Review mistakes
+        </Link>
+      </div>
+    )}
     <ApprovalsClient
       role={viewer.profile?.role ?? null}
       currentUserId={viewer.user.id}
@@ -55,5 +76,6 @@ export default async function ApprovalsPage() {
       pendingVariations={pendingVariations ?? []}
       unbilledVariations={(unbilledVariations ?? []) as unknown as UnbilledVariation[]}
     />
+    </>
   );
 }

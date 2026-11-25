@@ -8,6 +8,7 @@ import { coverageByMonth, loadBills, unallocatedSummary } from "@/lib/unallocate
 import { buildDigest, type DigestDebtor } from "@/lib/weekly-digest";
 import { reportError } from "@/lib/monitoring";
 import { loadRecentFaultsForDigest } from "@/lib/komtrax-data";
+import { loadMistakesForDigest } from "@/lib/mistakes-digest";
 
 export const maxDuration = 60;
 
@@ -70,6 +71,14 @@ export async function GET(request: NextRequest) {
       console.error("weekly digest: Komtrax faults unavailable", err);
     }
 
+    // Mistakes (0119, a draft not applied yet). Optional: a failure here never stops the email.
+    let mistakes: Awaited<ReturnType<typeof loadMistakesForDigest>> = null;
+    try {
+      mistakes = await loadMistakesForDigest(admin);
+    } catch (err) {
+      console.error("weekly digest: mistakes unavailable", err);
+    }
+
     const digest = buildDigest({
       appUrl: appUrl(),
       unallocated: unallocatedSummary(loaded.bills),
@@ -88,6 +97,7 @@ export async function GET(request: NextRequest) {
         })),
       },
       machineFaults,
+      mistakes,
     });
 
     const { error: sendError } = await getResend().emails.send({ from: getFromAddress(), to, subject: digest.subject, html: digest.html, text: digest.text });

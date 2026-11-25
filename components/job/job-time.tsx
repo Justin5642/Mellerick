@@ -1,5 +1,7 @@
 "use client";
 
+import { LinkToMistakeButton } from "@/components/mistakes/link-to-mistake-button";
+
 import { useState, useEffect } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { toast } from "sonner";
@@ -59,6 +61,8 @@ interface Props {
   // The stage picked when this job was scheduled — new clock-ins default to it
   // instead of landing unassigned.
   scheduledCostCenterId?: string | null;
+  /** Office/admin: the "part of a mistake?" tick on each work entry (rework time, 0119 (a draft, not applied yet)). */
+  canLinkMistakes?: boolean;
 }
 
 function formatTime(iso: string) {
@@ -78,7 +82,7 @@ function syncBilling(entryId: string) {
   fetch(`/api/time-entries/${entryId}/sync-billing`, { method: "POST" }).catch(() => {});
 }
 
-export function JobTime({ jobId, currentUserId, timeEntries: initial, site, costCenters, isAdmin, staff, onUpdate, scheduledCostCenterId }: Props) {
+export function JobTime({ jobId, currentUserId, timeEntries: initial, site, costCenters, isAdmin, staff, onUpdate, scheduledCostCenterId, canLinkMistakes }: Props) {
   const supabase = createClient();
   const [entries, setEntries] = useState<TimeEntry[]>(initial);
   const [loading, setLoading] = useState(false);
@@ -279,6 +283,12 @@ export function JobTime({ jobId, currentUserId, timeEntries: initial, site, cost
                         ))}
                       </SelectContent>
                     </Select>
+                  )}
+                  {!isTravel && canLinkMistakes && entry.clock_out && (
+                    <div className="flex items-center gap-1 text-xs text-slate-400">
+                      <LinkToMistakeButton jobId={jobId} source="time_entry" sourceId={entry.id} entryHours={entry.hours == null ? null : Number(entry.hours)} />
+                      Rework? Mark as part of a mistake
+                    </div>
                   )}
                 </div>
               );
