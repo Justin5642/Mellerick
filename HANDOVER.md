@@ -2459,6 +2459,17 @@ the stage's allowed hours.
     it can't drift. One FOR ALL office/admin policy (policies dropped by
     enumeration first), granted to authenticated + service_role, revoked from
     anon, not in the powersync publication — all asserted. No money column.
+  - **Closes an open time-entries rule (found 26 Nov 2026 by this gate test
+    on production).** Production's `time_entries` had an out-of-band policy
+    "Authenticated users can manage time entries" (FOR ALL, `auth.role() =
+    'authenticated'`) instead of the baseline's own-rows policy — any
+    technician could edit, move or delete anyone's time. 0120 drops every
+    PERMISSIVE policy on the table by enumeration and creates: read own, or
+    any entry on a job you can manage (`user_can_manage_job` — the
+    `tech_time_entries` stream's scope), office/admin everything; insert /
+    update / delete own only; office/admin all (0030). Asserted (exactly 5
+    permissive policies, no open write, no `auth.role()` policy). Technicians
+    no longer read time on jobs they aren't on.
   - `job_variations_after_reject`: when the office REJECTS a variation its
     time goes back to the stage (`variation_id` cleared) and its links are
     removed, so the ledger, over-hours and the scoreboards agree.

@@ -35,6 +35,7 @@ declare
   te_other uuid := gen_random_uuid();
   te_new uuid := gen_random_uuid();
   te_travel uuid := gen_random_uuid();
+  te_b uuid := gen_random_uuid();
   exp_a uuid := gen_random_uuid();
   exp_a2 uuid := gen_random_uuid();
   exp_b uuid := gen_random_uuid();
@@ -69,7 +70,8 @@ begin
     insert into time_entries (id, job_id, staff_id, clock_in, clock_out, entry_type, hours) values
       (te_own, job_a, tech, now() - interval '5 hours', now() - interval '4 hours', 'work', 1),
       (te_other, job_a, office, now() - interval '5 hours', now() - interval '4 hours', 'work', 1),
-      (te_travel, job_a, tech, now() - interval '7 hours', now() - interval '6 hours', 'travel', 1);
+      (te_travel, job_a, tech, now() - interval '7 hours', now() - interval '6 hours', 'travel', 1),
+      (te_b, job_b, office, now() - interval '5 hours', now() - interval '4 hours', 'work', 1);
     insert into job_expenses (id, job_id, supplier_name, category, amount, gst_amount) values
       (exp_a, job_a, '0120 Supplier', 'materials', 300, 30),
       (exp_a2, job_a, '0120 Supplier', 'materials', 100, 10),
@@ -149,6 +151,29 @@ begin
     update time_entries set variation_id = v_open where id = te_other;
     get diagnostics n = row_count;
     res := res || format('technician tags someone else''s entry (rows changed)|0|%s', n);
+
+    update time_entries set hours = 9 where id = te_other;
+    get diagnostics n = row_count;
+    res := res || format('technician edits someone else''s hours (rows changed)|0|%s', n);
+
+    delete from time_entries where id = te_other;
+    get diagnostics n = row_count;
+    res := res || format('technician deletes someone else''s entry (rows changed)|0|%s', n);
+
+    begin
+      insert into time_entries (job_id, staff_id, clock_in, clock_out, entry_type, hours)
+        values (job_a, office, now() - interval '3 hours', now() - interval '2 hours', 'work', 1);
+      outcome := 'ALLOWED';
+    exception when insufficient_privilege then outcome := 'BLOCKED';
+    when others then outcome := 'OTHER ERROR: ' || sqlstate || ' ' || sqlerrm;
+    end;
+    res := res || format('technician logs time as someone else|BLOCKED|%s', outcome);
+
+    select count(*) into n from time_entries where id = te_other;
+    res := res || format('technician reads the crew''s time on their own job|1|%s', n);
+
+    select count(*) into n from time_entries where id = te_b;
+    res := res || format('technician reads time on a job they aren''t on|0|%s', n);
 
     insert into job_variations (id, job_id, custom_name, quantity, unit, logged_by, is_hourly)
       values (v_tech, job_a, '0120 Tech logged', 1, 'unit', tech, true);

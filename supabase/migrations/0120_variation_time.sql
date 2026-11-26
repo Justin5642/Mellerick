@@ -314,6 +314,69 @@ grant all on variation_cost_links to service_role;
 revoke all on variation_cost_links from anon;
 
 -- ---------------------------------------------------------------------------
+-- 5b. time_entries: a technician changes only their OWN time.
+--
+-- Found by this migration's gate test on production (26 Nov 2026): the table
+-- carried an out-of-band policy "Authenticated users can manage time entries"
+-- (FOR ALL, USING auth.role() = 'authenticated') in place of the baseline's
+-- "Users can manage own time entries" — so any signed-in technician could
+-- edit, move or delete anyone's time. No migration ever created it, so no
+-- migration's drop-by-name could remove it. Converge by enumeration: drop
+-- every PERMISSIVE policy (restrictive ones are kept), then create the rules
+-- the app was built on, and assert them.
+--   read:  your own entries, any entry on a job you can manage (the crew's
+--          time on your job — the same scope as the tech_time_entries
+--          stream), office/admin everything;
+--   write: your own entries only; office/admin everything (0030).
+-- ---------------------------------------------------------------------------
+do $$
+declare p record;
+begin
+  for p in select polname from pg_policy
+            where polrelid = 'public.time_entries'::regclass and polpermissive loop
+    execute format('drop policy %I on time_entries', p.polname);
+  end loop;
+end $$;
+
+create policy "time entries: read own or crew" on time_entries for select
+  to authenticated
+  using (staff_id = (select auth.uid()) or user_can_manage_job(job_id::text));
+create policy "time entries: add own" on time_entries for insert
+  to authenticated
+  with check (staff_id = (select auth.uid()));
+create policy "time entries: change own" on time_entries for update
+  to authenticated
+  using (staff_id = (select auth.uid()))
+  with check (staff_id = (select auth.uid()));
+create policy "time entries: delete own" on time_entries for delete
+  to authenticated
+  using (staff_id = (select auth.uid()));
+create policy "Office/admin manage all time entries" on time_entries for all
+  to authenticated
+  using ((select is_office_or_admin(auth.uid())))
+  with check ((select is_office_or_admin(auth.uid())));
+
+do $$
+declare n int;
+begin
+  if not (select relrowsecurity from pg_class where oid = 'public.time_entries'::regclass) then
+    raise exception '0120: RLS is off on time_entries';
+  end if;
+  select count(*) into n from pg_policy where polrelid = 'public.time_entries'::regclass and polpermissive;
+  if n <> 5 then raise exception '0120: expected exactly 5 permissive policies on time_entries, found %', n; end if;
+  -- Every permissive write policy is own-rows or office/admin — nothing open.
+  select count(*) into n from pg_policy
+   where polrelid = 'public.time_entries'::regclass and polpermissive and polcmd in ('a', 'w', 'd', '*')
+     and position('is_office_or_admin' in coalesce(pg_get_expr(polqual, polrelid), '') || coalesce(pg_get_expr(polwithcheck, polrelid), '')) = 0
+     and position('staff_id = ' in coalesce(pg_get_expr(polqual, polrelid), '') || coalesce(pg_get_expr(polwithcheck, polrelid), '')) = 0;
+  if n > 0 then raise exception '0120: a time_entries write policy is neither own-rows nor office/admin'; end if;
+  select count(*) into n from pg_policy
+   where polrelid = 'public.time_entries'::regclass and polpermissive
+     and coalesce(pg_get_expr(polqual, polrelid), '') ~* 'auth\.role\(\)';
+  if n > 0 then raise exception '0120: a time_entries policy still lets any signed-in user through'; end if;
+end $$;
+
+-- ---------------------------------------------------------------------------
 -- 6. Assert the end state
 -- ---------------------------------------------------------------------------
 do $$
