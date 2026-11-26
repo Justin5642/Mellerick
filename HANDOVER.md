@@ -3838,6 +3838,7 @@ compilation. The same commit builds fine in GitHub Actions, which does set them.
 | `lib/monitoring/`, `instrumentation*.ts` | Web error monitoring (Sentry) and its privacy scrubber — §12 |
 | `mobile/lib/monitoring/` | Mobile crash / dead-letter reporting (Sentry) and its scrubber — §12 |
 | `supabase/migrations/` | Schema, applied in filename order |
+| `scripts/check-query-plans.sql` | Read-only EXPLAIN (ANALYZE, BUFFERS) of the three busiest dashboard reads (recent jobs, a staff member's work time, a job's photos), with the indexes each should use and when to revisit a `(staff_id, clock_in)` index on `time_entries` (not added: not needed at today's size, and it would slow every clock-on/off) |
 | `tests/unit/`, `tests/rls/`, `tests/e2e/` | Web tests |
 | `mobile/DECISIONS-FOR-AVI.md` | Every decision with its rationale — **read before undoing anything that looks odd** |
 | `mobile/GAP-ANALYSIS.md` | Parity audit against the web app |
