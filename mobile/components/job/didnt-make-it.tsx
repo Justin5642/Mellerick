@@ -77,7 +77,7 @@ export function DidntMakeItSheet({
       testID="didnt-make-it-sheet"
       title={
         <View>
-          <Text style={styles.title}>Didn't make it</Text>
+          <Text style={styles.title}>Didn&apos;t make it</Text>
           {heading ? <Text style={styles.subtitle}>{heading}</Text> : null}
         </View>
       }
@@ -183,7 +183,7 @@ export function DidntMakeItControl({
   return (
     <>
       <TouchableOpacity style={styles.button} onPress={() => setOpen(true)} accessibilityRole="button" testID="didnt-make-it">
-        <Text style={styles.buttonText}>Didn't make it</Text>
+        <Text style={styles.buttonText}>Didn&apos;t make it</Text>
       </TouchableOpacity>
       <DidntMakeItSheet
         visible={open}
@@ -262,7 +262,7 @@ export function MyBookingsDidntMakeIt({
   if (mine.length === 0) return null;
   return (
     <View style={cardStyles.card}>
-      <Text style={cardStyles.title}>Couldn't get to it?</Text>
+      <Text style={cardStyles.title}>Couldn&apos;t get to it?</Text>
       {mine.map((b) => (
         <View key={b.id} style={cardStyles.row}>
           <Text style={cardStyles.when}>{describe(b)}</Text>
