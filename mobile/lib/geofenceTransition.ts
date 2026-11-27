@@ -72,6 +72,11 @@ export interface GeofenceTransitionDeps {
     travelFromJobId: string;
   }): Promise<void>;
   nowIso(): string;
+  /**
+   * True when the job is finished and must not be clocked on to automatically
+   * (lib/autoClockClosedJob.ts — reads the server, false when it can't).
+   */
+  isJobClosed?(jobId: string, atIso: string): Promise<boolean>;
   onWarn?(message: string): void;
 }
 
@@ -113,6 +118,12 @@ export async function applyGeofenceTransition(
 
   if (input.kind === "arrival") {
     if (lookup.status === "none") {
+      // A job signed off elsewhere that this phone still thinks is open: don't
+      // clock on, and keep any pending departure for the next real arrival.
+      if (deps.isJobClosed && (await deps.isJobClosed(input.jobId, deps.nowIso()))) {
+        deps.onWarn?.(`[geofence] job ${input.jobId} is already finished — not clocking on`);
+        return { handled: true, setPendingDeparture: null, clearPendingDeparture: false };
+      }
       await deps.clockIn({ jobId: input.jobId, staffId: input.staffId, costCenterId: input.costCenterId ?? null });
     }
 

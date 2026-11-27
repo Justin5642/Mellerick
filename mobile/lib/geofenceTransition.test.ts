@@ -146,6 +146,35 @@ describe("applyGeofenceTransition — arrival", () => {
   });
 });
 
+describe("applyGeofenceTransition — a job already signed off", () => {
+  it("does not clock on, and keeps a pending departure for the next arrival", async () => {
+    const { deps, calls } = makeDeps({ status: "none" });
+    deps.isJobClosed = async () => true;
+
+    const result = await applyGeofenceTransition(
+      {
+        kind: "arrival",
+        jobId: "job-done",
+        staffId: "tech-1",
+        pendingDeparture: { jobId: "job-a", timeIso: "2026-08-05T09:30:00.000Z" },
+      },
+      deps
+    );
+
+    expect(calls).toEqual([]);
+    expect(result).toEqual({ handled: true, setPendingDeparture: null, clearPendingDeparture: false });
+  });
+
+  it("clocks on as before when the job is open", async () => {
+    const { deps, calls } = makeDeps({ status: "none" });
+    deps.isJobClosed = async () => false;
+
+    await applyGeofenceTransition({ kind: "arrival", jobId: "job-a", staffId: "tech-1", pendingDeparture: null }, deps);
+
+    expect(calls).toEqual(["clockIn"]);
+  });
+});
+
 describe("applyGeofenceTransition — departure", () => {
   it("clocks out the open entry and records the pending departure", async () => {
     const { deps, calls } = makeDeps({ status: "found", entryId: "e1", clockInIso: "2026-08-05T09:00:00.000Z" });

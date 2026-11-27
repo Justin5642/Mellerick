@@ -39,6 +39,7 @@ import {
   type OpenEntryLookup,
   type PendingDeparture,
 } from "./geofenceTransition";
+import { skipAutoClockOn, type JobClosure } from "./autoClockClosedJob";
 import { netInfoConnectivity } from "./data/net/connectivity";
 import { powersync } from "../powersync/db";
 import {
@@ -696,8 +697,19 @@ export function LocationTrackingProvider({ children }: { children: ReactNode }) 
         });
       },
       nowIso: () => new Date().toISOString(),
+      isJobClosed: async (jobId, atIso) => skipAutoClockOn(await readJobClosure(jobId), atIso),
       onWarn: (message) => console.warn(message),
     };
+  }
+
+  // The job's LIVE status, for the closed-job check (lib/autoClockClosedJob.ts).
+  // Null offline or on any error: the auto-clock then behaves as before.
+  async function readJobClosure(jobId: string): Promise<JobClosure | null> {
+    if (!(await netInfoConnectivity.isOnline())) return null;
+    const { data, error } = await supabase.from("jobs").select("status, actual_end").eq("id", jobId).maybeSingle();
+    if (error || !data) return null;
+    const row = data as { status: string | null; actual_end: string | null };
+    return { status: row.status, actualEnd: row.actual_end };
   }
 
 
