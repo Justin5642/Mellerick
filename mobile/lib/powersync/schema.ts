@@ -237,6 +237,13 @@ const job_bookings = new Table({
   // (office_job_bookings is job_bookings.*; tech_job_bookings lists its columns
   // and does not carry it).
   clock_entry_id: column.text,
+  // 0121 (DRAFT): "Didn't make it" — added by hand, as the generator emits it
+  // once applied. tech_job_bookings lists missed_at / missed_reason /
+  // missed_note (not missed_by); office_job_bookings is job_bookings.*.
+  missed_at: column.text,
+  missed_by: column.text,
+  missed_reason: column.text,
+  missed_note: column.text,
 }, {
   indexes: {
     job_start: ['job_id', 'starts_at'],
@@ -404,6 +411,9 @@ const jobs = new Table({
   customer_po: column.text,
   // 0111 (DRAFT, not applied): added by hand, as the generator emits it once applied.
   quarry_included: column.integer,
+  // 0122 (DRAFT): added by hand. tech_jobs streams them (with admin_status).
+  sent_back_note: column.text,
+  sent_back_at: column.text,
 }, {
   indexes: {
     assigned_scheduled: ['assigned_to', 'scheduled_start'],

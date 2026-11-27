@@ -185,13 +185,21 @@ streams:
   # a closed job until 90 days after its last activity. Children follow their
   # job through the same subquery, so a job and everything under it arrive and
   # leave together.
+  #
+  # admin_status / sent_back_note / sent_back_at (0122): a job the office sent
+  # back shows the crew a banner and a "Sent back" tag. sent_back_note is the
+  # note written TO the crew, copied by a trigger on send-back only. NEVER add
+  # jobs.admin_notes here: it also carries the admin's APPROVAL comment, which
+  # can talk money (lib/approve-job.ts), and the contract test treats it as a
+  # money column. Redeploy this file only AFTER 0122 is applied.
   tech_jobs:
     auto_subscribe: true
     query: |
       SELECT id, job_number, title, description, notes, status, priority, job_type,
              customer_id, site_id, assigned_to, scheduled_start, scheduled_end,
              actual_start, actual_end, completion_notes, voice_report_transcript, created_at,
-             scheduled_cost_center_id, schedule_daily, schedule_all_day
+             scheduled_cost_center_id, schedule_daily, schedule_all_day,
+             admin_status, sent_back_note, sent_back_at
       FROM jobs
       WHERE sync_tech IS NOT false
         AND id IN (SELECT job_id FROM job_assignments WHERE staff_id = auth.user_id())
@@ -219,7 +227,7 @@ streams:
   tech_job_bookings:
     auto_subscribe: true
     query: |
-      SELECT id, job_id, staff_id, cost_center_id, starts_at, ends_at, daily, all_day, created_at, updated_at, note
+      SELECT id, job_id, staff_id, cost_center_id, starts_at, ends_at, daily, all_day, created_at, updated_at, note, missed_at, missed_reason, missed_note
       FROM job_bookings
       WHERE job_id IN (SELECT id FROM jobs WHERE sync_tech IS NOT false AND id IN (SELECT job_id FROM job_assignments WHERE staff_id = auth.user_id()))
 

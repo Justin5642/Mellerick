@@ -1643,6 +1643,10 @@ export type Database = {
           google_event_id: string | null
           id: string
           job_id: string
+          missed_at: string | null
+          missed_by: string | null
+          missed_note: string | null
+          missed_reason: string | null
           note: string | null
           staff_id: string | null
           starts_at: string
@@ -1660,6 +1664,10 @@ export type Database = {
           google_event_id?: string | null
           id?: string
           job_id: string
+          missed_at?: string | null
+          missed_by?: string | null
+          missed_note?: string | null
+          missed_reason?: string | null
           note?: string | null
           staff_id?: string | null
           starts_at: string
@@ -1677,6 +1685,10 @@ export type Database = {
           google_event_id?: string | null
           id?: string
           job_id?: string
+          missed_at?: string | null
+          missed_by?: string | null
+          missed_note?: string | null
+          missed_reason?: string | null
           note?: string | null
           staff_id?: string | null
           starts_at?: string
@@ -2368,6 +2380,8 @@ export type Database = {
           scheduled_cost_center_id: string | null
           scheduled_end: string | null
           scheduled_start: string | null
+          sent_back_at: string | null
+          sent_back_note: string | null
           simpro_job_id: number | null
           site_id: string | null
           status: string
@@ -2412,6 +2426,8 @@ export type Database = {
           scheduled_cost_center_id?: string | null
           scheduled_end?: string | null
           scheduled_start?: string | null
+          sent_back_at?: string | null
+          sent_back_note?: string | null
           simpro_job_id?: number | null
           site_id?: string | null
           status?: string
@@ -2456,6 +2472,8 @@ export type Database = {
           scheduled_cost_center_id?: string | null
           scheduled_end?: string | null
           scheduled_start?: string | null
+          sent_back_at?: string | null
+          sent_back_note?: string | null
           simpro_job_id?: number | null
           site_id?: string | null
           status?: string

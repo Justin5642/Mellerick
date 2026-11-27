@@ -10,6 +10,7 @@
 // NO MONEY, ever: everything here is names, addresses, times, hours and
 // free text the board already holds for the viewer. There is no field for a
 // PO value, an amount or a rate, and none may be added (HANDOVER §2).
+import { isMissed, missedDetailText, NOT_ATTENDED } from "./booking-attendance";
 import { billingName, attentionName } from "@/lib/customer-billing";
 import { formatTime } from "@/lib/date";
 import { formatDateKeyRange } from "@/lib/schedule-form";
@@ -96,6 +97,8 @@ export type HoverCardDetails = {
   /** Everyone else booked on the job that day, with their hours. */
   crew: HoverCrewLine[];
   description: string | null;
+  /** "Didn't make it — Other: truck broke down" (0121 (draft)) or "Not attended" (office/admin only); null otherwise. */
+  attendance: string | null;
 };
 
 /**
@@ -141,6 +144,7 @@ export function hoverCardDetails(
     note: (booking.note ?? "").trim() || null,
     crew,
     description: trimText(job.description, HOVER_DESCRIPTION_MAX),
+    attendance: isMissed(booking) ? missedDetailText(booking) : booking.not_attended ? `${NOT_ATTENDED} — nobody clocked on to the job on its day` : null,
   };
 }
 

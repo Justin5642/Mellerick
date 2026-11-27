@@ -209,6 +209,41 @@ export class ScheduleRepository {
   }
 
   // -------------------------------------------------------------------------
+  // "Didn't make it" (0121 (draft), Justin 27 Nov 2026): the booking's technician says
+  // why they didn't get to it. The booking itself never moves. A side effect,
+  // not a job_bookings write — RLS lets only office/admin write bookings, and
+  // flag_booking_missed() behind the route is the narrow door — so it works
+  // offline and lands when there is signal. Coalesced per booking: a flag and
+  // an undo queued offline collapse to the last one. Waits for the booking's
+  // own insert when that hasn't synced yet.
+  // -------------------------------------------------------------------------
+
+  async flagMissed(jobId: string, bookingId: string, reason: string, note: string | null): Promise<string> {
+    return this.queueMissed(jobId, bookingId, { jobId, bookingId, reason, note });
+  }
+
+  async clearMissed(jobId: string, bookingId: string): Promise<string> {
+    return this.queueMissed(jobId, bookingId, { jobId, bookingId, clear: true });
+  }
+
+  private async queueMissed(jobId: string, bookingId: string, payload: Record<string, unknown>): Promise<string> {
+    const op: SideEffectOperation = {
+      kind: "side_effect",
+      id: this.ids.newId(),
+      effect: "booking-missed",
+      coalesceKey: `booking-missed:${bookingId}`,
+      payload,
+      dependsOn: await this.outbox.pendingInsertOpId("job_bookings", bookingId),
+      status: "pending",
+      attempts: 0,
+      nextAttemptAt: 0,
+      createdAt: this.time.nowMs(),
+    };
+    await this.outbox.enqueue(op);
+    return op.id;
+  }
+
+  // -------------------------------------------------------------------------
   // The office to-do list (0067), as on the web board's to-do panel
   // (components/schedule/team-schedule-view.tsx). The rules — what booking a
   // placed job becomes, what taking a booking back does — are lib/todoBoard.ts

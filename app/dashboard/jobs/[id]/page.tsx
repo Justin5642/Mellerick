@@ -169,9 +169,26 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
   // not on they get no schedule (who is booked, when) and no notes (Justin,
   // 16 Nov 2026). Stripped here so none of it reaches the browser.
   const hideSchedule = !isOffice && !(user && (currentAssignedIds.includes(user.id) || job.assigned_to === user.id));
+  // jobs.admin_notes is also the admin's APPROVAL comment, which can talk
+  // money — a technician only gets it while the job is sent back (it is the
+  // send-back note then; lib/sent-back.ts). Not on the job: no send-back at all.
+  const techJob = isOffice
+    ? job
+    : { ...job, admin_notes: job.admin_status === "rejected" ? job.admin_notes : null };
   const shownJob = hideSchedule
-    ? { ...job, scheduled_start: null, scheduled_end: null, schedule_daily: false, schedule_all_day: false, assigned_to: null }
-    : job;
+    ? {
+        ...techJob,
+        scheduled_start: null,
+        scheduled_end: null,
+        schedule_daily: false,
+        schedule_all_day: false,
+        assigned_to: null,
+        admin_status: null,
+        admin_notes: null,
+        sent_back_note: null,
+        sent_back_at: null,
+      }
+    : techJob;
 
   return (
     <JobDetailClient

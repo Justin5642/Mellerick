@@ -10,11 +10,13 @@ import { anchorForDateKey, dateKeyInBusinessTZ, formatTime, formatDate } from "@
 import { scheduleDays } from "@/lib/scheduling";
 import { formatScheduleDates, nextScheduleDay, scheduleDayOn } from "@/lib/schedule-form";
 import { jobStatusColors } from "@/lib/badge-colors";
+import { isSentBack } from "@/lib/sent-back";
 
-// Only what the cards below render. Technicians land here, so the job row is
+// Only what the cards below render (admin_status = the "Sent back" tag, 0122, a draft).
+// Technicians land here, so the job row is
 // named column by column rather than "*" — nothing on it they do not see.
 const JOB_COLUMNS =
-  "id, job_number, title, status, scheduled_start, scheduled_end, schedule_daily, customers(name), sites(address_line1, suburb, site_lat, site_lng)";
+  "id, job_number, title, status, admin_status, scheduled_start, scheduled_end, schedule_daily, customers(name), sites(address_line1, suburb, site_lat, site_lng)";
 
 function JobCard({ job }: { job: any }) {
   // A multi-day job's times are its daily hours (scheduleDays' first block
@@ -37,6 +39,9 @@ function JobCard({ job }: { job: any }) {
           <span className={`text-xs px-2 py-0.5 rounded-full font-medium capitalize ${jobStatusColors[job.status]}`}>
             {job.status.replace("_", " ")}
           </span>
+          {isSentBack(job) && (
+            <span className="text-xs px-2 py-0.5 rounded-full font-medium bg-red-100 text-red-700">Sent back</span>
+          )}
         </div>
         <p className="text-xs text-slate-500 mt-0.5">{job.customers?.name}</p>
         {address && (

@@ -14,10 +14,14 @@ import { copyJob, copyJobTitle, deleteJob, deleteJobMessage } from "../../lib/of
 import * as Crypto from "expo-crypto";
 import { useJobEdit } from "../../lib/data/hooks/useJobEdit";
 import { JobOverviewTab } from "../../components/job/overview";
+import { SentBackBanner } from "../../components/job/sent-back-banner";
 import { JobNotesTab } from "../../components/job/notes";
 import { JobPhotosTab } from "../../components/job/photos";
 import { JobTimeTab } from "../../components/job/time";
 import { JobTodayCard } from "../../components/job/today-card";
+import { MyBookingsDidntMakeIt } from "../../components/job/didnt-make-it";
+import { useMissedFlags } from "../../lib/data/hooks/useMissedFlags";
+import { isMissed, missedTagText, withQueuedMissed } from "../../lib/bookingAttendance";
 import { StartWorkButton } from "../../components/job/start-work";
 import { AutoClockStatus } from "../../components/job/auto-clock-status";
 import { JobPlantUsage } from "../../components/job/plant-usage";
@@ -155,6 +159,7 @@ export default function JobDetailScreen() {
   }, [scheduleParam, techParam, dayParam, isOfficeOrAdmin, job, loading]);
   const [leave, setLeave] = useState<ScheduleLeave[]>([]);
   const layer = useDataLayer();
+  const { queued: queuedMissed } = useMissedFlags();
 
   // Best-effort like the crew and cost centres: bookings are detail on top of
   // the job, never a reason to fail the screen. Edits still queued in the
@@ -476,7 +481,9 @@ export default function JobDetailScreen() {
         <View style={styles.bookingList}>
           {(() => {
             const flagged = bookingsNeedingReassignment(bookings, leave, businessTodayKey());
-            return bookings.map((b) => {
+            return bookings.map((raw) => {
+              // "Didn't make it" (0121 (draft)), with a change still queued on this phone laid over it.
+              const b = withQueuedMissed(raw, queuedMissed.get(raw.id));
               const mine = !!userId && b.staff_id === userId;
               const stage = b.cost_center_id ? costCenters.find((cc) => cc.id === b.cost_center_id)?.name : null;
               const clash = flagged.get(b.id);
@@ -486,6 +493,11 @@ export default function JobDetailScreen() {
                     {mine ? "You" : (b.staff_name ?? "Unassigned")} · {formatScheduleSummary(bookingWindow(b))}
                     {stage ? ` · ${stage}` : ""}
                   </Text>
+                  {isMissed(b) ? (
+                    <Text style={styles.reassignLine} numberOfLines={2}>
+                      {missedTagText(b)}
+                    </Text>
+                  ) : null}
                   {clash ? (
                     <Text style={styles.reassignLine} numberOfLines={2} accessibilityLabel={`${NEEDS_REASSIGNING}: on leave`}>
                       {NEEDS_REASSIGNING} · {clash.map((c) => `${leaveDayLabel(c.leaveDay)} ${leaveDateLabel(c.dateKey)}`).join(", ")}
@@ -533,6 +545,8 @@ export default function JobDetailScreen() {
             <Text style={styles.viewOnlyText}>View only — you're not assigned to this job.</Text>
           </View>
         )}
+        {/* Sent back by the office (0122): the crew and office, never view-only. */}
+        {!viewOnly && <SentBackBanner job={job} />}
         {/* Popped in to do something (25 Nov 2026): book themselves on from
             now and clock on to the stage they pick — online, technicians on
             an open job they're not on. Overview only, like the Today card. */}
@@ -548,6 +562,16 @@ export default function JobDetailScreen() {
               setBookings((prev) => [...(prev ?? []).filter((b) => b.id !== booking.id), { ...booking, note: null, staff_name: null }]);
               setTab("time");
             }}
+          />
+        )}
+        {/* "Didn't make it" on their own bookings up to today (0121). Not in view-only. */}
+        {activeTab === "overview" && !viewOnly && userId && (
+          <MyBookingsDidntMakeIt
+            jobId={job.id}
+            jobStatus={job.status}
+            bookings={bookings}
+            currentUserId={userId}
+            describe={(b) => formatScheduleSummary(bookingWindow(b)) ?? "Booking"}
           />
         )}
         {/* The day's steps first (Stage 6): what's done and what's next. Not in view-only. */}

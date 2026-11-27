@@ -91,6 +91,8 @@ import { useIsAdmin, useIsOfficeOrAdmin } from "../../design/guards/useRole";
 // allow, and a count above the grid. Hours only; office/admin only.
 import { bookingOverHours, formatOverHours, jobsOverHours, overHoursHeadline, type HoursByJob } from "../../lib/overHours";
 import { listJobHours } from "../../lib/data/reads/overHours";
+import { listAttendanceEntries } from "../../lib/data/reads/attendance";
+import { attendanceCandidateJobIds, isMissed, missedTagText, NOT_ATTENDED, notAttendedBookings } from "../../lib/bookingAttendance";
 import { readAllPages } from "../../lib/data/reads/pagedRows";
 
 interface SchedJob {
@@ -421,9 +423,37 @@ export default function ScheduleScreen() {
   }, [overHours, allJobs]);
   const [overOpen, setOverOpen] = useState(false);
 
+  // "Not attended" (27 Nov 2026, lib/bookingAttendance.ts) — office/admin,
+  // online, best-effort like the hours above: a past booking on an open job,
+  // not flagged "Didn't make it", whose technician never clocked on to that
+  // job on any of its days. Work clock-ons from 60 days back (as the web
+  // board); nothing is written.
+  const [notAttendedIds, setNotAttendedIds] = useState<Set<string>>(new Set());
+  const attendanceInput = useMemo(() => {
+    const window = { todayKey, fromKey: shiftDateKey(todayKey, -60) };
+    const list = [...(bookings ?? []), ...(doneBookings ?? [])];
+    const status = (id: string) => allJobs.get(id)?.status;
+    return { window, list, status, jobIds: canTodo ? attendanceCandidateJobIds(list, status, window) : [] };
+  }, [bookings, doneBookings, allJobs, todayKey, canTodo]);
+  useEffect(() => {
+    const { window, list, status, jobIds } = attendanceInput;
+    if (jobIds.length === 0) {
+      setNotAttendedIds(new Set());
+      return;
+    }
+    let live = true;
+    void listAttendanceEntries(jobIds, businessDayRange(window.fromKey).dayStartIso).then((entries) => {
+      if (!live) return;
+      setNotAttendedIds(entries ? new Set(notAttendedBookings(list, status, entries, window).map((n) => n.bookingId)) : new Set());
+    });
+    return () => {
+      live = false;
+    };
+  }, [attendanceInput]);
+
   // Every booking on the grid: the real ones, plus a read-only stand-in for
   // any job without bookings (job_bookings missing, or a read that failed).
-  const realBookings = useMemo<(JobBooking & Pick<BoardBooking, "added_by_technician" | "running">)[]>(() => {
+  const realBookings = useMemo<(JobBooking & Pick<BoardBooking, "added_by_technician" | "running" | "not_attended">)[]>(() => {
     const seen = new Set<string>();
     const out: JobBooking[] = [];
     for (const b of [...(bookings ?? []), ...(doneBookings ?? [])]) {
@@ -436,8 +466,12 @@ export default function ScheduleScreen() {
     // to now (at least 15:30, never past its day — lib/selfStartBooking.ts).
     const roles = new Map(staff.map((s) => [s.id, s.role]));
     const roleOf = (id: string) => roles.get(id) ?? null;
-    return withRunningEnds(out, roleOf, Date.now()).map((b) => ({ ...b, added_by_technician: isAddedByTechnician(b, roleOf) }));
-  }, [bookings, doneBookings, staff]);
+    return withRunningEnds(out, roleOf, Date.now()).map((b) => ({
+      ...b,
+      added_by_technician: isAddedByTechnician(b, roleOf),
+      not_attended: notAttendedIds.has(b.id),
+    }));
+  }, [bookings, doneBookings, staff, notAttendedIds]);
   const boardBookings = useMemo<BoardBooking[]>(() => {
     const openIds = new Set(jobs.map((j) => j.id));
     const open = jobs.map(toBoardJob);
@@ -1408,7 +1442,7 @@ export default function ScheduleScreen() {
                 title={item.job.title}
                 // Rows under "Earlier" have no day heading above them, so they
                 // carry their own date.
-                subtitle={`${canTodo && overHours && bookingOverHours({ job_id: item.job.id, cost_center_id: item.booking?.cost_center_id ?? null }, overHours) ? "⚠ Over hours · " : ""}${item.booking && reassign.get(item.booking.id)?.some((c) => c.dateKey === day.dateKey) ? `${NEEDS_REASSIGNING} · ` : ""}${section.earlier ? `${businessDayLabel(day.startIso)} · ` : ""}${item.job.customers?.name ?? "—"} · ${item.who ?? "Unassigned"}${count > 1 ? ` · Day ${index + 1} of ${count}` : ""}`}
+                subtitle={`${item.booking && isMissed(item.booking) ? `${missedTagText(item.booking)} · ` : item.booking && canTodo && notAttendedIds.has(item.booking.id) ? `${NOT_ATTENDED} · ` : ""}${canTodo && overHours && bookingOverHours({ job_id: item.job.id, cost_center_id: item.booking?.cost_center_id ?? null }, overHours) ? "⚠ Over hours · " : ""}${item.booking && reassign.get(item.booking.id)?.some((c) => c.dateKey === day.dateKey) ? `${NEEDS_REASSIGNING} · ` : ""}${section.earlier ? `${businessDayLabel(day.startIso)} · ` : ""}${item.job.customers?.name ?? "—"} · ${item.who ?? "Unassigned"}${count > 1 ? ` · Day ${index + 1} of ${count}` : ""}`}
                 status={item.job.status}
                 leading={
                   <View style={styles.timeCol}>

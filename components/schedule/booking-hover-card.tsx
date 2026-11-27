@@ -16,6 +16,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { AlertTriangle, CalendarClock, MapPin, Navigation, StickyNote, User, Users } from "lucide-react";
+import { DIDNT_MAKE_IT } from "@/lib/booking-attendance";
 import { HOVER_CLOSE_MS, HOVER_OPEN_MS, hoverCardPlacement, type HoverCardDetails } from "@/lib/schedule-hover";
 import { cn } from "@/lib/utils";
 
@@ -204,8 +205,13 @@ export function BookingHoverCard({
         </span>
       </div>
 
-      {(overText || leaveText) && (
+      {(overText || leaveText || d.attendance) && (
         <div className="mt-2 space-y-1">
+          {d.attendance && (
+            <p className={cn("rounded px-2 py-1 font-semibold", d.attendance.startsWith(DIDNT_MAKE_IT) ? "bg-red-50 text-red-800" : "bg-amber-50 text-amber-800")}>
+              {d.attendance}
+            </p>
+          )}
           {leaveText && <p className="rounded bg-rose-50 px-2 py-1 font-semibold text-rose-800">{leaveText}</p>}
           {overText && (
             <p className="flex items-center gap-1 rounded bg-amber-50 px-2 py-1 font-semibold text-amber-800">

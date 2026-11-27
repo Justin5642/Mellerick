@@ -68,6 +68,9 @@ import {
 import { BoardPointerSensor, BookingMenu, useHoldGesture } from "./booking-hold-menu";
 import { BoardScheduleDialog } from "./board-schedule-dialog";
 import { AddedByTechnicianTag } from "./added-by-technician-tag";
+import { BookingAttendanceTag } from "./booking-attendance-tag";
+import { NotAttendedSummary, type NotAttendedRow } from "./not-attended-summary";
+import type { NotAttendedItem } from "@/lib/booking-attendance";
 import {
   applyBoardMove,
   buildBoardIndex,
@@ -496,6 +499,7 @@ function BlockBody({ entry, tag, reassign, over, view }: BlockBodyProps) {
         </p>
       )}
       <AddedByTechnicianTag booking={booking} className="text-[10px]" />
+      <BookingAttendanceTag booking={booking} className="text-[10px]" />
     </>
   );
 }
@@ -853,6 +857,19 @@ const boardCollision: CollisionDetection = (args) => {
 };
 
 /** Everyone booked on a job, in booking order, once each. */
+/** The List tab's "Didn't make it" / "Not attended" lines for a job's bookings (27 Nov 2026). */
+function ListAttendanceTags({ bookings, staffById }: { bookings: readonly BoardBooking[]; staffById: Map<string, StaffMember> }) {
+  const flagged = bookings.filter((b) => b.missed_reason || b.not_attended);
+  if (flagged.length === 0) return null;
+  return (
+    <div className="flex flex-wrap gap-x-3">
+      {flagged.map((b) => (
+        <BookingAttendanceTag key={b.id} booking={b} who={b.staff_id ? staffById.get(b.staff_id)?.full_name : null} className="text-xs" />
+      ))}
+    </div>
+  );
+}
+
 function bookedNames(bookings: readonly BoardBooking[], staffById: Map<string, StaffMember>) {
   const names: string[] = [];
   for (const b of bookings) {
@@ -868,6 +885,7 @@ const PINNED_NAME =
   "bg-white p-2 flex items-center gap-2 min-w-0 sticky left-0 z-10 shadow-[4px_0_6px_-4px_rgba(0,0,0,0.12)]";
 
 const NO_LEAVE: ScheduleLeave[] = [];
+const NO_NOT_ATTENDED: NotAttendedItem[] = [];
 
 export function TeamScheduleView({
   jobs,
@@ -880,6 +898,7 @@ export function TeamScheduleView({
   viewerRole = null,
   viewerId = null,
   overHours = null,
+  notAttended = NO_NOT_ATTENDED,
 }: {
   jobs: BoardJob[];
   bookings: BoardBooking[];
@@ -898,6 +917,8 @@ export function TeamScheduleView({
    * null for a technician, or when the read failed (no badges then).
    */
   overHours?: HoursByJob | null;
+  /** Past bookings nobody clocked on to (lib/booking-attendance.ts) — office/admin only; [] otherwise. */
+  notAttended?: NotAttendedItem[];
 }) {
   // Narrowed to the methods lib/bookings.ts uses. Not cosmetic: matching the
   // fully-generic typed client against a structural parameter makes
@@ -1114,6 +1135,16 @@ export function TeamScheduleView({
         return by(b) - by(a) || a.job_number - b.job_number;
       });
   }, [overHours, boardJobs]);
+  // The header's "N bookings not attended" (27 Nov 2026), newest first.
+  const notAttendedRows = useMemo<NotAttendedRow[]>(() => {
+    const byId = new Map(boardJobs.map((j) => [j.id, j]));
+    const names = new Map(staff.map((s) => [s.id, s.full_name]));
+    return notAttended.flatMap((n) => {
+      const job = byId.get(n.jobId);
+      if (!job) return [];
+      return [{ bookingId: n.bookingId, jobId: n.jobId, jobNumber: job.job_number, title: job.title, staffName: names.get(n.staffId) ?? "Unknown", dayKeys: n.dayKeys }];
+    });
+  }, [notAttended, boardJobs, staff]);
   const reassignOn = (entry: BoardEntry) => reassign.get(entry.booking.id)?.some((c) => c.dateKey === entry.day.dateKey) ?? false;
   const leaveOn = (staffId: string, dateKey: string) => leaveIndex.get(staffId)?.get(dateKey) ?? [];
   // The leave day whose details are open, and a pending "book anyway?" question.
@@ -1921,6 +1952,7 @@ export function TeamScheduleView({
       {(tab === "week" || tab === "day") && (
       <div className="mt-4">
         <OverHoursSummary jobs={overJobs} />
+        <NotAttendedSummary rows={notAttendedRows} />
         <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
           <div className="flex items-center gap-2">
             <Button
@@ -2369,6 +2401,7 @@ export function TeamScheduleView({
                           {[dayOf, job.customers?.name, names].filter(Boolean).join(" · ")}
                         </p>
                         <ListStageTicks stages={stages} />
+                        <ListAttendanceTags bookings={bookingsByJob.get(job.id) ?? []} staffById={staffById} />
                       </div>
                       <WazeButton site={job.sites} />
                       <ListStatusPill status={job.status} />
@@ -2412,6 +2445,7 @@ export function TeamScheduleView({
                             .join(" · ")}
                         </p>
                         <ListStageTicks stages={stages} />
+                        <ListAttendanceTags bookings={bookingsByJob.get(job.id) ?? []} staffById={staffById} />
                       </div>
                       <WazeButton site={job.sites} />
                       {done && <ListStatusPill status={job.status} />}

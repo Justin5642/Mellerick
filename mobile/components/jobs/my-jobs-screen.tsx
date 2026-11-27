@@ -22,10 +22,12 @@ import { colors, statusColors } from "../../lib/theme";
 import { BUSINESS_TIME_ZONE } from "../../lib/date";
 import { businessTodayKey, formatScheduleSummary } from "../../lib/scheduleDisplay";
 import { listMyJobBookings } from "../../lib/data/reads/bookings";
+import { DidntMakeItControl } from "../job/didnt-make-it";
 import { getJobCostCentres } from "../../lib/data/reads/jobBilling";
 import { myJobEntries, splitMyJobEntries, type Booking, type MyJobEntry } from "../../lib/bookings";
 import type { ScheduledJobWindow } from "../../lib/scheduling";
 import { loadTodaysRunCount, runCardTitle } from "../../lib/todaysRun";
+import { isSentBack } from "../../lib/sentBack";
 
 interface Job {
   id: string;
@@ -35,6 +37,8 @@ interface Job {
   scheduled_start: string | null;
   scheduled_end: string | null;
   schedule_daily: boolean;
+  /** 'rejected' = sent back by the office (0122, a draft) — the "Sent back" tag. */
+  admin_status: string | null;
   customers: { name: string } | null;
   sites: { name: string; address_line1: string; suburb: string; site_lat: number | null; site_lng: number | null } | null;
 }
@@ -172,6 +176,7 @@ export function MyJobsScreen() {
     const sc = statusColors[job.status] ?? statusColors.pending;
     const address = job.sites ? `${job.sites.address_line1}, ${job.sites.suburb}` : null;
     const stage = entry.costCenterId ? stageNames[entry.costCenterId] : null;
+    const booking = entry.bookingId ? bookings?.find((b) => b.id === entry.bookingId) ?? null : null;
     return (
       <TouchableOpacity style={styles.card} onPress={() => router.push(`/job/${job.id}`)}>
         <View style={styles.cardHeader}>
@@ -182,10 +187,25 @@ export function MyJobsScreen() {
             <Text style={[styles.badgeText, { color: sc.text }]}>{job.status.replace("_", " ")}</Text>
           </View>
         </View>
+        {isSentBack(job) ? (
+          <View style={styles.sentBackTag}>
+            <Text style={styles.sentBackText}>↩ Sent back — see the note from the office</Text>
+          </View>
+        ) : null}
         {job.customers?.name && <Text style={styles.cardSubtext}>{job.customers.name}</Text>}
         {address && <Text style={styles.cardMeta}>📍 {address}</Text>}
         <WindowLine window={window} />
         {stage ? <Text style={styles.cardMeta}>🔧 {stage}</Text> : null}
+        {/* "Didn't make it" on their own booking today or earlier (0121). */}
+        {booking ? (
+          <DidntMakeItControl
+            jobId={job.id}
+            jobStatus={job.status}
+            booking={booking}
+            currentUserId={userId}
+            heading={`#${job.job_number} — ${job.title}`}
+          />
+        ) : null}
         {job.sites && (
           <TouchableOpacity style={styles.wazeButton} onPress={() => openWaze(job)}>
             <Text style={styles.wazeButtonText}>Navigate</Text>
@@ -277,6 +297,8 @@ export function MyJobsScreen() {
 }
 
 const styles = StyleSheet.create({
+  sentBackTag: { alignSelf: "flex-start", marginTop: 4, paddingHorizontal: 8, paddingVertical: 2, borderRadius: 10, backgroundColor: colors.red100 },
+  sentBackText: { fontSize: 12, fontWeight: "700", color: colors.red600 },
   container: { flex: 1, backgroundColor: colors.bg },
   center: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: colors.bg },
   header: {

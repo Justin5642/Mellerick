@@ -5,6 +5,7 @@ import { chunkIds, mergeResults, readAllPages } from "./pagedRows";
 import { bool } from "./rowMap";
 import { assignedOrCrewSql } from "./assignedJobs";
 import type { Booking, BookingWindow } from "../../bookings";
+import { isMissingMissedColumn, MISSED_COLUMNS } from "../../bookingAttendance";
 
 // Job bookings (migration 0079, and 0080 which streams them to devices — both
 // DRAFTS, not applied yet): one technician's window and cost centre on a job.
@@ -67,6 +68,9 @@ interface RawBookingRow {
   all_day: boolean | number | null;
   note?: string | null;
   created_by?: string | null;
+  missed_at?: string | null;
+  missed_reason?: string | null;
+  missed_note?: string | null;
 }
 
 function mapBooking(r: RawBookingRow): Booking {
@@ -81,6 +85,10 @@ function mapBooking(r: RawBookingRow): Booking {
     all_day: bool(r.all_day) ?? false,
     note: r.note ?? null,
     ...(r.created_by !== undefined ? { created_by: r.created_by ?? null } : {}),
+    // "Didn't make it" (0121 (draft)): only when the read carried the columns.
+    ...(r.missed_reason !== undefined
+      ? { missed_at: r.missed_at ?? null, missed_reason: r.missed_reason ?? null, missed_note: r.missed_note ?? null }
+      : {}),
   };
 }
 
@@ -90,6 +98,7 @@ function mapBooking(r: RawBookingRow): Booking {
 
 export const SQL_JOB_BOOKINGS = `
   SELECT b.id, b.job_id, b.staff_id, b.cost_center_id, b.starts_at, b.ends_at, b.daily, b.all_day, b.note,
+         b.missed_at, b.missed_reason, b.missed_note,
          p.full_name AS staff_name
   FROM job_bookings b
   LEFT JOIN profiles p ON p.id = b.staff_id
@@ -123,7 +132,9 @@ export async function listJobBookings(jobId: string): Promise<JobBooking[] | nul
           .select(`${columns}, staff:profiles!job_bookings_staff_id_fkey(full_name)`)
           .eq("job_id", jobId)
           .order("starts_at");
-      let res = await read(`${COLUMNS}, ${NOTE_COLUMN}`);
+      let res = await read(`${COLUMNS}, ${NOTE_COLUMN}, ${MISSED_COLUMNS}`);
+      // 0121 (draft) not applied: without "Didn't make it"; 0109 not applied: without notes.
+      if (isMissingMissedColumn(res.error)) res = await read(`${COLUMNS}, ${NOTE_COLUMN}`);
       if (isMissingNoteColumn(res.error)) res = await read(COLUMNS);
       if (isMissingTable(res.error)) return null;
       const rows = unwrapRows(res as never, "listJobBookings") as unknown as (RawBookingRow & {
@@ -143,7 +154,8 @@ export async function listJobBookings(jobId: string): Promise<JobBooking[] | nul
 // state 2 without a second query. Same "mine, open" scope as SQL_LIST_MY_JOBS.
 export const SQL_MY_OPEN_JOB_BOOKINGS = `
   SELECT j.id AS job_id_of_job, j.scheduled_start AS job_scheduled_start,
-         b.id, b.job_id, b.staff_id, b.cost_center_id, b.starts_at, b.ends_at, b.daily, b.all_day
+         b.id, b.job_id, b.staff_id, b.cost_center_id, b.starts_at, b.ends_at, b.daily, b.all_day,
+         b.missed_at, b.missed_reason, b.missed_note
   FROM jobs j
   LEFT JOIN job_bookings b ON b.job_id = j.id
   WHERE ${assignedOrCrewSql("j", "?1")}
@@ -185,11 +197,9 @@ export async function listMyJobBookings(
     },
     async () => {
       if (ids.size === 0) return [];
-      const res = await supabase
-        .from("job_bookings")
-        .select(COLUMNS)
-        .in("job_id", [...ids])
-        .order("starts_at");
+      const read = (columns: string) => supabase.from("job_bookings").select(columns).in("job_id", [...ids]).order("starts_at");
+      let res = await read(`${COLUMNS}, ${MISSED_COLUMNS}`);
+      if (isMissingMissedColumn(res.error)) res = await read(COLUMNS);
       if (isMissingTable(res.error)) return null;
       return (unwrapRows(res as never, "listMyJobBookings") as unknown as RawBookingRow[]).map(mapBooking);
     }
@@ -242,15 +252,19 @@ export async function withMyBookings<S extends { jobId: string }>(
 export async function listOpenJobBookingsRemote(): Promise<JobBooking[] | null> {
   // Paged: past PostgREST's 1000-row cap a single request silently dropped
   // bookings (24 Nov 2026). Ordered by start, then id, so pages never overlap.
-  const res = await readAllPages((from, to) =>
-    supabase
-      .from("job_bookings")
-      .select(`${COLUMNS}, created_by, staff:profiles!job_bookings_staff_id_fkey(full_name), jobs!inner(status)`)
-      .not("jobs.status", "in", '("completed","cancelled")')
-      .order("starts_at")
-      .order("id")
-      .range(from, to)
-  );
+  const read = (columns: string) =>
+    readAllPages((from, to) =>
+      supabase
+        .from("job_bookings")
+        .select(`${columns}, created_by, staff:profiles!job_bookings_staff_id_fkey(full_name), jobs!inner(status)`)
+        .not("jobs.status", "in", '("completed","cancelled")')
+        .order("starts_at")
+        .order("id")
+        .range(from, to)
+    );
+  // "Didn't make it" (0121 (draft)) rides along; without its columns, retried without them.
+  let res = await read(`${COLUMNS}, ${MISSED_COLUMNS}`);
+  if (isMissingMissedColumn(res.error)) res = await read(COLUMNS);
   if (isMissingTable(res.error)) return null;
   const rows = unwrapRows(res as never, "listOpenJobBookingsRemote") as unknown as (RawBookingRow & {
     staff: { full_name: string } | null;
@@ -266,21 +280,24 @@ export async function listOpenJobBookingsRemote(): Promise<JobBooking[] | null> 
 export async function listJobBookingsForJobsRemote(jobIds: readonly string[]): Promise<JobBooking[] | null> {
   if (jobIds.length === 0) return [];
   // Chunked ids (a long .in() list outgrows the URL) and each chunk paged.
-  const res = mergeResults(
-    await Promise.all(
-      chunkIds(jobIds).map((part) =>
-        readAllPages((from, to) =>
-          supabase
-            .from("job_bookings")
-            .select(`${COLUMNS}, created_by, staff:profiles!job_bookings_staff_id_fkey(full_name)`)
-            .in("job_id", part)
-            .order("starts_at")
-            .order("id")
-            .range(from, to)
+  const read = async (columns: string) =>
+    mergeResults(
+      await Promise.all(
+        chunkIds(jobIds).map((part) =>
+          readAllPages((from, to) =>
+            supabase
+              .from("job_bookings")
+              .select(`${columns}, created_by, staff:profiles!job_bookings_staff_id_fkey(full_name)`)
+              .in("job_id", part)
+              .order("starts_at")
+              .order("id")
+              .range(from, to)
+          )
         )
       )
-    )
-  );
+    );
+  let res = await read(`${COLUMNS}, ${MISSED_COLUMNS}`);
+  if (isMissingMissedColumn(res.error)) res = await read(COLUMNS);
   if (isMissingTable(res.error)) return null;
   const rows = unwrapRows(res as never, "listJobBookingsForJobsRemote") as unknown as (RawBookingRow & {
     staff: { full_name: string } | null;

@@ -70,6 +70,8 @@ export type BoardBooking = JobBooking & {
   added_by_technician?: boolean;
   /** Self-started and still clocked on: drawn to lib/self-start-booking.ts runningBookingEnd(). */
   running?: boolean;
+  /** Past, not flagged "Didn't make it", and nobody clocked on (lib/booking-attendance.ts) — office/admin only. */
+  not_attended?: boolean;
 };
 
 /**
