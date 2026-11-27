@@ -8,6 +8,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { supabase } from "../../lib/supabase";
 import { colors } from "../../lib/theme";
 import { prepareImage } from "../../lib/imageUpload";
+import { documentPickerAvailable, isPickedImage, isPickedPdf, pickDocuments, readPickedBase64, type PickedFile } from "../../lib/documentPicker";
 import { base64Bytes, cleanAttachmentName } from "../../lib/invoiceAttachments";
 import {
   addAttachment,
@@ -27,9 +28,10 @@ import {
 //  - photos from the library or the camera (expo-image-picker), shrunk first
 //    by lib/imageUpload.ts, as the web shrinks them in the browser;
 //  - the job's own documents (PDFs, Word, Excel… from the Documents tab),
-//    downloaded from Storage.
-// Any other file on the phone (a PDF in Files / Downloads) needs
-// expo-document-picker, which is not in the binary — attach those on the web.
+//    downloaded from Storage;
+//  - any other file on the phone (a PDF in Files / Downloads…) through
+//    expo-document-picker (Nov 2026; loaded lazily — a binary built before it
+//    was added hides the "Files" button).
 // Same limits as the web: 10 files, 3 MB in total (lib/invoiceAttachments.ts).
 
 interface JobDoc {
@@ -107,6 +109,58 @@ export function InvoiceAttachmentsField({
     }
   }
 
+  /** A file from the phone: refused by name/size before it is read; a photo is shrunk like the others. */
+  async function fileToAttachment(file: PickedFile, n: number): Promise<PhoneAttachment> {
+    if (isPickedImage(file) && !isPickedPdf(file)) {
+      try {
+        const img = await prepareImage(file.uri, { base64: true });
+        const content = img.base64 ?? "";
+        if (content) return { id: Crypto.randomUUID(), filename: photoAttachmentName(file.name, n), content, bytes: base64Bytes(content) };
+      } catch {
+        // Couldn't be re-encoded (HEIC on an old phone…): send the original.
+      }
+    }
+    const content = await readPickedBase64(file);
+    return { id: Crypto.randomUUID(), filename: cleanAttachmentName(file.name) || `file-${n}`, content, bytes: base64Bytes(content) };
+  }
+
+  async function pickFiles() {
+    let files: PickedFile[] | null;
+    try {
+      files = await pickDocuments({ multiple: true });
+    } catch (e) {
+      Alert.alert("Couldn't open your files", e instanceof Error ? e.message : "Please try again.");
+      return;
+    }
+    if (!files) return;
+    setBusy(true);
+    try {
+      const ready: PhoneAttachment[] = [];
+      const refused: string[] = [];
+      let room = MAX_ATTACHMENT_TOTAL_BYTES - total;
+      for (const f of files) {
+        if (!isPickedImage(f) && !isAttachableName(f.name)) {
+          refused.push(`${f.name} can't be attached (${ATTACHMENT_HINT})`);
+          continue;
+        }
+        // Known size first, so a file that can't fit isn't read for nothing (photos are shrunk, so they may still fit).
+        if (f.size != null && f.size > room && !isPickedImage(f)) {
+          refused.push(`${f.name} (${formatBytes(f.size)}) would take the attachments over ${formatBytes(MAX_ATTACHMENT_TOTAL_BYTES)}`);
+          continue;
+        }
+        const a = await fileToAttachment(f, value.length + ready.length + 1);
+        room -= a.bytes;
+        ready.push(a);
+      }
+      addAll(ready);
+      if (refused.length) Alert.alert("Not attached", refused.join("\n"));
+    } catch (e) {
+      Alert.alert("Couldn't add the file", e instanceof Error ? e.message : "Please try again.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function openDocs() {
     if (!jobId) return;
     setDocsOpen(true);
@@ -156,9 +210,10 @@ export function InvoiceAttachmentsField({
         <SourceButton icon="images-outline" label="Photos" onPress={() => void pickPhotos(false)} disabled={off} />
         <SourceButton icon="camera-outline" label="Camera" onPress={() => void pickPhotos(true)} disabled={off} />
         {jobId ? <SourceButton icon="document-text-outline" label="Job documents" onPress={() => void openDocs()} disabled={off} /> : null}
+        {documentPickerAvailable() ? <SourceButton icon="folder-open-outline" label="Files" onPress={() => void pickFiles()} disabled={off} /> : null}
       </View>
       <Text style={styles.hint}>
-        {busy ? "Adding…" : `${ATTACHMENT_HINT}. Other files from the phone: attach them on the web.`}
+        {busy ? "Adding…" : documentPickerAvailable() ? `${ATTACHMENT_HINT}.` : `${ATTACHMENT_HINT}. Other files from the phone: attach them on the web.`}
       </Text>
 
       {value.length > 0 && (

@@ -1259,11 +1259,10 @@ Storage upload first (a new office-only bucket + migration).
   and the job's own **documents** (from Storage, any allowed type), with the
   same limits and checks: `mobile/lib/invoiceAttachments.ts` is the web file
   byte for byte below its header (`tests/unit/invoice-attachments-mirror.test.ts`),
-  and the size used shows under the list. **Gap:** any other file on the
-  phone (a PDF in Files / Downloads) needs `expo-document-picker`, a native
-  module not in the binary — attach those on the web, or add the module in a
-  new build and a third source button in
-  `mobile/components/finance/invoice-attachments-field.tsx`.
+  and the size used shows under the list. Since 27 Nov 2026 a third source,
+  **Files**, attaches any file on the phone (a PDF in Files / Downloads…)
+  through `expo-document-picker` — see "PDF and other files from the phone"
+  below; it needs a NEW BUILD.
 
 **Invoices are made out to the Company (16 Nov 2026; no migration).**
 Invoice and quote PDFs, their detail pages and the Xero contact used
@@ -1528,8 +1527,8 @@ Stage 1 is web + database + pure rules; the phone comes next.
   would be counted against the quoted work; mixing them now would make the
   quoted margin wrong. Next stages:
   1. ~~**Phone:** Day Works entry and builder sign-off~~ — **done, Stage 2
-     (below).** Still to come on the phone: truck day stops, float moves
-     with a distance lookup (km are typed in today), and an offline path
+     (below).** Still to come on the phone: truck day stops (float and
+     load km: "Work out km", 27 Nov 2026 — see "Distance lookup"), and an offline path
      if it is ever wanted (outbox + `hire_entries` in a technician stream
      with its columns listed — it has no money column). Office void and
      Invoice Day Works reached the phone on 19 Nov 2026 (Stage 2, below).
@@ -1618,8 +1617,8 @@ line and hand the phone to the builder's rep, who signs it; it then locks.
   `PUT …/cartage-loads/quarry`. Only a signed line/load is voided (an
   invoiced one must come off its invoice first); a cost is refused once the
   load is invoiced or void. Reaches phones with the next build.
-- **Not on the phone:** truck day stops, float distance lookup (km typed),
-  offline entry.
+- **Not on the phone:** truck day stops, offline entry. (Km: "Work out km",
+  see "Distance lookup for floats and truck loads".)
 
 **Office PO tab and job documents on the phone (19 Nov 2026; no migration).**
 Justin: the office should be able to run a job's POs from the phone. Office/admin
@@ -1660,13 +1659,42 @@ PO's value is what the job is measured against.
   delete — `POST /api/jobs/[id]/documents` (base64 ≤ 3 MB, sniffed JPEG/PNG/WebP/PDF,
   the web's `{job}/{ts}_{name}` path, row as the caller, file removed if the row
   fails) and `PATCH/DELETE .../documents/[docId]` (row first, then the file).
-  **Photos only:** the binary has no document picker (`expo-document-picker` would be
-  a new native module and build), so PDFs are still uploaded on the website.
+  **Choose file** (27 Nov 2026, needs a new build) uploads a PDF or photo from the
+  phone's files — see "PDF and other files from the phone" below.
 - **Not on the phone:** pinning a typed PO site on the map (the job site's pin is
   reused when the address is the job site's, otherwise none — pin it on the web),
   opening the crew's docket photos from the PO card, "Mark stage complete" from the
   PO card. Reaches phones with the next build (no new native module); needs the web
   deployed first.
+
+**PDF and other files from the phone (27 Nov 2026; no migration, no stream change; NEEDS A NEW BUILD — native module).**
+The binary had no document picker, so PDFs (supplier invoices, plans, fleet
+service invoices) could only be uploaded on the website. `expo-document-picker`
+(~14.0.8, the SDK 54 pin; no config plugin needed — no iCloud entitlement) is
+now a dependency of `mobile/`. It is a **native module**: it reaches phones only
+through a new `eas build`, never an OTA update. It is loaded **lazily**
+(`mobile/lib/documentPicker.ts`, the `lib/dictation.ts` pattern), so an OTA
+update reaching an older binary just hides the new buttons.
+- **Where:** the four existing office/admin upload paths, nothing new on the
+  server — every route already accepted PDFs (bytes sniffed, ≤ 3 MB as base64):
+  job **Documents** tab → **Choose file** (`POST /api/jobs/[id]/documents`; name
+  prefilled from the file, folder and Office only as before); the **POs** tab's
+  supplier invoice → **Choose file** (`…/supplier-orders/[orderId]/invoice`; the
+  file name now carries the real extension); Fleet **Log a service** → **File**
+  (read by `/api/fleet/service-invoice/read`, saved through
+  `/api/fleet/[id]/service-records` as `service-invoice-<date>.pdf`); Fleet
+  machine **Documents** → **File** (`/api/fleet/[id]/documents`); the invoice
+  email's **Attachments** → **Files** (several at once, any allowed type —
+  Word, Excel, CSV… — against the same 10-file / 3 MB rules).
+- **Checks before sending** (`documentPicker.ts`, tested in
+  `mobile/lib/documentPicker.test.ts` with the module mocked): only PDF or a
+  photo for the upload routes; a PDF over 3 MB is refused by its reported size
+  before it is read ("… the phone can send 3.0 MB at most. Upload it on the
+  website instead."); a picked photo (HEIC included) is shrunk by `prepareImage`
+  like the camera path; the bytes are sniffed as the routes do (a renamed Word
+  file is refused); the picker's cache copy is deleted after reading.
+- Technicians: unchanged — no technician screen uploads documents on the phone
+  (the routes above are office/admin).
 
 **Fleet service history takes the invoice by drag and drop (17 Nov 2026; no migration).**
 Justin: "What happened to the drag and drop in the fleet? We drop the invoices
@@ -1711,7 +1739,7 @@ directly as before; the routes are there for them to share.
 - **Service history** (`mobile/components/fleet/ServiceHistory.tsx` on the
   machine screen): due banner, services with "View invoice", delete; **Log a
   service** with the invoice as a **photo** (camera or library → `prepareImage`
-  1600px JPEG), read automatically by `POST /api/fleet/service-invoice/read`
+  1600px JPEG) or, from the next build, a **PDF from the phone's files**, read automatically by `POST /api/fleet/service-invoice/read`
   and filled by `applyServiceInvoiceRead` (only empty / default fields),
   next service due, no cost / log the cost now / link an existing expense.
   Nothing is saved until Save → `GET/POST /api/fleet/[id]/service-records`
@@ -1736,7 +1764,7 @@ directly as before; the routes are there for them to share.
   (`components/fleet/EquipmentYearCost.tsx`) and "Fleet costs logged — FY" on
   the Fleet list (`components/fleet/FleetYearSummary.tsx`, read
   `listFleetExpenses`, local-first — `equipment_expenses` is unwindowed).
-- **Equipment documents upload** (photos) → `POST /api/fleet/[id]/documents`
+- **Equipment documents upload** (photos; PDFs from the next build) → `POST /api/fleet/[id]/documents`
   (≤ 3 MB base64, bytes sniffed PDF/JPEG/PNG/WebP; file then row as the
   caller, file removed if the row fails).
 - **Mirrors** pinned by `tests/unit/fleet-mobile-mirror.test.ts`:
@@ -1745,9 +1773,8 @@ directly as before; the routes are there for them to share.
   `mobile/lib/fleetCosts.ts` = `lib/fleet-costs.ts` (below the imports),
   `mobile/lib/hireLabels.ts` = `lib/hire-pricing.ts`'s hire vocabulary. Change
   the web file first, then copy. Calls in `mobile/lib/fleetOffice.ts` (tested).
-- **Gap:** no document picker is in the app binary (adding one is a native
-  module, so it waits for a build decision), so **PDF** invoices and documents
-  still go up on the website; the phone takes photos. Money only through
+- **PDF** invoices and documents from the phone: see "PDF and other files
+  from the phone" (27 Nov 2026, needs a new build). Money only through
   `MoneyText` inside `RoleGate` (Hire rates' rate lines are server-formatted
   text, shown only inside the office-only route and a `RoleGate`). Reaches
   phones with the next build (no new native module); the web routes must be
@@ -2071,7 +2098,6 @@ end-of-day hours and loads. His rules:
   margins (`lib/job-ledger.ts`) — quarry product already reaches the ledger
   through supplier PO invoices, so adding docket costs now would count it
   twice; decide which source wins first. No report of loads by month yet.
-  No distance lookup (km typed).
 - **Apply order:** paste `0111_cartage_loads.sql` → paste
   `supabase/tests/0111_cartage_loads_test.sql` (needs an active technician and
   an active office/admin) and trust only `0111 PASSED` → change 0111's header
@@ -2081,6 +2107,55 @@ end-of-day hours and loads. His rules:
   the gate test passes (35 scenarios) and fails, naming scenarios, with the
   lock trigger disabled or the cost table's RLS off; the money boundary sweep
   stays intact with the seeded load and cost.
+
+**Distance lookup for floats and truck loads (27 Nov 2026; no migration, no stream change).**
+Km were typed by hand. Justin chose the FREE OpenStreetMap route — no key, no account.
+- **"Work out km"** beside the km box: phone truck loads
+  (`mobile/components/job/truck-load-forms.tsx` — used by the job's Truck
+  loads and Today's run), phone Day Works km / float lines
+  (`mobile/components/job/day-works.tsx`), web Day Works km / float lines
+  (`components/job/job-day-works.tsx`; the web box now takes 0.1 km). Button
+  components `mobile/components/job/km-lookup.tsx` and
+  `components/job/km-lookup-button.tsx`. The answer fills the box only if
+  nobody typed in it while the lookup ran (`shouldFillKm`); the box stays
+  editable; a note says "≈ 23.4 km by road from Boral Wollert … to 12 Smith
+  St", in amber with "approximate" when an end only matched a street or
+  suburb. Online only — offline the phone says it needs signal. Technicians
+  may use it; no money anywhere.
+- **The trip** (`lib/distance-trip.ts`, mirrored byte for byte from the
+  first export at `mobile/lib/distanceTrip.ts`,
+  `tests/unit/distance-trip-mirror.test.ts`): a float / km line is pick-up →
+  drop-off, an empty end = the job site; a load uses its From / To boxes,
+  else material in = the picked quarry (or typed place) → the job site, spoil
+  out = the job site → the tip.
+- **Route** `GET /api/distance?from=&to=&jobId=` or `POST {from, to, jobId}`
+  (`app/api/distance/route.ts`): `requireRole(admin, office, technician)`;
+  per-user `consume_rate_limit()` bucket `distance` (30 per 10 min); each end
+  is `lat,lng`, a place/address, or `site` = the job's site, read as the
+  CALLER (RLS): its pin when set, else its address geocoded. Answer
+  `{ km, from: {label, precise}, to: {label, precise}, approximate }`; km
+  rounded UP to 0.1. Fixed sentences on every failure (both ends needed, job
+  not found, no site address, start/end not found, no road route, service
+  unavailable — 502). Helpers `lib/distance.ts` (tested with mocked fetch in
+  `tests/unit/distance.test.ts`, which also covers the route, auth, limiter
+  and sentences; phone call `mobile/lib/distanceLookup.ts`, tested).
+- **Places:** Nominatim (`lib/geocode.ts`'s User-Agent, Australia only,
+  `limit=1`). Unlike the geofence rule (building-level only), the best match
+  is accepted and its precision reported: a house/building or a named place
+  (a quarry, a tip) is precise; a street, suburb or bigger area is
+  approximate (`isPreciseForDistance`). Calls spaced 1.1 s apart (its 1/s
+  policy).
+- **Road distance:** OSRM's public demo server
+  (`router.project-osrm.org/route/v1/driving/…?overview=false`), one request
+  per lookup, 8 s timeout. Identical places and point pairs are answered from
+  a per-process LRU (300 entries, 24 h). **The demo server is fair-use only**
+  (light traffic, no guarantee, may throttle or go away); if volume grows,
+  a self-hosted OSRM or a paid routing service is the upgrade path — only
+  `osrmRouteMeters` in `lib/distance.ts` changes.
+- **Not verified against the live services** — neither OSRM nor Nominatim
+  could be reached from where this was written; tests mock them. Reaches
+  phones with the next build (no native module); the web must be deployed
+  first (the route).
 
 **Office/admin Time, Approvals and Staff on the phone (19 Nov 2026; no migration, no stream change).**
 Justin: bring the office's website tools for time, approvals and staff to the
