@@ -56,6 +56,7 @@ import {
   NO_MODE,
   boardModeReducer,
   bookingMenuItems,
+  missedAction,
   copyRefusal,
   movedBeyond,
   holdTolerance,
@@ -69,6 +70,7 @@ import { BoardPointerSensor, BookingMenu, useHoldGesture } from "./booking-hold-
 import { BoardScheduleDialog } from "./board-schedule-dialog";
 import { AddedByTechnicianTag } from "./added-by-technician-tag";
 import { BookingAttendanceTag } from "./booking-attendance-tag";
+import { BookingMissedDialog, type MissedTarget } from "./booking-missed-dialog";
 import { NotAttendedSummary, type NotAttendedRow } from "./not-attended-summary";
 import type { NotAttendedItem } from "@/lib/booking-attendance";
 import {
@@ -997,6 +999,8 @@ export function TeamScheduleView({
   // Schedule dialog is open over the board.
   const [menu, setMenu] = useState<{ pickup: Pickup; at: Point } | null>(null);
   const closeMenu = useCallback(() => setMenu(null), []);
+  // "Didn't make it" from the booking menu (office/admin, 27 Nov 2026).
+  const [missedTarget, setMissedTarget] = useState<MissedTarget | null>(null);
   const [scheduleRequest, setScheduleRequest] = useState<{ jobId: string; jobNumber: number; prefill: SchedulePrefill | null } | null>(null);
   // The booking whose edge is being dragged (Week view).
   const [resize, setResize] = useState<ResizeState | null>(null);
@@ -1438,6 +1442,14 @@ export function TeamScheduleView({
         return;
       case "todo":
         void dragOut(pickup);
+        return;
+      case "missed":
+        setMissedTarget({
+          jobId: menuJob.id,
+          bookingId: menuBooking.id,
+          title: `#${menuJob.job_number} — ${menuBooking.staff_id ? nameOf(menuBooking.staff_id) : "Unassigned"}`,
+          missed: menuBooking,
+        });
         return;
     }
   }
@@ -2559,11 +2571,13 @@ export function TeamScheduleView({
             unsaved: menuBooking.id.startsWith("pending:") || menuBooking.id.startsWith("legacy:"),
             readOnly: bookingsReadOnly,
             canTodo,
+            missed: missedAction(menuBooking, menuJob.status, todayKey, canTodo),
           })}
           onAction={onMenuAction}
           onClose={closeMenu}
         />
       )}
+      <BookingMissedDialog target={missedTarget} onClose={() => setMissedTarget(null)} onSaved={() => router.refresh()} />
       {/* Booking someone onto their leave: asked, never silent. */}
       <Dialog open={!!confirm} onOpenChange={(open) => { if (!open) closeConfirm(false); }}>
         <DialogContent>

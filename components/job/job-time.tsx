@@ -10,18 +10,21 @@ import { TIME_ENTRY_SELECT_WITH_STAFF } from "@/lib/time-entry-columns";
 import { canEditTimeEntry } from "@/lib/time-entry-access";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Clock, LogIn, LogOut, Smartphone, Car, Pencil, Plus } from "lucide-react";
+import { Clock, LogIn, LogOut, Smartphone, Car, Pencil, Plus, Repeat } from "lucide-react";
 import { TimeEntryEditDialog } from "@/components/job/time-entry-edit-dialog";
 import { BUSINESS_TIME_ZONE } from "@/lib/date";
 import { clockPlace } from "@/lib/clock-location";
 import {
   isMissingVariationColumn,
   isOpenVariation,
+  openVariations,
+  planClockSwitch,
   variationLabel,
   variationName,
   variationTimeRefusal,
   type VariationRef,
 } from "@/lib/variation-time";
+import { choiceVariationId, clockOnChoices, clockOnRow, showVariationChoice, STAGE_CHOICE, switchedText } from "@/lib/web-clock-on";
 
 interface TimeEntry {
   id: string;
@@ -174,25 +177,100 @@ export function JobTime({ jobId, currentUserId, timeEntries: initial, site, cost
   // in the office was clocked out (Justin approved removing it, 31 Oct 2026).
   // Automatic clock-in/out belongs to the phone app alone.
 
+  // Clock In / Switch can pick a variation (27 Nov 2026) — the phone's
+  // clock-on sheet, on the web: the stage (the job's scheduled cost centre, as
+  // before) or one of the job's open variations (lib/web-clock-on.ts).
+  const [columnMissing, setColumnMissing] = useState(false);
+  const [clockOnChoice, setClockOnChoice] = useState<string>(STAGE_CHOICE);
+  const [switchChoice, setSwitchChoice] = useState<string>("");
+  const offerVariations = showVariationChoice({
+    openCount: openVariations(variations).length,
+    entryCount: entries.length,
+    variationsReady,
+    columnMissing,
+  });
+
+  /** Insert a clock-on as the user; a database without variation_id retries as stage time. */
+  async function insertClockOn(atIso: string, costCenterId: string | null, variationId: string | null) {
+    const first = await supabase
+      .from("time_entries")
+      .insert(clockOnRow({ jobId, staffId: currentUserId, atIso, costCenterId, variationId }))
+      .select(TIME_ENTRY_SELECT_WITH_STAFF)
+      .single();
+    if (first.error && variationId && isMissingVariationColumn(first.error)) {
+      setColumnMissing(true);
+      const retry = await supabase
+        .from("time_entries")
+        .insert(clockOnRow({ jobId, staffId: currentUserId, atIso, costCenterId, variationId: null }))
+        .select(TIME_ENTRY_SELECT_WITH_STAFF)
+        .single();
+      if (!retry.error && retry.data) toast.message("Time against variations isn't switched on yet — clocked on to the stage.");
+      return { ...retry, variationId: null };
+    }
+    return { ...first, variationId };
+  }
+
+  /** The row as the tab keeps it: the read-back list has no variation_id, so carry the one written. */
+  function asEntry(data: unknown, variationId: string | null): TimeEntry {
+    const row = data as TimeEntry;
+    return variationsReady || variationId ? { ...row, variation_id: variationId } : row;
+  }
+
   async function clockIn() {
     if (myOpenEntry || loading) return;
     setLoading(true);
-    const { data, error } = await supabase
-      .from("time_entries")
-      .insert({ job_id: jobId, staff_id: currentUserId, clock_in: new Date().toISOString(), auto_clocked: false, cost_center_id: scheduledCostCenterId ?? null })
-      .select(TIME_ENTRY_SELECT_WITH_STAFF)
-      .single();
+    const variationId = offerVariations ? choiceVariationId(clockOnChoice) : null;
+    const { data, error, variationId: written } = await insertClockOn(new Date().toISOString(), scheduledCostCenterId ?? null, variationId);
     setLoading(false);
     // This exact spot caused the 4 Aug outage: the error was discarded, so a
     // refused RETURNING clause rolled the INSERT back while the UI still said
     // "Clocked in". Unpaid hours, no error, nothing to notice.
     if (error || !data) {
-      toast.error("Clock in failed — your time was NOT recorded. Try again.");
+      const refusal = variationTimeRefusal(error?.message);
+      toast.error(refusal ? `${refusal} Your time was NOT recorded.` : "Clock in failed — your time was NOT recorded. Try again.");
       return;
     }
-    setEntries(e => [data as unknown as TimeEntry, ...e]);
-    toast.success("Clocked in");
+    setEntries(e => [asEntry(data, written), ...e]);
+    setClockOnChoice(STAGE_CHOICE);
+    toast.success(written ? "Clocked in — on the variation" : "Clocked in");
     syncBilling(data.id);
+  }
+
+  // "Switch to a variation / back to the stage" while clocked on: the open
+  // entry ends and the new one starts at the same instant (planClockSwitch).
+  // Clock-off first — 0090 allows one open work entry per person per job.
+  async function switchClock() {
+    if (!myOpenEntry || loading || !switchChoice) return;
+    const variationId = choiceVariationId(switchChoice);
+    const plan = planClockSwitch(myOpenEntry, { costCenterId: myOpenEntry.cost_center_id, variationId }, new Date().toISOString());
+    if (!plan) return;
+    setLoading(true);
+    const hours = plausibleClockedHours(myOpenEntry.clock_in, plan.clockOutIso);
+    const off = await supabase
+      .from("time_entries")
+      .update({ clock_out: plan.clockOutIso, hours })
+      .eq("id", myOpenEntry.id)
+      .select(TIME_ENTRY_SELECT_WITH_STAFF)
+      .single();
+    if (off.error || !off.data) {
+      setLoading(false);
+      toast.error("Couldn't switch — you are still clocked in as before. Try again.");
+      return;
+    }
+    const closedId = myOpenEntry.id;
+    setEntries(e => e.map(en => en.id === closedId ? { ...en, ...(off.data as unknown as TimeEntry) } : en));
+    syncBilling(closedId);
+    const on = await insertClockOn(plan.clockInIso, myOpenEntry.cost_center_id, variationId);
+    setLoading(false);
+    setSwitchChoice("");
+    if (on.error || !on.data) {
+      const refusal = variationTimeRefusal(on.error?.message);
+      toast.error(`${refusal ? `${refusal} ` : ""}You were clocked off but NOT clocked back on — press Clock In.`);
+      return;
+    }
+    setEntries(e => [asEntry(on.data, on.variationId), ...e]);
+    toast.success(switchedText(on.variationId));
+    syncBilling(on.data.id);
   }
 
   async function clockOut() {
@@ -226,9 +304,23 @@ export function JobTime({ jobId, currentUserId, timeEntries: initial, site, cost
       {/* Manual clock in/out */}
       <div className="flex items-center gap-3">
         {!myOpenEntry ? (
-          <Button onClick={clockIn} disabled={loading} className="gap-2">
-            <LogIn className="w-4 h-4" />Clock In
-          </Button>
+          <>
+            {offerVariations && (
+              <Select value={clockOnChoice} onValueChange={(v) => setClockOnChoice(v ?? STAGE_CHOICE)} disabled={loading}>
+                <SelectTrigger className={`h-9 text-sm w-64 ${clockOnChoice !== STAGE_CHOICE ? "bg-amber-50 border-amber-300" : "bg-white"}`} aria-label="What are you clocking on to?">
+                  <SelectValue placeholder="Stage work" />
+                </SelectTrigger>
+                <SelectContent>
+                  {clockOnChoices(variations).map((c) => (
+                    <SelectItem key={c.value} value={c.value}>{c.label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
+            <Button onClick={clockIn} disabled={loading} className="gap-2">
+              <LogIn className="w-4 h-4" />Clock In
+            </Button>
+          </>
         ) : (
           <>
             <Button onClick={clockOut} disabled={loading} variant="outline" className="gap-2 border-red-200 text-red-600 hover:bg-red-50">
@@ -236,10 +328,37 @@ export function JobTime({ jobId, currentUserId, timeEntries: initial, site, cost
             </Button>
             <span className="flex items-center gap-1.5 text-sm text-green-600 font-medium">
               <Clock className="w-4 h-4" />Since {formatTime(myOpenEntry.clock_in)}
+              {myOpenEntry.variation_id && (
+                <span className="text-amber-700">
+                  {" "}· on {variationById.get(myOpenEntry.variation_id) ? variationName(variationById.get(myOpenEntry.variation_id)!) : "a variation"}
+                </span>
+              )}
             </span>
           </>
         )}
       </div>
+      {myOpenEntry && myOpenEntry.entry_type !== "travel" && !columnMissing && (variationsReady || entries.length <= 1) && (() => {
+        const choices = clockOnChoices(variations, myOpenEntry.variation_id ?? null);
+        if (choices.length === 0) return null;
+        return (
+          <div className="flex flex-wrap items-center gap-2">
+            <Select value={switchChoice} onValueChange={(v) => setSwitchChoice(v ?? "")} disabled={loading}>
+              <SelectTrigger className="h-8 text-xs w-64 bg-white" aria-label="Switch to">
+                <SelectValue placeholder={myOpenEntry.variation_id ? "Switch variation / back to the stage…" : "Switch to a variation (e.g. hit rock)…"} />
+              </SelectTrigger>
+              <SelectContent>
+                {choices.map((c) => (
+                  <SelectItem key={c.value} value={c.value}>{c.label}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Button size="sm" variant="outline" className="gap-1.5 h-8" onClick={switchClock} disabled={loading || !switchChoice}>
+              <Repeat className="w-3.5 h-3.5" />Switch
+            </Button>
+            <span className="text-xs text-slate-400">Clocks off and on again at the same minute.</span>
+          </div>
+        );
+      })()}
 
       {/* Time log */}
       <div>
