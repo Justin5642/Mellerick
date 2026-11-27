@@ -6,6 +6,8 @@ import { requireAdmin } from "@/lib/api/guards";
 import { isValidOAuthState, GOOGLE_STATE_COOKIE } from "@/lib/oauth-state";
 import { replaceSingletonToken } from "@/lib/oauth-token-store";
 import { reportError } from "@/lib/monitoring";
+import { recordGmailScope } from "@/lib/gmail-invoices";
+import { grantsGmailRead } from "@/lib/gmail-invoice-rules";
 
 export async function GET(request: NextRequest) {
   // Re-check admin at the callback (see xero/callback for the rationale): this
@@ -62,6 +64,10 @@ export async function GET(request: NextRequest) {
       console.error("Google callback: token storage failed —", stored.error);
       return NextResponse.redirect(new URL("/dashboard/settings?google=error", request.url));
     }
+
+    // Did this consent include reading supplier invoices from Gmail (0124, drafted)?
+    // Best-effort: the calendar connection is stored either way.
+    await recordGmailScope(supabase, grantsGmailRead(tokens.scope));
 
     return NextResponse.redirect(new URL("/dashboard/settings?google=connected", request.url));
   } catch (err) {

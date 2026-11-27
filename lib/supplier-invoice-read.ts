@@ -55,7 +55,7 @@ const INVOICE_SCHEMA = {
   },
 } as const;
 
-const SYSTEM = `You read supplier documents for Mellerick, an Australian plumbing business. Each PDF came from a supplier (plumbing merchants, hire companies, tip fees, subcontractors) and is usually one tax invoice, sometimes several invoices in one PDF, a credit note, or a statement.
+const SYSTEM = `You read supplier documents for Mellerick, an Australian plumbing business. Each PDF (or photo of a paper document) came from a supplier (plumbing merchants, hire companies, tip fees, subcontractors) and is usually one tax invoice, sometimes several invoices in one PDF, a credit note, or a statement.
 
 Return one entry per invoice or credit note in the PDF, in page order. A statement (a list of many invoices with a balance) is ONE entry of kind "statement" with no invoice number. Anything else (a quote, a remittance, a delivery docket) is one entry of kind "other".
 
@@ -86,9 +86,34 @@ export class SupplierInvoiceReadError extends Error {}
 
 /** Read one PDF. Throws SupplierInvoiceReadError with a message fit for the office. */
 export async function readSupplierInvoicePdf(pdf: Buffer, client = new Anthropic()): Promise<ReadInvoice[]> {
-  if (pdf.length > MAX_SUPPLIER_PDF_BYTES) {
+  return readSupplierInvoiceFile(pdf, "application/pdf", client);
+}
+
+/** Claude's limit for one image (base64 decoded ~5 MB); PDFs go up to the PDF limit. */
+export const MAX_SUPPLIER_IMAGE_BYTES = 5 * 1024 * 1024 - 64 * 1024;
+
+export type SupplierInvoiceMime = "application/pdf" | "image/jpeg" | "image/png" | "image/webp";
+
+/**
+ * Read one supplier document — a PDF, or a photo of a paper invoice (the
+ * Gmail import, drafted 0124, takes both). Same prompt and schema as the PDF reader.
+ */
+export async function readSupplierInvoiceFile(
+  file: Buffer,
+  mime: SupplierInvoiceMime,
+  client = new Anthropic(),
+): Promise<ReadInvoice[]> {
+  if (mime === "application/pdf" && file.length > MAX_SUPPLIER_PDF_BYTES) {
     throw new SupplierInvoiceReadError("This PDF is too large to read (over 20 MB).");
   }
+  if (mime !== "application/pdf" && file.length > MAX_SUPPLIER_IMAGE_BYTES) {
+    throw new SupplierInvoiceReadError("This photo is too large to read (over 5 MB).");
+  }
+  const data = file.toString("base64");
+  const fileBlock =
+    mime === "application/pdf"
+      ? ({ type: "document", source: { type: "base64", media_type: "application/pdf", data } } as const)
+      : ({ type: "image", source: { type: "base64", media_type: mime, data } } as const);
   const response = await client.beta.messages.parse({
     model: SUPPLIER_INVOICE_MODEL,
     max_tokens: 16000,
@@ -102,8 +127,8 @@ export async function readSupplierInvoicePdf(pdf: Buffer, client = new Anthropic
       {
         role: "user",
         content: [
-          { type: "document", source: { type: "base64", media_type: "application/pdf", data: pdf.toString("base64") } },
-          { type: "text", text: "Read this supplier PDF." },
+          fileBlock,
+          { type: "text", text: mime === "application/pdf" ? "Read this supplier PDF." : "Read this photo of a supplier document." },
         ],
       },
     ],

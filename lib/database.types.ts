@@ -1084,6 +1084,153 @@ export type Database = {
           },
         ]
       }
+      gmail_invoice_settings: {
+        Row: {
+          id: boolean
+          label_name: string
+          gmail_allowed: boolean | null
+          last_poll_at: string | null
+          last_ok_at: string | null
+          last_error: string | null
+          last_message_at: string | null
+          last_imported: number | null
+          updated_at: string
+          updated_by: string | null
+        }
+        Insert: {
+          id?: boolean
+          label_name?: string
+          gmail_allowed?: boolean | null
+          last_poll_at?: string | null
+          last_ok_at?: string | null
+          last_error?: string | null
+          last_message_at?: string | null
+          last_imported?: number | null
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Update: {
+          id?: boolean
+          label_name?: string
+          gmail_allowed?: boolean | null
+          last_poll_at?: string | null
+          last_ok_at?: string | null
+          last_error?: string | null
+          last_message_at?: string | null
+          last_imported?: number | null
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Relationships: []
+      }
+      gmail_supplier_invoices: {
+        Row: {
+          id: string
+          gmail_message_id: string
+          part_id: string
+          file_name: string | null
+          mime_type: string | null
+          received_at: string | null
+          sender: string | null
+          subject: string | null
+          storage_path: string | null
+          job_document_path: string | null
+          status: string
+          review_reason: string | null
+          error: string | null
+          doc_kind: string | null
+          supplier_name: string | null
+          invoice_number: string | null
+          invoice_date: string | null
+          amount_ex_gst: number | null
+          gst_amount: number | null
+          total: number | null
+          po_refs: string[]
+          job_refs: string[]
+          vendor_order_id: string | null
+          job_id: string | null
+          handled_by: string | null
+          handled_at: string | null
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          gmail_message_id: string
+          part_id: string
+          file_name?: string | null
+          mime_type?: string | null
+          received_at?: string | null
+          sender?: string | null
+          subject?: string | null
+          storage_path?: string | null
+          job_document_path?: string | null
+          status?: string
+          review_reason?: string | null
+          error?: string | null
+          doc_kind?: string | null
+          supplier_name?: string | null
+          invoice_number?: string | null
+          invoice_date?: string | null
+          amount_ex_gst?: number | null
+          gst_amount?: number | null
+          total?: number | null
+          po_refs?: string[]
+          job_refs?: string[]
+          vendor_order_id?: string | null
+          job_id?: string | null
+          handled_by?: string | null
+          handled_at?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          gmail_message_id?: string
+          part_id?: string
+          file_name?: string | null
+          mime_type?: string | null
+          received_at?: string | null
+          sender?: string | null
+          subject?: string | null
+          storage_path?: string | null
+          job_document_path?: string | null
+          status?: string
+          review_reason?: string | null
+          error?: string | null
+          doc_kind?: string | null
+          supplier_name?: string | null
+          invoice_number?: string | null
+          invoice_date?: string | null
+          amount_ex_gst?: number | null
+          gst_amount?: number | null
+          total?: number | null
+          po_refs?: string[]
+          job_refs?: string[]
+          vendor_order_id?: string | null
+          job_id?: string | null
+          handled_by?: string | null
+          handled_at?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "gmail_supplier_invoices_vendor_order_id_fkey"
+            columns: ["vendor_order_id"]
+            isOneToOne: false
+            referencedRelation: "vendor_orders"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "gmail_supplier_invoices_job_id_fkey"
+            columns: ["job_id"]
+            isOneToOne: false
+            referencedRelation: "jobs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       google_tokens: {
         Row: {
           access_token: string
@@ -4012,6 +4159,7 @@ export type Database = {
           gst_amount: number
           id: string
           invoice_date: string | null
+          invoice_needs_check: boolean
           invoice_number: string | null
           invoice_storage_path: string | null
           job_id: string
@@ -4040,6 +4188,7 @@ export type Database = {
           gst_amount?: number
           id?: string
           invoice_date?: string | null
+          invoice_needs_check?: boolean
           invoice_number?: string | null
           invoice_storage_path?: string | null
           job_id: string
@@ -4068,6 +4217,7 @@ export type Database = {
           gst_amount?: number
           id?: string
           invoice_date?: string | null
+          invoice_needs_check?: boolean
           invoice_number?: string | null
           invoice_storage_path?: string | null
           job_id?: string

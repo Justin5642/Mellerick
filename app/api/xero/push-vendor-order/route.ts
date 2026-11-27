@@ -39,6 +39,25 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Enter the supplier's invoice number and amount first" }, { status: 400 });
     }
 
+    // An invoice filled in from an email (0124, drafted) waits for the office to check
+    // it on the PO tab. Read on its own so a database without the column
+    // (before the drafted 0124) still sends as before.
+    const { data: check, error: checkError } = await supabase
+      .from("vendor_orders")
+      .select("invoice_needs_check")
+      .eq("id", orderId)
+      .maybeSingle();
+    if (checkError && checkError.code !== "42703" && checkError.code !== "PGRST204") {
+      reportError(checkError, { route: "api/xero/push-vendor-order", step: "needs check" });
+      return NextResponse.json({ error: "Couldn't check the PO. Try again." }, { status: 500 });
+    }
+    if ((check as { invoice_needs_check?: boolean } | null)?.invoice_needs_check) {
+      return NextResponse.json(
+        { error: "This invoice was read from an email. Check it against the PDF and press Confirm before sending it to Xero." },
+        { status: 409 }
+      );
+    }
+
     const { xero, tenantId, defaultExpenseAccountCode } = await getRefreshedXero();
     if (!defaultExpenseAccountCode) {
       return NextResponse.json(
