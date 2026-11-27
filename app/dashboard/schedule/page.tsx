@@ -49,6 +49,9 @@ function chunkIds(ids: string[], size = OVER_HOURS_CHUNK): string[][] {
   return out;
 }
 
+/** A stage's name and completion for the board — never an amount. */
+type CostCentreRow = { id: string; name: string; completed_at?: string | null };
+
 type BoardJobRow = Omit<BoardJob, "crew"> & {
   job_assignments?: { staff_id: string | null }[] | null;
   job_bookings?: JobBooking[] | null;
@@ -229,15 +232,22 @@ export default async function SchedulePage() {
     costCenterIds.length > 0
       ? // Chunked: completed jobs' bookings add many ids, and a long .in() list
         // outgrows the request URL.
+        // completed_at (0095, on the view since 0118) ticks the List tab's
+        // stages; a database without it on the view retries names only.
+        // Never an amount — the view has none, and none is selected.
         Promise.all(
-          chunkIds(costCenterIds).map((part) =>
-            supabase.from("po_cost_centers_public").select("id, name").in("id", part).then(({ data }) => data ?? []),
-          ),
+          chunkIds(costCenterIds).map(async (part) => {
+            const withDone = await supabase.from("po_cost_centers_public").select("id, name, completed_at").in("id", part);
+            if (!withDone.error) return (withDone.data ?? []) as CostCentreRow[];
+            const plain = await supabase.from("po_cost_centers_public").select("id, name").in("id", part);
+            return (plain.data ?? []) as CostCentreRow[];
+          }),
         ).then((parts) => parts.flat())
       : null,
     canSeeOverHours ? loadJobHours(supabase as unknown as OverHoursClient, jobs.map((j) => j.id)) : null,
   ]);
   const costCenterNames = new Map((costCenterRows ?? []).map((cc) => [cc.id, cc.name]));
+  const costCenterDone = new Map((costCenterRows ?? []).map((cc) => [cc.id, cc.completed_at ?? null]));
   // "Added by technician" (25 Nov 2026, 0118): a technician who started work
   // on the job booked themselves (created_by = staff_id, a technician). Still
   // clocked on = no end yet; it is drawn running to now (at least 15:30, never
@@ -249,6 +259,7 @@ export default async function SchedulePage() {
   const bookings: BoardBooking[] = withRunningEnds(rawBookings, roleOf, Date.now()).map((b) => ({
     ...b,
     cost_center_name: b.cost_center_id ? costCenterNames.get(b.cost_center_id) ?? null : null,
+    cost_center_completed_at: b.cost_center_id ? costCenterDone.get(b.cost_center_id) ?? null : null,
     added_by_technician: isAddedByTechnician(b, roleOf),
   }));
 

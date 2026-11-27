@@ -574,8 +574,9 @@ have gone over the allocated time."
   "already booked then" clash prompts; unlike before on the phone, neither
   side flags a completed job's booking **Needs reassigning** (it can't be
   reassigned) — the phone's `reassign` now leaves completed jobs out too. The
-  List tab stays open work only (the phone's List never had completed jobs);
-  the header's "N scheduled jobs" counts open jobs.
+  web List tab was open work only until 27 Nov 2026 (see "List tab shows
+  what's done", below; the phone's List still has no completed jobs); the
+  header's "N scheduled jobs" counts open jobs.
 - **The 1,000-row cap.** PostgREST answers at most 1000 rows per request
   (`max_rows`) without an error, so past 1000 the two schedules silently
   dropped DIFFERENT rows. Web: the board's jobs reads (open and completed, with
@@ -627,6 +628,31 @@ have gone over the allocated time."
   over-hours tags (a line and a whole-job alert, the completed job included)
   and the header list. Phone not yet checked on a device; it reaches phones
   with the next build (no native module).
+
+**List tab shows what's done: completed jobs and stage ticks (27 Nov 2026; no migration, no stream change; web only).**
+Emma: the office wants to see at a glance on the Schedule page's **List** tab
+whether each job has been completed, without clicking into it.
+- **Completed jobs listed** (`components/schedule/team-schedule-view.tsx`,
+  rule `listSection` in `lib/schedule-list.ts`): a COMPLETED job (never
+  cancelled) whose bookings fall on today or a later day is now in Today /
+  Upcoming beside the open work — greyed, with a green **"✓ Completed"**
+  pill instead of the status pill. Completed jobs booked only on past days
+  stay off the list (they're on the Week/Day board). Open work is listed as
+  before (past-dated open jobs under Upcoming). Today is now sorted by
+  today's start time; Upcoming by first booked day, as before. Data: the
+  completed jobs the page already loads for the board.
+- **Stage ticks per row** (`listStages` / `listStagesLabel`): under each row,
+  the stages (PO lines, `po_cost_centers`) of that day's bookings — Today:
+  bookings on today; Upcoming: bookings from today on (all, for past-dated
+  open work) — each once, with a green ✓ when its `completed_at` (0095) is
+  set: "Sewer ✓ · Stormwater". The page's cost-centre name read
+  (`app/dashboard/schedule/page.tsx`, chunked, from the money-free
+  `po_cost_centers_public` view, which has `completed_at` since 0118) now
+  selects `id, name, completed_at` — never an amount — and retries names only
+  if the view lacks the column. `BoardBooking` gained the optional
+  `cost_center_completed_at` (mirrored at `mobile/lib/boardModel.ts`; the
+  phone doesn't use it). Tests `tests/unit/schedule-list.test.ts`.
+- Not checked in a browser.
 
 **Web board drawn like the phone's schedule, and a hover card with the job's details (25 Nov 2026; no migration, no stream change; web only).**
 Justin: "Confirm that the web and the mobile app have the same looking

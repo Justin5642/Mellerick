@@ -45,6 +45,7 @@ import {
   type DayGap,
 } from "@/lib/todo-board";
 import { todoHours } from "@/lib/todo-list";
+import { isListCompleted, listSection, listStages, listStagesLabel, listStatusLabel, type ListStage } from "@/lib/schedule-list";
 import { BoardJobLink } from "./board-job-link";
 import { BookingCostCentreDialog, type CostCentreRequest, type PickedCostCentre } from "./booking-cost-centre-dialog";
 import { ScheduleExistingJobDialog } from "./schedule-existing-job-dialog";
@@ -382,6 +383,39 @@ type PlacedProps = {
   /** Over its allowed hours (office/admin only; lib/over-hours.ts). */
   over?: OverHours | null;
 };
+
+/** The List tab's pill: green "✓ Completed" for a completed job, else its status. */
+function ListStatusPill({ status }: { status: string }) {
+  const done = isListCompleted(status);
+  return (
+    <span
+      className={cn(
+        "text-xs px-2 py-0.5 rounded-full font-medium flex-shrink-0",
+        done ? "bg-green-100 text-green-700" : cn("capitalize", jobStatusColors[status] ?? ""),
+      )}
+    >
+      {listStatusLabel(status)}
+    </span>
+  );
+}
+
+/** The List tab's booked stages: "Sewer ✓ · Stormwater", a green tick on each completed stage. */
+function ListStageTicks({ stages }: { stages: readonly ListStage[] }) {
+  if (stages.length === 0) return null;
+  return (
+    <p className="text-xs text-slate-600 truncate" title={listStagesLabel(stages)}>
+      {stages.map((s, i) => (
+        <Fragment key={s.id}>
+          {i > 0 && <span className="text-slate-300"> · </span>}
+          <span className={s.done ? "text-green-700" : undefined}>
+            {s.name}
+            {s.done && <span className="font-bold" aria-label="stage complete"> ✓</span>}
+          </span>
+        </Fragment>
+      ))}
+    </p>
+  );
+}
 
 /** Said when someone tries to move (cut, drag) a completed job's booking. */
 function closedMoveMessage(job: Pick<BoardJob, "job_number" | "status">): string {
@@ -990,18 +1024,27 @@ export function TeamScheduleView({
     const today: BoardJob[] = [];
     const upcoming: BoardJob[] = [];
     for (const job of boardJobs) {
-      // Completed jobs are on the Week/Day board (greyed), not in the List's
-      // open work — as on the phone, whose List shows open jobs only.
-      if (isClosedJob(job)) continue;
+      // Completed jobs booked today or later are listed too, greyed with a
+      // "✓ Completed" pill (Emma, 27 Nov 2026 — lib/schedule-list.ts);
+      // cancelled never, and past completed work stays on the Week/Day board.
       const days = jobDays.get(job.id) ?? [];
-      if (days.length === 0) continue;
-      (days.some((d) => d.dateKey === liveTodayKey) ? today : upcoming).push(job);
+      const section = listSection(job.status, days.map((d) => d.dateKey), liveTodayKey);
+      if (section === "today") today.push(job);
+      else if (section === "upcoming") upcoming.push(job);
     }
+    // Today in time order (the page's scheduled_start order no longer holds
+    // once completed jobs are mixed in, or a booking has been moved).
+    const todayStart = (job: BoardJob) =>
+      jobDays.get(job.id)!.find((d) => d.dateKey === liveTodayKey)?.startIso ?? job.scheduled_start ?? "";
+    today.sort((a, b) => (todayStart(a) < todayStart(b) ? -1 : todayStart(a) > todayStart(b) ? 1 : 0));
     // Upcoming in order of the job's first booked day, which can differ from
     // the page's scheduled_start order once a booking has been moved here.
     upcoming.sort((a, b) => (jobDays.get(a.id)![0].startIso < jobDays.get(b.id)![0].startIso ? -1 : 1));
     return { todayJobsLive: today, upcomingJobsLive: upcoming };
   }, [boardJobs, jobDays, liveTodayKey]);
+  // A List row's booked stages on the given days, ticked when complete (0095).
+  const stagesOn = (jobId: string, dayKeys: readonly string[]) =>
+    listStages(bookingsByJob.get(jobId) ?? [], (id) => (bookingDays.get(id) ?? []).map((d) => d.dateKey), dayKeys);
 
   // Week grid — staff (rows) x the 7 days (Mon-Sun) containing
   // selectedDateKey. The day board is the same index over one day.
@@ -2312,8 +2355,10 @@ export function TeamScheduleView({
                   const today = days[index];
                   const dayOf = today ? dayOfLabel({ dayNumber: index + 1, dayCount: days.length }) : null;
                   const names = bookedNames(bookingsByJob.get(job.id) ?? [], staffById);
+                  const done = isListCompleted(job.status);
+                  const stages = stagesOn(job.id, [liveTodayKey]);
                   return (
-                    <Link prefetch={false} key={job.id} href={`/dashboard/jobs/${job.id}`} className="flex items-center gap-4 px-6 py-4 hover:bg-slate-50 transition-colors group">
+                    <Link prefetch={false} key={job.id} href={`/dashboard/jobs/${job.id}`} className={cn("flex items-center gap-4 px-6 py-4 hover:bg-slate-50 transition-colors group", done && "bg-slate-50/60 opacity-70")}>
                       <div className="text-center w-16 flex-shrink-0">
                         <p className="text-xs font-bold text-blue-600">{formatTime(today?.startIso ?? job.scheduled_start!)}</p>
                         {today && today.endIso !== today.startIso && <p className="text-xs text-slate-400">{formatTime(today.endIso)}</p>}
@@ -2323,11 +2368,10 @@ export function TeamScheduleView({
                         <p className="text-xs text-slate-500 truncate">
                           {[dayOf, job.customers?.name, names].filter(Boolean).join(" · ")}
                         </p>
+                        <ListStageTicks stages={stages} />
                       </div>
                       <WazeButton site={job.sites} />
-                      <span className={`text-xs px-2 py-0.5 rounded-full font-medium capitalize flex-shrink-0 ${jobStatusColors[job.status] ?? ""}`}>
-                        {job.status.replace("_", " ")}
-                      </span>
+                      <ListStatusPill status={job.status} />
                     </Link>
                   );
                 })}
@@ -2346,8 +2390,12 @@ export function TeamScheduleView({
                   const multiDay = days.length > 1;
                   const names = bookedNames(bookingsByJob.get(job.id) ?? [], staffById);
                   const first = days[0];
+                  const done = isListCompleted(job.status);
+                  // Its stages from today on (all of them for past-dated open work).
+                  const ahead = days.map((d) => d.dateKey).filter((k) => k >= liveTodayKey);
+                  const stages = stagesOn(job.id, ahead.length > 0 ? ahead : days.map((d) => d.dateKey));
                   return (
-                    <Link prefetch={false} key={job.id} href={`/dashboard/jobs/${job.id}`} className="flex items-center gap-4 px-6 py-4 hover:bg-slate-50 transition-colors group">
+                    <Link prefetch={false} key={job.id} href={`/dashboard/jobs/${job.id}`} className={cn("flex items-center gap-4 px-6 py-4 hover:bg-slate-50 transition-colors group", done && "bg-slate-50/60 opacity-70")}>
                       <div className="text-center w-20 flex-shrink-0">
                         <p className="text-xs font-bold text-slate-700">{formatDate(first.startIso)}</p>
                         <p className="text-xs text-slate-400">{formatTime(first.startIso)}</p>
@@ -2363,8 +2411,10 @@ export function TeamScheduleView({
                             .filter(Boolean)
                             .join(" · ")}
                         </p>
+                        <ListStageTicks stages={stages} />
                       </div>
                       <WazeButton site={job.sites} />
+                      {done && <ListStatusPill status={job.status} />}
                     </Link>
                   );
                 })}
