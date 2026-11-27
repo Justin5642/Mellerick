@@ -60,6 +60,16 @@ Diagnosing whether Metro is alive: `curl -s http://localhost:8081/status` →
 `packager-status:running`. Silence or connection-refused means it died; a long
 uptime with low CPU is normal and healthy.
 
+**Which app gets a feature (Justin, 27 Nov 2026).** The website is for the
+office (schedule board, POs, invoicing, Xero, reports, fleet costs, staff,
+settings); the phone is for the field (my jobs, clocking and auto-clock,
+photos, notes, sign-off, Day Works / truck loads, supplier orders, mistakes,
+offline). **New office features are built on the web only — don't port them
+to the phone.** Office/admin screens already on the phone stay and get bug
+fixes, but nothing new is added to them. A field feature the office also needs
+on the web is fine on both. Reason: every port doubles the work and the places
+it can break.
+
 **Two separate npm projects.** Root and `mobile/` have their own lockfiles and no
 workspace linking them. Install in the right directory.
 
