@@ -3215,6 +3215,50 @@ none. `app/job/[id].tsx` now sets its own `headerLeft` "Back": it pops when it
 can, otherwise goes home for the role (`/dashboard` office, `/` technician —
 `lib/jobBack.ts`, tested). Reaches phones with the next build.
 
+### Every screen and modal has a visible way out (27 Nov 2026; no migration, no native module)
+
+Justin: "Today I did a invoice PDF preview and there was no back button … make
+sure every dead end has a back button." iOS has no hardware back and a swipe
+isn't obvious, so every place a user can end up now SHOWS a way out.
+- **Stack screens:** the job screen's Back is now the root Stack's default
+  `headerLeft` (`app/_layout.tsx` → `components/ScreenBackButton.tsx`, rule
+  `lib/backTarget.ts` — `backTarget` / `goBackOrHome`; `lib/jobBack.ts` is an
+  alias). Every pushed screen (invoices, quotes, customers, fleet, staff,
+  settings, backflow, run sheet, job billing/costing …) shows "‹ Back": it pops
+  when it can, else goes home for the role (`/dashboard` office/admin, `/`
+  technician) — so a screen opened from a notification, a
+  `mellerickfield://` deep link or after a role re-gate is never a dead end.
+  The job screen's own `setOptions` copy is gone.
+- **PDF preview** (`components/finance/pdf-preview.tsx`, invoice/quote PDF and
+  the job report preview): the small "Close" text at the top-right became a
+  top-left "✕ Close" header (`ModalHeader`, `components/ModalClose.tsx`).
+- **Photos:** the timestamp-camera preview gained a top-left ✕ Close (outside
+  the stamped image; nothing saved, same as Retake); the photo viewer's ✕ moved
+  top-left, 44 pt, below the notch (`insets.top`, was a fixed 50 px).
+- **`KeyboardSheet`** (every form sheet, 29 uses) always shows a ✕ (Close) at
+  its top-right that calls `onRequestClose`.
+- **Picker sheets that only closed on a tap outside** now have a Cancel
+  (`SheetCancelButton`): backflow device/test pickers, job Overview's select,
+  the Time tab's stage / variation / staff pickers. The office Schedule booking
+  menu gained a Close row. The ✕ on the customer picker and line-item editor got
+  an accessible label and a bigger hit area.
+- **Guard:** `mobile/test/screens/way-out.test.ts` (from the file tree, not a
+  list): every route outside the tab groups is registered with
+  `headerShown: true` (allow-list: `login`), the root Stack's `headerLeft` is
+  `ScreenBackButton`, nothing sets `headerBackVisible: false` /
+  `gestureEnabled: false`, the root is the only Stack, and every `<Modal>` in the
+  app has `onRequestClose` (Android back) AND a visible Close / Cancel / Done
+  (or, for the clock prompt and location disclosure, their named decline
+  button); full-screen modals close from the top-left or a bottom Cancel. Unit
+  tests `mobile/lib/backTarget.test.ts`, and `KeyboardSheet.test.tsx` checks the ✕.
+- **Web, checked only:** dialogs use `components/ui/dialog.tsx` (✕ by default,
+  no `showCloseButton={false}` anywhere); the invoice/quote PDF opens in a new
+  tab; the mobile-width site/supplier pickers have Close. Minor: the public
+  `/privacy` and `/delete-account` pages have no link to sign in, and
+  `/update-password`'s form has no "Back to sign in" (only its expired-link
+  state links on). Not changed.
+- Reaches phones with the next build.
+
 ### Sync reliability and sign-out (17 October 2026 audit)
 
 Twelve findings fixed in one PR (branch `fix/mobile-sync-reliability`). What

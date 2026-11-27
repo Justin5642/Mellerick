@@ -22,6 +22,7 @@ import { colors } from "../../lib/theme";
 import { TEST_TYPES, FAILURE_REASONS } from "../../lib/backflow";
 import { useBackflow } from "../../lib/data/hooks/useBackflow";
 import { describeReadFailure } from "../../design/components/ScreenError";
+import { SheetCancelButton } from "../../components/ModalClose";
 
 interface DeviceGroup {
   group_label: string;
@@ -147,6 +148,7 @@ function ModalPicker({
                 </TouchableOpacity>
               )}
             />
+            <SheetCancelButton onPress={() => setOpen(false)} />
           </View>
         </TouchableOpacity>
       </Modal>

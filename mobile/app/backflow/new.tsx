@@ -22,6 +22,7 @@ import { colors } from "../../lib/theme";
 import { WATER_AUTHORITIES, DEVICE_TYPES, PROTECTION_TYPES } from "../../lib/backflow";
 import { useBackflow } from "../../lib/data/hooks/useBackflow";
 import { useWriteOutcome } from "../../lib/data/hooks/useWriteOutcome";
+import { SheetCancelButton } from "../../components/ModalClose";
 
 const API_BASE_URL = process.env.EXPO_PUBLIC_API_BASE_URL;
 const NO_SITE_VALUE = "__no_site__";
@@ -79,6 +80,7 @@ function ModalPicker({
                 </TouchableOpacity>
               )}
             />
+            <SheetCancelButton onPress={() => setOpen(false)} />
           </View>
         </TouchableOpacity>
       </Modal>

@@ -11,6 +11,7 @@ import { ScheduleNoteBanner } from "./schedule-note-banner";
 import type { JobBooking } from "../../lib/data/reads/bookings";
 import { dateRangeLabel } from "../../lib/scheduleDisplay";
 import { scheduleDays } from "../../lib/scheduling";
+import { SheetCancelButton } from "../ModalClose";
 
 const API_BASE_URL = process.env.EXPO_PUBLIC_API_BASE_URL;
 
@@ -76,6 +77,7 @@ function SelectField({
                 </TouchableOpacity>
               )}
             />
+            <SheetCancelButton onPress={() => setOpen(false)} />
           </View>
         </TouchableOpacity>
       </Modal>

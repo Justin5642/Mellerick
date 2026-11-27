@@ -14,6 +14,7 @@ import {
   type ViewStyle,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { Ionicons } from "@expo/vector-icons";
 import { colors } from "../lib/theme";
 import { useKeyboardVisible } from "../lib/useKeyboardVisible";
 
@@ -68,11 +69,23 @@ export function KeyboardSheet({ visible, onRequestClose, title, footer, children
       >
         <Pressable style={StyleSheet.absoluteFill} onPress={hideKeyboard} accessible={false} testID={testID ? `${testID}-backdrop` : undefined} />
         <View style={[styles.sheet, { paddingBottom: keyboardUp ? 0 : Math.max(insets.bottom, 12) + 8 }]} testID={testID}>
-          {title != null && (
+          {/* Always a visible way out (27 Nov 2026): the ✕ closes the sheet like
+              Android's back button (onRequestClose) — iOS has neither a back
+              button nor an obvious swipe for a sheet. */}
+          <View style={styles.headerRow}>
             <Pressable onPress={hideKeyboard} accessible={false} style={styles.titleWrap}>
-              {typeof title === "string" ? <Text style={styles.title}>{title}</Text> : title}
+              {title == null ? null : typeof title === "string" ? <Text style={styles.title}>{title}</Text> : title}
             </Pressable>
-          )}
+            <TouchableOpacity
+              onPress={onRequestClose}
+              accessibilityRole="button"
+              accessibilityLabel="Close"
+              style={styles.closeBtn}
+              testID={testID ? `${testID}-close` : "keyboard-sheet-close"}
+            >
+              <Ionicons name="close" size={24} color={colors.slate500} />
+            </TouchableOpacity>
+          </View>
           <ScrollView
             style={styles.body}
             contentContainerStyle={[styles.bodyContent, contentContainerStyle]}
@@ -100,7 +113,9 @@ const styles = StyleSheet.create({
   // flexShrink lets the sheet give up height to the keyboard; the ScrollView
   // inside is what actually shrinks, the title and footer keep their size.
   sheet: { backgroundColor: colors.card, borderTopLeftRadius: 16, borderTopRightRadius: 16, flexShrink: 1 },
-  titleWrap: { paddingHorizontal: 16, paddingTop: 16 },
+  headerRow: { flexDirection: "row", alignItems: "flex-start" },
+  titleWrap: { flex: 1, paddingLeft: 16, paddingTop: 16 },
+  closeBtn: { width: 48, height: 48, alignItems: "center", justifyContent: "center", marginTop: 4, marginRight: 4 },
   title: { fontSize: 16, fontWeight: "800", color: colors.slate900, marginBottom: 12 },
   body: { flexGrow: 0, flexShrink: 1 },
   bodyContent: { paddingHorizontal: 16, paddingBottom: 8 },

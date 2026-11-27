@@ -1,8 +1,8 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, Alert, TextInput } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { useFocusEffect, useLocalSearchParams, useNavigation, useRouter } from "expo-router";
-import { jobBackTarget } from "../../lib/jobBack";
+import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
+import { goBackOrHome } from "../../lib/backTarget";
 import { Ionicons } from "@expo/vector-icons";
 import { supabase } from "../../lib/supabase";
 import { getJob } from "../../lib/data/reads/jobs";
@@ -85,32 +85,12 @@ const JOB_TYPES = ["service", "installation", "maintenance", "emergency", "quote
 export default function JobDetailScreen() {
   const { id, schedule: scheduleParam, tech: techParam, day: dayParam } = useLocalSearchParams<{ id: string; schedule?: string; tech?: string; day?: string }>();
   const router = useRouter();
-  const navigation = useNavigation();
   const isOfficeOrAdmin = useIsOfficeOrAdmin();
 
-  // Always a way out (lib/jobBack.ts): the native arrow only appears when a
-  // screen sits behind this one, and a job opened from a notification or after
-  // a role re-gate has none.
-  useLayoutEffect(() => {
-    navigation.setOptions({
-      headerLeft: () => (
-        <TouchableOpacity
-          onPress={() => {
-            const target = jobBackTarget(router.canGoBack(), isOfficeOrAdmin);
-            if (target.kind === "pop") router.back();
-            else router.replace(target.path);
-          }}
-          accessibilityRole="button"
-          accessibilityLabel="Back"
-          hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
-          style={styles.headerBack}
-        >
-          <Ionicons name="chevron-back" size={24} color={colors.blue600} />
-          <Text style={styles.headerBackText}>Back</Text>
-        </TouchableOpacity>
-      ),
-    });
-  }, [navigation, router, isOfficeOrAdmin]);
+  // Always a way out: the root Stack's default headerLeft
+  // (components/ScreenBackButton, lib/backTarget.ts) pops when it can, else
+  // goes home for the role — a job opened from a notification or after a role
+  // re-gate has nothing behind it.
   const jobEdit = useJobEdit();
   const [job, setJob] = useState<any>(null);
   const [userId, setUserId] = useState<string | null>(null);
@@ -404,11 +384,7 @@ export default function JobDetailScreen() {
         <Text style={styles.notFoundHint}>It may have been removed, or you may not have access.</Text>
         <TouchableOpacity
           style={styles.notFoundBtn}
-          onPress={() => {
-            const target = jobBackTarget(router.canGoBack(), isOfficeOrAdmin);
-            if (target.kind === "pop") router.back();
-            else router.replace(target.path);
-          }}
+          onPress={() => goBackOrHome(router, isOfficeOrAdmin)}
         >
           <Text style={styles.notFoundBtnText}>Go back</Text>
         </TouchableOpacity>
@@ -764,8 +740,6 @@ export default function JobDetailScreen() {
 const styles = StyleSheet.create({
   reassignLine: { fontSize: 12, fontWeight: "800", color: "#be123c", marginTop: 1 },
   container: { flex: 1, backgroundColor: colors.bg },
-  headerBack: { flexDirection: "row", alignItems: "center", paddingRight: 8, marginLeft: -6 },
-  headerBackText: { fontSize: 17, color: colors.blue600 },
   viewOnlyBanner: { margin: 12, marginBottom: 0, padding: 10, borderRadius: 10, backgroundColor: colors.blue100 },
   viewOnlyText: { fontSize: 13, fontWeight: "600", color: colors.blue600, textAlign: "center" },
   center: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: colors.bg, padding: 24 },
