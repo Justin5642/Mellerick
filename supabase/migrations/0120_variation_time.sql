@@ -3,7 +3,7 @@
 -- office links other costs to it, and the stage's allowed hours stay a fair
 -- measure.
 --
--- STATUS: DRAFT — NOT APPLIED
+-- STATUS: ✅ APPLIED 2026-11-27 (gate test passed).
 -- How: paste this file into the SQL editor, then the gate test
 -- supabase/tests/0120_variation_time_test.sql, and trust only the final
 -- "0120 PASSED" row. Then change this line to applied and add the ledger row:
