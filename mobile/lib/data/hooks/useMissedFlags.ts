@@ -4,7 +4,7 @@ import { useFlush } from "./useFlush";
 import { queuedMissedFlags, type QueuedMissed } from "../../missedQueue";
 
 /**
- * "Didn't make it" (0121 (draft)): flag or undo a booking through the outbox, and the
+ * "Didn't make it" (0121): flag or undo a booking through the outbox, and the
  * changes still queued on this phone — so a screen shows the tech's flag at
  * once, offline included, until the booking syncs back with it.
  */

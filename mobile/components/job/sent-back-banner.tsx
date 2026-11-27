@@ -2,7 +2,7 @@ import { StyleSheet, Text, View } from "react-native";
 import { colors } from "../../lib/theme";
 import { sentBackNotice, sentBackWhen, type SentBackJob } from "../../lib/sentBack";
 
-// "Sent back by the office" (0122, a draft) — the note the office wrote to the crew,
+// "Sent back by the office" (0122) — the note the office wrote to the crew,
 // shown above every tab while the job is sent back and open. The job screen
 // leaves it off view-only jobs. Rule in lib/sentBack.ts (a copy of the web's).
 // Offline it shows what the mirror holds; before the stream redeploy the

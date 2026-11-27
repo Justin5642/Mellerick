@@ -1,5 +1,5 @@
 // POST/DELETE /api/jobs/[id]/bookings/[bookingId]/missed — "Didn't make it"
-// on a booking (Justin, 27 Nov 2026; migration 0121 (draft)). Request parsing and the
+// on a booking (Justin, 27 Nov 2026; migration 0121). Request parsing and the
 // fixed sentences the route answers with; flag_booking_missed() /
 // clear_booking_missed() make the decision and the write. Pure.
 import { validateMissed, type MissedReason } from "./booking-attendance";
@@ -32,7 +32,7 @@ export function parseMissedBody(body: unknown): MissedRequest {
   return v.ok ? { kind: "flag", reason: v.reason, note: v.note } : { kind: "invalid", error: v.error };
 }
 
-/** The answer for an error from the 0121 (draft) functions — never the database's text. */
+/** The answer for an error from the 0121 functions — never the database's text. */
 export function missedRpcError(error: { code?: string; message?: string } | null | undefined): { status: number; error: string } {
   switch (error?.code) {
     case "42883":

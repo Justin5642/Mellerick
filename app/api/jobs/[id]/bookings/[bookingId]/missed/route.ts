@@ -4,7 +4,7 @@ import { callerClient } from "@/lib/api/caller-client";
 import { reportError } from "@/lib/monitoring";
 import { isUuid, MISSED_SENTENCES, missedRpcError, parseMissedBody } from "@/lib/booking-missed";
 
-// "Didn't make it" on a booking (Justin, 27 Nov 2026; migration 0121 (draft)). The
+// "Didn't make it" on a booking (Justin, 27 Nov 2026; migration 0121). The
 // booking's technician (or office/admin) says why they didn't get to it; the
 // booking stays where it is, flagged, until the office moves it.
 //

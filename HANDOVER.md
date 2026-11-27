@@ -2654,7 +2654,7 @@ the stage's allowed hours.
   reinstated); the over-hours alert and scoreboards drop variation time even
   while the variation waits for approval.
 
-**"Didn't make it" and "Not attended" on bookings (27 Nov 2026; migration `0121` DRAFT — not applied; PowerSync streams to redeploy after it).**
+**"Didn't make it" and "Not attended" on bookings (27 Nov 2026; migration `0121` applied 2026-11-27, gate test passed; PowerSync streams redeployed 2026-11-27).**
 Justin: technicians sometimes don't make it to a job they're booked on, and the
 office can't tell a no-show from a forgotten close-out. His decisions: the
 technician flags THEIR OWN booking with a reason; the booking STAYS WHERE IT
@@ -2778,7 +2778,7 @@ on to is shown as "Not attended" — computed, never written.
   `tech_job_bookings` names the new columns, so not before 0121) → deploy the
   web (the route) → ship the phone build (no native module).
 
-**A job sent back by the office tells its crew: push, red banner, "Sent back" tag (27 Nov 2026; migration `0122` DRAFT; PowerSync streams to redeploy).**
+**A job sent back by the office tells its crew: push, red banner, "Sent back" tag (27 Nov 2026; migration `0122` applied 2026-11-27, gate test passed; PowerSync streams redeployed 2026-11-27).**
 Approvals → **Send back** (web `components/approvals/approvals-client.tsx`
 `reject()`, phone `mobile/lib/data/repositories/approvals.ts` `sendBackJob`)
 sets `jobs.admin_status = 'rejected'`, `admin_notes` = the note, status
@@ -2902,9 +2902,9 @@ windows) — all 16 technician-visible streams are money-free:
 - `tech_jobs` — 24 named columns, none monetary (`schedule_daily`,
   `schedule_all_day` added for the 0071 multi-day schedules; 0071 applied and
   these rules redeployed 2026-10-14; `admin_status`, `sent_back_note`,
-  `sent_back_at` added for the drafted 0122 — the office's send-back note to
-  the crew, copied by trigger; **never `admin_notes`**, which also holds
-  approval comments — redeploy after applying 0122)
+  `sent_back_at` added with 0122 (applied and streams redeployed 2026-11-27) —
+  the office's send-back note to the crew, copied by trigger; **never
+  `admin_notes`**, which also holds approval comments)
 - `tech_job_variations` — omits `rate`, `total_amount`, `admin_notes`
 - `variation_types` — omits the preset `rate`
 - `tech_time_entries` — omits `rate`; lists `variation_id` (0120 applied and streams redeployed 2026-11-27 —
@@ -2919,7 +2919,7 @@ windows) — all 16 technician-visible streams are money-free:
   deployed as sync config v5 on 2026-11-14) — 10 named columns: who, when, cost-centre **id**;
   plus `note` (the booking's free-text scheduling note, 0109 applied
   2026-11-16; streams redeployed 2026-11-17); plus `missed_at`, `missed_reason`,
-  `missed_note` ("Didn't make it", 0121 DRAFT — redeploy after applying it;
+  `missed_note` ("Didn't make it", 0121 applied and streams redeployed 2026-11-27;
   not `missed_by`); no money column exists on `job_bookings`
 
 **Backflow streams are gated on the caller's profile (migration 0110,
@@ -3757,9 +3757,8 @@ a shippable release.
 | **Leave on the schedule: record 0112** | Justin | `0112` applied 2026-11-19 (gate test passed). Ledger row: `insert into supabase_migrations.schema_migrations (version,name) values ('0112','schedule_leave') on conflict do nothing;` No PowerSync redeploy. Who sees the leave type defaults to office + admin; change it in Settings → Leave on the schedule. Part days: add From/To times on the Leave Log entry. |
 | **Komtrax: sync and link machines** | Justin | `0113` applied 2026-11-20 (gate test passed). Ledger row: `insert into supabase_migrations.schema_migrations (version,name) values ('0113','komtrax') on conflict do nothing;` Admin → Fleet → Komtrax machines → **Sync Komtrax**, then link any Komatsu machine not linked by serial (or put its serial in the fleet item's notes). `KOMTRAX_USERNAME` / `KOMTRAX_PASSWORD` are in Vercel Production. |
 | **Technicians start work themselves: record 0118** | Justin | `0118` applied 2026-11-25 (gate test passed). Ledger row if not yet run: `insert into supabase_migrations.schema_migrations (version,name) values ('0118','self_start_bookings') on conflict do nothing;` Deploy the web, then the phone build. No PowerSync redeploy. |
-| **Sent back → crew notified: apply 0122** | Justin | `0122` is a DRAFT. Paste `supabase/migrations/0122_sent_back_notice.sql`, then `supabase/tests/0122_sent_back_notice_test.sql`; trust only `0122 PASSED`. Mark its STATUS line applied, ledger: `insert into supabase_migrations.schema_migrations (version,name) values ('0122','sent_back_notice') on conflict do nothing;` Then **redeploy the PowerSync streams** (`tech_jobs` names the new columns), deploy the web, ship the phone build. Uses the push secrets already in Vault (0077). |
+| **Sent back + Didn't make it: ship the phone build** | Justin | `0121` and `0122` applied, ledger rows recorded and PowerSync streams redeployed (2026-11-27). Only the phone build is left (with 0120's). |
 | **Time against variations: ship the phone build** | Justin | `0120` applied, ledger row recorded and PowerSync streams redeployed (2026-11-27). Only the phone build is left. Office: tick "Charged by the hour" on hourly variations. |
-| **"Didn't make it": apply 0121** | Justin | `0121` is a DRAFT. Paste `supabase/migrations/0121_booking_missed.sql`, then `supabase/tests/0121_booking_missed_test.sql`; trust only `0121 PASSED`. Mark its STATUS applied; ledger: `insert into supabase_migrations.schema_migrations (version,name) values ('0121','booking_missed') on conflict do nothing;` Then **redeploy the PowerSync streams** (`tech_job_bookings` lists the new columns — not before 0121), deploy the web, then the phone build. |
 | **Cost of mistakes: record 0119** | Justin | `0119` applied 2026-11-25 (gate test passed). Ledger row if not yet run: `insert into supabase_migrations.schema_migrations (version,name) values ('0119','mistake_tracking') on conflict do nothing;` Deploy the web, then the phone build. No PowerSync redeploy. Check Settings → Mistake categories. |
 | **Record the 24–25 Nov migrations; redeploy PowerSync** | Justin | The catch-up (0067 + 0070 + 0117, which did 0064–0066's job) and 0114, 0116, 0115 are applied and confirmed by a read-only check (nothing from 0060–0116 missing). Ledger rows: `insert into supabase_migrations.schema_migrations (version,name) values ('0064','restrict_site_writes_to_office_admin'),('0065','office_only_job_documents'),('0066','backflow_certificate_storage_policies'),('0067','job_todo_list'),('0070','page_load_indexes'),('0114','customer_address_doc_folders'),('0115','job_mistakes'),('0116','job_folders'),('0117','catch_up_sites_and_office_only_documents') on conflict do nothing;` Then **redeploy the PowerSync streams** (`tech_job_photos` lists `folder`; docs/powersync-deploy.md), then the phone build. Run `scripts/audit-job-documents.mjs` to mark priced Simpro attachments office-only. Add billing addresses to customers. |
 | **Maestro flow 02** | Avi | Needs `ADMIN_EMAIL` / `ADMIN_PASSWORD` in the environment. The login subflow deliberately skips when a session already exists, so a password never passes through a script — which is why flows 01/03/04 could be run and 02 could not. |

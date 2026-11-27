@@ -1,4 +1,4 @@
-// "Not attended" read (0121 (draft)): time_entries, ids and timestamps only, chunked
+// "Not attended" read (0121): time_entries, ids and timestamps only, chunked
 // and paged; a failure answers null (no tags) rather than a partial list.
 type Call = [string, ...unknown[]];
 const calls: { table: string; chain: Call[] }[] = [];

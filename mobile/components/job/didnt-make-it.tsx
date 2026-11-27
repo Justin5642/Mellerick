@@ -20,7 +20,7 @@ import { shiftDateKey } from "../../lib/date";
 import type { Booking } from "../../lib/bookings";
 
 // "Didn't make it" on a technician's own booking (Justin, 27 Nov 2026;
-// migration 0121 (draft)). The booking stays where it is, flagged; the office sees a
+// migration 0121). The booking stays where it is, flagged; the office sees a
 // red "Didn't make it — <reason>" on the schedule and reschedules it by
 // dragging, which clears the flag. Through the outbox (a booking-missed side
 // effect), so it works offline. No money.

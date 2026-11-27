@@ -1,5 +1,5 @@
 // Copy of the web's lib/sent-back.ts — see that file for the rule (a job the
-// office sent back shows the crew a banner and a tag; 0122, a draft). Identical from
+// office sent back shows the crew a banner and a tag; 0122). Identical from
 // the first export on, pinned by tests/unit/sent-back.test.ts: change the web
 // file first, then copy its body here.
 

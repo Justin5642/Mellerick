@@ -209,7 +209,7 @@ export class ScheduleRepository {
   }
 
   // -------------------------------------------------------------------------
-  // "Didn't make it" (0121 (draft), Justin 27 Nov 2026): the booking's technician says
+  // "Didn't make it" (0121, Justin 27 Nov 2026): the booking's technician says
   // why they didn't get to it. The booking itself never moves. A side effect,
   // not a job_bookings write — RLS lets only office/admin write bookings, and
   // flag_booking_missed() behind the route is the narrow door — so it works

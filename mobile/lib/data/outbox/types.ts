@@ -101,7 +101,7 @@ export type SideEffectKind =
   // the job's PO line for it, added at $0 (or the job's `<n>-1` PO made at $0)
   // when it has none. Server-side for the same reason as quote-po.
   | "booking-cost-centre"
-  // "Didn't make it" on a booking (0121 (draft)): the technician flags (or clears)
+  // "Didn't make it" on a booking (0121): the technician flags (or clears)
   // their own booking. Server-side because job_bookings is office-written by
   // RLS; flag_booking_missed() is the narrow door. Coalesced per booking, so
   // a flag then an undo queued offline collapses to the undo.

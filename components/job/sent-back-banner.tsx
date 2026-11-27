@@ -2,7 +2,7 @@ import { Undo2 } from "lucide-react";
 import { sentBackNotice, sentBackWhen, type SentBackJob } from "@/lib/sent-back";
 
 // "Sent back by the office" — shown on the job to its crew and the office while
-// the job is sent back and open (0122, a draft; rule in lib/sent-back.ts). Not on
+// the job is sent back and open (0122; rule in lib/sent-back.ts). Not on
 // view-only jobs: the page strips the columns for a technician not on the job.
 export function SentBackBanner({ job, className = "" }: { job: SentBackJob; className?: string }) {
   const notice = sentBackNotice(job);

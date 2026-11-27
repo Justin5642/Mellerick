@@ -482,7 +482,7 @@ export default function JobDetailScreen() {
           {(() => {
             const flagged = bookingsNeedingReassignment(bookings, leave, businessTodayKey());
             return bookings.map((raw) => {
-              // "Didn't make it" (0121 (draft)), with a change still queued on this phone laid over it.
+              // "Didn't make it" (0121), with a change still queued on this phone laid over it.
               const b = withQueuedMissed(raw, queuedMissed.get(raw.id));
               const mine = !!userId && b.staff_id === userId;
               const stage = b.cost_center_id ? costCenters.find((cc) => cc.id === b.cost_center_id)?.name : null;

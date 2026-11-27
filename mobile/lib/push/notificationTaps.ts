@@ -5,7 +5,7 @@ import { useAuth } from "../auth-context";
 
 // Where tapping a notification should take the user, from its `data` payload.
 // The server sends { type: "job_assigned", jobId } (migration 0077) and
-// { type: "job_sent_back", jobId } (0122, a draft) — both open the job.
+// { type: "job_sent_back", jobId } (0122) — both open the job.
 // Anything unrecognised opens nothing — the app simply comes to the front.
 export function routeForNotification(data: unknown): string | null {
   if (!data || typeof data !== "object") return null;

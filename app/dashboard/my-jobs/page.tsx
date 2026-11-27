@@ -12,7 +12,7 @@ import { formatScheduleDates, nextScheduleDay, scheduleDayOn } from "@/lib/sched
 import { jobStatusColors } from "@/lib/badge-colors";
 import { isSentBack } from "@/lib/sent-back";
 
-// Only what the cards below render (admin_status = the "Sent back" tag, 0122, a draft).
+// Only what the cards below render (admin_status = the "Sent back" tag, 0122).
 // Technicians land here, so the job row is
 // named column by column rather than "*" — nothing on it they do not see.
 const JOB_COLUMNS =

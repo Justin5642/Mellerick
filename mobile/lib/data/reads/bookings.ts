@@ -85,7 +85,7 @@ function mapBooking(r: RawBookingRow): Booking {
     all_day: bool(r.all_day) ?? false,
     note: r.note ?? null,
     ...(r.created_by !== undefined ? { created_by: r.created_by ?? null } : {}),
-    // "Didn't make it" (0121 (draft)): only when the read carried the columns.
+    // "Didn't make it" (0121): only when the read carried the columns.
     ...(r.missed_reason !== undefined
       ? { missed_at: r.missed_at ?? null, missed_reason: r.missed_reason ?? null, missed_note: r.missed_note ?? null }
       : {}),
@@ -133,7 +133,7 @@ export async function listJobBookings(jobId: string): Promise<JobBooking[] | nul
           .eq("job_id", jobId)
           .order("starts_at");
       let res = await read(`${COLUMNS}, ${NOTE_COLUMN}, ${MISSED_COLUMNS}`);
-      // 0121 (draft) not applied: without "Didn't make it"; 0109 not applied: without notes.
+      // 0121 not applied: without "Didn't make it"; 0109 not applied: without notes.
       if (isMissingMissedColumn(res.error)) res = await read(`${COLUMNS}, ${NOTE_COLUMN}`);
       if (isMissingNoteColumn(res.error)) res = await read(COLUMNS);
       if (isMissingTable(res.error)) return null;
@@ -262,7 +262,7 @@ export async function listOpenJobBookingsRemote(): Promise<JobBooking[] | null> 
         .order("id")
         .range(from, to)
     );
-  // "Didn't make it" (0121 (draft)) rides along; without its columns, retried without them.
+  // "Didn't make it" (0121) rides along; without its columns, retried without them.
   let res = await read(`${COLUMNS}, ${MISSED_COLUMNS}`);
   if (isMissingMissedColumn(res.error)) res = await read(COLUMNS);
   if (isMissingTable(res.error)) return null;

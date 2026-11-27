@@ -129,7 +129,7 @@ export default async function SchedulePage() {
     };
     // Each booking's scheduling note (0109) rides along; on a database without
     // that column the embed is retried without it before anything else falls back.
-    // "Didn't make it" (0121 (draft)) rides along too; without its columns, retried without them first.
+    // "Didn't make it" (0121) rides along too; without its columns, retried without them first.
     let withBookings = await run(
       `${BOARD_COLUMNS}, schedule_daily, schedule_all_day, job_bookings(${BOOKING_COLUMNS}, created_by, ${BOOKING_NOTE_COLUMN}, ${MISSED_COLUMNS})`,
     );

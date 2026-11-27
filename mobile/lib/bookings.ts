@@ -45,7 +45,7 @@ export interface Booking {
    */
   created_by?: string | null;
   /**
-   * "Didn't make it" (0121 (draft)): when, the reason key and the note — null when
+   * "Didn't make it" (0121): when, the reason key and the note — null when
    * not flagged; absent on a database or device without the columns. Rules
    * in ./bookingAttendance.ts.
    */

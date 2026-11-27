@@ -1,7 +1,7 @@
 import { isMissed, missedDetailText, missedTagText, NOT_ATTENDED, type MissedFields } from "@/lib/booking-attendance";
 import { cn } from "@/lib/utils";
 
-// "Didn't make it — <reason>" (red; the technician flagged it, migration 0121 (draft))
+// "Didn't make it — <reason>" (red; the technician flagged it, migration 0121)
 // or "Not attended" (amber; computed — past, unflagged, nobody clocked on;
 // office/admin only, the page sets it only for them). Justin, 27 Nov 2026.
 // Its own file so each card markup only gains one element, like
