@@ -1,7 +1,7 @@
 -- ============================================================================
 -- Supplier invoices from Gmail, filed against the job automatically.
 --
--- STATUS: DRAFT — not applied. Paste this file into the Supabase SQL editor,
+-- STATUS: applied 2026-11-27 (gate test passed). Was: paste this file into the Supabase SQL editor,
 -- then supabase/tests/0124_gmail_supplier_invoices_test.sql, and trust only
 -- its final "0124 PASSED" row. Then change this line to applied, add the
 -- ledger row ('0124','gmail_supplier_invoices') and regenerate types. No
