@@ -23,6 +23,7 @@ import type { ClockVariation } from "../../lib/data/reads/clockVariations";
 import { useRole } from "../../design/guards/useRole";
 import { clockPlace } from "../../lib/clockLocation";
 import { RATE_CHOICES, canEditEntry, rateOverrideFor, type RateChoice } from "../../lib/timeEntryOffice";
+import { SheetCancelButton } from "../ModalClose";
 
 interface TimeEntry {
   id: string;
@@ -172,6 +173,7 @@ function CostCenterPicker({
                 </TouchableOpacity>
               )}
             />
+            <SheetCancelButton onPress={() => setOpen(false)} />
           </View>
         </TouchableOpacity>
       </Modal>
@@ -233,6 +235,7 @@ function VariationPicker({
                 </TouchableOpacity>
               )}
             />
+            <SheetCancelButton onPress={() => setOpen(false)} />
           </View>
         </TouchableOpacity>
       </Modal>
@@ -345,6 +348,7 @@ function StaffPicker({
                 </TouchableOpacity>
               )}
             />
+            <SheetCancelButton onPress={() => setOpen(false)} />
           </View>
         </TouchableOpacity>
       </Modal>

@@ -18,6 +18,8 @@ import { Image } from "expo-image";
 import * as Location from "expo-location";
 import { Ionicons } from "@expo/vector-icons";
 import ViewShot from "react-native-view-shot";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { ModalCloseButton } from "../ModalClose";
 import { colors, photoTagColors } from "../../lib/theme";
 import { describeReadFailure } from "../../design/components/ScreenError";
 import { usePhotoLibrary } from "../../lib/data/hooks/usePhotoLibrary";
@@ -86,6 +88,7 @@ export function JobPhotosTab({
   /** View-only: not assigned to this job (see JobNotesTab). */
   readOnly?: boolean;
 }) {
+  const insets = useSafeAreaInsets();
   const [photos, setPhotos] = useState<Photo[]>([]);
   const [urls, setUrls] = useState<Record<string, string>>({});
   // Grid thumbnails (lib/photoThumbs.ts), keyed by the PHOTO's storage path.
@@ -601,6 +604,12 @@ export function JobPhotosTab({
             </ViewShot>
           )}
 
+          {/* A visible way out, top-left, outside the ViewShot so it is never
+              stamped into the photo. Same as Retake: nothing is saved. */}
+          <View style={[styles.previewClose, { top: insets.top + 8 }]}>
+            <ModalCloseButton onPress={() => setPending(null)} label="Close" tone="dark" disabled={saving} />
+          </View>
+
           <View style={styles.previewControls}>
             <FolderChips value={folder} onChange={chooseFolder} dark />
             <View style={styles.typeRow}>
@@ -670,15 +679,13 @@ export function JobPhotosTab({
               ) : (
                 <ActivityIndicator color="#fff" style={styles.viewerImage} />
               )}
-              <View style={styles.viewerTopBar}>
+              <View style={[styles.viewerTopBar, { top: insets.top + 8 }]}>
+                <ModalCloseButton onPress={() => setViewingPhoto(null)} label="Close" tone="dark" />
                 <View style={[styles.photoTag, { backgroundColor: (photoTagColors[viewingPhoto.photo_type] ?? photoTagColors.general).bg }]}>
                   <Text style={[styles.photoTagText, { color: (photoTagColors[viewingPhoto.photo_type] ?? photoTagColors.general).text }]}>
                     {viewingPhoto.photo_type}
                   </Text>
                 </View>
-                <TouchableOpacity style={styles.viewerCloseButton} onPress={() => setViewingPhoto(null)}>
-                  <Ionicons name="close" size={24} color="#fff" />
-                </TouchableOpacity>
               </View>
               <View style={styles.viewerBottomBar}>
                 <Text style={styles.viewerDate}>{new Date(viewingPhoto.created_at).toLocaleString("en-AU")}</Text>
@@ -822,6 +829,7 @@ const styles = StyleSheet.create({
   loadErrorRetry: { fontSize: 13, fontWeight: "700", color: colors.blue600, paddingHorizontal: 4, paddingVertical: 2 },
 
   previewScreen: { flex: 1, backgroundColor: colors.black },
+  previewClose: { position: "absolute", left: 16 },
   shotWrap: { flex: 1, position: "relative" },
   previewImage: { width: "100%", height: "100%" },
   watermarkTag: {
@@ -860,20 +868,11 @@ const styles = StyleSheet.create({
   viewerFailedText: { color: "#e2e8f0", fontSize: 14, textAlign: "center", lineHeight: 20 },
   viewerTopBar: {
     position: "absolute",
-    top: 50,
     left: 16,
     right: 16,
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-  },
-  viewerCloseButton: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: "rgba(255,255,255,0.15)",
-    alignItems: "center",
-    justifyContent: "center",
   },
   viewerBottomBar: {
     position: "absolute",

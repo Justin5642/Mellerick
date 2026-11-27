@@ -1545,6 +1545,7 @@ export default function ScheduleScreen() {
               </>
             )}
             <Action icon="open-outline" label="Open job details" onPress={() => { const id = menuItem?.job.id; setMenuItem(null); if (id) router.push(`/job/${id}`); }} />
+            <Action icon="close" label="Close" onPress={() => setMenuItem(null)} />
           </View>
         </TouchableOpacity>
       </Modal>

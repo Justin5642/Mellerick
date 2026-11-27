@@ -1,8 +1,8 @@
-import { Modal, Platform, StyleSheet, Text, TouchableOpacity, View, ActivityIndicator } from "react-native";
+import { Modal, Platform, StyleSheet, View, ActivityIndicator } from "react-native";
 import { WebView } from "react-native-webview";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
 import * as FileSystem from "expo-file-system/legacy";
 import { colors } from "../../lib/theme";
+import { ModalHeader } from "../ModalClose";
 
 // Shows a PDF the app has in hand (the job report preview, an invoice or quote
 // PDF) without a native PDF module: react-native-webview is already in the
@@ -52,18 +52,13 @@ export function PdfPreview({
   base64: string | null;
   onClose: () => void;
 }) {
-  const insets = useSafeAreaInsets();
   const ready = Platform.OS === "ios" ? !!fileUri : !!base64;
   return (
     <Modal visible={visible} animationType="slide" onRequestClose={onClose} presentationStyle="fullScreen">
-      <View style={[styles.header, { paddingTop: insets.top + 8 }]}>
-        <Text style={styles.title} numberOfLines={1}>
-          {title}
-        </Text>
-        <TouchableOpacity onPress={onClose} accessibilityRole="button" hitSlop={8}>
-          <Text style={styles.close}>Close</Text>
-        </TouchableOpacity>
-      </View>
+      {/* Close sits top-left, where a Back button is looked for (Justin, 27 Nov
+          2026: "I did an invoice PDF preview and there was no back button" —
+          the old small "Close" text at the top-right went unnoticed). */}
+      <ModalHeader title={title} onClose={onClose} closeLabel="Close" />
       {!ready ? (
         <View style={styles.center}>
           <ActivityIndicator color={colors.blue600} />
@@ -89,18 +84,6 @@ export function PdfPreview({
 }
 
 const styles = StyleSheet.create({
-  header: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 12,
-    paddingHorizontal: 16,
-    paddingBottom: 10,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
-    backgroundColor: colors.card,
-  },
-  title: { flex: 1, fontSize: 16, fontWeight: "800", color: colors.slate900 },
-  close: { fontSize: 16, fontWeight: "700", color: colors.blue600 },
   center: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: colors.bg },
   web: { flex: 1, backgroundColor: colors.bg },
 });

@@ -33,7 +33,7 @@ export function CustomerPicker({ visible, onClose, onSelect }: { visible: boolea
         <View style={styles.sheet}>
           <View style={styles.head}>
             <Text style={styles.title}>Select customer</Text>
-            <TouchableOpacity onPress={onClose}><Ionicons name="close" size={22} color={colors.slate500} /></TouchableOpacity>
+            <TouchableOpacity onPress={onClose} accessibilityRole="button" accessibilityLabel="Close" hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}><Ionicons name="close" size={24} color={colors.slate500} /></TouchableOpacity>
           </View>
           <View style={styles.search}>
             <Ionicons name="search" size={16} color={colors.slate400} />

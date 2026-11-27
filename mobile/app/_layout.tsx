@@ -28,6 +28,7 @@ import { DataProvider } from "../lib/data/DataProvider";
 import { PowerSyncProvider } from "../lib/data/PowerSyncProvider";
 import { SyncStatusPill } from "../design/components/SyncStatusPill";
 import { ScreenError } from "../design/components/ScreenError";
+import { ScreenBackButton } from "../components/ScreenBackButton";
 import { colors } from "../lib/theme";
 
 // Floating, app-wide sync indicator: invisible when synced, "Syncing N…" while
@@ -136,7 +137,11 @@ function RootNavigation() {
   // Route groups are REGISTERED per role via Stack.Protected — a forbidden route
   // is not mounted or navigable for the wrong role (RLS is the backstop).
   return (
-    <Stack screenOptions={{ headerShown: false }}>
+    // headerLeft: every screen that shows the native header gets a visible
+    // "‹ Back" (components/ScreenBackButton) — it pops when it can, else goes
+    // home for the role, so a screen opened from a notification, a deep link or
+    // after a role re-gate is never a dead end (27 Nov 2026; lib/backTarget.ts).
+    <Stack screenOptions={{ headerShown: false, headerLeft: () => <ScreenBackButton /> }}>
       <Stack.Protected guard={!session}>
         <Stack.Screen name="login" />
       </Stack.Protected>

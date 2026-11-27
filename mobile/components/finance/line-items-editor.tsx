@@ -120,7 +120,7 @@ function CataloguePicker({ visible, onClose, onSelect }: { visible: boolean; onC
         <View style={styles.sheet}>
           <View style={styles.head}>
             <Text style={styles.sheetTitle}>Add from catalogue</Text>
-            <TouchableOpacity onPress={onClose}><Ionicons name="close" size={22} color={colors.slate500} /></TouchableOpacity>
+            <TouchableOpacity onPress={onClose} accessibilityRole="button" accessibilityLabel="Close" hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}><Ionicons name="close" size={24} color={colors.slate500} /></TouchableOpacity>
           </View>
           {/* Checked BEFORE the list, so a failed load can never fall through to
               the "No pricing items." empty state. */}

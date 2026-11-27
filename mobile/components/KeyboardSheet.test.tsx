@@ -55,3 +55,16 @@ describe("KeyboardSheet", () => {
     expect(KEYBOARD_SHEET_INPUT_FONT_SIZE).toBeGreaterThanOrEqual(16);
   });
 });
+
+describe("KeyboardSheet way out", () => {
+  it("always shows a Close button that calls onRequestClose", () => {
+    const close = jest.fn();
+    render(
+      <KeyboardSheet visible onRequestClose={close} testID="s">
+        <Text>Body</Text>
+      </KeyboardSheet>
+    );
+    fireEvent.press(screen.getByLabelText("Close"));
+    expect(close).toHaveBeenCalledTimes(1);
+  });
+});
