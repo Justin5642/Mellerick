@@ -18,6 +18,8 @@ import { dayWorksPeriodLabel, quantityProblem, type HireType, type HireUnit } fr
 import { splitMachinesByHire, type DayWorksView, type DayWorksEntry } from "@/lib/day-works-view";
 import { buildHireEntryRow } from "@/lib/day-works-entry";
 import { TruckLoadsCard, loadSummary, type TruckLoadsLoaded } from "./job-truck-loads";
+import { KmLookupButton } from "./km-lookup-button";
+import { floatTripEnds } from "@/lib/distance-trip";
 import { meterNote, prefillMeters, type MeterReadings } from "@/lib/komtrax-meter";
 
 // The job's Day Works / Hire tab (Stage 1, Nov 2026). Hire and cartage are
@@ -325,6 +327,7 @@ export function JobDayWorks({ jobId, readOnly = false }: Props) {
 
       {draft && (
         <EntryForm
+          jobId={jobId}
           draft={draft}
           setDraft={setDraft}
           view={view}
@@ -450,7 +453,8 @@ export function JobDayWorks({ jobId, readOnly = false }: Props) {
   );
 }
 
-function EntryForm({ draft, setDraft, view, saving, onSave, onCancel }: {
+function EntryForm({ jobId, draft, setDraft, view, saving, onSave, onCancel }: {
+  jobId: string;
   draft: Draft;
   setDraft: (d: Draft) => void;
   view: Loaded;
@@ -563,7 +567,8 @@ function EntryForm({ draft, setDraft, view, saving, onSave, onCancel }: {
               {(opt.hire_unit === "km" || opt.hire_unit === "move") && (
                 <div className="space-y-1.5">
                   <Label>{opt.hire_unit === "move" ? "Loaded km" : "Km"}</Label>
-                  <Input type="number" inputMode="decimal" min={0} step={1} value={draft.km} onChange={(e) => set({ km: e.target.value })} />
+                  <Input type="number" inputMode="decimal" min={0} step={0.1} value={draft.km} onChange={(e) => set({ km: e.target.value })} />
+                  <KmLookupButton jobId={jobId} km={draft.km} ends={() => floatTripEnds(draft.pickup, draft.dropoff)} onKm={(km) => set({ km })} />
                 </div>
               )}
               {(opt.hire_unit === "move" || opt.hire_type === "cartage") && (

@@ -30,6 +30,11 @@ export const SUPPLIER_INVOICE_READ_LIMIT: RateLimit = { bucket: "supplier-invoic
 // Each dropped fleet service invoice is one paid read. A busy day is a handful.
 export const SERVICE_INVOICE_READ_LIMIT: RateLimit = { bucket: "service-invoice-read", max: 30, windowSeconds: 600 };
 
+// Each distance lookup is one free OSRM request (and up to two Nominatim
+// ones) under our shared User-Agent — fair use on public servers. A driver
+// looks up a handful a day.
+export const DISTANCE_LIMIT: RateLimit = { bucket: "distance", max: 30, windowSeconds: 600 };
+
 let reportedUnavailable = false;
 
 /** true = allowed. Never throws. */

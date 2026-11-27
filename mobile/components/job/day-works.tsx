@@ -12,6 +12,8 @@ import { MoneyText } from "../../design/components/MoneyText";
 import { RoleGate } from "../../design/guards/RoleGate";
 import { signatureWebStyle } from "./signature";
 import { TruckLoadsSection, type TruckLoadsLoaded } from "./truck-loads";
+import { KmLookup } from "./km-lookup";
+import { floatTripEnds } from "../../lib/distanceTrip";
 import { InvoiceDayWorksSheet, VoidReasonSheet } from "./day-works-office";
 import { meterNote, prefillMeters } from "../../lib/komtraxMeter";
 import {
@@ -344,6 +346,7 @@ export function JobDayWorksTab({ jobId }: { jobId: string }) {
 
       {draft && (
         <EntrySheet
+          jobId={jobId}
           draft={draft}
           setDraft={setDraft}
           view={view}
@@ -401,7 +404,8 @@ function Field({ label, value, onChange, numeric, placeholder, multiline }: { la
   );
 }
 
-function EntrySheet({ draft, setDraft, view, saving, onSave, onCancel }: {
+function EntrySheet({ jobId, draft, setDraft, view, saving, onSave, onCancel }: {
+  jobId: string;
   draft: DayWorksDraft;
   setDraft: (d: DayWorksDraft) => void;
   view: Loaded;
@@ -504,7 +508,10 @@ function EntrySheet({ draft, setDraft, view, saving, onSave, onCancel }: {
             )}
             {komtraxNote && <Text style={styles.meta}>{komtraxNote}</Text>}
             {(opt.hire_unit === "km" || opt.hire_unit === "move") && (
-              <Field label={opt.hire_unit === "move" ? "Loaded km" : "Km"} value={draft.km} onChange={(v) => set({ km: v })} numeric placeholder="e.g. 42" />
+              <>
+                <Field label={opt.hire_unit === "move" ? "Loaded km" : "Km"} value={draft.km} onChange={(v) => set({ km: v })} numeric placeholder="e.g. 42" />
+                <KmLookup jobId={jobId} km={draft.km} ends={() => floatTripEnds(draft.pickup, draft.dropoff)} onKm={(km) => set({ km })} />
+              </>
             )}
             {(opt.hire_unit === "move" || opt.hire_type === "cartage") && (
               <View style={styles.actions}>

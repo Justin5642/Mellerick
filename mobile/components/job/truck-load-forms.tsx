@@ -12,6 +12,8 @@ import { KeyboardSheet, KEYBOARD_SHEET_INPUT_FONT_SIZE } from "../KeyboardSheet"
 import { signatureWebStyle } from "./signature";
 import { SupplierPickerSheet } from "./supplier-picker";
 import { formatWorkDate } from "../../lib/dayWorks";
+import { KmLookup } from "./km-lookup";
+import { truckLoadTripEnds } from "../../lib/distanceTrip";
 import {
   UNIT_LABEL,
   addTruckLoad,
@@ -212,6 +214,7 @@ export function TruckLoadSheet({ jobId, draft, setDraft, form, onSaved, onClose 
           <Field label={`How much (${UNIT_LABEL[draft.unit].toLowerCase()})`} value={draft.quantity} onChange={(v) => set({ quantity: v })} numeric placeholder="off the docket" />
           <Field label="Km travelled" value={draft.km} onChange={(v) => set({ km: v })} numeric placeholder="e.g. 35" />
         </View>
+        <KmLookup jobId={jobId} km={draft.km} ends={() => truckLoadTripEnds({ ...draft, place: quarry?.name ?? draft.place })} onKm={(km) => set({ km })} />
 
         <Field label="Docket number" value={draft.docket_number} onChange={(v) => set({ docket_number: v })} placeholder="e.g. 123456" />
         <TouchableOpacity style={styles.secondaryWide} onPress={() => void photo()} accessibilityRole="button" accessibilityLabel="Photograph the docket">

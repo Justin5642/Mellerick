@@ -1527,8 +1527,8 @@ Stage 1 is web + database + pure rules; the phone comes next.
   would be counted against the quoted work; mixing them now would make the
   quoted margin wrong. Next stages:
   1. ~~**Phone:** Day Works entry and builder sign-off~~ — **done, Stage 2
-     (below).** Still to come on the phone: truck day stops, float moves
-     with a distance lookup (km are typed in today), and an offline path
+     (below).** Still to come on the phone: truck day stops (float and
+     load km: "Work out km", 27 Nov 2026 — see "Distance lookup"), and an offline path
      if it is ever wanted (outbox + `hire_entries` in a technician stream
      with its columns listed — it has no money column). Office void and
      Invoice Day Works reached the phone on 19 Nov 2026 (Stage 2, below).
@@ -1617,8 +1617,8 @@ line and hand the phone to the builder's rep, who signs it; it then locks.
   `PUT …/cartage-loads/quarry`. Only a signed line/load is voided (an
   invoiced one must come off its invoice first); a cost is refused once the
   load is invoiced or void. Reaches phones with the next build.
-- **Not on the phone:** truck day stops, float distance lookup (km typed),
-  offline entry.
+- **Not on the phone:** truck day stops, offline entry. (Km: "Work out km",
+  see "Distance lookup for floats and truck loads".)
 
 **Office PO tab and job documents on the phone (19 Nov 2026; no migration).**
 Justin: the office should be able to run a job's POs from the phone. Office/admin
@@ -2098,7 +2098,6 @@ end-of-day hours and loads. His rules:
   margins (`lib/job-ledger.ts`) — quarry product already reaches the ledger
   through supplier PO invoices, so adding docket costs now would count it
   twice; decide which source wins first. No report of loads by month yet.
-  No distance lookup (km typed).
 - **Apply order:** paste `0111_cartage_loads.sql` → paste
   `supabase/tests/0111_cartage_loads_test.sql` (needs an active technician and
   an active office/admin) and trust only `0111 PASSED` → change 0111's header
@@ -2108,6 +2107,55 @@ end-of-day hours and loads. His rules:
   the gate test passes (35 scenarios) and fails, naming scenarios, with the
   lock trigger disabled or the cost table's RLS off; the money boundary sweep
   stays intact with the seeded load and cost.
+
+**Distance lookup for floats and truck loads (27 Nov 2026; no migration, no stream change).**
+Km were typed by hand. Justin chose the FREE OpenStreetMap route — no key, no account.
+- **"Work out km"** beside the km box: phone truck loads
+  (`mobile/components/job/truck-load-forms.tsx` — used by the job's Truck
+  loads and Today's run), phone Day Works km / float lines
+  (`mobile/components/job/day-works.tsx`), web Day Works km / float lines
+  (`components/job/job-day-works.tsx`; the web box now takes 0.1 km). Button
+  components `mobile/components/job/km-lookup.tsx` and
+  `components/job/km-lookup-button.tsx`. The answer fills the box only if
+  nobody typed in it while the lookup ran (`shouldFillKm`); the box stays
+  editable; a note says "≈ 23.4 km by road from Boral Wollert … to 12 Smith
+  St", in amber with "approximate" when an end only matched a street or
+  suburb. Online only — offline the phone says it needs signal. Technicians
+  may use it; no money anywhere.
+- **The trip** (`lib/distance-trip.ts`, mirrored byte for byte from the
+  first export at `mobile/lib/distanceTrip.ts`,
+  `tests/unit/distance-trip-mirror.test.ts`): a float / km line is pick-up →
+  drop-off, an empty end = the job site; a load uses its From / To boxes,
+  else material in = the picked quarry (or typed place) → the job site, spoil
+  out = the job site → the tip.
+- **Route** `GET /api/distance?from=&to=&jobId=` or `POST {from, to, jobId}`
+  (`app/api/distance/route.ts`): `requireRole(admin, office, technician)`;
+  per-user `consume_rate_limit()` bucket `distance` (30 per 10 min); each end
+  is `lat,lng`, a place/address, or `site` = the job's site, read as the
+  CALLER (RLS): its pin when set, else its address geocoded. Answer
+  `{ km, from: {label, precise}, to: {label, precise}, approximate }`; km
+  rounded UP to 0.1. Fixed sentences on every failure (both ends needed, job
+  not found, no site address, start/end not found, no road route, service
+  unavailable — 502). Helpers `lib/distance.ts` (tested with mocked fetch in
+  `tests/unit/distance.test.ts`, which also covers the route, auth, limiter
+  and sentences; phone call `mobile/lib/distanceLookup.ts`, tested).
+- **Places:** Nominatim (`lib/geocode.ts`'s User-Agent, Australia only,
+  `limit=1`). Unlike the geofence rule (building-level only), the best match
+  is accepted and its precision reported: a house/building or a named place
+  (a quarry, a tip) is precise; a street, suburb or bigger area is
+  approximate (`isPreciseForDistance`). Calls spaced 1.1 s apart (its 1/s
+  policy).
+- **Road distance:** OSRM's public demo server
+  (`router.project-osrm.org/route/v1/driving/…?overview=false`), one request
+  per lookup, 8 s timeout. Identical places and point pairs are answered from
+  a per-process LRU (300 entries, 24 h). **The demo server is fair-use only**
+  (light traffic, no guarantee, may throttle or go away); if volume grows,
+  a self-hosted OSRM or a paid routing service is the upgrade path — only
+  `osrmRouteMeters` in `lib/distance.ts` changes.
+- **Not verified against the live services** — neither OSRM nor Nominatim
+  could be reached from where this was written; tests mock them. Reaches
+  phones with the next build (no native module); the web must be deployed
+  first (the route).
 
 **Office/admin Time, Approvals and Staff on the phone (19 Nov 2026; no migration, no stream change).**
 Justin: bring the office's website tools for time, approvals and staff to the
