@@ -52,3 +52,35 @@ export const TIME_ENTRY_COLUMNS =
  */
 export const TIME_ENTRY_SELECT_WITH_STAFF =
   `${TIME_ENTRY_COLUMNS}, profiles!time_entries_staff_id_fkey(full_name)` as const;
+
+/**
+ * Columns a database may not have yet, so they are NOT in the list above —
+ * naming a missing column fails the whole read (42703), and the clock-on and
+ * clock-off paths read back through that list. They are read with the
+ * `…_WITH_VARIATION` lists below, falling back to the plain list on a database
+ * without them (withVariationFallback). Today: variation_id (0120, draft).
+ */
+export const TIME_ENTRY_OPTIONAL_COLUMNS = ["variation_id"] as const;
+
+/** The list plus 0120 (draft)'s variation_id — read first, with the plain list as the fallback. */
+export const TIME_ENTRY_COLUMNS_WITH_VARIATION = `${TIME_ENTRY_COLUMNS}, variation_id` as const;
+
+export const TIME_ENTRY_SELECT_WITH_STAFF_AND_VARIATION =
+  `${TIME_ENTRY_COLUMNS_WITH_VARIATION}, profiles!time_entries_staff_id_fkey(full_name)` as const;
+
+/**
+ * Run a read with the variation column; on a database without it (0120 (draft) not
+ * applied: 42703 / PGRST204 naming the column) run it again without. Any
+ * other error is returned as it came.
+ */
+export async function withVariationFallback<R extends { error: { code?: string; message?: string } | null }>(
+  run: (columns: string) => PromiseLike<R>,
+  columns: { withVariation: string; without: string }
+): Promise<R> {
+  const first = await run(columns.withVariation);
+  const e = first.error;
+  if (e && ["42703", "PGRST204", "PGRST200"].includes(e.code ?? "") && /variation_id/.test(e.message ?? "")) {
+    return run(columns.without);
+  }
+  return first;
+}

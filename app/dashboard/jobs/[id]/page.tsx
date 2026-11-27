@@ -4,7 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { getViewer } from "@/lib/auth/viewer";
 import { notFound } from "next/navigation";
 import { JobDetailClient } from "@/components/job/job-detail-client";
-import { TIME_ENTRY_SELECT_WITH_STAFF } from "@/lib/time-entry-columns";
+import { TIME_ENTRY_SELECT_WITH_STAFF, TIME_ENTRY_SELECT_WITH_STAFF_AND_VARIATION, withVariationFallback } from "@/lib/time-entry-columns";
 import { sumAllocatedHours } from "@/lib/hours-scoreboard";
 import { loadJobBookings } from "@/lib/bookings";
 import { loadScheduleLeave } from "@/lib/staff-leave-data";
@@ -134,7 +134,17 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
     // unhinted "profiles(...)" embed is ambiguous and PostgREST rejects the
     // whole query (PGRST201) — naming the exact FK fixes it (see
     // app/dashboard/page.tsx for the same class of bug on "jobs").
-    supabase.from("time_entries").select(TIME_ENTRY_SELECT_WITH_STAFF).eq("job_id", id).order("clock_in", { ascending: false }),
+    // With 0120 (draft)'s variation_id (time against a variation); a database without
+    // it is read without, and every entry is then the stage's.
+    withVariationFallback(
+      (cols) =>
+        supabase
+          .from("time_entries")
+          .select(cols as typeof TIME_ENTRY_SELECT_WITH_STAFF)
+          .eq("job_id", id)
+          .order("clock_in", { ascending: false }),
+      { withVariation: TIME_ENTRY_SELECT_WITH_STAFF_AND_VARIATION, without: TIME_ENTRY_SELECT_WITH_STAFF }
+    ),
     supabase.from("job_variations").select("*, variation_types(name), profiles!job_variations_logged_by_fkey(full_name)").eq("job_id", id).order("created_at", { ascending: false }),
     supabase.from("job_expenses").select("*").eq("job_id", id).order("created_at", { ascending: false }),
     supabase.from("equipment_usage_log").select("*").eq("job_id", id).order("usage_date", { ascending: false }),

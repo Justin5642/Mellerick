@@ -16,6 +16,7 @@ import { DeleteJobDialog } from "./delete-job-dialog";
 import { CopyJobDialog } from "./copy-job-dialog";
 import { JobHoursScoreboard } from "./job-hours-scoreboard";
 import { JobTodoControl } from "./job-todo-control";
+import { linkableCosts } from "./variation-costs";
 import { sumAllocatedHours } from "@/lib/hours-scoreboard";
 import { summariseBookings, type JobBookingWithNames } from "@/lib/bookings";
 import { bookingsForScheduleDialog, costCentersFromPurchaseOrders } from "@/lib/schedule-dialog-data";
@@ -201,7 +202,7 @@ export function JobDetailClient({ job, currentUserId, photos: initialPhotos, doc
   // logged Fleet costs (lib/fleet-costs.ts) — the same rate the job-margins
   // report uses. If that route fails, the plain table read still works and
   // costs at the estimate, as before.
-  const equipmentOptions = useCatalogOnFirstUse<any>(activeTab === "equipment" || (isAdmin && activeTab === "costing"), async () => {
+  const equipmentOptions = useCatalogOnFirstUse<any>(activeTab === "equipment" || (isAdmin && activeTab === "costing") || ((isAdmin || isOffice) && activeTab === "variations"), async () => {
     try {
       const res = await fetch("/api/fleet/rates");
       if (res.ok) return { data: (await res.json()).equipment ?? [] };
@@ -212,8 +213,9 @@ export function JobDetailClient({ job, currentUserId, photos: initialPhotos, doc
   });
   // Only "work" entries count against the allocated-hours budget — travel
   // time between jobs is tracked separately and shouldn't eat into it.
+  // Nor does time against a variation (0120 (draft)) — it is priced on the variation.
   const totalHoursLogged = timeEntries
-    .filter((e: any) => e.entry_type !== "travel")
+    .filter((e: any) => e.entry_type !== "travel" && !e.variation_id)
     .reduce((sum: number, e: any) => sum + (e.hours ? Number(e.hours) : 0), 0);
 
   // Flat list of every cost centre (stage) across all POs on this job, so
@@ -468,10 +470,10 @@ export function JobDetailClient({ job, currentUserId, photos: initialPhotos, doc
             </TabsContent>
             )}
             <TabsContent value="time" className="m-0 h-full">
-              <JobTime jobId={job.id} currentUserId={currentUserId} timeEntries={timeEntries} site={job.sites} costCenters={costCenters} isAdmin={isAdmin} staff={staff} onUpdate={setTimeEntries} scheduledCostCenterId={job.scheduled_cost_center_id} canLinkMistakes={isOffice} />
+              <JobTime jobId={job.id} currentUserId={currentUserId} timeEntries={timeEntries} site={job.sites} costCenters={costCenters} isAdmin={isAdmin} staff={staff} onUpdate={setTimeEntries} scheduledCostCenterId={job.scheduled_cost_center_id} canLinkMistakes={isOffice} isOffice={isOffice} variations={variations} />
             </TabsContent>
             <TabsContent value="variations" className="m-0 h-full">
-              <JobVariations jobId={job.id} variations={variations} variationTypes={variationTypes} canPrice={canPriceVariations} currentUserId={currentUserId} onUpdate={setVariations} highlightVariationId={highlightVariationId} />
+              <JobVariations jobId={job.id} variations={variations} variationTypes={variationTypes} canPrice={canPriceVariations} currentUserId={currentUserId} onUpdate={setVariations} highlightVariationId={highlightVariationId} timeEntries={timeEntries} linkableCosts={canPriceVariations ? linkableCosts({ expenses, vendorOrders, equipmentUsage, equipmentName: (id) => equipmentOptions?.find((e: any) => e.id === id)?.name ?? null }) : []} />
             </TabsContent>
             <TabsContent value="expenses" className="m-0 h-full">
               <JobExpenses jobId={job.id} jobNumber={job.job_number} expenses={expenses} onUpdate={setExpenses} currentUserId={currentUserId} costCenters={costCenters} canLinkMistakes={isOffice} />
@@ -501,6 +503,7 @@ export function JobDetailClient({ job, currentUserId, photos: initialPhotos, doc
                       equipmentOptions={equipmentOptions}
                       staffCostProfiles={staffCostProfiles}
                       minMarginPct={minMarginPct}
+                      variations={variations}
                     />
                   </div>
                   <JobProfitability

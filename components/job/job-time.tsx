@@ -14,6 +14,14 @@ import { Clock, LogIn, LogOut, Smartphone, Car, Pencil, Plus } from "lucide-reac
 import { TimeEntryEditDialog } from "@/components/job/time-entry-edit-dialog";
 import { BUSINESS_TIME_ZONE } from "@/lib/date";
 import { clockPlace } from "@/lib/clock-location";
+import {
+  isMissingVariationColumn,
+  isOpenVariation,
+  variationLabel,
+  variationName,
+  variationTimeRefusal,
+  type VariationRef,
+} from "@/lib/variation-time";
 
 interface TimeEntry {
   id: string;
@@ -33,6 +41,8 @@ interface TimeEntry {
   clock_out_lat?: number | null;
   clock_out_lng?: number | null;
   clock_out_accuracy?: number | null;
+  /** The variation this time is for (0120 (draft)); absent on a database without it. */
+  variation_id?: string | null;
 }
 
 interface CostCenterOption {
@@ -63,6 +73,14 @@ interface Props {
   scheduledCostCenterId?: string | null;
   /** Office/admin: the "part of a mistake?" tick on each work entry (rework time, 0119 (a draft, not applied yet)). */
   canLinkMistakes?: boolean;
+  /** Office/admin: may move anyone's entry on or off a variation (RLS 0030). */
+  isOffice?: boolean;
+  /**
+   * The job's variations (money-free fields only are read here). Time can be
+   * moved onto one that isn't rejected (0120 (draft)); the picker hides when the job
+   * has none or the database has no variation_id yet.
+   */
+  variations?: VariationRef[];
 }
 
 function formatTime(iso: string) {
@@ -82,7 +100,7 @@ function syncBilling(entryId: string) {
   fetch(`/api/time-entries/${entryId}/sync-billing`, { method: "POST" }).catch(() => {});
 }
 
-export function JobTime({ jobId, currentUserId, timeEntries: initial, site, costCenters, isAdmin, staff, onUpdate, scheduledCostCenterId, canLinkMistakes }: Props) {
+export function JobTime({ jobId, currentUserId, timeEntries: initial, site, costCenters, isAdmin, staff, onUpdate, scheduledCostCenterId, canLinkMistakes, isOffice, variations = [] }: Props) {
   const supabase = createClient();
   const [entries, setEntries] = useState<TimeEntry[]>(initial);
   const [loading, setLoading] = useState(false);
@@ -115,7 +133,33 @@ export function JobTime({ jobId, currentUserId, timeEntries: initial, site, cost
       toast.error("Failed to assign stage");
       return;
     }
-    setEntries((prev) => prev.map((e) => (e.id === entryId ? (data as unknown as TimeEntry) : e)));
+    setEntries((prev) => prev.map((e) => (e.id === entryId ? { ...e, ...(data as unknown as TimeEntry) } : e)));
+  }
+
+  // Time against a variation (0120 (draft)): the variation_id column is known to the
+  // database once any entry came back with the key. Before 0120 (draft) the page read
+  // falls back to the plain list and no entry has it, so the picker hides.
+  const variationsReady = entries.some((e) => "variation_id" in e);
+  const variationById = new Map(variations.map((v) => [v.id, v]));
+  const [movingId, setMovingId] = useState<string | null>(null);
+
+  async function setVariation(entryId: string, variationId: string | null) {
+    const target = entries.find((e) => e.id === entryId);
+    // The technician on their own entries; office/admin on anyone's (RLS 0030).
+    if (!target || !(canEditTimeEntry(target, currentUserId, isAdmin) || isOffice)) return;
+    setMovingId(entryId);
+    const { error } = await supabase.from("time_entries").update({ variation_id: variationId }).eq("id", entryId);
+    setMovingId(null);
+    if (error) {
+      toast.error(
+        isMissingVariationColumn(error)
+          ? "Time against variations isn't switched on yet."
+          : variationTimeRefusal(error.message) ?? "Couldn't move that time — try again."
+      );
+      return;
+    }
+    setEntries((prev) => prev.map((e) => (e.id === entryId ? { ...e, variation_id: variationId } : e)));
+    toast.success(variationId ? "Moved onto the variation" : "Moved back to the stage");
   }
 
   const myOpenEntry = entries.find(e => e.staff_id === currentUserId && e.entry_type !== "travel" && !e.clock_out);
@@ -168,7 +212,7 @@ export function JobTime({ jobId, currentUserId, timeEntries: initial, site, cost
       toast.error("Clock out failed — you are still clocked in. Try again.");
       return;
     }
-    setEntries(e => e.map(en => en.id === myOpenEntry.id ? data as unknown as TimeEntry : en));
+    setEntries(e => e.map(en => en.id === myOpenEntry.id ? { ...en, ...(data as unknown as TimeEntry) } : en));
     toast.success("Clocked out");
     syncBilling(data.id);
   }
@@ -284,6 +328,35 @@ export function JobTime({ jobId, currentUserId, timeEntries: initial, site, cost
                       </SelectContent>
                     </Select>
                   )}
+                  {!isTravel && variationsReady && (variations.length > 0 || entry.variation_id) && (() => {
+                    const current = entry.variation_id ? variationById.get(entry.variation_id) : undefined;
+                    const canMove = canEditTimeEntry(entry, currentUserId, isAdmin) || !!isOffice;
+                    const options = variations.filter((v) => isOpenVariation(v) || v.id === entry.variation_id);
+                    return (
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Select
+                          value={entry.variation_id ?? "none"}
+                          onValueChange={(v) => setVariation(entry.id, !v || v === "none" ? null : v)}
+                          disabled={!canMove || movingId === entry.id}
+                        >
+                          <SelectTrigger className={`h-7 text-xs w-56 ${entry.variation_id ? "bg-amber-50 border-amber-300" : "bg-white"}`}>
+                            <SelectValue placeholder="Stage work" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="none">Stage work (not a variation)</SelectItem>
+                            {options.map((v) => (
+                              <SelectItem key={v.id} value={v.id}>{variationLabel(v)}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        {entry.variation_id && (
+                          <span className="text-xs text-amber-700">
+                            Variation time{current ? ` — ${variationName(current)}` : ""} · not counted in the stage&apos;s allowed hours
+                          </span>
+                        )}
+                      </div>
+                    );
+                  })()}
                   {!isTravel && canLinkMistakes && entry.clock_out && (
                     <div className="flex items-center gap-1 text-xs text-slate-400">
                       <LinkToMistakeButton jobId={jobId} source="time_entry" sourceId={entry.id} entryHours={entry.hours == null ? null : Number(entry.hours)} />
@@ -314,7 +387,8 @@ export function JobTime({ jobId, currentUserId, timeEntries: initial, site, cost
         onSaved={(saved) => {
           setEntries((prev) => {
             const exists = prev.some((e) => e.id === saved.id);
-            return exists ? prev.map((e) => (e.id === saved.id ? saved : e)) : [saved, ...prev];
+            // Keep the entry's variation (the dialog reads back without it).
+            return exists ? prev.map((e) => (e.id === saved.id ? { ...e, ...saved } : e)) : [saved, ...prev];
           });
         }}
         onDeleted={(id) => setEntries((prev) => prev.filter((e) => e.id !== id))}

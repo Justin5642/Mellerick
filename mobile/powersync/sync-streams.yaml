@@ -249,10 +249,12 @@ streams:
   # touched recently, so the window keeps it. Rows are NOT widened to "my open
   # entries on any job" — that would sync entries on jobs the technician is no
   # longer assigned to, which the stream never did.
+  # variation_id (0120, draft): the variation this time is for — an id, not
+  # money. Redeploy these streams only AFTER 0120 is applied.
   tech_time_entries:
     auto_subscribe: true
     query: |
-      SELECT id, job_id, staff_id, clock_in, clock_out, hours, entry_type, cost_center_id, notes, created_at
+      SELECT id, job_id, staff_id, clock_in, clock_out, hours, entry_type, cost_center_id, notes, created_at, variation_id
       FROM time_entries
       WHERE job_id IN (SELECT id FROM jobs WHERE sync_tech IS NOT false AND id IN (SELECT job_id FROM job_assignments WHERE staff_id = auth.user_id()))
 

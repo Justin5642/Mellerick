@@ -16,6 +16,8 @@ import { unwrapRows, type SupabaseResult } from "./unwrap";
 export const OVER_HOURS_PO_COLUMNS = "id, job_id, total_hours";
 export const OVER_HOURS_LINE_COLUMNS = "id, po_id, name, allocated_hours";
 export const OVER_HOURS_ENTRY_COLUMNS = "job_id, cost_center_id, hours, clock_in, clock_out, entry_type";
+/** With 0120 (draft)'s variation_id, so variation time is left out of the allowed hours. Read first; the list above is the fallback. */
+export const OVER_HOURS_ENTRY_COLUMNS_WITH_VARIATION = `${OVER_HOURS_ENTRY_COLUMNS}, variation_id`;
 
 type Row = Record<string, unknown>;
 interface Query extends PromiseLike<SupabaseResult<Row[]>> {
@@ -42,6 +44,16 @@ async function readIn(table: string, columns: string, column: string, ids: reado
   return unwrapRows(res, `listJobHours ${table}`);
 }
 
+/** Work entries with variation_id (0120 (draft)), or without it on a database that lacks it — every entry is then the stage's. */
+async function readEntries(ids: readonly string[]): Promise<Row[]> {
+  try {
+    return await readIn("time_entries", OVER_HOURS_ENTRY_COLUMNS_WITH_VARIATION, "job_id", ids, true);
+  } catch (e) {
+    if (!/variation_id/.test(e instanceof Error ? e.message : String(e))) throw e;
+    return readIn("time_entries", OVER_HOURS_ENTRY_COLUMNS, "job_id", ids, true);
+  }
+}
+
 const text = (v: unknown) => (typeof v === "string" ? v : null);
 const hours = (v: unknown) => (typeof v === "number" || typeof v === "string" ? v : null);
 
@@ -52,7 +64,7 @@ export async function listJobHours(jobIds: readonly string[], nowMs = Date.now()
   try {
     const [pos, entryRows] = await Promise.all([
       readIn("purchase_orders_public", OVER_HOURS_PO_COLUMNS, "job_id", ids),
-      readIn("time_entries", OVER_HOURS_ENTRY_COLUMNS, "job_id", ids, true),
+      readEntries(ids),
     ]);
     const jobByPo = new Map<string, string>();
     for (const po of pos) {
@@ -75,7 +87,7 @@ export async function listJobHours(jobIds: readonly string[], nowMs = Date.now()
     const entries: OverHoursEntry[] = entryRows.flatMap((e) => {
       const jobId = text(e.job_id);
       return jobId
-        ? [{ job_id: jobId, cost_center_id: text(e.cost_center_id), hours: hours(e.hours), clock_in: text(e.clock_in), clock_out: text(e.clock_out), entry_type: text(e.entry_type) }]
+        ? [{ job_id: jobId, cost_center_id: text(e.cost_center_id), hours: hours(e.hours), clock_in: text(e.clock_in), clock_out: text(e.clock_out), entry_type: text(e.entry_type), variation_id: text(e.variation_id) }]
         : [];
     });
     return summariseJobHours({ pos: poRows, lines, entries, nowMs });

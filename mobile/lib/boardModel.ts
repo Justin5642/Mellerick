@@ -64,6 +64,8 @@ export type BoardJob = {
 /** A booking on the board. The cost centre's name rides along for the card. */
 export type BoardBooking = JobBooking & {
   cost_center_name?: string | null;
+  /** That stage's po_cost_centers.completed_at (0095) — the List tab's ✓. */
+  cost_center_completed_at?: string | null;
   /** A technician booked themselves by starting work (0118) — the "Added by technician" tag. */
   added_by_technician?: boolean;
   /** Self-started and still clocked on: drawn to lib/self-start-booking.ts runningBookingEnd(). */

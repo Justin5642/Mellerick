@@ -12,9 +12,12 @@ import {
   rowBelowMinimum,
   rowMarginPct,
   type EquipmentInput,
+  type LedgerVariation,
   type StaffCostProfileInput,
 } from "@/lib/job-ledger";
 import { ledgerMistakes, loadCostSources, loadMistakes } from "@/lib/mistakes-data";
+import { linkIndex, loadVariationLinks, withLinkedVariation, type VariationLink } from "@/lib/variation-links";
+import { variationName } from "@/lib/variation-time";
 
 // The job ledger card at the top of the Costing tab (admin only, like the rest
 // of the tab — labour cost comes from payroll data). Budget per cost centre
@@ -24,14 +27,28 @@ import { ledgerMistakes, loadCostSources, loadMistakes } from "@/lib/mistakes-da
 // own column, a SUBSET of cost: linked costs (time, expenses, POs… marked as
 // part of a mistake) are already in the other columns; only manual lines, less
 // money recovered, add to the cost. With no mistakes the column stays hidden.
+// Variations (0120 (draft)): time tagged to a variation (time_entries.variation_id) and
+// the plant, expenses and supplier POs the office linked to one
+// (variation_cost_links, read here) are costed on the variation's own row, at
+// its price, not on the stage — each record once.
 
 interface Props {
   jobId: string;
   purchaseOrders: { total_value: number | null; po_cost_centers?: { id: string; cost_centre_id?: string | null; allocated_amount: number | null; allocated_hours: number | null }[] }[];
-  timeEntries: { staff_id: string; hours: number | null; cost_center_id: string | null; entry_type?: string | null }[];
-  expenses: { amount: number | null; cost_center_id: string | null }[];
-  vendorOrders: { amount: number | null; cost_center_id: string | null; status: string }[];
-  equipmentUsage: { equipment_id: string; hours: number; loads?: number | null; cost_center_id?: string | null }[];
+  timeEntries: { staff_id: string; hours: number | null; cost_center_id: string | null; entry_type?: string | null; variation_id?: string | null }[];
+  expenses: { id?: string; amount: number | null; cost_center_id: string | null }[];
+  vendorOrders: { id?: string; amount: number | null; cost_center_id: string | null; status: string }[];
+  equipmentUsage: { id?: string; equipment_id: string; hours: number; loads?: number | null; cost_center_id?: string | null }[];
+  /** The job's variations as the office reads them (with their price). */
+  variations?: {
+    id: string;
+    status: string;
+    custom_name?: string | null;
+    variation_types?: { name: string | null } | null;
+    rate?: number | null;
+    quantity?: number | null;
+    total_amount?: number | null;
+  }[];
   equipmentOptions: EquipmentInput[];
   staffCostProfiles: StaffCostProfileInput[];
   minMarginPct: number;
@@ -39,8 +56,11 @@ interface Props {
 
 const money = (n: number) => `$${Math.round(n).toLocaleString("en-AU")}`;
 
-export function JobLedger({ jobId, purchaseOrders, timeEntries, expenses, vendorOrders, equipmentUsage, equipmentOptions, staffCostProfiles, minMarginPct }: Props) {
+export function JobLedger({ jobId, purchaseOrders, timeEntries, expenses, vendorOrders, equipmentUsage, equipmentOptions, staffCostProfiles, minMarginPct, variations = [] }: Props) {
   const [costCentres, setCostCentres] = useState<{ id: string; name: string }[]>([]);
+  const [links, setLinks] = useState<VariationLink[]>([]);
+  const [linksError, setLinksError] = useState(false);
+  const variationIds = variations.map((v) => v.id).join(",");
   const [mistakes, setMistakes] = useState<ReturnType<typeof ledgerMistakes>>([]);
   const [mistakesError, setMistakesError] = useState(false);
 
@@ -77,21 +97,47 @@ export function JobLedger({ jobId, purchaseOrders, timeEntries, expenses, vendor
     };
   }, [jobId]);
 
-  const ledger = useMemo(
-    () =>
-      computeJobLedger({
-        costCentres,
-        lines: purchaseOrders.flatMap((p) => p.po_cost_centers ?? []),
-        poTotal: purchaseOrders.reduce((s, p) => s + Number(p.total_value ?? 0), 0),
-        timeEntries,
-        ratesByStaff: loadedRatesByStaff(staffCostProfiles, equipmentOptions),
-        expenses,
-        supplierOrders: vendorOrders,
-        plant: plantCosts(equipmentUsage, equipmentOptions),
-        mistakes,
-      }),
-    [costCentres, purchaseOrders, timeEntries, staffCostProfiles, equipmentOptions, expenses, vendorOrders, equipmentUsage, mistakes]
-  );
+  // The office's cost links to this job's variations (0120 (draft)). Before 0120 (draft) there
+  // are none (the loader answers ready: false) and nothing changes.
+  useEffect(() => {
+    let live = true;
+    const ids = variationIds ? variationIds.split(",") : [];
+    void loadVariationLinks(createClient(), ids).then((r) => {
+      if (!live) return;
+      if (r.error) {
+        console.error("job ledger: variation links load failed:", r.error);
+        setLinksError(true);
+      }
+      setLinks(r.links);
+    });
+    return () => {
+      live = false;
+    };
+  }, [variationIds]);
+
+  const ledger = useMemo(() => {
+    const index = linkIndex(links);
+    const ledgerVariations: LedgerVariation[] = variations.map((v) => ({
+      id: v.id,
+      name: `Variation: ${variationName(v)}`,
+      status: v.status,
+      rate: v.rate,
+      quantity: v.quantity,
+      total_amount: v.total_amount,
+    }));
+    return computeJobLedger({
+      costCentres,
+      lines: purchaseOrders.flatMap((p) => p.po_cost_centers ?? []),
+      poTotal: purchaseOrders.reduce((s, p) => s + Number(p.total_value ?? 0), 0),
+      timeEntries,
+      ratesByStaff: loadedRatesByStaff(staffCostProfiles, equipmentOptions),
+      expenses: withLinkedVariation(expenses, "job_expense", index),
+      supplierOrders: withLinkedVariation(vendorOrders, "vendor_order", index),
+      plant: plantCosts(withLinkedVariation(equipmentUsage, "equipment_usage", index), equipmentOptions),
+      mistakes,
+      variations: ledgerVariations,
+    });
+  }, [costCentres, purchaseOrders, timeEntries, staffCostProfiles, equipmentOptions, expenses, vendorOrders, equipmentUsage, mistakes, links, variations]);
 
   if (ledger.budget === 0) {
     return (
@@ -115,7 +161,7 @@ export function JobLedger({ jobId, purchaseOrders, timeEntries, expenses, vendor
       <CardContent className="space-y-4">
         <div className="grid grid-cols-3 gap-3 text-center">
           <div className="rounded-lg bg-slate-50 p-3">
-            <p className="text-xs text-slate-500">Builder&apos;s price</p>
+            <p className="text-xs text-slate-500">{ledger.variationRevenue > 0 ? "Builder\u2019s price + variations" : "Builder\u2019s price"}</p>
             <p className="text-lg font-bold text-slate-900">{money(ledger.budget)}</p>
           </div>
           <div className="rounded-lg bg-slate-50 p-3">
@@ -163,6 +209,11 @@ export function JobLedger({ jobId, purchaseOrders, timeEntries, expenses, vendor
                   <tr key={r.key} className="text-right">
                     <td className="text-left py-2">
                       <span className="font-medium text-slate-800">{r.name}</span>
+                      {r.variation && !r.variation.priced && (
+                        <span className="block text-xs text-amber-600">
+                          {r.variation.status === "pending_approval" ? "Not priced yet — waiting for approval" : "No price"}
+                        </span>
+                      )}
                       {r.hours > 0 && (
                         <span className="block text-xs text-slate-400">
                           {r.hours.toFixed(1)}h{r.budgetHours > 0 ? ` of ${r.budgetHours.toFixed(1)}h` : ""}
@@ -211,6 +262,13 @@ export function JobLedger({ jobId, purchaseOrders, timeEntries, expenses, vendor
               are reviewed on the Purchase Orders tab.
             </p>
           )}
+          {ledger.variationCost > 0 || ledger.variationRevenue > 0 ? (
+            <p>
+              Variations: {money(ledger.variationRevenue)} approved, {money(ledger.variationCost)} of cost against them — time logged to a
+              variation and the costs linked to one are on its own row, not their stage&apos;s.
+            </p>
+          ) : null}
+          {linksError && <p className="text-amber-700">Couldn&apos;t load the costs linked to variations, so they show on their stages.</p>}
           {mistakesError && <p className="text-amber-700">Couldn&apos;t load this job&apos;s mistake costs, so they aren&apos;t in the cost above.</p>}
           {ledger.unpricedOrders > 0 && (
             <p>Supplier POs not priced yet aren&apos;t in the cost until their invoice amount is entered.</p>

@@ -19,6 +19,8 @@ import { summariseJobHours, type HoursByJob, type OverHoursEntry, type OverHours
 export const OVER_HOURS_PO_COLUMNS = "id, job_id, total_hours";
 export const OVER_HOURS_LINE_COLUMNS = "id, po_id, name, allocated_hours";
 export const OVER_HOURS_ENTRY_COLUMNS = "job_id, cost_center_id, hours, clock_in, clock_out, entry_type";
+/** With 0120 (draft)'s variation_id, so variation time is left out of the allowed hours. Read first; the list above is the fallback. */
+export const OVER_HOURS_ENTRY_COLUMNS_WITH_VARIATION = `${OVER_HOURS_ENTRY_COLUMNS}, variation_id`;
 
 /** Ids per `.in()` request: uuids are 36 characters, so ~4 kB of URL. */
 export const OVER_HOURS_CHUNK = 100;
@@ -65,6 +67,21 @@ async function readIn<T>(
 }
 
 /**
+ * Work entries for these jobs, with variation_id (0120 (draft)) — or, on a database
+ * without it (42703 / PGRST204 naming the column), without it: every entry is
+ * then the stage's, exactly as before.
+ */
+async function readEntries(client: OverHoursClient, ids: readonly string[]): Promise<OverHoursEntry[]> {
+  const travelOff = (q: Filterable<unknown>) => q.neq("entry_type", "travel");
+  try {
+    return await readIn<OverHoursEntry>(client, "time_entries", OVER_HOURS_ENTRY_COLUMNS_WITH_VARIATION, "job_id", ids, travelOff);
+  } catch (e) {
+    if (!/variation_id/.test(e instanceof Error ? e.message : String(e))) throw e;
+    return readIn<OverHoursEntry>(client, "time_entries", OVER_HOURS_ENTRY_COLUMNS, "job_id", ids, travelOff);
+  }
+}
+
+/**
  * Used and allowed hours for these jobs, or null when any read failed — the
  * board then shows no badges rather than a partial (and so wrong) answer.
  */
@@ -81,7 +98,7 @@ export async function loadJobHours(client: OverHoursClient, jobIds: readonly str
         ids,
       ),
       // time_entries has an id; the views above are ordered by theirs.
-      readIn<OverHoursEntry>(client, "time_entries", OVER_HOURS_ENTRY_COLUMNS, "job_id", ids, (q) => q.neq("entry_type", "travel")),
+      readEntries(client, ids),
     ]);
     const jobByPo = new Map<string, string>();
     for (const po of pos) if (po.id && po.job_id) jobByPo.set(po.id, po.job_id);

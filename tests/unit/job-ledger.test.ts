@@ -1,5 +1,14 @@
 import { describe, it, expect } from "vitest";
-import { computeJobLedger, belowMinimumMargin, plantCosts, type LedgerInputs } from "@/lib/job-ledger";
+import {
+  computeJobLedger,
+  belowMinimumMargin,
+  plantCosts,
+  costCentreTotals,
+  rowMarginPct,
+  variationRevenue,
+  variationRowKey,
+  type LedgerInputs,
+} from "@/lib/job-ledger";
 
 // The job ledger: budget from the builder's PO split, against cost so far,
 // per company cost centre (Stage 3).
@@ -111,7 +120,7 @@ describe("plantCosts", () => {
       [{ equipment_id: "digger", hours: 4 }, { equipment_id: "ute", hours: 4 }],
       [{ id: "digger", ...eq }, { id: "ute", assigned_to: "tech", ...eq }]
     );
-    expect(costs).toEqual([{ cost: 200, cost_center_id: null }]);
+    expect(costs).toEqual([{ cost: 200, cost_center_id: null, variation_id: null }]);
   });
 
   it("adds loads at the cost per load — even on an assigned truck — on the usage's line", () => {
@@ -119,7 +128,7 @@ describe("plantCosts", () => {
       [{ equipment_id: "truck", hours: 2, loads: 3, cost_center_id: "l-cart" }],
       [{ id: "truck", assigned_to: "driver", cost_per_load: 85, ...eq }]
     );
-    expect(costs).toEqual([{ cost: 255, cost_center_id: "l-cart" }]);
+    expect(costs).toEqual([{ cost: 255, cost_center_id: "l-cart", variation_id: null }]);
   });
 });
 
@@ -233,5 +242,100 @@ describe("computeJobLedger — mistake tracking (0119: don't double-count)", () 
   it("treats a 0115-only row (amount_ex_gst) as a manual line", () => {
     const l = computeJobLedger(base({ mistakes: [{ cost_center_id: "l-cart", amount_ex_gst: 400 }] }));
     expect(l.rows.find((r) => r.key === "transport")).toMatchObject({ mistakes: 400, mistakesAdded: 400, cost: 400 });
+  });
+});
+
+describe("computeJobLedger — time against variations (0120)", () => {
+  const rock = { id: "v-rock", name: "Hit rock", status: "approved", rate: 120, quantity: 6, total_amount: 720 };
+  const pit = { id: "v-pit", name: "Extra pit", status: "pending_approval", rate: null, quantity: 1, total_amount: null };
+
+  it("costs variation time on the variation's own row, not the stage's, and adds its price to the job's", () => {
+    const l = computeJobLedger(
+      base({
+        variations: [rock],
+        timeEntries: [
+          { staff_id: "tech", hours: 10, cost_center_id: "l-sewer", entry_type: "work" },
+          { staff_id: "tech", hours: 6, cost_center_id: "l-sewer", entry_type: "work", variation_id: "v-rock" },
+        ],
+      })
+    );
+    const bgd = l.rows.find((r) => r.key === "bgd")!;
+    const v = l.rows.find((r) => r.key === variationRowKey("v-rock"))!;
+    expect(bgd).toMatchObject({ hours: 10, labour: 800 });
+    expect(v).toMatchObject({ name: "Hit rock", budget: 720, hours: 6, labour: 480, cost: 480, variation: { id: "v-rock", priced: true } });
+    expect(rowMarginPct(v)).toBe(33.33);
+    expect(l.budget).toBe(12500 + 720);
+    expect(l.cost).toBe(1280);
+    expect(l.variationRevenue).toBe(720);
+    expect(l.variationCost).toBe(480);
+    // The builder's PO is still fully split — variation prices aren't part of it.
+    expect(l.unsplit).toBe(0);
+  });
+
+  it("moves LINKED plant, expenses and supplier POs to the variation, counting each once", () => {
+    const l = computeJobLedger(
+      base({
+        variations: [rock],
+        expenses: [{ amount: 400, cost_center_id: "l-storm", variation_id: "v-rock" }, { amount: 100, cost_center_id: "l-storm" }],
+        supplierOrders: [{ amount: 600, cost_center_id: "l-cart", status: "received", variation_id: "v-rock" }],
+        plant: [{ cost: 250, cost_center_id: "l-sewer", variation_id: "v-rock" }],
+      })
+    );
+    const v = l.rows.find((r) => r.key === variationRowKey("v-rock"))!;
+    expect(v).toMatchObject({ materials: 1000, plant: 250, cost: 1250 });
+    expect(l.rows.find((r) => r.key === "bgd")).toMatchObject({ materials: 100, plant: 0 });
+    expect(l.rows.find((r) => r.key === "transport")).toMatchObject({ materials: 0 });
+    expect(l.cost).toBe(1350);
+  });
+
+  it("a variation waiting for the office has cost but no price yet", () => {
+    const l = computeJobLedger(
+      base({ variations: [pit], timeEntries: [{ staff_id: "tech", hours: 2, cost_center_id: null, entry_type: "work", variation_id: "v-pit" }] })
+    );
+    const v = l.rows.find((r) => r.key === variationRowKey("v-pit"))!;
+    expect(v).toMatchObject({ budget: 0, cost: 160, variation: { priced: false } });
+    expect(l.budget).toBe(12500);
+  });
+
+  it("prices by rate × quantity when there is no total, and nothing for a rejected or pending variation", () => {
+    expect(variationRevenue({ status: "approved", rate: 95, quantity: 4, total_amount: null })).toBe(380);
+    expect(variationRevenue({ status: "auto_approved", rate: 28, quantity: 3, total_amount: 84 })).toBe(84);
+    expect(variationRevenue({ status: "pending_approval", rate: 95, quantity: 4, total_amount: 380 })).toBe(0);
+    expect(variationRevenue({ status: "rejected", rate: 95, quantity: 4, total_amount: 380 })).toBe(0);
+  });
+
+  it("leaves time on its stage when the variation is rejected or wasn't passed in", () => {
+    const l = computeJobLedger(
+      base({
+        variations: [{ ...rock, status: "rejected" }],
+        timeEntries: [
+          { staff_id: "tech", hours: 3, cost_center_id: "l-sewer", entry_type: "work", variation_id: "v-rock" },
+          { staff_id: "tech", hours: 1, cost_center_id: "l-sewer", entry_type: "work", variation_id: "v-unknown" },
+        ],
+      })
+    );
+    expect(l.rows.find((r) => r.key === "bgd")).toMatchObject({ hours: 4, labour: 320 });
+    expect(l.rows.some((r) => r.variation)).toBe(false);
+    expect(l.budget).toBe(12500);
+  });
+
+  it("puts variation rows after the cost centres and before travel", () => {
+    const l = computeJobLedger(
+      base({
+        variations: [rock],
+        timeEntries: [
+          { staff_id: "tech", hours: 1, cost_center_id: null, entry_type: "travel" },
+          { staff_id: "tech", hours: 1, cost_center_id: "l-sewer", entry_type: "work", variation_id: "v-rock" },
+        ],
+      })
+    );
+    expect(l.rows.map((r) => r.key)).toEqual(["bgd", "transport", variationRowKey("v-rock"), "travel"]);
+  });
+
+  it("adds every job's variation rows into one Variations total across jobs", () => {
+    const a = computeJobLedger(base({ variations: [rock] }));
+    const b = computeJobLedger(base({ variations: [{ ...rock, id: "v-2", name: "Other", total_amount: 280 }] }));
+    const v = costCentreTotals([a, b]).find((t) => t.key === "variations")!;
+    expect(v).toMatchObject({ name: "Variations", budget: 1000, cost: 0 });
   });
 });

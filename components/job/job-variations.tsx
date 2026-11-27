@@ -14,6 +14,16 @@ import { Plus, Trash2, Zap, Clock3, CheckCircle2, XCircle, ImageIcon, Paperclip 
 import { formatDate } from "@/lib/date";
 import { loadTechVariations } from "@/lib/variations-public";
 import { isCustomVariation, variationQtyText } from "@/lib/variation-qty";
+import {
+  hourlyQuantity,
+  hoursByVariation,
+  isHourlyVariation,
+  isMissingVariationColumn,
+  variationHoursText,
+  type VariationTimeEntry,
+} from "@/lib/variation-time";
+import { loadVariationLinks, type VariationLink } from "@/lib/variation-links";
+import { VariationCosts, type LinkableCost } from "@/components/job/variation-costs";
 
 interface VariationType {
   id: string;
@@ -41,6 +51,8 @@ interface Variation {
   logged_at: string | null;
   admin_notes: string | null;
   invoice_id: string | null;
+  /** Charged by the hour: the office's call (0120 (draft)); null/absent = by the unit. */
+  is_hourly?: boolean | null;
   variation_types?: { name: string } | null;
   profiles?: { full_name: string } | null;
 }
@@ -60,6 +72,8 @@ export function JobVariations({
   currentUserId,
   onUpdate,
   highlightVariationId,
+  timeEntries = [],
+  linkableCosts = [],
 }: {
   jobId: string;
   variations: Variation[];
@@ -74,6 +88,10 @@ export function JobVariations({
   currentUserId: string;
   onUpdate: (v: Variation[]) => void;
   highlightVariationId?: string | null;
+  /** The job's time entries (as the viewer reads them) — each variation's logged hours (0120 (draft)). */
+  timeEntries?: VariationTimeEntry[];
+  /** Office: the job's plant, expenses and supplier POs, to link to a variation (0120 (draft)). */
+  linkableCosts?: LinkableCost[];
 }) {
   const supabase = createClient();
   const [variations, setVariations] = useState<Variation[]>(initial);
@@ -98,6 +116,63 @@ export function JobVariations({
   }, [highlightVariationId]);
 
   const selectedType = variationTypes?.find((t) => t.id === typeId);
+
+  // Time logged to each variation (0120 (draft)). Hourly variations take their quantity
+  // from it; every card shows it.
+  const hoursBy = hoursByVariation(timeEntries);
+  const variationTimeReady = timeEntries.some((e) => "variation_id" in e);
+
+  // The office's cost links (variation_cost_links, 0120 (draft)). ready: false = the
+  // table isn't there yet; the section then hides.
+  const [links, setLinks] = useState<VariationLink[]>([]);
+  const [linksReady, setLinksReady] = useState(false);
+  const variationIdList = variations.map((v) => v.id).join(",");
+  useEffect(() => {
+    if (!canPrice) return;
+    let live = true;
+    void loadVariationLinks(supabase, variationIdList ? variationIdList.split(",") : []).then((r) => {
+      if (!live) return;
+      setLinksReady(r.ready && !r.error);
+      setLinks(r.links);
+    });
+    return () => {
+      live = false;
+    };
+    // supabase is a fresh browser client each render; the ids are the trigger.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [canPrice, variationIdList]);
+
+  async function setHourly(v: Variation, hourly: boolean) {
+    const { data, error } = await supabase
+      .from("job_variations")
+      .update({ is_hourly: hourly })
+      .eq("id", v.id)
+      .select("*, variation_types(name), profiles!job_variations_logged_by_fkey(full_name)")
+      .single();
+    if (error || !data) {
+      toast.error(isMissingVariationColumn(error) ? "Hourly variations aren't switched on yet (migration 0120)." : "Couldn't change that — try again.");
+      return;
+    }
+    set(variations.map((x) => (x.id === v.id ? (data as any) : x)));
+  }
+
+  /** An approved hourly variation's quantity brought up to the hours now logged (price follows the rate). */
+  async function applyLoggedHours(v: Variation) {
+    const qty = hourlyQuantity(hoursBy[v.id]?.hours ?? 0);
+    const rate = Number(v.rate ?? 0);
+    const { data, error } = await supabase
+      .from("job_variations")
+      .update({ quantity: qty, total_amount: Math.round(rate * qty * 100) / 100 })
+      .eq("id", v.id)
+      .select("*, variation_types(name), profiles!job_variations_logged_by_fkey(full_name)")
+      .single();
+    if (error || !data) {
+      toast.error("Couldn't update the quantity — try again.");
+      return;
+    }
+    set(variations.map((x) => (x.id === v.id ? (data as any) : x)));
+    toast.success(`Quantity set to ${qty} h`);
+  }
 
   function set(updated: Variation[]) {
     setVariations(updated);
@@ -194,15 +269,19 @@ export function JobVariations({
   }
 
   async function priceAndApprove(v: Variation) {
-    const p = pricing[v.id] ?? { rate: v.rate?.toString() ?? "", quantity: v.quantity.toString(), notes: "" };
+    const hourly = isHourlyVariation(v);
+    const defaultQty = hourly && (hoursBy[v.id]?.hours ?? 0) > 0 ? hourlyQuantity(hoursBy[v.id].hours) : v.quantity;
+    const p = pricing[v.id] ?? { rate: v.rate?.toString() ?? "", quantity: "", notes: "" };
     const rate = parseFloat(p.rate) || 0;
-    const qty = isCustomVariation(v) ? 1 : parseFloat(p.quantity) || v.quantity;
+    // A lump-sum custom variation is quantity 1; an hourly one is its hours
+    // (prefilled from the time logged to it, editable).
+    const qty = isCustomVariation(v) && !hourly ? 1 : parseFloat(p.quantity) || defaultQty;
     const { data, error } = await supabase
       .from("job_variations")
       .update({
         rate,
         quantity: qty,
-        total_amount: rate * qty,
+        total_amount: Math.round(rate * qty * 100) / 100,
         status: "approved",
         approved_by: currentUserId,
         approved_at: new Date().toISOString(),
@@ -221,6 +300,15 @@ export function JobVariations({
 
   async function reject(v: Variation) {
     const notes = pricing[v.id]?.notes ?? "";
+    // 0120 (draft) gives a rejected variation's time back to its stage and drops its cost links.
+    const logged = hoursBy[v.id];
+    if (
+      logged &&
+      (logged.hours > 0 || logged.running > 0) &&
+      !window.confirm(`${variationHoursText(logged)} against this variation. Rejecting it moves that time back to the stage (and unlinks its costs). Reject?`)
+    ) {
+      return;
+    }
     const { data, error } = await supabase
       .from("job_variations")
       .update({ status: "rejected", admin_notes: notes || null, approved_by: currentUserId, approved_at: new Date().toISOString() })
@@ -320,6 +408,12 @@ export function JobVariations({
                     </p>
                   )}
                   {v.admin_notes && <p className="text-xs text-slate-500 mt-1 italic">Office note: {v.admin_notes}</p>}
+                  {variationTimeReady && (
+                    <p className={`text-xs mt-1 ${hoursBy[v.id] ? "text-amber-700 font-medium" : "text-slate-400"}`}>
+                      {variationHoursText(hoursBy[v.id])}
+                      {isHourlyVariation(v) ? " · charged by the hour" : ""}
+                    </p>
+                  )}
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
                   <span className={`flex items-center gap-1.5 text-xs font-medium px-2.5 py-1 rounded-full ${s.bg} ${s.text}`}>
@@ -341,20 +435,50 @@ export function JobVariations({
                 </div>
               </div>
 
+              {canPrice && variationTimeReady && v.status !== "rejected" && (
+                <div className="flex flex-wrap items-center gap-3 text-xs text-slate-600">
+                  <label className="flex items-center gap-1.5">
+                    <input type="checkbox" checked={isHourlyVariation(v)} onChange={(e) => setHourly(v, e.target.checked)} />
+                    Charged by the hour (quantity = hours logged)
+                  </label>
+                  {(v.status === "approved" || v.status === "auto_approved") &&
+                    isHourlyVariation(v) &&
+                    !v.invoice_id &&
+                    v.rate != null &&
+                    hoursBy[v.id] &&
+                    hourlyQuantity(hoursBy[v.id].hours) !== Number(v.quantity) && (
+                      <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => applyLoggedHours(v)}>
+                        Set quantity to {hourlyQuantity(hoursBy[v.id].hours)} h logged
+                      </Button>
+                    )}
+                </div>
+              )}
+
+              {canPrice && linksReady && (
+                <VariationCosts
+                  variationId={v.id}
+                  rejected={v.status === "rejected"}
+                  links={links}
+                  candidates={linkableCosts}
+                  onChange={setLinks}
+                />
+              )}
+
               {canPrice && v.status === "pending_approval" && (
-                <div className={`border-t pt-3 grid ${isCustomVariation(v) ? "grid-cols-2" : "grid-cols-3"} gap-2 items-end`}>
-                  {!isCustomVariation(v) && (
+                <div className={`border-t pt-3 grid ${isCustomVariation(v) && !isHourlyVariation(v) ? "grid-cols-2" : "grid-cols-3"} gap-2 items-end`}>
+                  {(!isCustomVariation(v) || isHourlyVariation(v)) && (
                     <div className="space-y-1">
-                      <Label className="text-xs">Quantity</Label>
+                      <Label className="text-xs">{isHourlyVariation(v) ? "Hours" : "Quantity"}</Label>
                       <Input
                         className="h-8 text-sm"
-                        defaultValue={v.quantity}
+                        key={`${v.id}-${isHourlyVariation(v) ? hoursBy[v.id]?.hours ?? 0 : "q"}`}
+                        defaultValue={isHourlyVariation(v) && (hoursBy[v.id]?.hours ?? 0) > 0 ? hourlyQuantity(hoursBy[v.id].hours) : v.quantity}
                         onChange={(e) => setPricing((p) => ({ ...p, [v.id]: { ...(p[v.id] ?? { rate: "", quantity: "", notes: "" }), quantity: e.target.value } }))}
                       />
                     </div>
                   )}
                   <div className="space-y-1">
-                    <Label className="text-xs">{isCustomVariation(v) ? "Price ($ ex GST)" : "Rate ($)"}</Label>
+                    <Label className="text-xs">{isHourlyVariation(v) ? "Rate ($/h ex GST)" : isCustomVariation(v) ? "Price ($ ex GST)" : "Rate ($)"}</Label>
                     <Input
                       className="h-8 text-sm"
                       type="number"

@@ -727,7 +727,8 @@ export function JobPO({ jobId, jobNumber, customerName, site, pos: initialPos, t
   }
   const hoursByCostCenter: Record<string, number> = {};
   for (const t of timeEntries) {
-    if (!t.cost_center_id || t.entry_type === "travel") continue;
+    // Variation time (0120 (draft)) is priced on its variation, not the stage's hours.
+    if (!t.cost_center_id || t.entry_type === "travel" || (t as { variation_id?: string | null }).variation_id) continue;
     hoursByCostCenter[t.cost_center_id] = (hoursByCostCenter[t.cost_center_id] ?? 0) + (Number(t.hours) || 0);
   }
 

@@ -27,6 +27,8 @@ export interface OverHoursEntry {
   clock_in: string | null;
   clock_out: string | null;
   entry_type?: string | null;
+  /** Variation time (0120 (draft)): never counts toward the stage's or the job's allowed hours. */
+  variation_id?: string | null;
 }
 
 export interface LineHours {
@@ -72,9 +74,9 @@ export function formatOverHours(hours: number): string {
   return `${roundHours(hours)} h`;
 }
 
-/** The hours one entry counts for: travel 0, closed its hours, open the time since clock_in. */
+/** The hours one entry counts for: travel and variation time 0, closed its hours, open the time since clock_in. */
 export function entryUsedHours(entry: OverHoursEntry, nowMs: number): number {
-  if (entry.entry_type === "travel") return 0;
+  if (entry.entry_type === "travel" || entry.variation_id) return 0;
   if (entry.clock_out) return Math.max(0, num(entry.hours));
   if (!entry.clock_in) return 0;
   const live = (nowMs - new Date(entry.clock_in).getTime()) / 3_600_000;

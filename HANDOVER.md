@@ -329,6 +329,12 @@ and 0096 then refused bookings for the other cost centres.
   complete") or the office's PO tab.
 - **Not changed:** the office's status drop-down itself, the PO tab's stage
   controls.
+- **Office can complete / reopen a stage from the PO tab (fixed 27 Nov 2026).**
+  `POST …/stages/[stageId]/complete` used `requireUser`, which leaves the role
+  null, so office/admin not on the job's crew got "Only the crew on this job
+  can complete its stages" (Emma: couldn't mark Brodie's Camera Inspection
+  stage complete for him). It now uses `requireRole(admin, office,
+  technician)`; the test mocks only `requireRole`, so a regression fails.
 
 **Mistake costs per cost centre (23 Nov 2026; migration `0115` applied 2026-11-25).**
 Justin: "We also need a way of tracking the expense of mistakes in each cost
@@ -568,8 +574,9 @@ have gone over the allocated time."
   "already booked then" clash prompts; unlike before on the phone, neither
   side flags a completed job's booking **Needs reassigning** (it can't be
   reassigned) — the phone's `reassign` now leaves completed jobs out too. The
-  List tab stays open work only (the phone's List never had completed jobs);
-  the header's "N scheduled jobs" counts open jobs.
+  web List tab was open work only until 27 Nov 2026 (see "List tab shows
+  what's done", below; the phone's List still has no completed jobs); the
+  header's "N scheduled jobs" counts open jobs.
 - **The 1,000-row cap.** PostgREST answers at most 1000 rows per request
   (`max_rows`) without an error, so past 1000 the two schedules silently
   dropped DIFFERENT rows. Web: the board's jobs reads (open and completed, with
@@ -621,6 +628,31 @@ have gone over the allocated time."
   over-hours tags (a line and a whole-job alert, the completed job included)
   and the header list. Phone not yet checked on a device; it reaches phones
   with the next build (no native module).
+
+**List tab shows what's done: completed jobs and stage ticks (27 Nov 2026; no migration, no stream change; web only).**
+Emma: the office wants to see at a glance on the Schedule page's **List** tab
+whether each job has been completed, without clicking into it.
+- **Completed jobs listed** (`components/schedule/team-schedule-view.tsx`,
+  rule `listSection` in `lib/schedule-list.ts`): a COMPLETED job (never
+  cancelled) whose bookings fall on today or a later day is now in Today /
+  Upcoming beside the open work — greyed, with a green **"✓ Completed"**
+  pill instead of the status pill. Completed jobs booked only on past days
+  stay off the list (they're on the Week/Day board). Open work is listed as
+  before (past-dated open jobs under Upcoming). Today is now sorted by
+  today's start time; Upcoming by first booked day, as before. Data: the
+  completed jobs the page already loads for the board.
+- **Stage ticks per row** (`listStages` / `listStagesLabel`): under each row,
+  the stages (PO lines, `po_cost_centers`) of that day's bookings — Today:
+  bookings on today; Upcoming: bookings from today on (all, for past-dated
+  open work) — each once, with a green ✓ when its `completed_at` (0095) is
+  set: "Sewer ✓ · Stormwater". The page's cost-centre name read
+  (`app/dashboard/schedule/page.tsx`, chunked, from the money-free
+  `po_cost_centers_public` view, which has `completed_at` since 0118) now
+  selects `id, name, completed_at` — never an amount — and retries names only
+  if the view lacks the column. `BoardBooking` gained the optional
+  `cost_center_completed_at` (mirrored at `mobile/lib/boardModel.ts`; the
+  phone doesn't use it). Tests `tests/unit/schedule-list.test.ts`.
+- Not checked in a browser.
 
 **Web board drawn like the phone's schedule, and a hover card with the job's details (25 Nov 2026; no migration, no stream change; web only).**
 Justin: "Confirm that the web and the mobile app have the same looking
@@ -2423,6 +2455,192 @@ Rework cost centre (tag only); callbacks are a mistake on the original job
   is applied: the PO tab shows the 0115 card, the crew card hides, Log mistake
   says it isn't switched on, the report and ledgers use 0115's amounts.
 
+**Reports → Time log (27 Nov 2026; no migration, no stream change; web only).**
+Office: "Time log – have what time log was for what job type (e.g. Brodie –
+Sewer), date, hours on site. Need all details." `app/dashboard/reports/time-log`
+(office/admin — technicians get "for the office", as the other office
+reports), linked from the Reports header. One row per time entry whose
+clock-on falls in the range (Melbourne days): date, staff, job # + title
+(link), site street/suburb, cost centre / stage (`po_cost_centers` **id, name
+only**), variation name when `variation_id` is set (0120 draft — read with it,
+retried without on 42703/PGRST204), work/travel, clock on / off ("still on",
+hours live to now), hours, on/off-site flag for clock-on and clock-off
+(`lib/clock-location.ts` against the site pin and fence; blank with no fix, no
+pin, or travel), auto/manual, edited by, notes. Filters in the query string:
+`from`/`to` (default this week Mon–Sun), `staff`, `job` (number), `type`.
+Totals per staff member (work/travel split) and per cost centre (travel and
+each variation on their own line). **Download CSV** of the filtered rows
+(built on the server, saved in the browser). **Hours only** — `time_entries`
+is read through its column grants with a named list (never `rate_override`),
+as the caller (RLS), paged with `fetchAllRows`, lookups `.in()` in chunks of
+100. Rules `lib/time-log-report.ts`, tested in
+`tests/unit/time-log-report.test.ts` (incl. no money-named key or CSV column).
+
+**Time against variations (25 Nov 2026; migration `0120` applied 2026-11-27, gate test passed; PowerSync streams to redeploy AFTER it).**
+Justin: a stage's allowed hours (sewer and stormwater, 16 h) blow out when the
+crew hit rock. That extra time must go against a VARIATION, so the variation
+can be costed and the stage's allowed hours stay a fair measure. His
+decisions: (1) charging is mixed and the office decides each one — an hourly
+variation (its unit is an hour unit, or the office ticks "Charged by the
+hour") takes its quantity from the hours logged to it, others are per m³ or an
+agreed price; pricing and approval stay office-only (0028); (2) the crew tag
+the time on site, the office checks; (3) variation time does NOT count toward
+the stage's allowed hours.
+- **Migration `0120_variation_time.sql`:**
+  - `time_entries.variation_id uuid` → `job_variations(id) on delete set null`,
+    partial index, **granted explicitly** (`grant select (variation_id)` —
+    column-level grants, 0045/0092). Not money; in the technicians' stream.
+  - `time_entries_variation_guard` (BEFORE INSERT/UPDATE OF variation_id,
+    job_id, entry_type; SECURITY DEFINER — the crew can't read
+    job_variations): the variation must be on the SAME job; travel can't be
+    tagged; tagging onto a REJECTED variation is refused (check_violation with
+    sentences mapped by `variationTimeRefusal`). Who may edit which entry is
+    the existing RLS: own entries for a technician, anyone's for office/admin
+    (0030); billed entries stay office-only (0098).
+  - `job_variations.is_hourly boolean` (null = by the unit). A trigger ignores
+    anyone but office/admin setting it (null on a technician's insert, kept on
+    update). The office stream is `job_variations.*`; `is_hourly` added to
+    `mobile/lib/powersync/schema.ts` by hand; the tech stream and
+    `job_variations_public` are unchanged.
+  - **Link design — `variation_cost_links`** (modelled on 0119's
+    `mistake_cost_lines`, links only): `variation_id` (cascade), `source`
+    (`job_expense` / `vendor_order` / `equipment_usage`), `source_id`,
+    `created_by` (forced), unique `(source, source_id)` (a cost belongs to at
+    most one variation), guard: the record is on the variation's job and the
+    variation isn't rejected; deleting the record deletes its link. **No
+    amount stored** — costed from the source the way the ledger costs it, so
+    it can't drift. One FOR ALL office/admin policy (policies dropped by
+    enumeration first), granted to authenticated + service_role, revoked from
+    anon, not in the powersync publication — all asserted. No money column.
+  - **Closes an open time-entries rule (found 26 Nov 2026 by this gate test
+    on production).** Production's `time_entries` had an out-of-band policy
+    "Authenticated users can manage time entries" (FOR ALL, `auth.role() =
+    'authenticated'`) instead of the baseline's own-rows policy — any
+    technician could edit, move or delete anyone's time. 0120 drops every
+    PERMISSIVE policy on the table by enumeration and creates: read own, or
+    any entry on a job you can manage (`user_can_manage_job` — the
+    `tech_time_entries` stream's scope), office/admin everything; insert /
+    update / delete own only; office/admin all (0030). Asserted (exactly 5
+    permissive policies, no open write, no `auth.role()` policy). Technicians
+    no longer read time on jobs they aren't on.
+  - `job_variations_after_reject`: when the office REJECTS a variation its
+    time goes back to the stage (`variation_id` cleared) and its links are
+    removed, so the ledger, over-hours and the scoreboards agree.
+  - **Checked** on a scratch Postgres 16 (full chain 0000–0119 + CI seed,
+    `/var/tmp/pg120`): 0120 applies twice cleanly; the gate test
+    `supabase/tests/0120_variation_time_test.sql` passes (23 scenarios) and
+    fails naming scenarios with the guard trigger disabled (3), with a
+    permissive SELECT policy on the link table (1), and with the reject
+    trigger disabled (2); the money sweep stays intact. Not tried against
+    PostgREST, in a browser or on a device.
+- **Rules** `lib/variation-time.ts` (hours and names only — the phone runs
+  them), mirrored byte for byte from the first export at
+  `mobile/lib/variationTime.ts` (`tests/unit/variation-time-mirror.test.ts`,
+  which also forbids money words): `isHourlyVariation`, `openVariations` (not
+  rejected), `hoursByVariation`, `hourlyQuantity`, `planClockSwitch` (same
+  instant, never at/before the entry's start), `variationTimeRefusal`,
+  `isMissingVariationColumn`. Tests `tests/unit/variation-time.test.ts`.
+- **Allowed hours leave variation time out:** `lib/over-hours.ts`
+  (`entryUsedHours`, mirrored), its readers (`lib/over-hours-data.ts`,
+  `mobile/lib/data/reads/overHours.ts` — read `variation_id`, fall back
+  without it), the hours scoreboard (`lib/hours-scoreboard.ts`, the phone's
+  `reads/hoursScoreboard.ts` — local SQL `variation_id IS NULL`, remote with a
+  fallback), the PO tab's hours per stage and its job total
+  (`job-po.tsx`, `job-detail-client.tsx`). **Hours to invoice**
+  (`lib/invoice-hours.ts loadJobHours`, approvals and "Apply hourly rate")
+  also leave it out — it is billed through its variation, so billing it as
+  hours too would charge it twice.
+- **Ledger** (`lib/job-ledger.ts`): each variation (not rejected) gets its own
+  row (`variationRowKey`, after the cost centres, before travel): budget =
+  its price — approved / auto-approved only, `total_amount`, else rate ×
+  quantity (`variationRevenue`; pending = cost with "Not priced yet");
+  cost = its tagged time (hours × loaded rate, as labour) + its LINKED
+  expenses / supplier POs / plant. **Each record is costed once**: tagged
+  time and linked costs go to the variation row INSTEAD of their stage line.
+  The job's price (`budget`) = builder's POs + approved variations
+  (`variationRevenue`); `unsplit` still compares the builder's PO value with
+  its split only; `variationCost` is the variation rows' cost. Anything tagged
+  to a rejected or unknown variation stays on its stage. `costCentreTotals`
+  folds every job's variation rows into one "Variations" row. Mistakes are
+  unchanged (still by the mistake's PO line). Tests in
+  `tests/unit/job-ledger.test.ts`. Shown in the Costing tab's Job Ledger
+  (admin; reads the links itself, `lib/variation-links.ts`) and Reports → Job
+  margins (admin; reads time with `variation_id`, the variations and the
+  links).
+- **Web Time tab** (`components/job/job-time.tsx`): each work entry gets a
+  "Stage work / Variation: …" picker (own entries; office/admin any) and an
+  amber "Variation time · not counted in the stage's allowed hours" line. The
+  job page reads time with `variation_id` (`withVariationFallback`,
+  `TIME_ENTRY_SELECT_WITH_STAFF_AND_VARIATION` in `lib/time-entry-columns.ts`,
+  mirrored on the phone; the plain list stays the fallback — the optional
+  column is pinned by `tests/unit/time-entry-columns.test.ts`). The web's own
+  Clock In is unchanged (no variation picker there yet).
+- **Web Variations tab, office** (`components/job/job-variations.tsx`): every
+  card shows "6.5 h logged (1 still clocked on)"; "Charged by the hour"
+  tick box (`is_hourly`); an hourly pending variation's approval form shows
+  **Hours** prefilled from the logged hours (editable) and "Rate ($/h)"; an
+  approved hourly one not yet invoiced offers "Set quantity to N h logged"
+  (re-prices at its rate); rejecting one with time asks first ("moves that
+  time back to the stage"); **Costs linked to this variation**
+  (`components/job/variation-costs.tsx`): link the job's plant, expenses and
+  supplier POs (each only once), unlink. Before 0120 the hours line, tick box
+  and links hide.
+- **Phone** (reaches phones with the next build; no native module):
+  - **Clock-on picker** (`mobile/components/job/clock-on-stage-picker.tsx`,
+    now `useClockOnTarget`, used by the Time tab and the Today card): besides
+    the stage rule (`manualClockOnCostCentre`, unchanged) it lists the job's
+    open variations (`mobile/lib/data/reads/clockVariations.ts` — the
+    money-free technician projection, local-first, so offline too) and
+    "+ New variation (e.g. hit rock)": a name, details and a camera photo,
+    logged exactly like the Variations tab's custom one (no rate, no amount,
+    office prices it). The sheet shows when it must ask for the stage, when
+    the job has open variations, or from "Clock on to a variation…".
+  - **Switch** while clocked on: "Switch to a variation (e.g. hit rock)" /
+    "Switch variation / back to the stage" — `useTimeClock.switchClock` →
+    `TimeEntriesRepository.switchClock`: clock-off then clock-on at the same
+    instant, the clock-on `dependsOn` the clock-off (0090's one open entry per
+    job). A NEW variation is three chained ops: clock-off → the variation's
+    insert (waits for it) → clock-on (waits for the insert — its foreign
+    key). All outbox, so offline works.
+  - **Time tab**: each work entry has a "Stage work · move onto a variation…"
+    picker (`TimeEntriesRepository.setVariation`, a one-column update; own
+    entries for a technician, anyone's for office/admin). The controls show
+    once an online read this session found the column (remembered for the
+    session, so they keep working offline).
+  - `VariationsRepository.submitVariation` now returns its op id and takes a
+    `dependsOn`. Tests `mobile/lib/data/repositories/timeEntriesVariation.test.ts`.
+- **Stream change:** `tech_time_entries` lists `variation_id` (an id — no
+  money; `sync-streams-contract.test.ts` passes); `office_time_entries` is
+  `time_entries.*`. Added to `mobile/lib/powersync/schema.ts` by hand. Not
+  validated with `@powersync/service-sync-rules` here.
+- **Before 0120 is applied nothing breaks:** every reader that names
+  `variation_id` retries without it on 42703 / PGRST204 and treats every
+  entry as the stage's (job page, phone Time tab, over-hours, scoreboard,
+  hours to invoice, Job margins); the link table reads as "none" (42P01 /
+  PGRST205); the variation pickers, tick box, hours and links hide; the
+  phone's gateway drops `time_entries.variation_id` from queued writes
+  (`mobile/lib/data/optionalColumns.ts`) — a clock-on still lands as stage
+  time, a move has nothing left to write and is done.
+- **Apply / deploy order:** paste `supabase/migrations/0120_variation_time.sql`
+  → paste `supabase/tests/0120_variation_time_test.sql` (needs an active
+  technician and an active office/admin), trust only `0120 PASSED` → change
+  0120's STATUS line to applied, add the ledger row
+  (`('0120','variation_time')`), regenerate types (`lib/database.types.ts`
+  has `time_entries.variation_id`, `job_variations.is_hourly` and
+  `variation_cost_links` by hand) → **redeploy the PowerSync streams**
+  (`docs/powersync-deploy.md` — `tech_time_entries` names `variation_id`,
+  so not before 0120) → deploy the web → ship the phone build.
+- **Not done / to know:** the web job page's own Clock In has no variation
+  choice (tag the entry afterwards, or use the phone); the phone's office
+  screens don't show variation hours or links (the office uses the web);
+  a linked supplier PO / expense is the WHOLE record; a cost can be both
+  part of a mistake and linked to a variation (the ledger moves it to the
+  variation; the mistake still reports it as linked); "Set quantity to N h
+  logged" isn't automatic — the office presses it; rejecting a variation
+  moves its time back to the stage for good (re-tag by hand if it is
+  reinstated); the over-hours alert and scoreboards drop variation time even
+  while the variation waits for approval.
+
 ---
 
 ## 2. The one rule that must never break
@@ -2453,7 +2671,8 @@ windows) — all 16 technician-visible streams are money-free:
   these rules redeployed 2026-10-14)
 - `tech_job_variations` — omits `rate`, `total_amount`, `admin_notes`
 - `variation_types` — omits the preset `rate`
-- `tech_time_entries` — omits `rate`
+- `tech_time_entries` — omits `rate`; lists `variation_id` (0120, applied 2026-11-27 —
+  the variation the time is for, an id, not money; redeploy after applying)
 - `profiles`, `sync_horizon`, `tech_customers` / `backflow_customers`,
   `tech_sites` / `backflow_sites`, `backflow_devices`, `backflow_tests`,
   `tech_job_assignments`, `tech_job_photos`, `tech_job_notes`,
@@ -3300,6 +3519,7 @@ a shippable release.
 | **Leave on the schedule: record 0112** | Justin | `0112` applied 2026-11-19 (gate test passed). Ledger row: `insert into supabase_migrations.schema_migrations (version,name) values ('0112','schedule_leave') on conflict do nothing;` No PowerSync redeploy. Who sees the leave type defaults to office + admin; change it in Settings → Leave on the schedule. Part days: add From/To times on the Leave Log entry. |
 | **Komtrax: sync and link machines** | Justin | `0113` applied 2026-11-20 (gate test passed). Ledger row: `insert into supabase_migrations.schema_migrations (version,name) values ('0113','komtrax') on conflict do nothing;` Admin → Fleet → Komtrax machines → **Sync Komtrax**, then link any Komatsu machine not linked by serial (or put its serial in the fleet item's notes). `KOMTRAX_USERNAME` / `KOMTRAX_PASSWORD` are in Vercel Production. |
 | **Technicians start work themselves: record 0118** | Justin | `0118` applied 2026-11-25 (gate test passed). Ledger row if not yet run: `insert into supabase_migrations.schema_migrations (version,name) values ('0118','self_start_bookings') on conflict do nothing;` Deploy the web, then the phone build. No PowerSync redeploy. |
+| **Time against variations: redeploy PowerSync (0120 applied 2026-11-27)** | Justin | `0120` applied (gate test passed). Ledger row if not yet run: `insert into supabase_migrations.schema_migrations (version,name) values ('0120','variation_time') on conflict do nothing;` Redeploy the PowerSync streams (`tech_time_entries` names `variation_id`), then the phone build. Office: tick "Charged by the hour" on hourly variations. |
 | **Cost of mistakes: record 0119** | Justin | `0119` applied 2026-11-25 (gate test passed). Ledger row if not yet run: `insert into supabase_migrations.schema_migrations (version,name) values ('0119','mistake_tracking') on conflict do nothing;` Deploy the web, then the phone build. No PowerSync redeploy. Check Settings → Mistake categories. |
 | **Record the 24–25 Nov migrations; redeploy PowerSync** | Justin | The catch-up (0067 + 0070 + 0117, which did 0064–0066's job) and 0114, 0116, 0115 are applied and confirmed by a read-only check (nothing from 0060–0116 missing). Ledger rows: `insert into supabase_migrations.schema_migrations (version,name) values ('0064','restrict_site_writes_to_office_admin'),('0065','office_only_job_documents'),('0066','backflow_certificate_storage_policies'),('0067','job_todo_list'),('0070','page_load_indexes'),('0114','customer_address_doc_folders'),('0115','job_mistakes'),('0116','job_folders'),('0117','catch_up_sites_and_office_only_documents') on conflict do nothing;` Then **redeploy the PowerSync streams** (`tech_job_photos` lists `folder`; docs/powersync-deploy.md), then the phone build. Run `scripts/audit-job-documents.mjs` to mark priced Simpro attachments office-only. Add billing addresses to customers. |
 | **Maestro flow 02** | Avi | Needs `ADMIN_EMAIL` / `ADMIN_PASSWORD` in the environment. The login subflow deliberately skips when a session already exists, so a password never passes through a script — which is why flows 01/03/04 could be run and 02 could not. |
@@ -3671,6 +3891,7 @@ compilation. The same commit builds fine in GitHub Actions, which does set them.
 | `lib/monitoring/`, `instrumentation*.ts` | Web error monitoring (Sentry) and its privacy scrubber — §12 |
 | `mobile/lib/monitoring/` | Mobile crash / dead-letter reporting (Sentry) and its scrubber — §12 |
 | `supabase/migrations/` | Schema, applied in filename order |
+| `scripts/check-query-plans.sql` | Read-only EXPLAIN (ANALYZE, BUFFERS) of the three busiest dashboard reads (recent jobs, a staff member's work time, a job's photos), with the indexes each should use and when to revisit a `(staff_id, clock_in)` index on `time_entries` (not added: not needed at today's size, and it would slow every clock-on/off) |
 | `tests/unit/`, `tests/rls/`, `tests/e2e/` | Web tests |
 | `mobile/DECISIONS-FOR-AVI.md` | Every decision with its rationale — **read before undoing anything that looks odd** |
 | `mobile/GAP-ANALYSIS.md` | Parity audit against the web app |

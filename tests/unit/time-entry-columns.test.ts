@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
-import { TIME_ENTRY_COLUMNS } from "../../lib/time-entry-columns";
+import { TIME_ENTRY_COLUMNS, TIME_ENTRY_COLUMNS_WITH_VARIATION, TIME_ENTRY_OPTIONAL_COLUMNS } from "../../lib/time-entry-columns";
 
 /**
  * Migration 0045 dropped the TABLE-level SELECT grant on `time_entries` and
@@ -104,6 +104,16 @@ describe("time_entries reads must name columns explicitly (migration 0045)", () 
     expect(mobileColumnList()).not.toContain("rate_override");
   });
 
+  it("the optional columns are read by the WITH_VARIATION lists, the same on web and mobile", () => {
+    for (const col of TIME_ENTRY_OPTIONAL_COLUMNS) {
+      expect(TIME_ENTRY_COLUMNS).not.toContain(col);
+      expect(TIME_ENTRY_COLUMNS_WITH_VARIATION.split(", ")).toContain(col);
+    }
+    const src = readFileSync(join(REPO_ROOT, "mobile", "lib", "timeEntryColumns.ts"), "utf8");
+    expect(src).toContain('export const TIME_ENTRY_OPTIONAL_COLUMNS = ["variation_id"] as const;');
+    expect(src).toContain("export const TIME_ENTRY_COLUMNS_WITH_VARIATION = `${TIME_ENTRY_COLUMNS}, variation_id` as const;");
+  });
+
   it("the web and mobile column lists are identical", () => {
     // Two packages, two lockfiles, no workspace — the list is duplicated by
     // necessity. This is what stops the copies drifting.
@@ -140,7 +150,9 @@ describe("time_entries reads must name columns explicitly (migration 0045)", () 
     // No screen reads it.
     known.delete("sync_office");
 
-    const listed = new Set(TIME_ENTRY_COLUMNS.split(", "));
+    // Optional columns (a draft migration's) are read through the
+    // `…_WITH_VARIATION` list with a fallback, so they count as fetched.
+    const listed = new Set([...TIME_ENTRY_COLUMNS.split(", "), ...TIME_ENTRY_OPTIONAL_COLUMNS]);
     const missing = [...known].filter((c) => !listed.has(c));
     const extra = [...listed].filter((c) => !known.has(c));
 

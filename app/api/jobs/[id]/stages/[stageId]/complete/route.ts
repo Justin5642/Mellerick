@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { requireUser } from "@/lib/api/guards";
+import { requireRole } from "@/lib/api/guards";
 import { reportError } from "@/lib/monitoring";
 import { isOnJob } from "@/lib/builder-po-stages";
 
@@ -16,7 +16,10 @@ import { isOnJob } from "@/lib/builder-po-stages";
 const MAX_BACKDATE_MS = 14 * 86_400_000;
 
 export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string; stageId: string }> }) {
-  const guard = await requireUser(request);
+  // requireRole, not requireUser: requireUser leaves role null, so office
+  // users who aren't on the crew were refused ("Only the crew…") and could
+  // never complete or reopen a stage from the PO tab (Emma, 27 Nov 2026).
+  const guard = await requireRole(request, ["admin", "office", "technician"]);
   if (!guard.ok) return guard.response;
   const { id: jobId, stageId } = await params;
   const b = ((await request.json().catch(() => null)) ?? {}) as Record<string, unknown>;
