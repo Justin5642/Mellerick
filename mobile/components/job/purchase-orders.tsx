@@ -7,6 +7,7 @@ import { cryptoIdGen } from "../../lib/data/ids";
 import { netInfoConnectivity } from "../../lib/data/net/connectivity";
 import { prepareImage } from "../../lib/imageUpload";
 import { pickPhoto } from "../../lib/pickPhoto";
+import { documentPickerAvailable, pickUploadFile, kindExtension, type ReadyUpload } from "../../lib/documentPicker";
 import { localDateKey } from "../../lib/date";
 import { openExternalUrl } from "../../lib/open-external-url";
 import { KeyboardSheet, KEYBOARD_SHEET_INPUT_FONT_SIZE } from "../KeyboardSheet";
@@ -68,6 +69,8 @@ interface InvoiceDraft {
   invoiceDate: string;
   amount: string;
   photoUri: string | null;
+  /** A PDF / photo chosen from the phone's files (builds with expo-document-picker). */
+  picked: ReadyUpload | null;
 }
 
 const STATUS_LABEL: Record<OrderStatus, string> = { ordered: "Ordered", received: "Received", cancelled: "Cancelled" };
@@ -271,6 +274,7 @@ function PurchaseOrders({ jobId }: { jobId: string }) {
       invoiceDate: o.invoice_date ?? localDateKey(new Date()),
       amount: o.amount ? o.amount.toFixed(2) : "",
       photoUri: null,
+      picked: null,
     });
   }
 
@@ -284,7 +288,11 @@ function PurchaseOrders({ jobId }: { jobId: string }) {
     setSaving(true);
     try {
       let file: string | null = null;
-      if (invoice.photoUri) {
+      let ext = "jpg";
+      if (invoice.picked) {
+        file = invoice.picked.base64;
+        ext = kindExtension(invoice.picked.kind);
+      } else if (invoice.photoUri) {
         const { base64 } = await prepareImage(invoice.photoUri, { base64: true });
         if (!base64) throw new Error("Couldn't prepare the photo — take it again.");
         file = base64;
@@ -294,7 +302,7 @@ function PurchaseOrders({ jobId }: { jobId: string }) {
         invoiceDate: invoice.invoiceDate.trim() || null,
         amount: invoice.amount,
         file,
-        fileName: `invoice-${invoice.invoiceNumber.trim()}`,
+        fileName: `invoice-${invoice.invoiceNumber.trim()}.${ext}`,
       });
       setInvoice(null);
       show(res, `Invoice saved on ${invoice.order.po_number}`);
@@ -558,19 +566,39 @@ function PurchaseOrders({ jobId }: { jobId: string }) {
           )}
           <Text style={styles.label}>Invoice file</Text>
           <Text style={styles.small}>
-            {invoice.photoUri
-              ? "Photo attached — kept from technicians (office only)."
-              : invoice.order.invoice_storage_path
-                ? "A file is already attached. Take a photo to replace it."
-                : "Photograph the invoice. PDFs from email are attached on the website."}
+            {invoice.picked
+              ? `${invoice.picked.originalName} attached — kept from technicians (office only).`
+              : invoice.photoUri
+                ? "Photo attached — kept from technicians (office only)."
+                : invoice.order.invoice_storage_path
+                  ? "A file is already attached. Take a photo or choose a file to replace it."
+                  : documentPickerAvailable()
+                    ? "Photograph the invoice, or choose the PDF from your files."
+                    : "Photograph the invoice. PDFs from email are attached on the website."}
           </Text>
           <View style={styles.photoRow}>
-            <TouchableOpacity style={styles.secondaryBtn} onPress={async () => { const uri = await pickPhoto("camera"); if (uri) setInvoice((d) => d && { ...d, photoUri: uri }); }}>
+            <TouchableOpacity style={styles.secondaryBtn} onPress={async () => { const uri = await pickPhoto("camera"); if (uri) setInvoice((d) => d && { ...d, photoUri: uri, picked: null }); }}>
               <Text style={styles.secondaryBtnText}>Take photo</Text>
             </TouchableOpacity>
-            <TouchableOpacity style={styles.secondaryBtn} onPress={async () => { const uri = await pickPhoto("library"); if (uri) setInvoice((d) => d && { ...d, photoUri: uri }); }}>
+            <TouchableOpacity style={styles.secondaryBtn} onPress={async () => { const uri = await pickPhoto("library"); if (uri) setInvoice((d) => d && { ...d, photoUri: uri, picked: null }); }}>
               <Text style={styles.secondaryBtnText}>Choose photo</Text>
             </TouchableOpacity>
+            {documentPickerAvailable() && (
+              <TouchableOpacity
+                style={styles.secondaryBtn}
+                onPress={async () => {
+                  const res = await pickUploadFile();
+                  if (!res) return;
+                  if (!res.ok) {
+                    Alert.alert("Can't attach that file", res.error);
+                    return;
+                  }
+                  setInvoice((d) => d && { ...d, picked: res.upload, photoUri: null });
+                }}
+              >
+                <Text style={styles.secondaryBtnText}>Choose file</Text>
+              </TouchableOpacity>
+            )}
           </View>
         </KeyboardSheet>
       )}
@@ -745,5 +773,5 @@ const styles = StyleSheet.create({
   pair: { flexDirection: "row", gap: 8 },
   half: { flex: 1 },
   removeLine: { fontSize: 13, color: colors.red600 },
-  photoRow: { flexDirection: "row", gap: 8, marginTop: 6 },
+  photoRow: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 6 },
 });

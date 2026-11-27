@@ -19,6 +19,7 @@ import {
   type DocumentFolderGroup,
 } from "../../lib/documentFolders";
 import { pickPhoto } from "../../lib/pickPhoto";
+import { documentPickerAvailable, pickUploadFile, pickedBaseName, uploadFileName, type ReadyUpload } from "../../lib/documentPicker";
 
 interface Document {
   id: string;
@@ -48,13 +49,16 @@ function extLabel(fileName: string) {
 }
 
 // Office/admin can also add a document from the phone (Nov 2026) — a photo
-// from the camera or the library: the binary has no document (PDF) picker, so
-// PDFs are still uploaded on the website — and mark one "Office only" (0065:
+// from the camera or the library, or (builds with expo-document-picker) a PDF
+// or photo chosen from the phone's files — and mark one "Office only" (0065:
 // hidden from technicians, row and file) or delete it. Those go online through
 // /api/jobs/[id]/documents/** (requireOfficeOrAdmin, as the caller), never a
 // direct write from this screen.
 interface UploadDraft {
-  uri: string;
+  /** A photo from the camera / library (shrunk on Upload)… */
+  uri: string | null;
+  /** …or a file chosen from the phone, already read and checked. */
+  picked: ReadyUpload | null;
   name: string;
   officeOnly: boolean;
   folder: DocumentFolderGroup;
@@ -121,16 +125,36 @@ export function JobDocumentsTab({ jobId }: { jobId: string }) {
 
   async function startUpload(source: "camera" | "library") {
     const uri = await pickPhoto(source);
-    if (uri) setUpload({ uri, name: "", officeOnly: false, folder: DEFAULT_FOLDER_GROUP });
+    if (uri) setUpload({ uri, picked: null, name: "", officeOnly: false, folder: DEFAULT_FOLDER_GROUP });
+  }
+
+  async function startFileUpload() {
+    const res = await pickUploadFile();
+    if (!res) return;
+    if (!res.ok) {
+      Alert.alert("Can't upload that file", res.error);
+      return;
+    }
+    setUpload({ uri: null, picked: res.upload, name: pickedBaseName(res.upload.originalName), officeOnly: false, folder: DEFAULT_FOLDER_GROUP });
   }
 
   async function saveUpload() {
     if (!upload || uploading) return;
     setUploading(true);
     try {
-      const { base64 } = await prepareImage(upload.uri, { base64: true });
-      if (!base64) throw new Error("Couldn't prepare the photo — take it again.");
-      await uploadJobDocument(jobId, { file: base64, fileName: documentPhotoName(upload.name), officeOnly: upload.officeOnly, folder: folderValue(upload.folder) });
+      let file: string;
+      let fileName: string;
+      if (upload.picked) {
+        file = upload.picked.base64;
+        fileName = uploadFileName(upload.name, upload.picked.originalName, upload.picked.kind);
+      } else {
+        if (!upload.uri) throw new Error("Choose the file again.");
+        const { base64 } = await prepareImage(upload.uri, { base64: true });
+        if (!base64) throw new Error("Couldn't prepare the photo — take it again.");
+        file = base64;
+        fileName = documentPhotoName(upload.name);
+      }
+      await uploadJobDocument(jobId, { file, fileName, officeOnly: upload.officeOnly, folder: folderValue(upload.folder) });
       setUpload(null);
       await loadDocuments();
     } catch (e) {
@@ -228,6 +252,12 @@ export function JobDocumentsTab({ jobId }: { jobId: string }) {
             <Ionicons name="image-outline" size={16} color={colors.blue600} />
             <Text style={styles.uploadText}>Add photo</Text>
           </TouchableOpacity>
+          {documentPickerAvailable() && (
+            <TouchableOpacity style={styles.uploadBtn} onPress={() => void startFileUpload()}>
+              <Ionicons name="document-attach-outline" size={16} color={colors.blue600} />
+              <Text style={styles.uploadText}>Choose file</Text>
+            </TouchableOpacity>
+          )}
         </View>
       )}
       {documents.length === 0 ? (
@@ -322,6 +352,11 @@ export function JobDocumentsTab({ jobId }: { jobId: string }) {
             onChangeText={(name) => setUpload({ ...upload, name })}
             placeholder="e.g. Plumbing plan sheet 2"
           />
+          {upload.picked && (
+            <Text style={styles.pickedNote} numberOfLines={2}>
+              {upload.picked.originalName} · {formatBytes(upload.picked.bytes)}
+            </Text>
+          )}
           {foldersReady && (
             <>
               <Text style={[styles.label, { marginTop: 14 }]}>Folder</Text>
@@ -401,8 +436,9 @@ const styles = StyleSheet.create({
   rowContent: { flex: 1 },
   fileName: { fontSize: 14, fontWeight: "600", color: colors.slate900 },
   fileMeta: { fontSize: 11, color: colors.slate500, marginTop: 2 },
-  uploadRow: { flexDirection: "row", gap: 8, marginTop: 10 },
+  uploadRow: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 10 },
   uploadBtn: { flexDirection: "row", alignItems: "center", gap: 6, borderWidth: 1, borderColor: colors.blue100, borderRadius: 8, paddingHorizontal: 12, paddingVertical: 8, backgroundColor: colors.card },
+  pickedNote: { fontSize: 12, color: colors.slate500, marginTop: 6 },
   uploadText: { fontSize: 13, fontWeight: "600", color: colors.blue600 },
   label: { fontSize: 13, fontWeight: "600", color: colors.slate700, marginBottom: 4 },
   input: { borderWidth: 1, borderColor: colors.border, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 8, fontSize: KEYBOARD_SHEET_INPUT_FONT_SIZE, color: colors.slate900, backgroundColor: colors.card },

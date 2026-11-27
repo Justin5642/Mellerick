@@ -4,6 +4,7 @@ import { Stack, useLocalSearchParams } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import * as ImagePicker from "expo-image-picker";
 import { prepareImage, prepareImageForUpload } from "../../lib/imageUpload";
+import { documentPickerAvailable, pickUploadFile, uploadFileName } from "../../lib/documentPicker";
 import { colors } from "../../lib/theme";
 import { MoneyText } from "../../design/components/MoneyText";
 import { ScreenError } from "../../design/components/ScreenError";
@@ -103,8 +104,8 @@ export default function EquipmentDetailScreen() {
   }
 
   // Upload a document photo (registration, insurance, compliance) through the
-  // web's /api/fleet/[id]/documents — office/admin, online only. No document
-  // picker is in the app binary, so PDFs are uploaded on the website.
+  // web's /api/fleet/[id]/documents — office/admin, online only. A PDF comes
+  // through uploadDocumentFile (builds with expo-document-picker).
   async function uploadDocument(fromCamera: boolean) {
     if (uploadingDoc) return;
     const perm = fromCamera ? await ImagePicker.requestCameraPermissionsAsync() : await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -117,6 +118,22 @@ export default function EquipmentDetailScreen() {
       if (!base64) throw new Error("Couldn't use that photo. Try taking it again.");
       if (base64Bytes(base64) > MAX_UPLOAD_BYTES) throw new Error("That photo is too large (over 3 MB). Take it again closer in.");
       await uploadEquipmentDocument(id, base64, `document-${today}-${Date.now() % 100000}.jpg`);
+      setDocuments(await listEquipmentDocuments(id));
+    } catch (e) {
+      Alert.alert("Couldn't upload the document", e instanceof Error ? e.message : "Please try again.");
+    } finally {
+      setUploadingDoc(false);
+    }
+  }
+
+  async function uploadDocumentFile() {
+    if (uploadingDoc) return;
+    const res = await pickUploadFile();
+    if (!res) return;
+    if (!res.ok) { Alert.alert("Can't upload that file", res.error); return; }
+    setUploadingDoc(true);
+    try {
+      await uploadEquipmentDocument(id, res.upload.base64, uploadFileName("", res.upload.originalName, res.upload.kind));
       setDocuments(await listEquipmentDocuments(id));
     } catch (e) {
       Alert.alert("Couldn't upload the document", e instanceof Error ? e.message : "Please try again.");
@@ -341,13 +358,18 @@ export default function EquipmentDetailScreen() {
               <TouchableOpacity onPress={() => uploadDocument(false)} style={styles.addBtn} accessibilityLabel="Upload a document photo">
                 <Ionicons name="image-outline" size={16} color={colors.blue600} /><Text style={styles.addText}>Photos</Text>
               </TouchableOpacity>
+              {documentPickerAvailable() && (
+                <TouchableOpacity onPress={() => void uploadDocumentFile()} style={styles.addBtn} accessibilityLabel="Upload a PDF or photo from your files">
+                  <Ionicons name="document-attach-outline" size={16} color={colors.blue600} /><Text style={styles.addText}>File</Text>
+                </TouchableOpacity>
+              )}
             </View>
           )}
         </RoleGate>
       </View>
       <View style={styles.card}>
         {documents.length === 0 ? (
-          <Text style={styles.empty}>No documents yet. Photograph registration, insurance &amp; compliance papers here; PDFs are uploaded on the website.</Text>
+          <Text style={styles.empty}>No documents yet. Photograph registration, insurance &amp; compliance papers here{documentPickerAvailable() ? ", or upload the PDF" : "; PDFs are uploaded on the website"}.</Text>
         ) : (
           documents.map((doc) => (
             <TouchableOpacity key={doc.id} style={styles.docRow} onPress={() => openDocument(doc)} disabled={openingDocId === doc.id}>

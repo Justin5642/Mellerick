@@ -1259,11 +1259,10 @@ Storage upload first (a new office-only bucket + migration).
   and the job's own **documents** (from Storage, any allowed type), with the
   same limits and checks: `mobile/lib/invoiceAttachments.ts` is the web file
   byte for byte below its header (`tests/unit/invoice-attachments-mirror.test.ts`),
-  and the size used shows under the list. **Gap:** any other file on the
-  phone (a PDF in Files / Downloads) needs `expo-document-picker`, a native
-  module not in the binary — attach those on the web, or add the module in a
-  new build and a third source button in
-  `mobile/components/finance/invoice-attachments-field.tsx`.
+  and the size used shows under the list. Since 27 Nov 2026 a third source,
+  **Files**, attaches any file on the phone (a PDF in Files / Downloads…)
+  through `expo-document-picker` — see "PDF and other files from the phone"
+  below; it needs a NEW BUILD.
 
 **Invoices are made out to the Company (16 Nov 2026; no migration).**
 Invoice and quote PDFs, their detail pages and the Xero contact used
@@ -1660,13 +1659,42 @@ PO's value is what the job is measured against.
   delete — `POST /api/jobs/[id]/documents` (base64 ≤ 3 MB, sniffed JPEG/PNG/WebP/PDF,
   the web's `{job}/{ts}_{name}` path, row as the caller, file removed if the row
   fails) and `PATCH/DELETE .../documents/[docId]` (row first, then the file).
-  **Photos only:** the binary has no document picker (`expo-document-picker` would be
-  a new native module and build), so PDFs are still uploaded on the website.
+  **Choose file** (27 Nov 2026, needs a new build) uploads a PDF or photo from the
+  phone's files — see "PDF and other files from the phone" below.
 - **Not on the phone:** pinning a typed PO site on the map (the job site's pin is
   reused when the address is the job site's, otherwise none — pin it on the web),
   opening the crew's docket photos from the PO card, "Mark stage complete" from the
   PO card. Reaches phones with the next build (no new native module); needs the web
   deployed first.
+
+**PDF and other files from the phone (27 Nov 2026; no migration, no stream change; NEEDS A NEW BUILD — native module).**
+The binary had no document picker, so PDFs (supplier invoices, plans, fleet
+service invoices) could only be uploaded on the website. `expo-document-picker`
+(~14.0.8, the SDK 54 pin; no config plugin needed — no iCloud entitlement) is
+now a dependency of `mobile/`. It is a **native module**: it reaches phones only
+through a new `eas build`, never an OTA update. It is loaded **lazily**
+(`mobile/lib/documentPicker.ts`, the `lib/dictation.ts` pattern), so an OTA
+update reaching an older binary just hides the new buttons.
+- **Where:** the four existing office/admin upload paths, nothing new on the
+  server — every route already accepted PDFs (bytes sniffed, ≤ 3 MB as base64):
+  job **Documents** tab → **Choose file** (`POST /api/jobs/[id]/documents`; name
+  prefilled from the file, folder and Office only as before); the **POs** tab's
+  supplier invoice → **Choose file** (`…/supplier-orders/[orderId]/invoice`; the
+  file name now carries the real extension); Fleet **Log a service** → **File**
+  (read by `/api/fleet/service-invoice/read`, saved through
+  `/api/fleet/[id]/service-records` as `service-invoice-<date>.pdf`); Fleet
+  machine **Documents** → **File** (`/api/fleet/[id]/documents`); the invoice
+  email's **Attachments** → **Files** (several at once, any allowed type —
+  Word, Excel, CSV… — against the same 10-file / 3 MB rules).
+- **Checks before sending** (`documentPicker.ts`, tested in
+  `mobile/lib/documentPicker.test.ts` with the module mocked): only PDF or a
+  photo for the upload routes; a PDF over 3 MB is refused by its reported size
+  before it is read ("… the phone can send 3.0 MB at most. Upload it on the
+  website instead."); a picked photo (HEIC included) is shrunk by `prepareImage`
+  like the camera path; the bytes are sniffed as the routes do (a renamed Word
+  file is refused); the picker's cache copy is deleted after reading.
+- Technicians: unchanged — no technician screen uploads documents on the phone
+  (the routes above are office/admin).
 
 **Fleet service history takes the invoice by drag and drop (17 Nov 2026; no migration).**
 Justin: "What happened to the drag and drop in the fleet? We drop the invoices
@@ -1711,7 +1739,7 @@ directly as before; the routes are there for them to share.
 - **Service history** (`mobile/components/fleet/ServiceHistory.tsx` on the
   machine screen): due banner, services with "View invoice", delete; **Log a
   service** with the invoice as a **photo** (camera or library → `prepareImage`
-  1600px JPEG), read automatically by `POST /api/fleet/service-invoice/read`
+  1600px JPEG) or, from the next build, a **PDF from the phone's files**, read automatically by `POST /api/fleet/service-invoice/read`
   and filled by `applyServiceInvoiceRead` (only empty / default fields),
   next service due, no cost / log the cost now / link an existing expense.
   Nothing is saved until Save → `GET/POST /api/fleet/[id]/service-records`
@@ -1736,7 +1764,7 @@ directly as before; the routes are there for them to share.
   (`components/fleet/EquipmentYearCost.tsx`) and "Fleet costs logged — FY" on
   the Fleet list (`components/fleet/FleetYearSummary.tsx`, read
   `listFleetExpenses`, local-first — `equipment_expenses` is unwindowed).
-- **Equipment documents upload** (photos) → `POST /api/fleet/[id]/documents`
+- **Equipment documents upload** (photos; PDFs from the next build) → `POST /api/fleet/[id]/documents`
   (≤ 3 MB base64, bytes sniffed PDF/JPEG/PNG/WebP; file then row as the
   caller, file removed if the row fails).
 - **Mirrors** pinned by `tests/unit/fleet-mobile-mirror.test.ts`:
@@ -1745,9 +1773,8 @@ directly as before; the routes are there for them to share.
   `mobile/lib/fleetCosts.ts` = `lib/fleet-costs.ts` (below the imports),
   `mobile/lib/hireLabels.ts` = `lib/hire-pricing.ts`'s hire vocabulary. Change
   the web file first, then copy. Calls in `mobile/lib/fleetOffice.ts` (tested).
-- **Gap:** no document picker is in the app binary (adding one is a native
-  module, so it waits for a build decision), so **PDF** invoices and documents
-  still go up on the website; the phone takes photos. Money only through
+- **PDF** invoices and documents from the phone: see "PDF and other files
+  from the phone" (27 Nov 2026, needs a new build). Money only through
   `MoneyText` inside `RoleGate` (Hire rates' rate lines are server-formatted
   text, shown only inside the office-only route and a `RoleGate`). Reaches
   phones with the next build (no new native module); the web routes must be

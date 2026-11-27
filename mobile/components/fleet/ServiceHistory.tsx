@@ -7,6 +7,7 @@ import { KeyboardSheet, KEYBOARD_SHEET_INPUT_FONT_SIZE } from "../KeyboardSheet"
 import { MoneyText } from "../../design/components/MoneyText";
 import { RoleGate } from "../../design/guards/RoleGate";
 import { prepareImage } from "../../lib/imageUpload";
+import { documentPickerAvailable, kindExtension, pickUploadFile } from "../../lib/documentPicker";
 import { cryptoIdGen } from "../../lib/data/ids";
 import { openExternalUrl } from "../../lib/open-external-url";
 import { getEquipmentReceiptSignedUrl } from "../../lib/data/reads/fleet";
@@ -33,8 +34,8 @@ import {
 // Fleet → Service history on the phone (office/admin): the web's
 // components/fleet/equipment-service-records.tsx. Online only — service
 // records are in no PowerSync stream. "Log a service" takes the invoice as a
-// photo (camera or library; no document picker is in the app binary, so a
-// PDF invoice is dropped on the website), reads it automatically
+// photo (camera or library) or a PDF from the phone's files (builds with
+// expo-document-picker — lib/documentPicker.ts), reads it automatically
 // (/api/fleet/service-invoice/read) and fills only what's still empty.
 // Nothing is saved until Save; the server uploads the invoice first, so a
 // failed upload saves nothing.
@@ -46,7 +47,7 @@ export function ServiceHistory({ equipmentId, today, onCostLogged, liveHours = n
   const [loadError, setLoadError] = useState<string | null>(null);
   const [form, setForm] = useState<ServiceForm | null>(null);
   const [formId, setFormId] = useState("");
-  const [invoice, setInvoice] = useState<{ base64: string } | null>(null);
+  const [invoice, setInvoice] = useState<{ base64: string; ext: string; label: string } | null>(null);
   const [reading, setReading] = useState(false);
   const [readNote, setReadNote] = useState<{ tone: "ok" | "warn"; text: string } | null>(null);
   const [saving, setSaving] = useState(false);
@@ -90,11 +91,24 @@ export function ServiceHistory({ equipmentId, today, onCostLogged, liveHours = n
       base64 = undefined;
     }
     if (!base64) { Alert.alert("Couldn't use that photo", "Try taking it again."); return; }
-    setInvoice({ base64 });
+    await attachInvoiceFile({ base64, ext: "jpg", label: "Invoice photo attached" });
+  }
+
+  // A PDF (or photo) from the phone's files — builds with expo-document-picker.
+  async function chooseInvoiceFile() {
+    const res = await pickUploadFile();
+    if (!res) return;
+    if (!res.ok) { Alert.alert("Can't use that file", res.error); return; }
+    await attachInvoiceFile({ base64: res.upload.base64, ext: kindExtension(res.upload.kind), label: `${res.upload.originalName} attached` });
+  }
+
+  async function attachInvoiceFile(file: { base64: string; ext: string; label: string }) {
+    const { base64 } = file;
+    setInvoice(file);
     setForm((f) => f && (f.expense === NEW_EXPENSE ? f : { ...f, expense: NEW_EXPENSE }));
     setReadNote(null);
     if (base64Bytes(base64) > MAX_UPLOAD_BYTES) {
-      setReadNote({ tone: "warn", text: "Too large to read or save (over 3 MB). Take the photo again closer in." });
+      setReadNote({ tone: "warn", text: "Too large to read or save (over 3 MB). Take a photo of it instead." });
       return;
     }
     setReading(true);
@@ -114,12 +128,12 @@ export function ServiceHistory({ equipmentId, today, onCostLogged, liveHours = n
     const problem = serviceFormProblem(form);
     if (problem) { Alert.alert("Check the service", problem); return; }
     if (invoice && form.expense === NEW_EXPENSE && base64Bytes(invoice.base64) > MAX_UPLOAD_BYTES) {
-      Alert.alert("Invoice too large", "Remove the photo or take it again closer in.");
+      Alert.alert("Invoice too large", "Remove it, or take a photo of it instead.");
       return;
     }
     setSaving(true);
     try {
-      const inv = invoice && form.expense === NEW_EXPENSE ? { fileBase64: invoice.base64, fileName: `service-invoice-${form.service_date}.jpg` } : null;
+      const inv = invoice && form.expense === NEW_EXPENSE ? { fileBase64: invoice.base64, fileName: `service-invoice-${form.service_date}.${invoice.ext}` } : null;
       const res = await saveServiceRecord(equipmentId, servicePayload(form, formId, inv));
       setForm(null);
       setInvoice(null);
@@ -247,20 +261,23 @@ export function ServiceHistory({ equipmentId, today, onCostLogged, liveHours = n
       >
         {form && (
           <>
-            <Text style={styles.fieldLabel}>Service invoice (photo)</Text>
+            <Text style={styles.fieldLabel}>Service invoice</Text>
             {invoice ? (
               <View style={styles.chosen}>
                 <Ionicons name="checkmark-circle" size={16} color={colors.green600} />
-                <Text style={styles.chosenText}>Invoice photo attached</Text>
+                <Text style={styles.chosenText} numberOfLines={1}>{invoice.label}</Text>
                 <TouchableOpacity onPress={() => { setInvoice(null); setReadNote(null); }} hitSlop={8} disabled={reading}><Text style={styles.remove}>Remove</Text></TouchableOpacity>
               </View>
             ) : (
               <View style={styles.twoCol}>
                 <TouchableOpacity style={styles.pickBtn} onPress={() => pickInvoice(true)}><Ionicons name="camera-outline" size={16} color={colors.blue600} /><Text style={styles.pickText}>Camera</Text></TouchableOpacity>
                 <TouchableOpacity style={styles.pickBtn} onPress={() => pickInvoice(false)}><Ionicons name="image-outline" size={16} color={colors.blue600} /><Text style={styles.pickText}>Photos</Text></TouchableOpacity>
+                {documentPickerAvailable() && (
+                  <TouchableOpacity style={styles.pickBtn} onPress={() => void chooseInvoiceFile()}><Ionicons name="document-attach-outline" size={16} color={colors.blue600} /><Text style={styles.pickText}>File</Text></TouchableOpacity>
+                )}
               </View>
             )}
-            <Text style={styles.hint}>Read automatically and saved with the service&apos;s cost. A PDF invoice can be dropped on the website.</Text>
+            <Text style={styles.hint}>Read automatically and saved with the service&apos;s cost. A photo, or a PDF from your files (up to 3 MB).</Text>
             {reading && <View style={styles.noteRow}><ActivityIndicator size="small" color={colors.blue600} /><Text style={styles.noteText}>Reading the invoice…</Text></View>}
             {readNote && <Text style={[styles.noteText, readNote.tone === "ok" ? styles.noteOk : styles.noteWarn]}>{readNote.text}</Text>}
 
@@ -294,7 +311,7 @@ export function ServiceHistory({ equipmentId, today, onCostLogged, liveHours = n
               <ExpenseChoice key={e.id} active={form.expense === e.id} onPress={() => set("expense")(e.id)} label={linkLabel(e)} amount={Number(e.amount)} />
             ))}
             {invoice && form.expense !== NEW_EXPENSE && (
-              <Text style={[styles.noteText, styles.noteWarn]}>The invoice photo is saved only with &ldquo;Log the cost now&rdquo;.</Text>
+              <Text style={[styles.noteText, styles.noteWarn]}>The invoice is saved only with &ldquo;Log the cost now&rdquo;.</Text>
             )}
             {form.expense === NEW_EXPENSE && (
               <>
@@ -303,7 +320,7 @@ export function ServiceHistory({ equipmentId, today, onCostLogged, liveHours = n
                   <View style={{ flex: 1 }}><Field label="GST" value={form.gst_amount} onChange={set("gst_amount")} num /></View>
                 </View>
                 <Field label="Invoice #" value={form.invoice_number} onChange={set("invoice_number")} />
-                <Text style={styles.hint}>Saved as an expense with the invoice photo, so it counts once in the yearly cost.</Text>
+                <Text style={styles.hint}>Saved as an expense with the invoice, so it counts once in the yearly cost.</Text>
               </>
             )}
           </>

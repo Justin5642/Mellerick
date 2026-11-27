@@ -3,8 +3,9 @@ import * as ImagePicker from "expo-image-picker";
 
 // One photo from the camera or the photo library, for the office's uploads on
 // the phone (a supplier invoice on the PO tab, a job document). Null when
-// cancelled or not allowed. The binary has no document (PDF) picker, so these
-// are photos only; resize with lib/imageUpload.ts prepareImage before sending.
+// cancelled or not allowed. Photos only — a PDF from the phone's files comes
+// through lib/documentPicker.ts; resize with lib/imageUpload.ts prepareImage
+// before sending.
 export async function pickPhoto(source: "camera" | "library"): Promise<string | null> {
   const perm = source === "camera" ? await ImagePicker.requestCameraPermissionsAsync() : await ImagePicker.requestMediaLibraryPermissionsAsync();
   if (!perm.granted) {
