@@ -2476,7 +2476,7 @@ as the caller (RLS), paged with `fetchAllRows`, lookups `.in()` in chunks of
 100. Rules `lib/time-log-report.ts`, tested in
 `tests/unit/time-log-report.test.ts` (incl. no money-named key or CSV column).
 
-**Time against variations (25 Nov 2026; migration `0120` applied 2026-11-27, gate test passed; PowerSync streams to redeploy AFTER it).**
+**Time against variations (25 Nov 2026; migration `0120` applied 2026-11-27, gate test passed; PowerSync streams redeployed 2026-11-27).**
 Justin: a stage's allowed hours (sewer and stormwater, 16 h) blow out when the
 crew hit rock. That extra time must go against a VARIATION, so the variation
 can be costed and the stage's allowed hours stay a fair measure. His
@@ -2671,7 +2671,7 @@ windows) — all 16 technician-visible streams are money-free:
   these rules redeployed 2026-10-14)
 - `tech_job_variations` — omits `rate`, `total_amount`, `admin_notes`
 - `variation_types` — omits the preset `rate`
-- `tech_time_entries` — omits `rate`; lists `variation_id` (0120, applied 2026-11-27 —
+- `tech_time_entries` — omits `rate`; lists `variation_id` (0120 applied and streams redeployed 2026-11-27 —
   the variation the time is for, an id, not money; redeploy after applying)
 - `profiles`, `sync_horizon`, `tech_customers` / `backflow_customers`,
   `tech_sites` / `backflow_sites`, `backflow_devices`, `backflow_tests`,
@@ -3519,7 +3519,7 @@ a shippable release.
 | **Leave on the schedule: record 0112** | Justin | `0112` applied 2026-11-19 (gate test passed). Ledger row: `insert into supabase_migrations.schema_migrations (version,name) values ('0112','schedule_leave') on conflict do nothing;` No PowerSync redeploy. Who sees the leave type defaults to office + admin; change it in Settings → Leave on the schedule. Part days: add From/To times on the Leave Log entry. |
 | **Komtrax: sync and link machines** | Justin | `0113` applied 2026-11-20 (gate test passed). Ledger row: `insert into supabase_migrations.schema_migrations (version,name) values ('0113','komtrax') on conflict do nothing;` Admin → Fleet → Komtrax machines → **Sync Komtrax**, then link any Komatsu machine not linked by serial (or put its serial in the fleet item's notes). `KOMTRAX_USERNAME` / `KOMTRAX_PASSWORD` are in Vercel Production. |
 | **Technicians start work themselves: record 0118** | Justin | `0118` applied 2026-11-25 (gate test passed). Ledger row if not yet run: `insert into supabase_migrations.schema_migrations (version,name) values ('0118','self_start_bookings') on conflict do nothing;` Deploy the web, then the phone build. No PowerSync redeploy. |
-| **Time against variations: redeploy PowerSync (0120 applied 2026-11-27)** | Justin | `0120` applied (gate test passed). Ledger row if not yet run: `insert into supabase_migrations.schema_migrations (version,name) values ('0120','variation_time') on conflict do nothing;` Redeploy the PowerSync streams (`tech_time_entries` names `variation_id`), then the phone build. Office: tick "Charged by the hour" on hourly variations. |
+| **Time against variations: ship the phone build** | Justin | `0120` applied, ledger row recorded and PowerSync streams redeployed (2026-11-27). Only the phone build is left. Office: tick "Charged by the hour" on hourly variations. |
 | **Cost of mistakes: record 0119** | Justin | `0119` applied 2026-11-25 (gate test passed). Ledger row if not yet run: `insert into supabase_migrations.schema_migrations (version,name) values ('0119','mistake_tracking') on conflict do nothing;` Deploy the web, then the phone build. No PowerSync redeploy. Check Settings → Mistake categories. |
 | **Record the 24–25 Nov migrations; redeploy PowerSync** | Justin | The catch-up (0067 + 0070 + 0117, which did 0064–0066's job) and 0114, 0116, 0115 are applied and confirmed by a read-only check (nothing from 0060–0116 missing). Ledger rows: `insert into supabase_migrations.schema_migrations (version,name) values ('0064','restrict_site_writes_to_office_admin'),('0065','office_only_job_documents'),('0066','backflow_certificate_storage_policies'),('0067','job_todo_list'),('0070','page_load_indexes'),('0114','customer_address_doc_folders'),('0115','job_mistakes'),('0116','job_folders'),('0117','catch_up_sites_and_office_only_documents') on conflict do nothing;` Then **redeploy the PowerSync streams** (`tech_job_photos` lists `folder`; docs/powersync-deploy.md), then the phone build. Run `scripts/audit-job-documents.mjs` to mark priced Simpro attachments office-only. Add billing addresses to customers. |
 | **Maestro flow 02** | Avi | Needs `ADMIN_EMAIL` / `ADMIN_PASSWORD` in the environment. The login subflow deliberately skips when a session already exists, so a password never passes through a script — which is why flows 01/03/04 could be run and 02 could not. |
