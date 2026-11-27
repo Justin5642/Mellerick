@@ -2778,6 +2778,102 @@ on to is shown as "Not attended" — computed, never written.
   `tech_job_bookings` names the new columns, so not before 0121) → deploy the
   web (the route) → ship the phone build (no native module).
 
+**A job sent back by the office tells its crew: push, red banner, "Sent back" tag (27 Nov 2026; migration `0122` DRAFT; PowerSync streams to redeploy).**
+Approvals → **Send back** (web `components/approvals/approvals-client.tsx`
+`reject()`, phone `mobile/lib/data/repositories/approvals.ts` `sendBackJob`)
+sets `jobs.admin_status = 'rejected'`, `admin_notes` = the note, status
+`in_progress`, `ready_to_invoice` false. The toast said "technician will be
+notified" — nothing did: no push, the note shown nowhere, and `tech_jobs`
+didn't carry the columns, so the job just reappeared in My Jobs.
+- **Why a new column for the note.** `jobs.admin_notes` is ALSO the admin's
+  approval comment (`lib/approve-job.ts` writes it on approve), which can talk
+  money, and a technician's job stays on their phone up to 90 days after it
+  closes (0068). So `admin_notes` stays off phones (the stream contract test
+  lists it as a money term — not weakened) and 0122 adds
+  **`jobs.sent_back_note`** (the note written TO the crew) and
+  **`sent_back_at`**, written only by trigger `jobs_sent_back_stamp`
+  (`stamp_job_sent_back()`, BEFORE INSERT/UPDATE, sorts after 0074's
+  `jobs_office_columns` and 0098's `jobs_requeue_on_complete`): copied from
+  `admin_notes` (trimmed) when `admin_status` becomes `rejected` or the note
+  changes while rejected; any other write — including a technician writing
+  the columns directly — keeps the old values. They keep the LAST send-back
+  as history; the banner and tag key off `admin_status`. Jobs already sent
+  back are given their note once (backfill before the trigger exists;
+  `sent_back_at` = their `updated_at`).
+- **Push** (`notify_job_sent_back()`, AFTER UPDATE OF admin_status,
+  admin_notes; 0077's mechanism exactly — pg_net + the Vault secrets
+  `push_function_url` / `push_internal_secret`, sent after commit, nothing
+  without secrets, any failure a WARNING): to the job's crew
+  (`job_assignments` ∪ `assigned_to`), once each, **never the sender**
+  (`auth.uid()`), only for a signed-in user's write (service-role scripts send
+  nothing) on an open job. Title "Job #123 sent back", body = the note
+  (whitespace collapsed, ≤150 characters with "…"), data `{ type:
+  "job_sent_back", jobId }` — the phone's tap handler opens the job
+  (`mobile/lib/push/notificationTaps.ts`, tested). A note edited while still
+  sent back pushes again; other edits don't. Both functions SECURITY DEFINER,
+  not executable by clients; `grant select (sent_back_note, sent_back_at)`
+  explicitly (jobs has no column grants today); end state asserted.
+- **Clears on re-sign-off — already true, verified:** completing the job as a
+  signed-in user puts `admin_status` back to `pending` (0098's
+  `jobs_requeue_on_complete`), so it returns to Approvals and the banner/tag
+  go. A stage-only sign-off (other stages open) writes no `jobs` row, so the
+  job stays sent back — intended (it is still open).
+- **Rule** `lib/sent-back.ts` (`isSentBack` = rejected and not
+  completed/cancelled, `sentBackNotice`, `sentBackWhen` "Fri 27 Nov, 2:15 pm"
+  Melbourne), mirrored from the first export at `mobile/lib/sentBack.ts`
+  (`tests/unit/sent-back.test.ts`).
+- **Web:** red **"Sent back by the office"** banner with the note and when,
+  above the job's tabs (`components/job/sent-back-banner.tsx` in
+  `job-detail-client.tsx`), for the crew and office, not on view-only jobs.
+  The job page (`app/dashboard/jobs/[id]/page.tsx`) now gives a technician
+  `admin_notes` only while the job is sent back (it is the send-back note
+  then; otherwise it may be an approval comment), and a technician not on the
+  job none of the send-back columns. Before 0122 the banner reads
+  `admin_notes` (web only). **My Jobs** (`app/dashboard/my-jobs/page.tsx`)
+  selects `admin_status` (0041 — exists) and shows a red "Sent back" tag.
+- **Phone:** the same banner above every tab (`mobile/components/job/sent-back-banner.tsx`
+  in `app/job/[id].tsx`, not on view-only jobs) and a "↩ Sent back" tag on My
+  Jobs cards (`components/jobs/my-jobs-screen.tsx`). Reads: `getJob` and
+  `listMyJobs` (`mobile/lib/data/reads/jobs.ts`) return `admin_status`
+  (+ `sent_back_note`, `sent_back_at` on the detail), identical shapes local
+  and remote (`jobs.local.test.ts`, `getJob.remote.test.ts`); the remote
+  detail read retries without the two new columns on 42703/PGRST204 naming
+  them (`isMissingSentBackColumn`). The phone never reads `admin_notes` for
+  this. Columns added to `mobile/lib/powersync/schema.ts` by hand.
+- **Toasts:** web "Job sent back — the crew see your note on the job"; phone
+  office alert "The job was reopened — the crew see your note on the job."
+- **Stream change:** `tech_jobs` lists `admin_status, sent_back_note,
+  sent_back_at` (not money; `sync-streams-contract.test.ts` passes and now
+  also asserts `tech_jobs` never names `admin_notes`). `office_jobs` is
+  `jobs.*`. Not validated with `@powersync/service-sync-rules` here.
+- **Before 0122 is applied nothing breaks:** no push; the web banner shows
+  from `admin_notes` (no time); the phone's remote read falls back and shows
+  the banner without a note ("Ask the office what's needed…"); the phone's
+  mirror has no `admin_status` until the streams are redeployed, so offline
+  no banner/tag shows (the remote reads have `admin_status` already).
+- **Checked** on a scratch Postgres 16 (`/var/tmp/pg122`: the full chain
+  0000–0120 + CI seed, pg_net shimmed with a request queue, Vault with
+  `create_secret`): 0122 applies twice cleanly;
+  `supabase/tests/0122_sent_back_notice_test.sql` passes (23 scenarios: one
+  push to the technician only with the sender on the crew, title/body/data,
+  note trimmed and stamped, other edits silent, a changed note pushes again
+  and is cut to 150 characters, the technician reads status and note on their
+  job but can't forge the note or change `admin_notes`, re-sign-off → pending
+  with no push and the note kept, a service-role send-back stamps but doesn't
+  push, a still-completed job doesn't push, no secrets → nothing queued) and
+  fails naming scenarios with the notify trigger disabled (8) or the stamp
+  trigger disabled (9). Not tried against PostgREST, the real send-push, in a
+  browser or on a device.
+- **Apply / deploy order:** paste `supabase/migrations/0122_sent_back_notice.sql`
+  → paste `supabase/tests/0122_sent_back_notice_test.sql` (needs an active
+  technician and an active office/admin), trust only `0122 PASSED` → change
+  0122's STATUS line to applied, add the ledger row
+  (`('0122','sent_back_notice')`), regenerate types (`lib/database.types.ts`
+  has both columns by hand) → **redeploy the PowerSync streams**
+  (`docs/powersync-deploy.md` — `tech_jobs` names `sent_back_note` /
+  `sent_back_at`, so not before 0122) → deploy the web → ship the phone build
+  (no native module).
+
 ---
 
 ## 2. The one rule that must never break
@@ -2803,9 +2899,12 @@ lands in **plaintext SQLite on that technician's phone**, whatever RLS says.
 Treat `sync-streams.yaml` as security code. Re-audited 9 October 2026 (sync
 windows) — all 16 technician-visible streams are money-free:
 
-- `tech_jobs` — 21 named columns, none monetary (`schedule_daily`,
+- `tech_jobs` — 24 named columns, none monetary (`schedule_daily`,
   `schedule_all_day` added for the 0071 multi-day schedules; 0071 applied and
-  these rules redeployed 2026-10-14)
+  these rules redeployed 2026-10-14; `admin_status`, `sent_back_note`,
+  `sent_back_at` added for the drafted 0122 — the office's send-back note to
+  the crew, copied by trigger; **never `admin_notes`**, which also holds
+  approval comments — redeploy after applying 0122)
 - `tech_job_variations` — omits `rate`, `total_amount`, `admin_notes`
 - `variation_types` — omits the preset `rate`
 - `tech_time_entries` — omits `rate`; lists `variation_id` (0120 applied and streams redeployed 2026-11-27 —
@@ -3658,6 +3757,7 @@ a shippable release.
 | **Leave on the schedule: record 0112** | Justin | `0112` applied 2026-11-19 (gate test passed). Ledger row: `insert into supabase_migrations.schema_migrations (version,name) values ('0112','schedule_leave') on conflict do nothing;` No PowerSync redeploy. Who sees the leave type defaults to office + admin; change it in Settings → Leave on the schedule. Part days: add From/To times on the Leave Log entry. |
 | **Komtrax: sync and link machines** | Justin | `0113` applied 2026-11-20 (gate test passed). Ledger row: `insert into supabase_migrations.schema_migrations (version,name) values ('0113','komtrax') on conflict do nothing;` Admin → Fleet → Komtrax machines → **Sync Komtrax**, then link any Komatsu machine not linked by serial (or put its serial in the fleet item's notes). `KOMTRAX_USERNAME` / `KOMTRAX_PASSWORD` are in Vercel Production. |
 | **Technicians start work themselves: record 0118** | Justin | `0118` applied 2026-11-25 (gate test passed). Ledger row if not yet run: `insert into supabase_migrations.schema_migrations (version,name) values ('0118','self_start_bookings') on conflict do nothing;` Deploy the web, then the phone build. No PowerSync redeploy. |
+| **Sent back → crew notified: apply 0122** | Justin | `0122` is a DRAFT. Paste `supabase/migrations/0122_sent_back_notice.sql`, then `supabase/tests/0122_sent_back_notice_test.sql`; trust only `0122 PASSED`. Mark its STATUS line applied, ledger: `insert into supabase_migrations.schema_migrations (version,name) values ('0122','sent_back_notice') on conflict do nothing;` Then **redeploy the PowerSync streams** (`tech_jobs` names the new columns), deploy the web, ship the phone build. Uses the push secrets already in Vault (0077). |
 | **Time against variations: ship the phone build** | Justin | `0120` applied, ledger row recorded and PowerSync streams redeployed (2026-11-27). Only the phone build is left. Office: tick "Charged by the hour" on hourly variations. |
 | **"Didn't make it": apply 0121** | Justin | `0121` is a DRAFT. Paste `supabase/migrations/0121_booking_missed.sql`, then `supabase/tests/0121_booking_missed_test.sql`; trust only `0121 PASSED`. Mark its STATUS applied; ledger: `insert into supabase_migrations.schema_migrations (version,name) values ('0121','booking_missed') on conflict do nothing;` Then **redeploy the PowerSync streams** (`tech_job_bookings` lists the new columns — not before 0121), deploy the web, then the phone build. |
 | **Cost of mistakes: record 0119** | Justin | `0119` applied 2026-11-25 (gate test passed). Ledger row if not yet run: `insert into supabase_migrations.schema_migrations (version,name) values ('0119','mistake_tracking') on conflict do nothing;` Deploy the web, then the phone build. No PowerSync redeploy. Check Settings → Mistake categories. |

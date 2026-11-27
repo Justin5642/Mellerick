@@ -150,7 +150,7 @@ export function ApprovalsClient({ role, jobs: initialJobs, hoursByJob, pendingVa
       )
       .eq("id", jobId);
 
-    // "Technician will be notified" is a promise about a row that may not have
+    // "The crew see your note" is a promise about a row that may not have
     // changed. If it did not, the job stays approved-pending and the note the
     // admin just wrote is gone.
     if (rejectErr || rejectCount === 0) {
@@ -164,8 +164,8 @@ export function ApprovalsClient({ role, jobs: initialJobs, hoursByJob, pendingVa
     // saying — `.catch(() => {})` said nothing.
     const calendarSynced = await pushJobToCalendar(jobId);
     setJobs(j => j.filter(job => job.id !== jobId));
-    if (calendarSynced) toast.success("Job sent back — technician will be notified");
-    else toast.warning("Job sent back — technician will be notified, but Google Calendar was not updated");
+    if (calendarSynced) toast.success("Job sent back — the crew see your note on the job");
+    else toast.warning("Job sent back — the crew see your note on the job, but Google Calendar was not updated");
     setSaving(null);
   }
 

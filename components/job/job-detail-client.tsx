@@ -12,6 +12,7 @@ import { Badge } from "@/components/ui/badge";
 import { ArrowLeft, Briefcase, FileText, Image, List, MessageSquare, PenLine, ClipboardList, Clock, Receipt, GitPullRequestArrow, DollarSign, Truck, TrendingUp, Trash2, CalendarClock, Construction, Copy } from "lucide-react";
 import Link from "next/link";
 import { JobOverview } from "./job-overview";
+import { SentBackBanner } from "./sent-back-banner";
 import { DeleteJobDialog } from "./delete-job-dialog";
 import { CopyJobDialog } from "./copy-job-dialog";
 import { JobHoursScoreboard } from "./job-hours-scoreboard";
@@ -398,6 +399,7 @@ export function JobDetailClient({ job, currentUserId, photos: initialPhotos, doc
             View only — you&apos;re not assigned to this job.
           </div>
         )}
+        {!viewOnly && <SentBackBanner job={job} className="mx-6 mt-4" />}
         <Tabs value={shownTab} onValueChange={(v) => setActiveTab(v ?? "overview")} className="h-full flex flex-col">
           <div className="bg-white border-b px-6 overflow-x-auto">
             <TabsList className="h-auto bg-transparent p-0 gap-0 flex w-max min-w-full">

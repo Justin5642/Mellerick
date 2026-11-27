@@ -2380,6 +2380,8 @@ export type Database = {
           scheduled_cost_center_id: string | null
           scheduled_end: string | null
           scheduled_start: string | null
+          sent_back_at: string | null
+          sent_back_note: string | null
           simpro_job_id: number | null
           site_id: string | null
           status: string
@@ -2424,6 +2426,8 @@ export type Database = {
           scheduled_cost_center_id?: string | null
           scheduled_end?: string | null
           scheduled_start?: string | null
+          sent_back_at?: string | null
+          sent_back_note?: string | null
           simpro_job_id?: number | null
           site_id?: string | null
           status?: string
@@ -2468,6 +2472,8 @@ export type Database = {
           scheduled_cost_center_id?: string | null
           scheduled_end?: string | null
           scheduled_start?: string | null
+          sent_back_at?: string | null
+          sent_back_note?: string | null
           simpro_job_id?: number | null
           site_id?: string | null
           status?: string

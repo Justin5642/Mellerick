@@ -411,6 +411,9 @@ const jobs = new Table({
   customer_po: column.text,
   // 0111 (DRAFT, not applied): added by hand, as the generator emits it once applied.
   quarry_included: column.integer,
+  // 0122 (DRAFT): added by hand. tech_jobs streams them (with admin_status).
+  sent_back_note: column.text,
+  sent_back_at: column.text,
 }, {
   indexes: {
     assigned_scheduled: ['assigned_to', 'scheduled_start'],

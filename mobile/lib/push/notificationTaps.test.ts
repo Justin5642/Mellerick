@@ -10,6 +10,11 @@ describe("routeForNotification", () => {
     expect(routeForNotification({ type: "job_assigned", jobId })).toBe(`/job/${jobId}`);
   });
 
+  it("opens the job a job_sent_back push (0122) is about", () => {
+    const jobId = "3f1c2a9e-1b2c-4d5e-8f90-1234567890ab";
+    expect(routeForNotification({ type: "job_sent_back", jobId })).toBe(`/job/${jobId}`);
+  });
+
   it("ignores payloads it does not recognise", () => {
     expect(routeForNotification(undefined)).toBeNull();
     expect(routeForNotification({})).toBeNull();

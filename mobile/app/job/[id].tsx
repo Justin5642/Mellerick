@@ -14,6 +14,7 @@ import { copyJob, copyJobTitle, deleteJob, deleteJobMessage } from "../../lib/of
 import * as Crypto from "expo-crypto";
 import { useJobEdit } from "../../lib/data/hooks/useJobEdit";
 import { JobOverviewTab } from "../../components/job/overview";
+import { SentBackBanner } from "../../components/job/sent-back-banner";
 import { JobNotesTab } from "../../components/job/notes";
 import { JobPhotosTab } from "../../components/job/photos";
 import { JobTimeTab } from "../../components/job/time";
@@ -544,6 +545,8 @@ export default function JobDetailScreen() {
             <Text style={styles.viewOnlyText}>View only — you're not assigned to this job.</Text>
           </View>
         )}
+        {/* Sent back by the office (0122): the crew and office, never view-only. */}
+        {!viewOnly && <SentBackBanner job={job} />}
         {/* Popped in to do something (25 Nov 2026): book themselves on from
             now and clock on to the stage they pick — online, technicians on
             an open job they're not on. Overview only, like the Today card. */}

@@ -169,7 +169,7 @@ export default function ApprovalsScreen() {
     try {
       await approvals.sendBackJob({ jobId, note });
       setJobs((j) => j.filter((x) => x.id !== jobId));
-      Alert.alert("Sent back", "The job was reopened for the technician.");
+      Alert.alert("Sent back", "The job was reopened — the crew see your note on the job.");
     } catch (e) {
       Alert.alert("Couldn't send back", e instanceof Error ? e.message : "Please try again.");
     } finally {

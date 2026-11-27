@@ -65,6 +65,8 @@ export interface MyJob {
   scheduled_end: string | null;
   /** Migration 0071: the window repeats on each booked day (lib/scheduling.ts). */
   schedule_daily: boolean;
+  /** 'rejected' = the office sent it back (the "Sent back" tag, lib/sentBack.ts). */
+  admin_status: string | null;
   customers: { name: string } | null;
   sites: JobSiteSummary | null;
 }
@@ -92,6 +94,10 @@ export interface JobDetail {
   voice_report_transcript: string | null;
   assigned_to: string | null;
   scheduled_cost_center_id: string | null;
+  /** The office's send-back (0122, a draft): 'rejected' + the note TO the crew. Never admin_notes. */
+  admin_status: string | null;
+  sent_back_note: string | null;
+  sent_back_at: string | null;
   assigned_profile: { full_name: string } | null;
   customers: { name: string; phone: string | null; mobile: string | null; email: string | null } | null;
   sites: {
@@ -154,6 +160,7 @@ const OFFICE_SELECT_WITH_STAGE = `${OFFICE_SELECT}, job_stage_notes(stage, creat
 // ASC NULLS LAST; SQLite ASC is NULLS FIRST, hence the `IS NULL,` prefix.
 export const SQL_LIST_MY_JOBS = `
   SELECT j.id, j.job_number, j.title, j.status, j.scheduled_start, j.scheduled_end, j.schedule_daily,
+         j.admin_status,
          c.name AS customer_name,
          s.name AS site_name, s.address_line1 AS site_address_line1,
          s.suburb AS site_suburb, s.site_lat, s.site_lng
@@ -189,7 +196,9 @@ export const SQL_GET_JOB = `
          j.job_type, j.created_at, j.scheduled_start, j.scheduled_end, j.schedule_daily, j.schedule_all_day,
          j.actual_start, j.actual_end, j.completion_notes,
          j.overtime_reason, j.overtime_category, j.voice_report_transcript,
-         j.assigned_to, j.scheduled_cost_center_id, p.full_name AS assigned_profile_full_name,
+         j.assigned_to, j.scheduled_cost_center_id,
+         j.admin_status, j.sent_back_note, j.sent_back_at,
+         p.full_name AS assigned_profile_full_name,
          c.name AS customer_name, c.phone AS customer_phone,
          c.mobile AS customer_mobile, c.email AS customer_email,
          s.name AS site_name, s.address_line1 AS site_address_line1,
@@ -266,6 +275,7 @@ interface RawMyJobRow {
   scheduled_start: string | null;
   scheduled_end: string | null;
   schedule_daily: number | boolean | null;
+  admin_status: string | null;
   customer_name: string | null;
   site_name: string | null;
   site_address_line1: string | null;
@@ -296,6 +306,9 @@ interface RawJobDetailRow {
   voice_report_transcript: string | null;
   assigned_to: string | null;
   scheduled_cost_center_id: string | null;
+  admin_status: string | null;
+  sent_back_note: string | null;
+  sent_back_at: string | null;
   assigned_profile_full_name: string | null;
   customer_name: string | null;
   customer_phone: string | null;
@@ -368,6 +381,7 @@ function mapMyJob(r: RawMyJobRow): MyJob {
     scheduled_start: r.scheduled_start,
     scheduled_end: r.scheduled_end,
     schedule_daily: bool(r.schedule_daily) ?? false,
+    admin_status: r.admin_status ?? null,
     customers: nestOne(r.customer_name, { name: r.customer_name as string }),
     sites: mapSiteSummary(r),
   };
@@ -396,6 +410,9 @@ function mapJobDetail(r: RawJobDetailRow): JobDetail {
     voice_report_transcript: r.voice_report_transcript,
     assigned_to: r.assigned_to,
     scheduled_cost_center_id: r.scheduled_cost_center_id,
+    admin_status: r.admin_status ?? null,
+    sent_back_note: r.sent_back_note ?? null,
+    sent_back_at: r.sent_back_at ?? null,
     assigned_profile: nestOne(r.assigned_profile_full_name, { full_name: r.assigned_profile_full_name as string }),
     customers: nestOne(r.customer_name, {
       name: r.customer_name as string,
@@ -475,7 +492,7 @@ export async function listMyJobs(userId: string): Promise<MyJob[]> {
       const crew = await crewJobIdsRemote(userId, { kind: "open" }, "listMyJobs");
       const res = await supabase
         .from("jobs")
-        .select("id, job_number, title, status, scheduled_start, scheduled_end, schedule_daily, customers(name), sites(name, address_line1, suburb, site_lat, site_lng)")
+        .select("id, job_number, title, status, scheduled_start, scheduled_end, schedule_daily, admin_status, customers(name), sites(name, address_line1, suburb, site_lat, site_lng)")
         .or(assignedOrCrewFilter(userId, crew))
         .not("status", "in", '("completed","cancelled")')
         .order("scheduled_start", { ascending: true, nullsFirst: false });
@@ -622,6 +639,18 @@ export async function listMyJobSites(userId: string): Promise<MyJobSite[]> {
   );
 }
 
+const JOB_DETAIL_SELECT_BEFORE_0122 =
+  "id, job_number, title, status, priority, description, notes, job_type, created_at, scheduled_start, scheduled_end, schedule_daily, schedule_all_day, actual_start, actual_end, completion_notes, overtime_reason, overtime_category, voice_report_transcript, assigned_to, scheduled_cost_center_id, admin_status, assigned_profile:profiles!jobs_assigned_to_fkey(full_name), customers(name, phone, mobile, email), sites(name, address_line1, suburb, state, postcode, site_lat, site_lng)";
+const JOB_DETAIL_SELECT = JOB_DETAIL_SELECT_BEFORE_0122.replace(
+  "admin_status,",
+  "admin_status, sent_back_note, sent_back_at,"
+);
+
+/** 42703 / PGRST204 naming a sent_back column: 0122 not applied. Code AND column, never the message alone. */
+export function isMissingSentBackColumn(error: { code?: string; message?: string } | null | undefined): boolean {
+  return !!error && (error.code === "42703" || error.code === "PGRST204") && /sent_back_/.test(error.message ?? "");
+}
+
 /**
  * Single job with customer/site embeds for the shared job/[id] route.
  * No role gate, but a local MISS answers from Supabase: a technician's
@@ -634,13 +663,19 @@ export async function listMyJobSites(userId: string): Promise<MyJobSite[]> {
 export async function getJob(id: string): Promise<JobDetail | null> {
   // Unchanged Supabase body (app/job/[id].tsx loadJob).
   const remote = async (): Promise<JobDetail | null> => {
-    const res = await supabase
-      .from("jobs")
-      .select(
-        "id, job_number, title, status, priority, description, notes, job_type, created_at, scheduled_start, scheduled_end, schedule_daily, schedule_all_day, actual_start, actual_end, completion_notes, overtime_reason, overtime_category, voice_report_transcript, assigned_to, scheduled_cost_center_id, assigned_profile:profiles!jobs_assigned_to_fkey(full_name), customers(name, phone, mobile, email), sites(name, address_line1, suburb, state, postcode, site_lat, site_lng)"
-      )
-      .eq("id", id)
-      .single();
+    const run = (sentBack: boolean) =>
+      supabase
+        .from("jobs")
+        .select(sentBack ? JOB_DETAIL_SELECT : JOB_DETAIL_SELECT_BEFORE_0122)
+        .eq("id", id)
+        .single();
+    const res = (await run(true)) as unknown as { error: { code?: string; message?: string } | null };
+    if (isMissingSentBackColumn(res.error)) {
+      // Before 0122 (a draft): no stamped note or time. The send-back still
+      // shows (from admin_status) — the note is never read from admin_notes.
+      const before = unwrap((await run(false)) as never, "getJob") as Record<string, unknown> | null;
+      return before ? ({ ...before, sent_back_note: null, sent_back_at: null } as unknown as JobDetail) : null;
+    }
     // .single() reports "no rows" as PGRST116, which unwrap maps to null —
     // absence is a normal answer here (the id may be a job this caller cannot
     // see), while a genuine failure still throws.

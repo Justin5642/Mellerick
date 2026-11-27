@@ -13,6 +13,11 @@ jobs, assigning yourself, or re-saving a crew that already includes the person.
 **Status:** switched on in production 19 Oct 2026 (steps 1–4 done, live test
 push delivered). The steps are kept for a new project or a rotated secret.
 
+**Also: "Job #123 sent back"** (migration `0122`, DRAFT) — when the office
+sends a job back from Approvals, its crew (never the sender) get a push with
+the office's note; tapping opens the job. Same trigger mechanism and Vault
+secrets as above, so nothing more to set up once 0122 is applied.
+
 ## One-time setup, in this order
 
 Run from the repo root. Use the pinned CLI (`supabase@2.109.1`); see HANDOVER for

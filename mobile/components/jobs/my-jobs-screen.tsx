@@ -27,6 +27,7 @@ import { getJobCostCentres } from "../../lib/data/reads/jobBilling";
 import { myJobEntries, splitMyJobEntries, type Booking, type MyJobEntry } from "../../lib/bookings";
 import type { ScheduledJobWindow } from "../../lib/scheduling";
 import { loadTodaysRunCount, runCardTitle } from "../../lib/todaysRun";
+import { isSentBack } from "../../lib/sentBack";
 
 interface Job {
   id: string;
@@ -36,6 +37,8 @@ interface Job {
   scheduled_start: string | null;
   scheduled_end: string | null;
   schedule_daily: boolean;
+  /** 'rejected' = sent back by the office (0122, a draft) — the "Sent back" tag. */
+  admin_status: string | null;
   customers: { name: string } | null;
   sites: { name: string; address_line1: string; suburb: string; site_lat: number | null; site_lng: number | null } | null;
 }
@@ -184,6 +187,11 @@ export function MyJobsScreen() {
             <Text style={[styles.badgeText, { color: sc.text }]}>{job.status.replace("_", " ")}</Text>
           </View>
         </View>
+        {isSentBack(job) ? (
+          <View style={styles.sentBackTag}>
+            <Text style={styles.sentBackText}>↩ Sent back — see the note from the office</Text>
+          </View>
+        ) : null}
         {job.customers?.name && <Text style={styles.cardSubtext}>{job.customers.name}</Text>}
         {address && <Text style={styles.cardMeta}>📍 {address}</Text>}
         <WindowLine window={window} />
@@ -289,6 +297,8 @@ export function MyJobsScreen() {
 }
 
 const styles = StyleSheet.create({
+  sentBackTag: { alignSelf: "flex-start", marginTop: 4, paddingHorizontal: 8, paddingVertical: 2, borderRadius: 10, backgroundColor: colors.red100 },
+  sentBackText: { fontSize: 12, fontWeight: "700", color: colors.red600 },
   container: { flex: 1, backgroundColor: colors.bg },
   center: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: colors.bg },
   header: {

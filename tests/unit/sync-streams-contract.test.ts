@@ -350,6 +350,16 @@ describe("PowerSync sync windows", () => {
     );
   });
 
+  it("gives technicians the office's send-back note (0122), never jobs.admin_notes", () => {
+    // admin_notes also carries the admin's APPROVAL comment (lib/approve-job.ts),
+    // which can talk money; 0122's trigger copies only the send-back note into
+    // sent_back_note. MONEY_TERMS above lists admin_notes, so this is a second,
+    // named statement of the same rule for this one stream.
+    const cols = query("tech_jobs").match(/SELECT (.*?) FROM/i)![1].split(",").map((c) => c.trim());
+    expect(cols).toEqual(expect.arrayContaining(["admin_status", "sent_back_note", "sent_back_at"]));
+    expect(cols).not.toContain("admin_notes");
+  });
+
   it("scopes every technician job-child stream through the same windowed job set", () => {
     const children = Object.keys(streams).filter((n) => n.startsWith("tech_job_") || n === "tech_time_entries");
     expect(children.length).toBeGreaterThanOrEqual(6);

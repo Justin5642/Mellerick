@@ -48,7 +48,7 @@ describe("listMyJobs (local)", () => {
     {
       id: "j1", job_number: 101, title: "Backflow annual test", status: "scheduled",
       scheduled_start: "2026-07-27T08:00:00+00:00", scheduled_end: "2026-07-27T10:00:00+00:00",
-      schedule_daily: 1,
+      schedule_daily: 1, admin_status: "rejected",
       customer_name: "Acme Pty Ltd",
       site_name: "Head office", site_address_line1: "1 Main St", site_suburb: "Richmond",
       site_lat: -37.82, site_lng: 144.99,
@@ -56,7 +56,7 @@ describe("listMyJobs (local)", () => {
     {
       id: "j2", job_number: 102, title: "Pump repair", status: "pending",
       scheduled_start: null, scheduled_end: null,
-      schedule_daily: 0,
+      schedule_daily: 0, admin_status: null,
       customer_name: null,
       site_name: null, site_address_line1: null, site_suburb: null,
       site_lat: null, site_lng: null,
@@ -73,14 +73,14 @@ describe("listMyJobs (local)", () => {
       {
         id: "j1", job_number: 101, title: "Backflow annual test", status: "scheduled",
         scheduled_start: "2026-07-27T08:00:00+00:00", scheduled_end: "2026-07-27T10:00:00+00:00",
-        schedule_daily: true,
+        schedule_daily: true, admin_status: "rejected",
         customers: { name: "Acme Pty Ltd" },
         sites: { name: "Head office", address_line1: "1 Main St", suburb: "Richmond", site_lat: -37.82, site_lng: 144.99 },
       },
       {
         id: "j2", job_number: 102, title: "Pump repair", status: "pending",
         scheduled_start: null, scheduled_end: null,
-        schedule_daily: false,
+        schedule_daily: false, admin_status: null,
         customers: null,
         sites: null,
       },
@@ -89,6 +89,7 @@ describe("listMyJobs (local)", () => {
     const [sql, params] = getAll.mock.calls[0];
     expect(norm(sql)).toBe(norm(`
       SELECT j.id, j.job_number, j.title, j.status, j.scheduled_start, j.scheduled_end, j.schedule_daily,
+             j.admin_status,
              c.name AS customer_name,
              s.name AS site_name, s.address_line1 AS site_address_line1,
              s.suburb AS site_suburb, s.site_lat, s.site_lng
@@ -184,7 +185,9 @@ describe("getJob (local)", () => {
     actual_start: "2026-07-27T08:05:00+00:00", actual_end: null,
     completion_notes: null, overtime_reason: null, overtime_category: null,
     voice_report_transcript: null,
-    assigned_to: "tech-1", scheduled_cost_center_id: null, assigned_profile_full_name: "Jo Tech",
+    assigned_to: "tech-1", scheduled_cost_center_id: null,
+    admin_status: "rejected", sent_back_note: "Need the CCTV report", sent_back_at: "2026-11-27T03:15:00+00:00",
+    assigned_profile_full_name: "Jo Tech",
     customer_name: "Acme Pty Ltd", customer_phone: "03 9000 0000",
     customer_mobile: null, customer_email: "acme@example.com",
     site_name: "Head office", site_address_line1: "1 Main St", site_suburb: "Richmond",
@@ -206,7 +209,9 @@ describe("getJob (local)", () => {
       actual_start: "2026-07-27T08:05:00+00:00", actual_end: null,
       completion_notes: null, overtime_reason: null, overtime_category: null,
       voice_report_transcript: null,
-      assigned_to: "tech-1", scheduled_cost_center_id: null, assigned_profile: { full_name: "Jo Tech" },
+      assigned_to: "tech-1", scheduled_cost_center_id: null,
+      admin_status: "rejected", sent_back_note: "Need the CCTV report", sent_back_at: "2026-11-27T03:15:00+00:00",
+      assigned_profile: { full_name: "Jo Tech" },
       customers: { name: "Acme Pty Ltd", phone: "03 9000 0000", mobile: null, email: "acme@example.com" },
       sites: { name: "Head office", address_line1: "1 Main St", suburb: "Richmond", state: "VIC", postcode: "3121", site_lat: -37.82, site_lng: 144.99 },
     });
@@ -216,7 +221,9 @@ describe("getJob (local)", () => {
              j.job_type, j.created_at, j.scheduled_start, j.scheduled_end, j.schedule_daily, j.schedule_all_day,
              j.actual_start, j.actual_end, j.completion_notes,
              j.overtime_reason, j.overtime_category, j.voice_report_transcript,
-             j.assigned_to, j.scheduled_cost_center_id, p.full_name AS assigned_profile_full_name,
+             j.assigned_to, j.scheduled_cost_center_id,
+             j.admin_status, j.sent_back_note, j.sent_back_at,
+             p.full_name AS assigned_profile_full_name,
              c.name AS customer_name, c.phone AS customer_phone,
              c.mobile AS customer_mobile, c.email AS customer_email,
              s.name AS site_name, s.address_line1 AS site_address_line1,
