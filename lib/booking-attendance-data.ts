@@ -1,5 +1,6 @@
 import { fetchAllRows, type RangeableQuery } from "@/lib/fetch-all-rows";
 import type { AttendanceEntry } from "@/lib/booking-attendance";
+import type { ActualEntry } from "@/lib/schedule-actuals";
 
 /**
  * The one read behind "Not attended" on the schedule board (lib/booking-
@@ -21,6 +22,7 @@ type Filterable<T> = RangeableQuery<T> & {
   in: (column: string, values: readonly string[]) => Filterable<T>;
   eq: (column: string, value: string) => Filterable<T>;
   gte: (column: string, value: string) => Filterable<T>;
+  lt: (column: string, value: string) => Filterable<T>;
   order: (column: string, opts?: { ascending?: boolean }) => Filterable<T>;
 };
 
@@ -67,4 +69,60 @@ export async function loadAttendanceEntries(
     console.error("[schedule] attendance unavailable:", e instanceof Error ? e.message : e);
     return null;
   }
+}
+
+/**
+ * The schedule's ACTUAL clocked time (lib/schedule-actuals.ts; Justin, 27 Nov
+ * 2026): every WORK entry clocked on from `fromIso` up to `toIso`, for every
+ * technician — time on a job they weren't booked on shows too, so this is a
+ * date-range read, not a per-job one. Office/admin only (the page never asks
+ * for a technician); run as the CALLER, so RLS decides.
+ *
+ * IDS AND TIMESTAMPS ONLY — a named list, never "*" (time_entries has column
+ * grants and rate_override). Paged, so the 1000-row cap never drops an entry.
+ * null when the read failed: the board then draws no clocked time.
+ */
+export const ACTUAL_ENTRY_COLUMNS = "id, job_id, staff_id, clock_in, clock_out, entry_type";
+
+export type ActualsClient = AttendanceClient;
+
+export async function loadActualEntries(client: ActualsClient, fromIso: string, toIso: string): Promise<ActualEntry[] | null> {
+  try {
+    const r = await fetchAllRows<unknown>((count) =>
+      client
+        .from("time_entries")
+        .select(ACTUAL_ENTRY_COLUMNS, count)
+        .eq("entry_type", "work")
+        .gte("clock_in", fromIso)
+        .lt("clock_in", toIso)
+        .order("id"),
+    );
+    if (!r.ok) throw new Error(`actual time_entries: ${r.error}`);
+    return r.rows as ActualEntry[];
+  } catch (e) {
+    console.error("[schedule] clocked time unavailable:", e instanceof Error ? e.message : e);
+    return null;
+  }
+}
+
+/** Job number and title for jobs that have clocked time but aren't on the board (an unbooked span's label). */
+export type ActualJobLabel = { job_number: number | null; title: string | null };
+
+export async function loadActualJobLabels(
+  client: { from: (table: string) => { select: (columns: string) => { in: (column: string, values: readonly string[]) => PromiseLike<{ data: unknown[] | null; error: unknown }> } } },
+  jobIds: readonly string[],
+): Promise<Record<string, ActualJobLabel>> {
+  const ids = Array.from(new Set(jobIds));
+  const out: Record<string, ActualJobLabel> = {};
+  for (let i = 0; i < ids.length; i += ATTENDANCE_CHUNK) {
+    const { data, error } = await client.from("jobs").select("id, job_number, title").in("id", ids.slice(i, i + ATTENDANCE_CHUNK));
+    if (error) {
+      console.error("[schedule] clocked-time job labels unavailable");
+      continue;
+    }
+    for (const row of (data ?? []) as { id: string; job_number: number | null; title: string | null }[]) {
+      out[row.id] = { job_number: row.job_number, title: row.title };
+    }
+  }
+  return out;
 }

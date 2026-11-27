@@ -30,7 +30,15 @@ import {
   notAttendedBookings,
   type AttendanceWindow,
 } from "@/lib/booking-attendance";
-import { loadAttendanceEntries, type AttendanceClient } from "@/lib/booking-attendance-data";
+import {
+  loadActualEntries,
+  loadActualJobLabels,
+  loadAttendanceEntries,
+  type ActualJobLabel,
+  type ActualsClient,
+  type AttendanceClient,
+} from "@/lib/booking-attendance-data";
+import { scheduleActuals, type ScheduleActuals } from "@/lib/schedule-actuals";
 
 const BOARD_COLUMNS =
   // priority, description, customers.company and the site's full address +
@@ -248,7 +256,13 @@ export default async function SchedulePage() {
   const jobStatus = (id: string) => jobStatusById.get(id);
   const attendanceJobIds = canSeeOverHours ? attendanceCandidateJobIds(rawBookings, jobStatus, attendanceWindow) : [];
 
-  const [poRows, missingProfiles, costCenterRows, overHours, attendanceEntries] = await Promise.all([
+  // Actual clocked time beside each booking (27 Nov 2026, lib/schedule-
+  // actuals.ts) — office/admin only; a technician's page never reads it.
+  // Every work entry clocked on from the board's first day to now, for every
+  // technician (time on a job they weren't booked on shows too). Ids and
+  // timestamps only; null = the read failed and nothing is drawn.
+  const nowIso = new Date().toISOString();
+  const [poRows, missingProfiles, costCenterRows, overHours, attendanceEntries, actualEntries] = await Promise.all([
     todoIds.length > 0
       ? supabase.from("purchase_orders_public").select("job_id, total_hours").in("job_id", todoIds).then(({ data }) => data)
       : null,
@@ -274,7 +288,23 @@ export default async function SchedulePage() {
     attendanceJobIds.length > 0
       ? loadAttendanceEntries(supabase as unknown as AttendanceClient, attendanceJobIds, businessDayRange(leaveRange.from).dayStartIso)
       : null,
+    canSeeOverHours ? loadActualEntries(supabase as unknown as ActualsClient, businessDayRange(leaveRange.from).dayStartIso, nowIso) : null,
   ]);
+  const actuals: ScheduleActuals | null = actualEntries ? scheduleActuals(actualEntries, rawBookings, Date.parse(nowIso)) : null;
+  // An unbooked span's block names its job: from the board's jobs, else read
+  // (id, number, title only).
+  const actualJobs: Record<string, ActualJobLabel> = {};
+  if (actuals) {
+    const boardJobsById = new Map(jobs.map((j) => [j.id, j]));
+    const unbookedJobIds = new Set(Object.values(actuals.unbooked).flat().map((s) => s.jobId));
+    const toRead: string[] = [];
+    for (const id of unbookedJobIds) {
+      const j = boardJobsById.get(id);
+      if (j) actualJobs[id] = { job_number: j.job_number, title: j.title };
+      else toRead.push(id);
+    }
+    if (toRead.length > 0) Object.assign(actualJobs, await loadActualJobLabels(supabase as never, toRead));
+  }
   const notAttended =
     canSeeOverHours && (attendanceJobIds.length === 0 || attendanceEntries)
       ? notAttendedBookings(rawBookings, jobStatus, attendanceEntries ?? [], attendanceWindow)
@@ -357,6 +387,8 @@ export default async function SchedulePage() {
         viewerRole={viewerRole}
         overHours={overHours}
         notAttended={notAttended}
+        actuals={actuals}
+        actualJobs={actuals ? actualJobs : undefined}
         viewerId={viewer?.user?.id ?? null}
       />
     </div>

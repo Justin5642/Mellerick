@@ -157,6 +157,7 @@ export function BookingHoverCard({
   completed,
   overText,
   leaveText,
+  actualText = null,
   onPointerEnter,
   onPointerLeave,
 }: {
@@ -170,6 +171,8 @@ export function BookingHoverCard({
   overText: string | null;
   /** The technician is on leave that day (Needs reassigning). */
   leaveText: string | null;
+  /** "Clocked 7:42–3:10 · 7.5 h" — what was actually clocked (office/admin only; null otherwise). */
+  actualText?: string | null;
   onPointerEnter: () => void;
   onPointerLeave: () => void;
 }) {
@@ -252,6 +255,7 @@ export function BookingHoverCard({
           <p>{d.when}</p>
           {d.span && <p className="text-violet-700">{d.span}</p>}
           {d.costCentre && <p className="font-medium text-cyan-700">{d.costCentre}</p>}
+          {actualText && <p data-hover-actual className="font-semibold text-emerald-700">⏱ {actualText}</p>}
         </Row>
         {d.note && (
           <Row icon={StickyNote}>
