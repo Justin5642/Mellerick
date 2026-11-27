@@ -44,7 +44,7 @@ export interface JobBooking {
   /** Who made the booking (0079). A technician's own id = they started work themselves (0118). Board reads only. */
   created_by?: string | null;
   /**
-   * "Didn't make it" (0121 (draft)): when, the reason key and the note. Null = not
+   * "Didn't make it" (0121): when, the reason key and the note. Null = not
    * flagged. Absent on a database without the columns (readers retry
    * without them — isMissingMissedColumn in lib/booking-attendance.ts).
    */
@@ -337,7 +337,7 @@ export async function loadJobBookings(
   const read = (columns: string) =>
     supabase.from("job_bookings").select(columns).eq("job_id", jobId).order("starts_at", { ascending: true });
   let { data, error } = await read(`${BOOKING_COLUMNS}, google_event_id, updated_at, ${BOOKING_NOTE_COLUMN}, ${MISSED_COLUMNS}`);
-  // 0121 (draft) not applied: without "Didn't make it".
+  // 0121 not applied: without "Didn't make it".
   if (isMissingMissedColumn(error)) ({ data, error } = await read(`${BOOKING_COLUMNS}, google_event_id, updated_at, ${BOOKING_NOTE_COLUMN}`));
   // 0109 not applied: the bookings without their notes.
   if (isMissingNoteColumn(error)) ({ data, error } = await read(`${BOOKING_COLUMNS}, google_event_id, updated_at`));

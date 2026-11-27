@@ -1,5 +1,5 @@
 // MIRROR of the web's lib/booking-attendance.ts — "Didn't make it" and "Not
-// attended" on a booking (Justin, 27 Nov 2026; migration 0121 (draft)). Identical
+// attended" on a booking (Justin, 27 Nov 2026; migration 0121). Identical
 // below the imports, pinned by tests/unit/booking-attendance-mirror.test.ts:
 // change the web file first, then copy its body here.
 //
@@ -7,7 +7,7 @@
 import { dateKeyInBusinessTZ } from "./date";
 import { scheduleDays } from "./scheduling";
 
-/** 0121 (draft)'s job_bookings_missed_reason check, in the order the sheet lists them. */
+/** 0121's job_bookings_missed_reason check, in the order the sheet lists them. */
 export const MISSED_REASONS = [
   { key: "out_of_time", label: "Ran out of time" },
   { key: "previous_job_ran_over", label: "Previous job ran over" },
@@ -19,13 +19,13 @@ export const MISSED_REASONS = [
 
 export type MissedReason = (typeof MISSED_REASONS)[number]["key"];
 
-/** 0121 (draft)'s job_bookings_missed_note_length. */
+/** 0121's job_bookings_missed_note_length. */
 export const MISSED_NOTE_MAX = 500;
 
 export const DIDNT_MAKE_IT = "Didn't make it";
 export const NOT_ATTENDED = "Not attended";
 
-/** The booking columns 0121 (draft) adds that every reader shows (missed_by stays on the server). */
+/** The booking columns 0121 adds that every reader shows (missed_by stays on the server). */
 export const MISSED_COLUMNS = "missed_at, missed_reason, missed_note";
 
 export function isMissedReason(value: unknown): value is MissedReason {
@@ -61,7 +61,7 @@ export function missedDetailText(b: MissedFields): string {
 
 export type MissedInput = { ok: true; reason: MissedReason; note: string | null } | { ok: false; error: string };
 
-/** The sheet's / route's check — the same rules as 0121 (draft)'s constraints. */
+/** The sheet's / route's check — the same rules as 0121's constraints. */
 export function validateMissed(input: { reason?: unknown; note?: unknown }): MissedInput {
   if (!isMissedReason(input.reason)) return { ok: false, error: "Pick a reason." };
   if (input.note != null && typeof input.note !== "string") return { ok: false, error: "The note must be text." };
@@ -95,7 +95,7 @@ export function isClosedJobStatus(status: string | null | undefined): boolean {
 /**
  * Whether "Didn't make it" is offered on this booking: someone's booking (not
  * Unassigned) on an open job, whose first booked day is today or earlier —
- * a future booking can't be missed yet. 0121 (draft)'s flag_booking_missed() decides
+ * a future booking can't be missed yet. 0121's flag_booking_missed() decides
  * again on the server.
  */
 export function canFlagMissed(b: Pick<AttendanceBooking, "staff_id" | "starts_at" | "ends_at" | "daily">, jobStatus: string | null | undefined, todayKey: string): boolean {
@@ -208,7 +208,7 @@ export function withQueuedMissed<B extends MissedFields>(b: B, queued: { reason:
 }
 
 /**
- * Whether PostgREST says 0121 (draft)'s columns aren't there yet: 42703 on a select,
+ * Whether PostgREST says 0121's columns aren't there yet: 42703 on a select,
  * PGRST204 on a body — code AND column name, never the message alone.
  */
 export function isMissingMissedColumn(error: { code?: string | null; message?: string | null } | null | undefined): boolean {

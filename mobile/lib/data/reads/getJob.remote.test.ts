@@ -1,4 +1,4 @@
-// The REMOTE half of getJob reads the office's send-back (0122, a draft): admin_status
+// The REMOTE half of getJob reads the office's send-back (0122): admin_status
 // plus the note stamped FOR the crew (sent_back_note) — never admin_notes,
 // which also carries approval comments. Before 0122 the columns don't exist,
 // so the read retries without them instead of failing the job screen.

@@ -3,7 +3,7 @@ import type { Outbox } from "../outbox/outbox";
 import type { Operation, SideEffectOperation } from "../outbox/types";
 import { queuedMissedFlags } from "../../missedQueue";
 
-// "Didn't make it" (0121 (draft)): a coalesced side effect per booking, never a
+// "Didn't make it" (0121): a coalesced side effect per booking, never a
 // job_bookings write (RLS lets only office/admin write bookings).
 
 function capture(pendingInsert: string | null = null) {

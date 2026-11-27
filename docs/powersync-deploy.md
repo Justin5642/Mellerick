@@ -105,3 +105,4 @@ node --js-explicit-resource-management -e '
 | `tech_job_bookings`, `office_job_bookings` (job bookings on the phone, build 16) | `0079` and `0080` applied (2026-10-19) | **deployed as v5, 2026-11-14** |
 | `tech_job_photos.folder` (job folders) | `0116` applied (2026-11-25) | **deployed, 2026-11-27** (with the row below) |
 | `tech_time_entries.variation_id` (time against variations) | `0120` applied (2026-11-27) | **deployed, 2026-11-27** |
+| `tech_job_bookings.missed_*` (didn't make it) + `tech_jobs.admin_status/sent_back_*` (sent back) | `0121` and `0122` applied (2026-11-27) | **deployed, 2026-11-27** |

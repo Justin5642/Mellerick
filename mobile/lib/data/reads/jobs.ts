@@ -94,7 +94,7 @@ export interface JobDetail {
   voice_report_transcript: string | null;
   assigned_to: string | null;
   scheduled_cost_center_id: string | null;
-  /** The office's send-back (0122, a draft): 'rejected' + the note TO the crew. Never admin_notes. */
+  /** The office's send-back (0122): 'rejected' + the note TO the crew. Never admin_notes. */
   admin_status: string | null;
   sent_back_note: string | null;
   sent_back_at: string | null;
@@ -671,7 +671,7 @@ export async function getJob(id: string): Promise<JobDetail | null> {
         .single();
     const res = (await run(true)) as unknown as { error: { code?: string; message?: string } | null };
     if (isMissingSentBackColumn(res.error)) {
-      // Before 0122 (a draft): no stamped note or time. The send-back still
+      // Before 0122: no stamped note or time. The send-back still
       // shows (from admin_status) — the note is never read from admin_notes.
       const before = unwrap((await run(false)) as never, "getJob") as Record<string, unknown> | null;
       return before ? ({ ...before, sent_back_note: null, sent_back_at: null } as unknown as JobDetail) : null;

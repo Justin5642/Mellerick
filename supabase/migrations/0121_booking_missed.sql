@@ -1,7 +1,7 @@
 -- ============================================================================
 -- "Didn't make it" on a booking — the technician says why they didn't get to it.
 --
--- STATUS: DRAFT — NOT APPLIED. Paste this file into the Supabase SQL editor,
+-- STATUS: ✅ APPLIED 2026-11-27 (gate test passed). Was: paste this file into the Supabase SQL editor,
 -- then supabase/tests/0121_booking_missed_test.sql, and trust only its final
 -- "0121 PASSED" row. Then change this line to applied, add the ledger row
 -- ('0121','booking_missed'), regenerate types, and THEN redeploy the PowerSync

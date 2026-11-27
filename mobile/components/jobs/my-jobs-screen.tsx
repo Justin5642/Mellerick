@@ -37,7 +37,7 @@ interface Job {
   scheduled_start: string | null;
   scheduled_end: string | null;
   schedule_daily: boolean;
-  /** 'rejected' = sent back by the office (0122, a draft) — the "Sent back" tag. */
+  /** 'rejected' = sent back by the office (0122) — the "Sent back" tag. */
   admin_status: string | null;
   customers: { name: string } | null;
   sites: { name: string; address_line1: string; suburb: string; site_lat: number | null; site_lng: number | null } | null;

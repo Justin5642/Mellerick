@@ -1,4 +1,4 @@
-// A job the office sent back to the crew (Approvals → "Send back"; 0122, a draft).
+// A job the office sent back to the crew (Approvals → "Send back"; 0122).
 //
 // The office sets jobs.admin_status = 'rejected' with a note; 0122's trigger
 // copies the note to jobs.sent_back_note and stamps sent_back_at, and pushes

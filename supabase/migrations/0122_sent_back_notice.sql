@@ -1,7 +1,7 @@
 -- ============================================================================
 -- A job sent back by the office tells its crew: a push, and a note on the job.
 --
--- STATUS: DRAFT — NOT APPLIED. Paste this, then
+-- STATUS: ✅ APPLIED 2026-11-27 (gate test passed). Was: paste this, then
 -- supabase/tests/0122_sent_back_notice_test.sql, and trust only "0122 PASSED".
 --
 -- WHY (27 Nov 2026)

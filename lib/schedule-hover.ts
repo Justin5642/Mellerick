@@ -97,7 +97,7 @@ export type HoverCardDetails = {
   /** Everyone else booked on the job that day, with their hours. */
   crew: HoverCrewLine[];
   description: string | null;
-  /** "Didn't make it — Other: truck broke down" (0121 (draft)) or "Not attended" (office/admin only); null otherwise. */
+  /** "Didn't make it — Other: truck broke down" (0121) or "Not attended" (office/admin only); null otherwise. */
   attendance: string | null;
 };
 

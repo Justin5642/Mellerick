@@ -1,4 +1,4 @@
-// "Didn't make it" changes still queued on this phone (0121 (draft)). The flag is a
+// "Didn't make it" changes still queued on this phone (0121). The flag is a
 // side effect (ScheduleRepository.flagMissed / clearMissed), so nothing local
 // changes until the server has it and the booking syncs back; screens lay the
 // queued change over what they read (withQueuedMissed in ./bookingAttendance)
