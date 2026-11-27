@@ -72,6 +72,7 @@ import {
   type RowItem,
 } from "../../lib/scheduleGrid";
 import { bookingOverHours, formatOverHours, type HoursByJob, type OverHours } from "../../lib/overHours";
+import { isMissed, missedDetailText, missedTagText, NOT_ATTENDED } from "../../lib/bookingAttendance";
 import { leaveColour, leaveDayLabel, leaveRangeLabel, NEEDS_REASSIGNING, type LeaveConflict, type LeaveDay, type LeaveIndex } from "../../lib/staffLeave";
 import type { DayGap } from "../../lib/todoBoard";
 
@@ -813,6 +814,7 @@ function Block({ placed, top, view, rowStaffId, staffNames, others, saveState, r
     completed ? "completed" : null,
     reassign ? NEEDS_REASSIGNING : null,
     booking.added_by_technician ? ADDED_BY_TECHNICIAN : null,
+    isMissed(booking) ? missedDetailText(booking) : booking.not_attended ? NOT_ATTENDED : null,
     over ? over.text : null,
     saveState === "saving" ? "saving" : saveState === "queued" ? "not on the server yet" : saveState === "failed" ? "not saved" : null,
   ]
@@ -857,6 +859,11 @@ function Block({ placed, top, view, rowStaffId, staffNames, others, saveState, r
               {ADDED_BY_TECHNICIAN}
               {booking.running ? " · on now" : ""} ·{" "}
             </Text>
+          ) : null}
+          {isMissed(booking) ? (
+            <Text style={styles.missedText}>{missedTagText(booking)} · </Text>
+          ) : booking.not_attended ? (
+            <Text style={styles.notAttendedText}>{NOT_ATTENDED} · </Text>
           ) : null}
           {over ? (
             <Text style={styles.overText}>
@@ -934,6 +941,8 @@ const styles = StyleSheet.create({
   blockFailed: { borderColor: colors.red600, borderWidth: 2 },
   blockOver: { borderColor: "#d97706", borderWidth: 2, borderLeftWidth: 4 },
   overText: { color: "#b45309", fontWeight: "800" },
+  missedText: { color: "#b91c1c", fontWeight: "800" },
+  notAttendedText: { color: "#b45309", fontWeight: "800" },
   blockReassign: { borderColor: "#e11d48", borderWidth: 2, borderLeftWidth: 4 },
   reassignText: { color: "#be123c", fontWeight: "800" },
   selfStartText: { color: "#047857", fontWeight: "800" },

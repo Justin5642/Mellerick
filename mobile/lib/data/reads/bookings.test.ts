@@ -149,6 +149,31 @@ describe("listJobBookings — the booking's scheduling note (0109)", () => {
   });
 });
 
+describe("listJobBookings — \"Didn't make it\" (0121)", () => {
+  it("remote: selects the missed columns, and retries without them before 0121 is applied", async () => {
+    mockAnswers = {
+      job_bookings: [
+        { data: null, error: { code: "42703", message: "column job_bookings.missed_at does not exist" } },
+        { data: [{ ...localRow, daily: true, all_day: false, staff: { full_name: "Dave" } }], error: null },
+      ],
+    };
+    expect(await listJobBookings("j1")).toEqual([{ ...mapped, staff_name: "Dave" }]);
+    const selects = mockCalls.filter((c) => c.method === "select").map((c) => String(c.args[0]));
+    expect(selects).toHaveLength(2);
+    expect(selects[0]).toMatch(/missed_reason/);
+    expect(selects[1]).not.toMatch(/missed_/);
+    expect(selects[1]).toMatch(/\bnote\b/);
+  });
+
+  it("local: carries the flag", async () => {
+    const getAll = jest.fn().mockResolvedValue([{ ...localRow, staff_name: "Dave", missed_at: "t", missed_reason: "weather", missed_note: null }]);
+    setLocalReads(fakeReads(getAll));
+    const [b] = (await listJobBookings("j1"))!;
+    expect(b.missed_reason).toBe("weather");
+    expect(SQL_JOB_BOOKINGS).toMatch(/b\.missed_reason/);
+  });
+});
+
 describe("listMyJobBookings", () => {
   const jobs = ["j1", "j2"];
   const j1Start = "2026-10-19 20:00:00Z";

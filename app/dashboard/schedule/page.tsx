@@ -22,6 +22,15 @@ import { fetchAllRows, type RangeableQuery } from "@/lib/fetch-all-rows";
 import { businessDayRange } from "@/lib/scheduling";
 import { loadJobHours, OVER_HOURS_CHUNK, type OverHoursClient } from "@/lib/over-hours-data";
 import { boardTextForViewer } from "@/lib/schedule-hover";
+import { dateKeyInBusinessTZ } from "@/lib/date";
+import {
+  attendanceCandidateJobIds,
+  isMissingMissedColumn,
+  MISSED_COLUMNS,
+  notAttendedBookings,
+  type AttendanceWindow,
+} from "@/lib/booking-attendance";
+import { loadAttendanceEntries, type AttendanceClient } from "@/lib/booking-attendance-data";
 
 const BOARD_COLUMNS =
   // priority, description, customers.company and the site's full address +
@@ -120,7 +129,13 @@ export default async function SchedulePage() {
     };
     // Each booking's scheduling note (0109) rides along; on a database without
     // that column the embed is retried without it before anything else falls back.
-    let withBookings = await run(`${BOARD_COLUMNS}, schedule_daily, schedule_all_day, job_bookings(${BOOKING_COLUMNS}, created_by, ${BOOKING_NOTE_COLUMN})`);
+    // "Didn't make it" (0121 (draft)) rides along too; without its columns, retried without them first.
+    let withBookings = await run(
+      `${BOARD_COLUMNS}, schedule_daily, schedule_all_day, job_bookings(${BOOKING_COLUMNS}, created_by, ${BOOKING_NOTE_COLUMN}, ${MISSED_COLUMNS})`,
+    );
+    if (isMissingMissedColumn(withBookings.error)) {
+      withBookings = await run(`${BOARD_COLUMNS}, schedule_daily, schedule_all_day, job_bookings(${BOOKING_COLUMNS}, created_by, ${BOOKING_NOTE_COLUMN})`);
+    }
     if (isMissingNoteColumn(withBookings.error)) {
       withBookings = await run(`${BOARD_COLUMNS}, schedule_daily, schedule_all_day, job_bookings(${BOOKING_COLUMNS}, created_by)`);
     }
@@ -222,7 +237,18 @@ export default async function SchedulePage() {
   const viewerRole = viewer?.profile?.role ?? null;
   const canSeeOverHours = viewerRole === "office" || viewerRole === "admin";
 
-  const [poRows, missingProfiles, costCenterRows, overHours] = await Promise.all([
+  // "Not attended" (27 Nov 2026, lib/booking-attendance.ts) — office/admin
+  // only, computed, nothing written: a past booking on an open job, not
+  // flagged "Didn't make it", whose technician never clocked on to that job on
+  // any of its days. Work clock-ons from the board's first day on, for the
+  // candidate jobs only; ids and timestamps, never a rate. null = the read
+  // failed and no booking is tagged.
+  const attendanceWindow: AttendanceWindow = { todayKey: dateKeyInBusinessTZ(new Date()), fromKey: leaveRange.from };
+  const jobStatusById = new Map(jobs.map((j) => [j.id, j.status]));
+  const jobStatus = (id: string) => jobStatusById.get(id);
+  const attendanceJobIds = canSeeOverHours ? attendanceCandidateJobIds(rawBookings, jobStatus, attendanceWindow) : [];
+
+  const [poRows, missingProfiles, costCenterRows, overHours, attendanceEntries] = await Promise.all([
     todoIds.length > 0
       ? supabase.from("purchase_orders_public").select("job_id, total_hours").in("job_id", todoIds).then(({ data }) => data)
       : null,
@@ -245,7 +271,15 @@ export default async function SchedulePage() {
         ).then((parts) => parts.flat())
       : null,
     canSeeOverHours ? loadJobHours(supabase as unknown as OverHoursClient, jobs.map((j) => j.id)) : null,
+    attendanceJobIds.length > 0
+      ? loadAttendanceEntries(supabase as unknown as AttendanceClient, attendanceJobIds, businessDayRange(leaveRange.from).dayStartIso)
+      : null,
   ]);
+  const notAttended =
+    canSeeOverHours && (attendanceJobIds.length === 0 || attendanceEntries)
+      ? notAttendedBookings(rawBookings, jobStatus, attendanceEntries ?? [], attendanceWindow)
+      : [];
+  const notAttendedIds = new Set(notAttended.map((n) => n.bookingId));
   const costCenterNames = new Map((costCenterRows ?? []).map((cc) => [cc.id, cc.name]));
   const costCenterDone = new Map((costCenterRows ?? []).map((cc) => [cc.id, cc.completed_at ?? null]));
   // "Added by technician" (25 Nov 2026, 0118): a technician who started work
@@ -261,6 +295,7 @@ export default async function SchedulePage() {
     cost_center_name: b.cost_center_id ? costCenterNames.get(b.cost_center_id) ?? null : null,
     cost_center_completed_at: b.cost_center_id ? costCenterDone.get(b.cost_center_id) ?? null : null,
     added_by_technician: isAddedByTechnician(b, roleOf),
+    not_attended: notAttendedIds.has(b.id),
   }));
 
   const poHours = todoIds.length > 0 ? allocatedHoursByJob(poRows ?? []) : new Map<string, number>();
@@ -321,6 +356,7 @@ export default async function SchedulePage() {
         leave={leave}
         viewerRole={viewerRole}
         overHours={overHours}
+        notAttended={notAttended}
         viewerId={viewer?.user?.id ?? null}
       />
     </div>

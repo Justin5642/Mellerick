@@ -33,6 +33,7 @@ const EFFECT_LABELS: Record<string, string> = {
   "assign-technicians": "Assigning technicians",
   "backflow-submit": "Submitting a backflow test",
   "booking-cost-centre": "Setting the bookings' cost centre",
+  "booking-missed": "\"Didn't make it\" on a booking",
   "quote-po": "Adding the quote's purchase order",
   "stage-complete": "Marking a stage complete",
   "sync-billing": "Updating billing",

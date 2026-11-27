@@ -20,6 +20,7 @@ import {
   type ScheduleInput,
   type ScheduledJobWindow,
 } from "./scheduling";
+import { isMissingMissedColumn, MISSED_COLUMNS } from "./booking-attendance";
 import { describeSchedule, formatDateKeyRange, formatScheduleDates, formatScheduleHours } from "./schedule-form";
 
 export interface JobBooking {
@@ -42,6 +43,14 @@ export interface JobBooking {
   note?: string | null;
   /** Who made the booking (0079). A technician's own id = they started work themselves (0118). Board reads only. */
   created_by?: string | null;
+  /**
+   * "Didn't make it" (0121 (draft)): when, the reason key and the note. Null = not
+   * flagged. Absent on a database without the columns (readers retry
+   * without them — isMissingMissedColumn in lib/booking-attendance.ts).
+   */
+  missed_at?: string | null;
+  missed_reason?: string | null;
+  missed_note?: string | null;
 }
 
 export interface JobBookingWithNames extends JobBooking {
@@ -327,7 +336,9 @@ export async function loadJobBookings(
 ): Promise<{ bookings: JobBookingWithNames[]; error: string | null; missingTable: boolean }> {
   const read = (columns: string) =>
     supabase.from("job_bookings").select(columns).eq("job_id", jobId).order("starts_at", { ascending: true });
-  let { data, error } = await read(`${BOOKING_COLUMNS}, google_event_id, updated_at, ${BOOKING_NOTE_COLUMN}`);
+  let { data, error } = await read(`${BOOKING_COLUMNS}, google_event_id, updated_at, ${BOOKING_NOTE_COLUMN}, ${MISSED_COLUMNS}`);
+  // 0121 (draft) not applied: without "Didn't make it".
+  if (isMissingMissedColumn(error)) ({ data, error } = await read(`${BOOKING_COLUMNS}, google_event_id, updated_at, ${BOOKING_NOTE_COLUMN}`));
   // 0109 not applied: the bookings without their notes.
   if (isMissingNoteColumn(error)) ({ data, error } = await read(`${BOOKING_COLUMNS}, google_event_id, updated_at`));
   if (error) return { bookings: [], error: error.message, missingTable: isBookingsTableMissing(error) };

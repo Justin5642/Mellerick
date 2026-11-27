@@ -19,6 +19,7 @@ import { formatDate } from "@/lib/date";
 import { formatDateKeyRange } from "@/lib/schedule-form";
 import { scheduleDays } from "@/lib/scheduling";
 import { bookingWindow, describeBooking, type JobBookingWithNames } from "@/lib/bookings";
+import { BookingAttendanceTag } from "@/components/schedule/booking-attendance-tag";
 import { leaveDateLabel, leaveDayLabel, NEEDS_REASSIGNING, type LeaveConflict } from "@/lib/staff-leave";
 import { CustomerPicker } from "@/components/customer-picker";
 import { AddSiteDialog } from "@/components/site-add-dialog";
@@ -34,6 +35,8 @@ interface Props {
   bookingsError?: string | null;
   /** Booking id → the days its technician is on leave (0112 — a draft, not applied yet). */
   leaveClashes?: ReadonlyMap<string, LeaveConflict[]>;
+  /** Bookings nobody clocked on to (office/admin only — "Not attended", lib/booking-attendance.ts). */
+  notAttendedIds?: ReadonlySet<string>;
   /** A technician on a job they are not on: the Schedule card is left out. */
   hideSchedule?: boolean;
   /** Opens the Schedule dialog; absent for anyone who cannot change bookings (not office/admin). */
@@ -47,7 +50,7 @@ interface Props {
 // "Add New Site" dialog inline, so a wrong/missing site can be fixed here
 // without a trip to the Customer page — same picker as the New Job form.
 
-export function JobOverview({ job, readOnly = false, bookings, bookingsError, leaveClashes, hideSchedule = false, onEditSchedule, canEditSite = false }: Props) {
+export function JobOverview({ job, readOnly = false, bookings, bookingsError, leaveClashes, notAttendedIds, hideSchedule = false, onEditSchedule, canEditSite = false }: Props) {
   const [pinOpen, setPinOpen] = useState(false);
   const router = useRouter();
   const supabase = createClient();
@@ -308,6 +311,8 @@ export function JobOverview({ job, readOnly = false, bookings, bookingsError, le
                         {b.all_day ? " · All day" : ""}
                       </p>
                       {b.note && <p className="text-xs text-amber-800 whitespace-pre-wrap mt-0.5">Note: {b.note}</p>}
+                      <BookingAttendanceTag booking={{ ...b, not_attended: notAttendedIds?.has(b.id) }} className="text-xs mt-0.5 whitespace-normal" />
+                      {b.missed_note && <p className="text-xs text-red-700 whitespace-pre-wrap">{b.missed_note}</p>}
                       {(leaveClashes?.get(b.id)?.length ?? 0) > 0 && (
                         <p className="text-xs text-rose-700 mt-0.5">
                           <span className="inline-block rounded bg-rose-600 px-1 font-bold text-white mr-1">{NEEDS_REASSIGNING}</span>

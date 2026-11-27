@@ -22,6 +22,7 @@ import { colors, statusColors } from "../../lib/theme";
 import { BUSINESS_TIME_ZONE } from "../../lib/date";
 import { businessTodayKey, formatScheduleSummary } from "../../lib/scheduleDisplay";
 import { listMyJobBookings } from "../../lib/data/reads/bookings";
+import { DidntMakeItControl } from "../job/didnt-make-it";
 import { getJobCostCentres } from "../../lib/data/reads/jobBilling";
 import { myJobEntries, splitMyJobEntries, type Booking, type MyJobEntry } from "../../lib/bookings";
 import type { ScheduledJobWindow } from "../../lib/scheduling";
@@ -172,6 +173,7 @@ export function MyJobsScreen() {
     const sc = statusColors[job.status] ?? statusColors.pending;
     const address = job.sites ? `${job.sites.address_line1}, ${job.sites.suburb}` : null;
     const stage = entry.costCenterId ? stageNames[entry.costCenterId] : null;
+    const booking = entry.bookingId ? bookings?.find((b) => b.id === entry.bookingId) ?? null : null;
     return (
       <TouchableOpacity style={styles.card} onPress={() => router.push(`/job/${job.id}`)}>
         <View style={styles.cardHeader}>
@@ -186,6 +188,16 @@ export function MyJobsScreen() {
         {address && <Text style={styles.cardMeta}>📍 {address}</Text>}
         <WindowLine window={window} />
         {stage ? <Text style={styles.cardMeta}>🔧 {stage}</Text> : null}
+        {/* "Didn't make it" on their own booking today or earlier (0121). */}
+        {booking ? (
+          <DidntMakeItControl
+            jobId={job.id}
+            jobStatus={job.status}
+            booking={booking}
+            currentUserId={userId}
+            heading={`#${job.job_number} — ${job.title}`}
+          />
+        ) : null}
         {job.sites && (
           <TouchableOpacity style={styles.wazeButton} onPress={() => openWaze(job)}>
             <Text style={styles.wazeButtonText}>Navigate</Text>

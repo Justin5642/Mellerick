@@ -1643,6 +1643,10 @@ export type Database = {
           google_event_id: string | null
           id: string
           job_id: string
+          missed_at: string | null
+          missed_by: string | null
+          missed_note: string | null
+          missed_reason: string | null
           note: string | null
           staff_id: string | null
           starts_at: string
@@ -1660,6 +1664,10 @@ export type Database = {
           google_event_id?: string | null
           id?: string
           job_id: string
+          missed_at?: string | null
+          missed_by?: string | null
+          missed_note?: string | null
+          missed_reason?: string | null
           note?: string | null
           staff_id?: string | null
           starts_at: string
@@ -1677,6 +1685,10 @@ export type Database = {
           google_event_id?: string | null
           id?: string
           job_id?: string
+          missed_at?: string | null
+          missed_by?: string | null
+          missed_note?: string | null
+          missed_reason?: string | null
           note?: string | null
           staff_id?: string | null
           starts_at?: string

@@ -19,6 +19,7 @@ import { JobTodoControl } from "./job-todo-control";
 import { linkableCosts } from "./variation-costs";
 import { sumAllocatedHours } from "@/lib/hours-scoreboard";
 import { summariseBookings, type JobBookingWithNames } from "@/lib/bookings";
+import { notAttendedBookings } from "@/lib/booking-attendance";
 import { bookingsForScheduleDialog, costCentersFromPurchaseOrders } from "@/lib/schedule-dialog-data";
 import { bookingsNeedingReassignment, NEEDS_REASSIGNING, type ScheduleLeave } from "@/lib/staff-leave";
 import { dateKeyInBusinessTZ } from "@/lib/date";
@@ -240,6 +241,20 @@ export function JobDetailClient({ job, currentUserId, photos: initialPhotos, doc
     [bookingsReady, loadedBookings, job, currentAssignedIds, staff, purchaseOrders],
   );
   const scheduleSummary = summariseBookings(bookings);
+  // "Not attended" (27 Nov 2026, lib/booking-attendance.ts) — office/admin
+  // only: a past booking nobody clocked on to, from this job's own time
+  // entries (the page holds all of them, so the window is the whole history).
+  const notAttendedIds = useMemo(
+    () =>
+      isOffice
+        ? new Set(
+            notAttendedBookings(bookings, () => job.status, timeEntries, { todayKey: dateKeyInBusinessTZ(new Date()), fromKey: "0000-01-01" }).map(
+              (n) => n.bookingId,
+            ),
+          )
+        : undefined,
+    [isOffice, bookings, job.status, timeEntries],
+  );
   // Bookings on a day their technician is on leave, from today on.
   const leaveClashes = useMemo(
     () => bookingsNeedingReassignment(bookings, leave ?? [], dateKeyInBusinessTZ(new Date())),
@@ -435,6 +450,7 @@ export function JobDetailClient({ job, currentUserId, photos: initialPhotos, doc
                 bookings={bookings}
                 bookingsError={bookingsError}
                 leaveClashes={leaveClashes}
+                notAttendedIds={notAttendedIds}
                 hideSchedule={hideSchedule}
                 onEditSchedule={isOffice ? openSchedule : undefined}
                 canEditSite={isOffice}

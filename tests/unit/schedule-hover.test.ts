@@ -75,6 +75,14 @@ describe("hoverCardDetails", () => {
   const index = buildBoardIndex(all, new Map([[j.id, j]]), ["2026-11-24"], days);
   const entry = index.byStaff.get("alice")!.get("2026-11-24")![0];
 
+  it("says 'Didn't make it' with the reason and note, or 'Not attended' (0121)", () => {
+    expect(hoverCardDetails(entry, all, days, nameOf).attendance).toBeNull();
+    const flagged = { ...entry, booking: { ...entry.booking, missed_at: "x", missed_reason: "other", missed_note: "truck broke down" } };
+    expect(hoverCardDetails(flagged, all, days, nameOf).attendance).toBe("Didn't make it — Other: truck broke down");
+    const absent = { ...entry, booking: { ...entry.booking, not_attended: true } };
+    expect(hoverCardDetails(absent, all, days, nameOf).attendance).toMatch(/^Not attended/);
+  });
+
   it("bills the company, with the contact as Attn", () => {
     const d = hoverCardDetails(entry, all, days, nameOf);
     expect(d.customer).toBe("Landart Landscapes");
