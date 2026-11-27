@@ -67,7 +67,10 @@ photos, notes, sign-off, Day Works / truck loads, supplier orders, mistakes,
 offline). **New office features are built on the web only — don't port them
 to the phone.** Office/admin screens already on the phone stay and get bug
 fixes, but nothing new is added to them. A field feature the office also needs
-on the web is fine on both. Reason: every port doubles the work and the places
+on the web is fine on both. **Exception — the schedule:** office/admin keep
+changing the schedule on the phone (things change at the last minute), so the
+phone's office Schedule tab (move, copy, add/edit bookings, to-do list) is
+kept level with the web board and may get new features. Reason: every port doubles the work and the places
 it can break.
 
 **Two separate npm projects.** Root and `mobile/` have their own lockfiles and no
