@@ -6,17 +6,17 @@ import { Toaster } from "@/components/ui/sonner";
 const geist = Geist({ variable: "--font-geist-sans", subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: "Mellerick App",
+  title: "Mellerick Office",
   description: "Mellerick Plumbing Business Management",
   manifest: "/manifest.webmanifest",
   appleWebApp: {
     capable: true,
     statusBarStyle: "black-translucent",
-    title: "Mellerick",
+    title: "Mellerick Office",
   },
   icons: {
-    icon: "/icon-192.png",
-    apple: "/apple-touch-icon.png",
+    icon: "/office-icon-192.png",
+    apple: "/office-apple-touch-icon.png",
   },
 };
 

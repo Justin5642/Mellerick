@@ -73,6 +73,17 @@ phone's office Schedule tab (move, copy, add/edit bookings, to-do list) is
 kept level with the web board and may get new features. Reason: every port doubles the work and the places
 it can break.
 
+**Two apps, two names (27 Nov 2026).** The website is **Mellerick Office**
+(`app/manifest.ts`, `app/layout.tsx`; installable on a laptop from Chrome/Edge),
+the phone app is **Mellerick Field**. The website's installed icon is the logo
+with a dark OFFICE band (`public/office-icon-*.png`,
+`public/office-apple-touch-icon.png`, made by `scripts/make-office-icons.mjs`;
+the plain `icon-*.png` stay for the sidebar), an **Office** tag sits beside the
+logo in the sidebar and phone-width top bar (`components/app-sidebar.tsx`), and
+the sign-in card says which app is which. The manifest no longer forces
+portrait (it is installed on laptops). Team handout:
+[`docs/team-guide-office-vs-field.md`](docs/team-guide-office-vs-field.md).
+
 **Two separate npm projects.** Root and `mobile/` have their own lockfiles and no
 workspace linking them. Install in the right directory.
 

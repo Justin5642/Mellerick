@@ -59,7 +59,10 @@ export default function LoginPage() {
         <Card className="shadow-2xl border-0">
           <CardHeader className="space-y-1">
             <CardTitle className="text-xl">Sign in</CardTitle>
-            <CardDescription>Enter your credentials to access the app</CardDescription>
+            <CardDescription>
+              Mellerick Office — the website for the office. On site, use the
+              Mellerick Field app on your phone.
+            </CardDescription>
           </CardHeader>
           <CardContent>
             <form onSubmit={handleLogin} className="space-y-4">

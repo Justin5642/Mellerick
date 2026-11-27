@@ -2,29 +2,28 @@ import type { MetadataRoute } from "next";
 
 export default function manifest(): MetadataRoute.Manifest {
   return {
-    name: "Mellerick App",
-    short_name: "Mellerick",
-    description: "Mellerick Plumbing Business Management",
+    name: "Mellerick Office",
+    short_name: "Mellerick Office",
+    description: "Mellerick Office — the website for the office. Technicians use the Mellerick Field app on their phone.",
     start_url: "/dashboard",
     display: "standalone",
     background_color: "#ffffff",
     theme_color: "#0f172a",
-    orientation: "portrait",
-    icons: [
+        icons: [
       {
-        src: "/icon-192.png",
+        src: "/office-icon-192.png",
         sizes: "192x192",
         type: "image/png",
         purpose: "any",
       },
       {
-        src: "/icon-512.png",
+        src: "/office-icon-512.png",
         sizes: "512x512",
         type: "image/png",
         purpose: "any",
       },
       {
-        src: "/icon-512-maskable.png",
+        src: "/office-icon-512-maskable.png",
         sizes: "512x512",
         type: "image/png",
         purpose: "maskable",
