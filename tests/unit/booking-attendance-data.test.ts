@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { ATTENDANCE_ENTRY_COLUMNS, loadAttendanceEntries, type AttendanceClient } from "@/lib/booking-attendance-data";
+import { ACTUAL_ENTRY_COLUMNS, ATTENDANCE_ENTRY_COLUMNS, loadActualEntries, loadAttendanceEntries, type AttendanceClient } from "@/lib/booking-attendance-data";
 
 // "Not attended" reads time_entries (27 Nov 2026). time_entries carries a money
 // column (rate_override) behind column grants (0045): a named list of ids and
@@ -19,6 +19,7 @@ function client(pages: (call: Call, from: number) => { data: unknown[] | null; e
           in: (col: string, vals: readonly string[]) => (call.filters.push(`in:${col}:${vals.length}`), q),
           eq: (col: string, v: string) => (call.filters.push(`eq:${col}:${v}`), q),
           gte: (col: string, v: string) => (call.filters.push(`gte:${col}:${v}`), q),
+          lt: (col: string, v: string) => (call.filters.push(`lt:${col}:${v}`), q),
           order: () => q,
           range: async (from: number) => ({ ...pages(call, from), count: null }),
         };
@@ -56,5 +57,26 @@ describe("loadAttendanceEntries", () => {
     const { c, calls } = client(() => ({ data: [], error: null }));
     expect(await loadAttendanceEntries(c, [], "x")).toEqual([]);
     expect(calls).toHaveLength(0);
+  });
+});
+
+describe("loadActualEntries (actual clocked time on the schedule)", () => {
+  it("selects ids and timestamps only — never a rate", () => {
+    expect(ACTUAL_ENTRY_COLUMNS).not.toMatch(/rate|amount|cost|hours|\*/);
+    expect(ACTUAL_ENTRY_COLUMNS.split(", ").sort()).toEqual(["clock_in", "clock_out", "entry_type", "id", "job_id", "staff_id"]);
+  });
+
+  it("reads every work entry clocked on in the board's range", async () => {
+    const { c, calls } = client(() => ({ data: [{ id: "e" }], error: null }));
+    const rows = await loadActualEntries(c, "2026-09-27T14:00:00.000Z", "2026-11-27T01:00:00.000Z");
+    expect(rows).toHaveLength(1);
+    expect(calls[0].table).toBe("time_entries");
+    expect(calls[0].columns).toBe(ACTUAL_ENTRY_COLUMNS);
+    expect(calls[0].filters).toEqual(["eq:entry_type:work", "gte:clock_in:2026-09-27T14:00:00.000Z", "lt:clock_in:2026-11-27T01:00:00.000Z"]);
+  });
+
+  it("answers null when the read fails", async () => {
+    const { c } = client(() => ({ data: null, error: { message: "boom" } }));
+    expect(await loadActualEntries(c, "a", "b")).toBeNull();
   });
 });

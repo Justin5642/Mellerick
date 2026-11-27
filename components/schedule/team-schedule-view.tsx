@@ -141,7 +141,21 @@ import { OverHoursSummary, type OverHoursJob } from "./over-hours-summary";
 // The phone's layout (25 Nov 2026): Day is a time-of-day timeline per
 // technician, blocks sized by their hours with lanes for overlaps — the same
 // rules as the phone's grid (lib/schedule-grid.ts ↔ mobile/lib/scheduleGrid.ts).
-import { dayTimelineHours, layoutDayRow, minutesIntoDay } from "@/lib/schedule-grid";
+import { dayTimelineHours, layoutDayRow, minutesIntoDay, ROW_PADDING } from "@/lib/schedule-grid";
+import {
+  actualBarGeometry,
+  actualLine,
+  actualsForBooking,
+  clockedHoursFor,
+  clockedHoursLabel,
+  CLOCKED_NOT_BOOKED,
+  layoutUnbookedDay,
+  spanTimes,
+  unbookedFor,
+  type ActualSpan,
+  type ScheduleActuals,
+} from "@/lib/schedule-actuals";
+import type { ActualJobLabel } from "@/lib/booking-attendance-data";
 // Rest the mouse on a booking: the job's details without opening it.
 import { BookingHoverCard, hoverHandlers, useHoverCard, useHoverCardId } from "./booking-hover-card";
 import { hoverCardDetails, statusLabel } from "@/lib/schedule-hover";
@@ -688,6 +702,76 @@ function DraggableBlock({
   );
 }
 
+// ---------------------------------------------------------------------------
+// Actual clocked time (27 Nov 2026, lib/schedule-actuals.ts) — office/admin
+// only, display only. Green = what was clocked; the booking stays as planned.
+// ---------------------------------------------------------------------------
+
+/** Day view: a thin green bar under a booking at the real clock-on..clock-off. */
+function ActualBar({ span, left, width, top }: { span: ActualSpan; left: number; width: number; top: number }) {
+  return (
+    <div
+      data-actual-bar
+      title={`Clocked ${spanTimes(span)} · ${clockedHoursLabel(span.hours)}`}
+      className={cn("absolute z-[1] h-1 rounded-full", span.stale ? "bg-amber-500" : "bg-emerald-600", span.open && !span.stale && "animate-pulse")}
+      style={{ left, width, top }}
+    />
+  );
+}
+
+/** Week view: "Clocked 7:42–3:10 · 7.5 h" under a booking. */
+function ActualLine({ spans }: { spans: readonly ActualSpan[] }) {
+  const line = actualLine(spans);
+  if (!line) return null;
+  const stale = spans.some((s) => s.stale);
+  return (
+    <p data-actual-line className={cn("-mt-1 truncate px-0.5 text-[10px] font-semibold leading-3", stale ? "text-amber-700" : "text-emerald-700")} title={line}>
+      ⏱ {line}
+    </p>
+  );
+}
+
+/**
+ * Time clocked on a job this technician wasn't booked on that day: its own
+ * green block ("Clocked — not booked"), linking to the job. Not draggable; in
+ * a pick mode it lets the click through to the row / cell.
+ */
+function UnbookedBlock({
+  span,
+  job,
+  position,
+  pickActive,
+}: {
+  span: ActualSpan;
+  job: ActualJobLabel | undefined;
+  position?: { left: number; top: number; width: number };
+  pickActive: boolean;
+}) {
+  const label = job?.job_number != null ? `#${job.job_number}` : "Job";
+  return (
+    <Link
+      prefetch={false}
+      href={`/dashboard/jobs/${span.jobId}`}
+      data-unbooked-actual
+      title={`${CLOCKED_NOT_BOOKED}: ${label}${job?.title ? ` ${job.title}` : ""} — ${spanTimes(span)} · ${clockedHoursLabel(span.hours)}`}
+      onPointerDown={(e) => e.stopPropagation()}
+      onClick={(e) => e.stopPropagation()}
+      className={cn(
+        "block overflow-hidden rounded-lg border border-dashed border-emerald-600 bg-emerald-50 px-1.5 py-[3px] text-emerald-900 hover:bg-emerald-100",
+        position ? "absolute z-[1]" : "w-full",
+        pickActive && "pointer-events-none",
+      )}
+      style={{ ...(position ? { left: position.left, top: position.top, width: position.width } : null), height: position ? BLOCK_HEIGHT : undefined }}
+    >
+      <p className="truncate text-[10px] font-extrabold uppercase leading-4 tracking-wide text-emerald-700">{CLOCKED_NOT_BOOKED}</p>
+      <p className="truncate text-xs font-bold leading-4">
+        {label} <span className="font-semibold">{spanTimes(span)}</span>
+      </p>
+      {position && job?.title ? <p className="truncate text-[10px] leading-4 text-emerald-800">{job.title}</p> : null}
+    </Link>
+  );
+}
+
 /**
  * A technician's row on the Day timeline (or Unassigned) — the drop / paste
  * target for "give this booking to them" (a Day move changes the technician,
@@ -745,6 +829,7 @@ function DroppableWeekCell({
   isToday,
   hours,
   gap,
+  clocked = 0,
   onGapClick,
   onPick,
   onAddJob,
@@ -756,6 +841,8 @@ function DroppableWeekCell({
   hours?: number;
   /** Unbooked hours (office/admin only — the to-do list's gap). */
   gap?: DayGap;
+  /** Hours actually clocked this day (office/admin only; lib/schedule-actuals.ts). */
+  clocked?: number;
   onGapClick?: (hours: number) => void;
   onPick?: (id: string) => void;
   /** "Schedule an existing job" on this technician's day (office/admin, today on). */
@@ -779,11 +866,20 @@ function DroppableWeekCell({
       )}
     >
       {children}
-      {((hours !== undefined && hours > 0) || (gap?.kind === "free" && gap.hours > 0) || (onAddJob && !onPick)) && (
+      {((hours !== undefined && hours > 0) || clocked > 0 || (gap?.kind === "free" && gap.hours > 0) || (onAddJob && !onPick)) && (
         <div className="mt-auto flex items-center justify-between gap-1 leading-none">
           {gap?.kind === "free" && gap.hours > 0 ? <GapButton hours={gap.hours} onClick={onGapClick} compact /> : <span />}
           <span className="flex items-center gap-1">
-            {hours !== undefined && hours > 0 && <span className="text-[10px] font-semibold text-slate-500">{formatHours(hours)}</span>}
+            {hours !== undefined && hours > 0 && (
+              <span className="text-[10px] font-semibold text-slate-500" title="Booked hours">
+                {formatHours(hours)}
+              </span>
+            )}
+            {clocked > 0 && (
+              <span className="whitespace-nowrap text-[10px] font-semibold text-emerald-700" title="Hours actually clocked on (work)">
+                ⏱ {clockedHoursLabel(clocked)}
+              </span>
+            )}
             {onAddJob && !onPick && <AddExistingJobButton onClick={onAddJob} compact />}
           </span>
         </div>
@@ -888,6 +984,7 @@ const PINNED_NAME =
 
 const NO_LEAVE: ScheduleLeave[] = [];
 const NO_NOT_ATTENDED: NotAttendedItem[] = [];
+const NO_ACTUAL_JOBS: Record<string, ActualJobLabel> = {};
 
 export function TeamScheduleView({
   jobs,
@@ -901,6 +998,8 @@ export function TeamScheduleView({
   viewerId = null,
   overHours = null,
   notAttended = NO_NOT_ATTENDED,
+  actuals = null,
+  actualJobs = NO_ACTUAL_JOBS,
 }: {
   jobs: BoardJob[];
   bookings: BoardBooking[];
@@ -921,6 +1020,13 @@ export function TeamScheduleView({
   overHours?: HoursByJob | null;
   /** Past bookings nobody clocked on to (lib/booking-attendance.ts) — office/admin only; [] otherwise. */
   notAttended?: NotAttendedItem[];
+  /**
+   * What was actually clocked (lib/schedule-actuals.ts) — office/admin only;
+   * null for a technician, or when the read failed (nothing drawn then).
+   */
+  actuals?: ScheduleActuals | null;
+  /** Number and title of each job an unbooked span is on. */
+  actualJobs?: Record<string, ActualJobLabel>;
 }) {
   // Narrowed to the methods lib/bookings.ts uses. Not cosmetic: matching the
   // fully-generic typed client against a structural parameter makes
@@ -1195,8 +1301,14 @@ export function TeamScheduleView({
     const days = [];
     for (const byDay of board.byStaff.values()) for (const e of byDay.get(selectedDateKey) ?? []) days.push(e.day);
     for (const e of board.unassigned.get(selectedDateKey) ?? []) days.push(e.day);
+    // Clocked time early or late widens it too, so the green bars fit.
+    if (actuals) {
+      for (const list of [...Object.values(actuals.byBooking), ...Object.values(actuals.unbooked)]) {
+        for (const span of list) if (span.dateKey === selectedDateKey) days.push(span);
+      }
+    }
     return dayTimelineHours(days, selectedDateKey);
-  }, [board, selectedDateKey]);
+  }, [board, selectedDateKey, actuals]);
   const dayTimelineWidth = (dayRange.endHour - dayRange.startHour) * WEB_HOUR_WIDTH;
 
   const cutJob = useMemo(() => {
@@ -2172,7 +2284,11 @@ export function TeamScheduleView({
                 {[{ staffId: null as string | null, name: "Unassigned" }, ...sortedStaff.map((m) => ({ staffId: m.id as string | null, name: m.full_name }))].map((row) => {
                   const entries = (row.staffId ? board.byStaff.get(row.staffId)?.get(selectedDateKey) : board.unassigned.get(selectedDateKey)) ?? [];
                   const rowLeave = row.staffId ? leaveOn(row.staffId, selectedDateKey) : [];
-                  const { items, height } = layoutDayRow(entries, rowLeave, dayRange, { hourWidth: WEB_HOUR_WIDTH, laneHeight: WEB_LANE_HEIGHT });
+                  const { items, height: bookedHeight } = layoutDayRow(entries, rowLeave, dayRange, { hourWidth: WEB_HOUR_WIDTH, laneHeight: WEB_LANE_HEIGHT });
+                  // Clocked time on a job they weren't booked on: its own lanes under the bookings.
+                  const unbooked = layoutUnbookedDay(unbookedFor(actuals, row.staffId, selectedDateKey), dayRange, WEB_HOUR_WIDTH);
+                  const height = bookedHeight + unbooked.lanes * WEB_LANE_HEIGHT;
+                  const clocked = clockedHoursFor(actuals, row.staffId, selectedDateKey);
                   const source: BoardCell = { staffId: row.staffId, dateKey: selectedDateKey };
                   const hours = row.staffId ? periodHours.get(row.staffId) ?? 0 : 0;
                   const gap = row.staffId ? gapFor(row.staffId, selectedDateKey) : undefined;
@@ -2187,8 +2303,8 @@ export function TeamScheduleView({
                         <p className={cn("truncate text-[13px] font-bold", row.staffId ? "text-slate-900" : "text-orange-700")}>{row.name}</p>
                         <p className="truncate text-[11px] text-slate-500">
                           {row.staffId
-                            ? hours > 0
-                              ? formatHours(hours)
+                            ? hours > 0 || clocked > 0
+                              ? `${formatHours(hours)} booked${clocked > 0 ? ` · ${clockedHoursLabel(clocked)} clocked` : ""}`
                               : rowLeave.length > 0
                                 ? leaveLabel(rowLeave[0].leave.leave_type)
                                 : "Free"
@@ -2223,6 +2339,23 @@ export function TeamScheduleView({
                             />
                           ),
                         )}
+                        {items.flatMap((it) =>
+                          it.kind === "booking"
+                            ? actualsForBooking(actuals, it.entry.booking.id, selectedDateKey).flatMap((span) => {
+                                const g = actualBarGeometry(span, dayRange, WEB_HOUR_WIDTH);
+                                return g ? [<ActualBar key={`actual-${span.entryId}-${it.id}`} span={span} left={g.left} width={g.width} top={it.top + BLOCK_HEIGHT + 1} />] : [];
+                              })
+                            : [],
+                        )}
+                        {unbooked.items.map((u) => (
+                          <UnbookedBlock
+                            key={`unbooked-${u.span.entryId}-${u.span.dateKey}`}
+                            span={u.span}
+                            job={actualJobs[u.span.jobId]}
+                            pickActive={!!onPick}
+                            position={{ left: u.left, width: u.width, top: bookedHeight - ROW_PADDING + u.lane * WEB_LANE_HEIGHT }}
+                          />
+                        ))}
                       </DroppableTimelineRow>
                     </div>
                   );
@@ -2302,6 +2435,7 @@ export function TeamScheduleView({
                           isToday={key === todayKey}
                           hours={memberHours?.get(key) ?? 0}
                           gap={gapFor(member.id, key)}
+                          clocked={clockedHoursFor(actuals, member.id, key)}
                           onGapClick={filterToGap}
                           onPick={onPick}
                           onAddJob={canTodo && key >= todayKey ? () => openExisting({ staffId: member.id, dateKey: key }) : undefined}
@@ -2310,20 +2444,25 @@ export function TeamScheduleView({
                             <LeaveTile key={`leave-${day.leave.start_date}-${day.startIso}`} day={day} compact onOpen={setOpenLeave} />
                           ))}
                           {(memberDays?.get(key) ?? []).map((entry) => (
-                            <DraggableBlock
-                              key={entry.booking.id}
-                              entry={entry}
-                              source={{ staffId: member.id, dateKey: key }}
-                              tag={tagFor(entry)}
-                              {...cardWiring}
-                              reassign={reassignOn(entry)}
-                              closed={closedOn(entry)}
-                              over={overOn(entry)}
-                              view="week"
-                        handles={handlesFor(entry)}
-                              onResizeStart={startResize}
-                              resizeState={resizeStateFor(entry)}
-                            />
+                            <Fragment key={entry.booking.id}>
+                              <DraggableBlock
+                                entry={entry}
+                                source={{ staffId: member.id, dateKey: key }}
+                                tag={tagFor(entry)}
+                                {...cardWiring}
+                                reassign={reassignOn(entry)}
+                                closed={closedOn(entry)}
+                                over={overOn(entry)}
+                                view="week"
+                                handles={handlesFor(entry)}
+                                onResizeStart={startResize}
+                                resizeState={resizeStateFor(entry)}
+                              />
+                              <ActualLine spans={actualsForBooking(actuals, entry.booking.id, key)} />
+                            </Fragment>
+                          ))}
+                          {unbookedFor(actuals, member.id, key).map((span) => (
+                            <UnbookedBlock key={`unbooked-${span.entryId}`} span={span} job={actualJobs[span.jobId]} pickActive={!!onPick} />
                           ))}
                         </DroppableWeekCell>
                       ))}
@@ -2556,6 +2695,7 @@ export function TeamScheduleView({
             navigateUrl={wazeUrl(entry.job.sites)}
             completed={isClosedJob(entry.job)}
             overText={over?.text ?? null}
+            actualText={actuals && entry.day.dateKey <= liveTodayKey ? actualLine(actualsForBooking(actuals, entry.booking.id, entry.day.dateKey)) ?? "Nothing clocked on this booking's day yet" : null}
             leaveText={leaveHits.length > 0 ? `${NEEDS_REASSIGNING} — ${leaveDayLabel(leaveHits[0].leaveDay)}` : null}
             onPointerEnter={hoverCard.keep}
             onPointerLeave={hoverCard.leave}

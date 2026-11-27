@@ -752,6 +752,67 @@ everything."
   focus opens the card. Not tried on a real touch device (touch paths are
   unchanged).
 
+**The schedule shows what was actually clocked, beside what was booked (27 Nov 2026; no migration, no stream change; web board + the phone's office Schedule tab).**
+Justin: "No matter what time is scheduled, it needs to show what was actually
+clocked onto — when someone clocks on and off, it shows up on the schedule."
+His call: show BOTH — each booking stays as planned, and the real clocked time
+is drawn on the same technician's row/day. **Display only: nothing writes a
+booking.** Office/admin only; technicians' boards are unchanged and the web
+page doesn't even read the time for them.
+- **Rules** `lib/schedule-actuals.ts` (pure, tested in
+  `tests/unit/schedule-actuals.test.ts`), mirrored byte for byte below the
+  imports at `mobile/lib/scheduleActuals.ts`
+  (`tests/unit/schedule-actuals-mirror.test.ts`, which also forbids money
+  words): WORK `time_entries` only (travel is never drawn); each entry split
+  into Melbourne-day spans (`businessDayRange`, so a night shift across
+  midnight is two spans — never bucketed by its start); still clocked on =
+  runs to now, capped at 16 h after the clock-on (`MAX_OPEN_HOURS`) and then
+  flagged "still on? (no clock-off)" in amber; a span is MATCHED to the same
+  technician's booking on the same job and day (0071/0079 days via
+  `scheduleDays(bookingWindow(b))`, the booking it overlaps most), otherwise
+  it is **"Clocked — not booked"** — including time on a job that day booked
+  only for someone else. Completed jobs' time shows like any other. Clocked
+  hours per technician per day are totalled (matched + unbooked). Labels:
+  "Clocked 7:42–3:10 · 7.5 h", "7:20 – on now" (Melbourne wall-clock,
+  12-hour, no am/pm).
+- **Web** (`components/schedule/team-schedule-view.tsx`): **Day** — a thin
+  green bar in the gap under each booking at the real clock-on..clock-off
+  (`actualBarGeometry`, the timeline widens to fit an early/late clock-on),
+  unbooked time as a dashed green block in its own lane under the row's
+  bookings (`layoutUnbookedDay`, links to the job), and "8.5 h booked · 10.3 h
+  clocked" under the name. **Week** — "⏱ Clocked 7:42–3:10 · 7.5 h" under each
+  booking block, unbooked chips in the cell, "⏱ 7.5 h" beside the booked hours
+  in the cell footer. **Hover card** — the same line (or "Nothing clocked on
+  this booking's day yet" for today and earlier). The List tab is unchanged.
+- **Web data** (`app/dashboard/schedule/page.tsx`, office/admin only):
+  `loadActualEntries` (`lib/booking-attendance-data.ts`) reads, as the CALLER
+  (RLS), every work entry clocked on from the board's first day (60 days back)
+  to now — `id, job_id, staff_id, clock_in, clock_out, entry_type`, never `*`
+  or `rate_override` — paged past the 1000-row cap. Matching runs on the
+  server; the board gets plain objects (`ScheduleActuals`). Jobs with unbooked
+  time that aren't on the board get `id, job_number, title` read
+  (`loadActualJobLabels`). A failed read = nothing drawn, the board is
+  otherwise untouched.
+- **Phone** (`mobile/app/(office)/schedule.tsx`, `ScheduleGrid.tsx`):
+  `listActualEntries` / `listActualJobLabels` in
+  `mobile/lib/data/reads/attendance.ts` (online, best-effort, same columns),
+  for the days on screen up to now, re-read when the bookings reload. Day: the
+  green bar under each booking, unbooked blocks in their own lanes (tap →
+  the job), "· 7.5 h clocked" under the name. Week: "⏱ 7:42–3:10 ·" in the
+  block's title line; unbooked chips in lanes under the row
+  (`layoutUnbookedWeek`). Offline → nothing drawn. Reaches phones with the
+  next build (no native module).
+- **Checked** in Chromium with mock data at 1500 px (a temporary page, not
+  committed): Week lines, the unbooked chip, the cell totals, the hover line,
+  Day bars and the unbooked block all draw; no console errors. Phone not
+  checked on a device.
+- **Not done:** no "clocked differs from booked by more than N minutes" flag
+  (just shown side by side); an entry clocked on before the board's first day
+  isn't drawn; time on a cancelled job's booking reads as not booked (cancelled
+  jobs' bookings aren't on the board); the Day bar has no text of its own (its
+  tooltip and the hover card say the times); the List tab doesn't show clocked
+  time.
+
 **Load page data on the server, not in the browser.** A browser→Supabase
 query from Australia costs ~100 ms+; a server query in `sin1` costs ~2 ms. So
 My Jobs, Approvals, Staff, Fleet and Customers are server pages that pass

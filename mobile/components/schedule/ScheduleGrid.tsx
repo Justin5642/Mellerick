@@ -54,6 +54,7 @@ import {
   LANE_HEIGHT,
   LEFT_COLUMN_WIDTH,
   MIN_TOUCH,
+  ROW_PADDING,
   WEEK_COLUMN_WIDTH,
   bookingEndKey,
   canResizeByDays,
@@ -75,6 +76,21 @@ import { bookingOverHours, formatOverHours, type HoursByJob, type OverHours } fr
 import { isMissed, missedDetailText, missedTagText, NOT_ATTENDED } from "../../lib/bookingAttendance";
 import { leaveColour, leaveDayLabel, leaveRangeLabel, NEEDS_REASSIGNING, type LeaveConflict, type LeaveDay, type LeaveIndex } from "../../lib/staffLeave";
 import type { DayGap } from "../../lib/todoBoard";
+import {
+  actualBarGeometry,
+  actualLabel,
+  actualsForBooking,
+  clockedHoursFor,
+  clockedHoursLabel,
+  CLOCKED_NOT_BOOKED,
+  layoutUnbookedDay,
+  layoutUnbookedWeek,
+  spanTimes,
+  unbookedFor,
+  type ActualSpan,
+  type ScheduleActuals,
+  type UnbookedPlacement,
+} from "../../lib/scheduleActuals";
 
 /** Week view: the strip under each technician's row that holds the "N h free" pills. */
 const GAP_STRIP = 20;
@@ -125,6 +141,17 @@ export interface ScheduleGridProps {
   reassign?: ReadonlyMap<string, LeaveConflict[]>;
   /** Used vs allowed hours per job (office/admin; lib/overHours.ts) — absent/null = no "Over hours" tags. */
   overHours?: HoursByJob | null;
+  /**
+   * What was actually clocked (office/admin; lib/scheduleActuals.ts) — absent/null
+   * = nothing drawn. Display only: a green bar under each booking (Day), a
+   * "⏱ 7:42–3:10" line in it (Week), and a "Clocked — not booked" block for
+   * time on a job they weren't booked on that day.
+   */
+  actuals?: ScheduleActuals | null;
+  /** Number and title of the jobs an unbooked block is on. */
+  actualJobs?: ReadonlyMap<string, { job_number: number | null; title: string | null }>;
+  /** A "Clocked — not booked" block was tapped. */
+  onOpenJob?: (jobId: string) => void;
   /** A leave block was tapped: show its details (read-only). */
   onOpenLeave?: (day: LeaveDay) => void;
   /** A technician's free hours on a day (office/admin's to-do list); absent = no gaps shown. */
@@ -146,8 +173,15 @@ export function ScheduleGrid(props: ScheduleGridProps) {
     const days: ScheduleDay[] = [];
     for (const byDay of board.byStaff.values()) for (const e of byDay.get(dayKey) ?? []) days.push(e.day);
     for (const e of board.unassigned.get(dayKey) ?? []) days.push(e.day);
+    // Clocked time early or late widens it too, so the green bars fit.
+    const actuals = props.actuals;
+    if (actuals) {
+      for (const list of [...Object.values(actuals.byBooking), ...Object.values(actuals.unbooked)]) {
+        for (const span of list) if (span.dateKey === dayKey) days.push(span);
+      }
+    }
     return dayTimelineHours(days, dayKey);
-  }, [view, board, dayKey]);
+  }, [view, board, dayKey, props.actuals]);
 
   const columnWidth = view === "day" ? HOUR_WIDTH : WEEK_COLUMN_WIDTH;
   const columnCount = view === "day" ? dayRange!.endHour - dayRange!.startHour : dayKeys.length;
@@ -179,9 +213,11 @@ export function ScheduleGrid(props: ScheduleGridProps) {
 
   // Every block's position inside its row (bookings and leave — lib/scheduleGrid.ts
   // layoutDayRow / layoutWeekRow), and each row's height.
-  const { placedByRow, leaveByRow, heights } = useMemo(() => {
+  const actuals = props.actuals ?? null;
+  const { placedByRow, leaveByRow, unbookedByRow, heights } = useMemo(() => {
     const placedByRow: Placed[][] = [];
     const leaveByRow: Extract<RowItem, { kind: "leave" }>[][] = [];
+    const unbookedByRow: (UnbookedPlacement & { top: number })[][] = [];
     const heights: number[] = [];
     for (const row of rows) {
       const { items, height } =
@@ -196,12 +232,18 @@ export function ScheduleGrid(props: ScheduleGridProps) {
       }
       placedByRow.push(placed);
       leaveByRow.push(leave);
+      // Clocked time on a job they weren't booked on: its own lanes under the bookings.
+      const unbooked =
+        view === "day"
+          ? layoutUnbookedDay(unbookedFor(actuals, row.staffId, dayKey), dayRange!, HOUR_WIDTH)
+          : layoutUnbookedWeek(dayKeys, (k) => unbookedFor(actuals, row.staffId, k), WEEK_COLUMN_WIDTH);
+      unbookedByRow.push(unbooked.items.map((u) => ({ ...u, top: height - ROW_PADDING + u.lane * LANE_HEIGHT })));
       // Week view keeps a strip under each technician's lanes for the
       // "N h free" pills, so they never sit on a booking.
-      heights.push(height + (showGaps && view === "week" && row.staffId ? GAP_STRIP : 0));
+      heights.push(height + unbooked.lanes * LANE_HEIGHT + (showGaps && view === "week" && row.staffId ? GAP_STRIP : 0));
     }
-    return { placedByRow, leaveByRow, heights };
-  }, [rows, view, dayKey, dayKeys, dayRange, entriesFor, leaveFor, showGaps]);
+    return { placedByRow, leaveByRow, unbookedByRow, heights };
+  }, [rows, view, dayKey, dayKeys, dayRange, entriesFor, leaveFor, showGaps, actuals]);
   const tops = useMemo(() => rowOffsets(heights), [heights]);
   const bodyHeight = tops.length ? tops[tops.length - 1] + heights[heights.length - 1] : 0;
 
@@ -480,7 +522,12 @@ export function ScheduleGrid(props: ScheduleGridProps) {
                     </Text>
                     {row.staffId ? (
                       <View style={styles.hoursRow}>
-                        <Text style={styles.hoursText}>{formatHours(row.hours)}</Text>
+                        <Text style={styles.hoursText}>
+                          {formatHours(row.hours)}
+                          {view === "day" && clockedHoursFor(actuals, row.staffId, dayKey) > 0 ? (
+                            <Text style={styles.actualText}> · {clockedHoursLabel(clockedHoursFor(actuals, row.staffId, dayKey))} clocked</Text>
+                          ) : null}
+                        </Text>
                         {free !== null && !placing ? (
                           <GapPill hours={free} who={row.name} dateKey={dayKey} onPress={onGapPress} disabled={dragging} />
                         ) : null}
@@ -554,12 +601,46 @@ export function ScheduleGrid(props: ScheduleGridProps) {
                       saveState={saveStates.get(p.entry.booking.id)}
                       reassign={props.reassign?.get(p.entry.booking.id)?.some((c) => c.dateKey === p.entry.day.dateKey) ?? false}
                       over={props.overHours ? bookingOverHours(p.entry.booking, props.overHours) : null}
+                      actual={actuals ? actualsForBooking(actuals, p.entry.booking.id, p.entry.day.dateKey) : NO_SPANS}
                       lifted={drag?.entry.booking.id === p.entry.booking.id}
                       onOpen={onOpen}
                       onBlocked={onBlocked}
                       onBegin={beginDrag}
                       onMove={moveDrag}
                       onEnd={endDrag}
+                    />
+                  )),
+                )}
+
+                {/* Day view: what was actually clocked, a green bar under each booking. */}
+                {view === "day" && actuals
+                  ? placedByRow.map((placed, i) =>
+                      placed.flatMap((p) =>
+                        actualsForBooking(actuals, p.entry.booking.id, dayKey).flatMap((span) => {
+                          const g = actualBarGeometry(span, dayRange!, HOUR_WIDTH);
+                          return g
+                            ? [
+                                <View
+                                  key={`actual-${span.entryId}-${p.entry.booking.id}`}
+                                  pointerEvents="none"
+                                  style={[styles.actualBar, span.stale && styles.actualBarStale, { left: g.left, width: g.width, top: tops[i] + p.top + LANE_HEIGHT - 5 }]}
+                                />,
+                              ]
+                            : [];
+                        }),
+                      ),
+                    )
+                  : null}
+
+                {/* Clocked on a job they weren't booked on that day. */}
+                {unbookedByRow.map((items, i) =>
+                  items.map((u) => (
+                    <UnbookedChip
+                      key={`unbooked-${u.span.entryId}-${u.span.dateKey}`}
+                      item={u}
+                      top={tops[i] + u.top}
+                      job={props.actualJobs?.get(u.span.jobId)}
+                      onOpen={props.onOpenJob}
                     />
                   )),
                 )}
@@ -704,6 +785,55 @@ function LeaveBlock({ item, top, onOpen }: { item: Extract<RowItem, { kind: "lea
   );
 }
 
+const NO_SPANS: readonly ActualSpan[] = [];
+
+/**
+ * Time clocked on a job this technician wasn't booked on that day: a green,
+ * dashed block at its real times (Day) or in its day's column (Week). Display
+ * only — never dragged; a tap opens the job.
+ */
+function UnbookedChip({
+  item,
+  top,
+  job,
+  onOpen,
+}: {
+  item: UnbookedPlacement;
+  top: number;
+  job: { job_number: number | null; title: string | null } | undefined;
+  onOpen?: (jobId: string) => void;
+}) {
+  const { span, left, width } = item;
+  const tap = useMemo(
+    () =>
+      Gesture.Tap()
+        .runOnJS(true)
+        .onEnd((_e, ok) => {
+          if (ok) onOpen?.(span.jobId);
+        }),
+    [span.jobId, onOpen],
+  );
+  const label = job?.job_number != null ? `#${job.job_number}` : "Job";
+  return (
+    <GestureDetector gesture={tap}>
+      <View
+        accessible
+        accessibilityRole="button"
+        accessibilityLabel={`${CLOCKED_NOT_BOOKED}: ${label} ${job?.title ?? ""}, ${spanTimes(span)}, ${clockedHoursLabel(span.hours)}`}
+        style={[styles.unbooked, { left, top, width, height: LANE_HEIGHT - 6 }]}
+      >
+        <Text style={styles.unbookedHead} numberOfLines={1}>
+          {CLOCKED_NOT_BOOKED}
+        </Text>
+        <Text style={styles.unbookedText} numberOfLines={1}>
+          {label} {spanTimes(span)}
+          {job?.title ? ` · ${job.title}` : ""}
+        </Text>
+      </View>
+    </GestureDetector>
+  );
+}
+
 interface BlockProps {
   placed: Placed;
   top: number;
@@ -716,6 +846,8 @@ interface BlockProps {
   reassign: boolean;
   /** Its job (or its cost centre) is over the allowed hours. */
   over: OverHours | null;
+  /** What was actually clocked on it that day (Week view shows it in the title line). */
+  actual: readonly ActualSpan[];
   lifted: boolean;
   onOpen: (entry: BoardEntry) => void;
   onBlocked: (message: string) => void;
@@ -724,7 +856,7 @@ interface BlockProps {
   onEnd: (commit: boolean) => void;
 }
 
-function Block({ placed, top, view, rowStaffId, staffNames, others, saveState, reassign, over, lifted, onOpen, onBlocked, onBegin, onMove, onEnd }: BlockProps) {
+function Block({ placed, top, view, rowStaffId, staffNames, others, saveState, reassign, over, actual, lifted, onOpen, onBlocked, onBegin, onMove, onEnd }: BlockProps) {
   const { entry, left, width } = placed;
   const { job, booking, day } = entry;
   const completed = isCompletedJob(job);
@@ -816,6 +948,7 @@ function Block({ placed, top, view, rowStaffId, staffNames, others, saveState, r
     booking.added_by_technician ? ADDED_BY_TECHNICIAN : null,
     isMissed(booking) ? missedDetailText(booking) : booking.not_attended ? NOT_ATTENDED : null,
     over ? over.text : null,
+    actualLabel(actual),
     saveState === "saving" ? "saving" : saveState === "queued" ? "not on the server yet" : saveState === "failed" ? "not saved" : null,
   ]
     .filter(Boolean)
@@ -869,6 +1002,9 @@ function Block({ placed, top, view, rowStaffId, staffNames, others, saveState, r
             <Text style={styles.overText}>
               ⚠ Over {formatOverHours(over.usedHours)}/{formatOverHours(over.allowedHours)} ·{" "}
             </Text>
+          ) : null}
+          {view === "week" && actual.length > 0 ? (
+            <Text style={[styles.actualText, actual.some((sp) => sp.stale) && styles.notAttendedText]}>⏱ {actual.map(spanTimes).join(", ")} · </Text>
           ) : null}
           {saveState === "saving" ? "Saving… · " : saveState === "queued" ? "Not synced yet · " : saveState === "failed" ? "Not saved · " : ""}
           {view === "week" ? `${shortTime(day.startIso)} ` : ""}
@@ -946,6 +1082,24 @@ const styles = StyleSheet.create({
   blockReassign: { borderColor: "#e11d48", borderWidth: 2, borderLeftWidth: 4 },
   reassignText: { color: "#be123c", fontWeight: "800" },
   selfStartText: { color: "#047857", fontWeight: "800" },
+  actualText: { color: "#047857", fontWeight: "700" },
+  actualBar: { position: "absolute", height: 4, borderRadius: 2, backgroundColor: "#059669" },
+  actualBarStale: { backgroundColor: "#d97706" },
+  unbooked: {
+    position: "absolute",
+    borderRadius: 8,
+    borderWidth: 1,
+    borderStyle: "dashed",
+    borderColor: "#059669",
+    backgroundColor: "#ecfdf5",
+    paddingHorizontal: 6,
+    paddingVertical: 3,
+    overflow: "hidden",
+    minHeight: MIN_TOUCH,
+    minWidth: MIN_TOUCH,
+  },
+  unbookedHead: { fontSize: 9, fontWeight: "800", color: "#047857", textTransform: "uppercase" },
+  unbookedText: { fontSize: 11, fontWeight: "700", color: "#064e3b", marginTop: 1 },
   leave: {
     position: "absolute",
     borderRadius: 8,

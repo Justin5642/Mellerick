@@ -91,7 +91,8 @@ import { useIsAdmin, useIsOfficeOrAdmin } from "../../design/guards/useRole";
 // allow, and a count above the grid. Hours only; office/admin only.
 import { bookingOverHours, formatOverHours, jobsOverHours, overHoursHeadline, type HoursByJob } from "../../lib/overHours";
 import { listJobHours } from "../../lib/data/reads/overHours";
-import { listAttendanceEntries } from "../../lib/data/reads/attendance";
+import { listActualEntries, listActualJobLabels, listAttendanceEntries } from "../../lib/data/reads/attendance";
+import { scheduleActuals, type ActualEntry } from "../../lib/scheduleActuals";
 import { attendanceCandidateJobIds, isMissed, missedTagText, NOT_ATTENDED, notAttendedBookings } from "../../lib/bookingAttendance";
 import { readAllPages } from "../../lib/data/reads/pagedRows";
 
@@ -267,6 +268,8 @@ export default function ScheduleScreen() {
     },
     [router]
   );
+  // A "Clocked — not booked" block was tapped: open that job.
+  const onOpenActualJob = useCallback((jobId: string) => router.push({ pathname: "/job/[id]", params: { id: jobId } }), [router]);
   // The place confirm, waiting for its cost centre (every booking asks — 19 Nov 2026).
   const [placeAsk, setPlaceAsk] = useState<(PlaceRequest & { job: TodoJob; insert: ReturnType<typeof planTodoDrop>; target: BoardCell }) | null>(null);
   // The crew as it was when the picker opened — only people ADDED are asked about leave.
@@ -472,6 +475,53 @@ export default function ScheduleScreen() {
       not_attended: notAttendedIds.has(b.id),
     }));
   }, [bookings, doneBookings, staff, notAttendedIds]);
+  // Actual clocked time beside each booking (27 Nov 2026, lib/scheduleActuals.ts)
+  // — office/admin, online, best-effort, display only: every work entry
+  // clocked on in the days shown (up to now), matched to its booking, or
+  // drawn as "Clocked — not booked". Re-read whenever the bookings reload
+  // (pull to refresh, a write) or the days change.
+  const [actualEntries, setActualEntries] = useState<ActualEntry[] | null>(null);
+  useEffect(() => {
+    if (!canTodo || rangeFirst > todayKey) {
+      setActualEntries(null);
+      return;
+    }
+    let live = true;
+    const nowIso = new Date().toISOString();
+    const endIso = businessDayRange(rangeLast).dayEndIso;
+    void listActualEntries(businessDayRange(rangeFirst).dayStartIso, endIso < nowIso ? endIso : nowIso).then((entries) => {
+      if (live) setActualEntries(entries);
+    });
+    return () => {
+      live = false;
+    };
+  }, [canTodo, rangeFirst, rangeLast, todayKey, bookings, doneBookings]);
+  const actuals = useMemo(
+    () => (actualEntries ? scheduleActuals(actualEntries, realBookings, Date.now()) : null),
+    [actualEntries, realBookings],
+  );
+  const [extraJobLabels, setExtraJobLabels] = useState<Map<string, { job_number: number | null; title: string | null }>>(new Map());
+  const missingLabelIds = useMemo(() => {
+    if (!actuals) return "";
+    const ids = new Set(Object.values(actuals.unbooked).flat().map((sp) => sp.jobId));
+    return [...ids].filter((id) => !allJobs.has(id)).sort().join(",");
+  }, [actuals, allJobs]);
+  useEffect(() => {
+    if (!missingLabelIds) return;
+    let live = true;
+    void listActualJobLabels(missingLabelIds.split(",")).then((m) => {
+      if (live) setExtraJobLabels(m);
+    });
+    return () => {
+      live = false;
+    };
+  }, [missingLabelIds]);
+  const actualJobs = useMemo(() => {
+    const m = new Map(extraJobLabels);
+    for (const [id, j] of allJobs) m.set(id, { job_number: j.job_number, title: j.title });
+    return m;
+  }, [extraJobLabels, allJobs]);
+
   const boardBookings = useMemo<BoardBooking[]>(() => {
     const openIds = new Set(jobs.map((j) => j.id));
     const open = jobs.map(toBoardJob);
@@ -1414,6 +1464,9 @@ export default function ScheduleScreen() {
           leave={leaveIndex}
           reassign={reassign}
           overHours={canTodo ? overHours : null}
+          actuals={canTodo ? actuals : null}
+          actualJobs={actualJobs}
+          onOpenJob={onOpenActualJob}
           onOpenLeave={onOpenLeave}
           gapFor={canTodo ? gapFor : undefined}
           onGapPress={onGapPress}
