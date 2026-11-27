@@ -2455,6 +2455,27 @@ Rework cost centre (tag only); callbacks are a mistake on the original job
   is applied: the PO tab shows the 0115 card, the crew card hides, Log mistake
   says it isn't switched on, the report and ledgers use 0115's amounts.
 
+**Reports → Time log (27 Nov 2026; no migration, no stream change; web only).**
+Office: "Time log – have what time log was for what job type (e.g. Brodie –
+Sewer), date, hours on site. Need all details." `app/dashboard/reports/time-log`
+(office/admin — technicians get "for the office", as the other office
+reports), linked from the Reports header. One row per time entry whose
+clock-on falls in the range (Melbourne days): date, staff, job # + title
+(link), site street/suburb, cost centre / stage (`po_cost_centers` **id, name
+only**), variation name when `variation_id` is set (0120 draft — read with it,
+retried without on 42703/PGRST204), work/travel, clock on / off ("still on",
+hours live to now), hours, on/off-site flag for clock-on and clock-off
+(`lib/clock-location.ts` against the site pin and fence; blank with no fix, no
+pin, or travel), auto/manual, edited by, notes. Filters in the query string:
+`from`/`to` (default this week Mon–Sun), `staff`, `job` (number), `type`.
+Totals per staff member (work/travel split) and per cost centre (travel and
+each variation on their own line). **Download CSV** of the filtered rows
+(built on the server, saved in the browser). **Hours only** — `time_entries`
+is read through its column grants with a named list (never `rate_override`),
+as the caller (RLS), paged with `fetchAllRows`, lookups `.in()` in chunks of
+100. Rules `lib/time-log-report.ts`, tested in
+`tests/unit/time-log-report.test.ts` (incl. no money-named key or CSV column).
+
 **Time against variations (25 Nov 2026; migration `0120` DRAFT — NOT APPLIED; PowerSync streams to redeploy AFTER it).**
 Justin: a stage's allowed hours (sewer and stormwater, 16 h) blow out when the
 crew hit rock. That extra time must go against a VARIATION, so the variation
