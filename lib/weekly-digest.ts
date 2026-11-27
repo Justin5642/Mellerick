@@ -37,6 +37,14 @@ export interface DigestMistakes {
   open: number;
   /** Recovery claimed and not yet received, ex GST. */
   openRecoverable: number;
+  /** Stage 5 pattern flags (lib/mistake-patterns.ts) — never the admin-only person flag. Left out when they couldn't be worked out. */
+  patterns?: DigestMistakePatterns | null;
+}
+
+export interface DigestMistakePatterns {
+  count: number;
+  /** Worst first. */
+  top: { title: string; rule: string; net: number }[];
 }
 
 /** One machine + fault code seen in the last week (lib/komtrax-data.ts groupFaults). */
@@ -95,6 +103,12 @@ export function buildDigest(i: DigestInput): { subject: string; html: string; te
       ? [
           "",
           `MISTAKES: ${i.mistakes.newThisWeek} logged this week, ${i.mistakes.open} not closed, ${money(i.mistakes.openRecoverable)} claimed back and not yet received`,
+          ...(i.mistakes.patterns && i.mistakes.patterns.count > 0
+            ? [
+                `${i.mistakes.patterns.count} pattern${i.mistakes.patterns.count === 1 ? "" : "s"} to look at:`,
+                ...i.mistakes.patterns.top.map((p) => `  - ${p.title} — ${p.rule}, ${money(p.net)} so far`),
+              ]
+            : []),
           `Review them: ${i.appUrl}/dashboard/reports/mistakes`,
         ]
       : []),
@@ -131,7 +145,13 @@ ${table(i.awaitingInvoice.oldest.map((p) => row([escapeHtml(p.poNumber), escapeH
 ${
   i.mistakes
     ? `${h(`Mistakes: ${i.mistakes.newThisWeek} logged this week`)}
-<p style="font-size:14px;margin:0;">${i.mistakes.open} not closed · ${money(i.mistakes.openRecoverable)} claimed back and not yet received · <a href="${escapeHtml(`${i.appUrl}/dashboard/reports/mistakes`)}">Review them</a></p>`
+<p style="font-size:14px;margin:0;">${i.mistakes.open} not closed · ${money(i.mistakes.openRecoverable)} claimed back and not yet received · <a href="${escapeHtml(`${i.appUrl}/dashboard/reports/mistakes`)}">Review them</a></p>${
+        i.mistakes.patterns && i.mistakes.patterns.count > 0
+          ? `
+<p style="font-size:14px;margin:8px 0 4px;"><strong>${i.mistakes.patterns.count} pattern${i.mistakes.patterns.count === 1 ? "" : "s"} to look at</strong></p>
+${table(i.mistakes.patterns.top.map((p) => row([escapeHtml(p.title), escapeHtml(p.rule), `${money(p.net)} so far`])))}`
+          : ""
+      }`
     : ""
 }
 ${

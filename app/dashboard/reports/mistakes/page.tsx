@@ -4,12 +4,24 @@ import Link from "next/link";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { getViewer } from "@/lib/auth/viewer";
 import { createClient } from "@/lib/supabase/server";
-import { businessDateParts, formatDate } from "@/lib/date";
+import { businessDateParts, dateKeyInBusinessTZ, formatDate } from "@/lib/date";
 import { isMonthKey, lastMonths, monthLabel } from "@/lib/day-works-report";
 import { groupMistakes, mistakesByJob, mistakesByMonth, mistakesInCell, NONE, openItems, UNTAGGED_NAME, type GroupRow, type MistakesCell } from "@/lib/mistakes-report";
 import { loadCostSources, loadMistakes, withMoney, type MistakeWithMoney, type TrackingMode } from "@/lib/mistakes-data";
 import { causeLabel, mistakeStatusLabel } from "@/lib/mistake-raise";
 import { MistakesReview } from "@/components/mistakes/mistakes-review";
+import { loadMistakePatterns } from "@/lib/mistake-patterns-data";
+import {
+  CENTRE_SHARE_PCT,
+  PATTERN_WINDOW_DAYS,
+  SAME_CATEGORY_MIN,
+  SAME_CAUSE_MIN,
+  SAME_CUSTOMER_MIN,
+  SAME_SITE_MIN,
+  SAME_SUPPLIER_MIN,
+  patternsForViewer,
+  type PatternFlag,
+} from "@/lib/mistake-patterns";
 import { Card, CardContent } from "@/components/ui/card";
 import { ArrowLeft } from "lucide-react";
 
@@ -22,6 +34,11 @@ import { ArrowLeft } from "lucide-react";
 //     the CRM already holds (already in job cost) plus manual lines.
 //   • By category, by cause, by supplier (credits claimed vs received), by
 //     job (net cost as a % of the job's builder PO value), by person (admin).
+//   • Patterns (stage 5, 27 Nov 2026) at the top: the same cause, category,
+//     supplier, builder, site or (admin only) person again and again, and cost
+//     centres whose mistakes are a big share of their open jobs' PO value —
+//     lib/mistake-patterns.ts. All mistakes are read (not just 12 months) so
+//     "the same site, ever" sees old callbacks.
 //   • Open items: still costing money with no credit claimed.
 //   • Review: every mistake not closed — cost it, link costs, record money
 //     back, close it (components/mistakes/).
@@ -87,9 +104,12 @@ export default async function MistakesReportPage({ searchParams }: { searchParam
   const jobValue = new Map<string, number>();
   const responsible = new Map<string, string>();
   let hiddenHours = 0;
+  let patterns: PatternFlag[] = [];
+  let patternsError: string | null = null;
   try {
     const [loaded, centresRes, staffRes] = await Promise.all([
-      loadMistakes(db, { from }),
+      // Every mistake, not just the 12 months: the patterns' "same site, ever" needs the old ones.
+      loadMistakes(db),
       db.from("cost_centres").select("id, name").order("sort_order").order("name"),
       db.from("profiles").select("id, full_name").eq("is_active", true).order("full_name"),
     ]);
@@ -101,7 +121,7 @@ export default async function MistakesReportPage({ searchParams }: { searchParam
     if (mode !== "missing") {
       const { sources } = await loadCostSources(db, loaded.lines, { withRates: isAdmin });
       mistakes = withMoney(loaded.mistakes, loaded.lines, sources);
-      hiddenHours = mistakes.reduce((s, m) => s + m.money.hiddenHours, 0);
+      hiddenHours = mistakes.filter((m) => m.occurred_on >= from).reduce((s, m) => s + m.money.hiddenHours, 0);
 
       const lineIds = mistakes.map((m) => m.cost_center_id).filter((id): id is string => !!id);
       for (const l of await byIds<{ id: string; cost_centre_id: string | null }>(db, "po_cost_centers", "id, cost_centre_id", lineIds)) lineCentre.set(l.id, l.cost_centre_id);
@@ -119,6 +139,13 @@ export default async function MistakesReportPage({ searchParams }: { searchParam
         if (isAdmin) {
           const resp = await byIds<{ mistake_id: string; staff_id: string }>(db, "mistake_responsibility", "mistake_id, staff_id", mistakes.map((m) => m.id), "mistake_id");
           for (const r of resp) responsible.set(r.mistake_id, r.staff_id);
+        }
+        // Stage 5 pattern flags. Optional: a failure here never stops the rest of the report.
+        try {
+          patterns = patternsForViewer(await loadMistakePatterns(db, mistakes, { withPeople: isAdmin, today: dateKeyInBusinessTZ(new Date()) }), isAdmin);
+        } catch (err) {
+          console.error("mistakes report patterns failed:", err);
+          patternsError = "Couldn't work out the patterns. Refresh to try again.";
         }
       }
     }
@@ -155,7 +182,7 @@ export default async function MistakesReportPage({ searchParams }: { searchParam
 
   let jobs = new Map<string, JobRow>();
   const lineNames = new Map<string, string>();
-  const jobIdsShown = [...new Set([...list.map((m) => m.job_id), ...byJob.map((r) => r.key), ...open.unrecovered.map((m) => m.job_id)].filter((id): id is string => !!id))];
+  const jobIdsShown = [...new Set([...list.map((m) => m.job_id), ...byJob.map((r) => r.key), ...open.unrecovered.map((m) => m.job_id), ...patterns.flatMap((p) => p.mistakes.map((m) => m.job_id))].filter((id): id is string => !!id))];
   if (!loadError && jobIdsShown.length > 0) {
     try {
       jobs = new Map((await byIds<JobRow>(db, "jobs", "id, job_number, title, customers(name)", jobIdsShown)).map((j) => [j.id, j]));
@@ -189,6 +216,7 @@ export default async function MistakesReportPage({ searchParams }: { searchParam
           Categories, causes, linked costs and recovery arrive with the 0119 database update — until then each mistake is its one logged amount.
         </p>
       )}
+      {mode === "tracking" && !loadError && <PatternsPanel flags={patterns} error={patternsError} jobLabel={jobLabel} />}
       {hiddenHours > 0 && (
         <p className="text-xs text-slate-500">
           {Math.round(hiddenHours * 10) / 10} h of rework labour is linked but not costed here — labour cost uses payroll rates, which only admin sees.
@@ -458,6 +486,62 @@ function GroupTable({ title, rows, label, showRecovery, empty }: { title: string
           )}
         </CardContent>
       </Card>
+    </div>
+  );
+}
+
+const PATTERN_SHOW_MISTAKES = 8;
+
+function PatternsPanel({ flags, error, jobLabel }: { flags: PatternFlag[]; error: string | null; jobLabel: (id: string | null) => string }) {
+  return (
+    <div className="space-y-2">
+      <h2 className="text-lg font-semibold text-slate-900">Patterns{flags.length > 0 ? ` — ${flags.length} to look at` : ""}</h2>
+      <p className="text-xs text-slate-500">
+        The same thing going wrong again and again — the same cause ({SAME_CAUSE_MIN}+, overall or within one cost centre), category ({SAME_CATEGORY_MIN}+),
+        supplier ({SAME_SUPPLIER_MIN}+) or builder ({SAME_CUSTOMER_MIN}+) in the last {PATTERN_WINDOW_DAYS} days, the same site {SAME_SITE_MIN}+ times ever, and
+        cost centres whose mistakes on open jobs are more than {CENTRE_SHARE_PCT}% of their builder PO value. Worst first, by what they have cost so far.
+      </p>
+      {error && <p className="text-sm text-red-600">{error}</p>}
+      {!error && flags.length === 0 && <p className="text-sm text-slate-400">No patterns right now.</p>}
+      {flags.length > 0 && (
+        <Card>
+          <CardContent className="p-0 divide-y divide-slate-100">
+            {flags.map((f) => (
+              <details key={f.id} className="group px-4 py-3">
+                <summary className="flex cursor-pointer flex-wrap items-baseline gap-x-3 gap-y-1 list-none">
+                  <span className="font-medium text-slate-900">{f.title}</span>
+                  {f.adminOnly && <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[11px] text-slate-600">Admin only</span>}
+                  <span className="text-sm text-slate-500">{f.rule}</span>
+                  <span className="ml-auto text-sm font-semibold text-red-600">{money(f.net)} so far</span>
+                </summary>
+                <div className="mt-2 space-y-1 text-xs text-slate-500">
+                  <p>
+                    {f.count} mistake{f.count === 1 ? "" : "s"} · cost {money(f.gross)}
+                    {f.claimed > 0 || f.recovered > 0 ? ` · claimed back ${money(f.claimed)}, received ${money(f.recovered)}` : ""}
+                    {f.value != null ? ` · open jobs' PO value ${money(f.value)}` : ""}
+                  </p>
+                  <ul className="space-y-0.5">
+                    {f.mistakes.slice(0, PATTERN_SHOW_MISTAKES).map((m) => (
+                      <li key={m.id} className="flex gap-3">
+                        <span className="w-24 shrink-0">{formatDate(m.occurred_on, { day: "numeric", month: "short", year: "numeric" })}</span>
+                        {m.job_id ? (
+                          <Link href={`/dashboard/jobs/${m.job_id}?tab=po`} className="text-slate-700 hover:underline">
+                            {jobLabel(m.job_id)}
+                          </Link>
+                        ) : (
+                          <span>No job</span>
+                        )}
+                        <span className="ml-auto text-red-600">{exact(m.net)}</span>
+                      </li>
+                    ))}
+                    {f.mistakes.length > PATTERN_SHOW_MISTAKES && <li>…and {f.mistakes.length - PATTERN_SHOW_MISTAKES} more</li>}
+                  </ul>
+                </div>
+              </details>
+            ))}
+          </CardContent>
+        </Card>
+      )}
     </div>
   );
 }

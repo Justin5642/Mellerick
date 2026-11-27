@@ -2457,8 +2457,34 @@ Rework cost centre (tag only); callbacks are a mistake on the original job
 - **Not done / to know:** supplier credits aren't matched to Xero credit notes;
   a linked supplier PO / expense is the WHOLE record (a part of it → unlink and
   add a manual line, which then counts as new cost); hire lines in a mistake
-  aren't in the Job Ledger (as hire isn't); job-less mistakes have no photos;
-  stage 5 (pattern flags) not built.
+  aren't in the Job Ledger (as hire isn't); job-less mistakes have no photos.
+- **Stage 5 — pattern flags (27 Nov 2026; no migration, no stream change; web
+  only, office/admin).** Justin: see where money KEEPS leaking. Worked out
+  every time from the mistakes the report already loads — nothing stored.
+  Rules `lib/mistake-patterns.ts` (pure, `tests/unit/mistake-patterns.test.ts`),
+  thresholds as constants at its top (no settings UI): the same `cause_code`
+  3+ times in the last 90 days (overall, and within one company cost centre —
+  the centre flag is left out when it is the whole overall flag again); the
+  same category 3+; the same supplier 2+ (with claimed / received); the same
+  builder (the job's customer) 3+; the same site 2+ **ever** (callbacks);
+  **admin only**, the same person (`mistake_responsibility`) 2+ in 90 days —
+  the reader only reads that table for an admin and `patternsForViewer` drops
+  it for anyone else; and a company cost centre whose mistakes on OPEN jobs
+  (not cancelled, not completed-and-approved — the Job margins rule) net more
+  than 5% of its builder PO value (sum of `po_cost_centers.allocated_amount`)
+  across every open job. Each flag: what, how many, cost / claimed /
+  received / net so far, and its mistakes newest first. Reads in
+  `lib/mistake-patterns-data.ts` (as the caller; chunked `.in()`, open jobs
+  paged). **Reports → Mistakes** shows a **Patterns** panel at the top, worst
+  first (net, then count), each opening its mistakes with job links; the page
+  now reads ALL mistakes, not just 12 months (the month table and breakdowns
+  still use 12 months), so "same site, ever" sees old callbacks; a pattern
+  failure shows a sentence and the rest of the report still loads. **Monday
+  email**: "N patterns to look at" with the top 3 under the Mistakes line
+  (`lib/mistakes-digest.ts` `loadPatternsForDigest`, service role, labour
+  costed without payroll rates as office sees it, never the person flag; a
+  failure leaves the patterns out and never stops the email; left out before
+  0119). Not checked in a browser.
 - **Apply / deploy order:** paste `0119_mistake_tracking.sql` → paste
   `supabase/tests/0119_mistake_tracking_test.sql` (needs an active technician
   and an active admin; office-only checks need an office user), trust only
