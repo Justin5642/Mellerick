@@ -12,7 +12,10 @@ let job: Record<string, unknown> | null = null;
 let crewRow: unknown = null;
 let stage: Record<string, unknown> | null = null;
 
-vi.mock("@/lib/api/guards", () => ({ requireUser: (...a: unknown[]) => requireUser(...a) }));
+// The route must use requireRole (which carries the caller's role): with
+// requireUser the role was always null, so office staff not on the crew were
+// refused. Mock only requireRole, so a regression to requireUser fails here.
+vi.mock("@/lib/api/guards", () => ({ requireRole: (...a: unknown[]) => requireUser(...a) }));
 vi.mock("@/lib/monitoring", () => ({ reportError: vi.fn() }));
 vi.mock("@/lib/supabase/admin", () => ({
   createAdminClient: vi.fn(() => ({
@@ -102,5 +105,13 @@ describe("POST stage complete", () => {
     requireUser.mockResolvedValue(tech("crew-2"));
     crewRow = { job_id: "job-1" };
     expect((await call()).status).toBe(200);
+  });
+
+  it("lets the office complete a stage on a job they aren't crew on", async () => {
+    requireUser.mockResolvedValue({ ok: true as const, userId: "office-1", role: "office" });
+    const res = await call();
+    expect(res.status).toBe(200);
+    expect(updates[0]).toMatchObject({ completed_by: "office-1" });
+    expect(requireUser.mock.calls[0][1]).toEqual(["admin", "office", "technician"]);
   });
 });

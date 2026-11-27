@@ -329,6 +329,12 @@ and 0096 then refused bookings for the other cost centres.
   complete") or the office's PO tab.
 - **Not changed:** the office's status drop-down itself, the PO tab's stage
   controls.
+- **Office can complete / reopen a stage from the PO tab (fixed 27 Nov 2026).**
+  `POST …/stages/[stageId]/complete` used `requireUser`, which leaves the role
+  null, so office/admin not on the job's crew got "Only the crew on this job
+  can complete its stages" (Emma: couldn't mark Brodie's Camera Inspection
+  stage complete for him). It now uses `requireRole(admin, office,
+  technician)`; the test mocks only `requireRole`, so a regression fails.
 
 **Mistake costs per cost centre (23 Nov 2026; migration `0115` applied 2026-11-25).**
 Justin: "We also need a way of tracking the expense of mistakes in each cost
