@@ -456,6 +456,7 @@ export function JobDetailClient({ job, currentUserId, photos: initialPhotos, doc
                 hideSchedule={hideSchedule}
                 onEditSchedule={isOffice ? openSchedule : undefined}
                 canEditSite={isOffice}
+                canFlagMissed={isOffice}
               />
               {/* "Log mistake" for the crew on a job they're on (0119): no money. Office logs and costs on the PO tab. */}
               {!isOffice && !viewOnly && (

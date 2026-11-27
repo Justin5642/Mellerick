@@ -2457,8 +2457,34 @@ Rework cost centre (tag only); callbacks are a mistake on the original job
 - **Not done / to know:** supplier credits aren't matched to Xero credit notes;
   a linked supplier PO / expense is the WHOLE record (a part of it → unlink and
   add a manual line, which then counts as new cost); hire lines in a mistake
-  aren't in the Job Ledger (as hire isn't); job-less mistakes have no photos;
-  stage 5 (pattern flags) not built.
+  aren't in the Job Ledger (as hire isn't); job-less mistakes have no photos.
+- **Stage 5 — pattern flags (27 Nov 2026; no migration, no stream change; web
+  only, office/admin).** Justin: see where money KEEPS leaking. Worked out
+  every time from the mistakes the report already loads — nothing stored.
+  Rules `lib/mistake-patterns.ts` (pure, `tests/unit/mistake-patterns.test.ts`),
+  thresholds as constants at its top (no settings UI): the same `cause_code`
+  3+ times in the last 90 days (overall, and within one company cost centre —
+  the centre flag is left out when it is the whole overall flag again); the
+  same category 3+; the same supplier 2+ (with claimed / received); the same
+  builder (the job's customer) 3+; the same site 2+ **ever** (callbacks);
+  **admin only**, the same person (`mistake_responsibility`) 2+ in 90 days —
+  the reader only reads that table for an admin and `patternsForViewer` drops
+  it for anyone else; and a company cost centre whose mistakes on OPEN jobs
+  (not cancelled, not completed-and-approved — the Job margins rule) net more
+  than 5% of its builder PO value (sum of `po_cost_centers.allocated_amount`)
+  across every open job. Each flag: what, how many, cost / claimed /
+  received / net so far, and its mistakes newest first. Reads in
+  `lib/mistake-patterns-data.ts` (as the caller; chunked `.in()`, open jobs
+  paged). **Reports → Mistakes** shows a **Patterns** panel at the top, worst
+  first (net, then count), each opening its mistakes with job links; the page
+  now reads ALL mistakes, not just 12 months (the month table and breakdowns
+  still use 12 months), so "same site, ever" sees old callbacks; a pattern
+  failure shows a sentence and the rest of the report still loads. **Monday
+  email**: "N patterns to look at" with the top 3 under the Mistakes line
+  (`lib/mistakes-digest.ts` `loadPatternsForDigest`, service role, labour
+  costed without payroll rates as office sees it, never the person flag; a
+  failure leaves the patterns out and never stops the email; left out before
+  0119). Not checked in a browser.
 - **Apply / deploy order:** paste `0119_mistake_tracking.sql` → paste
   `supabase/tests/0119_mistake_tracking_test.sql` (needs an active technician
   and an active admin; office-only checks need an office user), trust only
@@ -2587,7 +2613,7 @@ the stage's allowed hours.
   `TIME_ENTRY_SELECT_WITH_STAFF_AND_VARIATION` in `lib/time-entry-columns.ts`,
   mirrored on the phone; the plain list stays the fallback — the optional
   column is pinned by `tests/unit/time-entry-columns.test.ts`). The web's own
-  Clock In is unchanged (no variation picker there yet).
+  Clock In picks a variation since 27 Nov 2026 (below).
 - **Web Variations tab, office** (`components/job/job-variations.tsx`): every
   card shows "6.5 h logged (1 still clocked on)"; "Charged by the hour"
   tick box (`is_hourly`); an hourly pending variation's approval form shows
@@ -2643,8 +2669,23 @@ the stage's allowed hours.
   `variation_cost_links` by hand) → **redeploy the PowerSync streams**
   (`docs/powersync-deploy.md` — `tech_time_entries` names `variation_id`,
   so not before 0120) → deploy the web → ship the phone build.
-- **Not done / to know:** the web job page's own Clock In has no variation
-  choice (tag the entry afterwards, or use the phone); the phone's office
+- **Web Clock In picks a variation too (27 Nov 2026; no migration).** The
+  Time tab's Clock In has a "Stage work / Variation: …" picker beside it when
+  the job has an open (not rejected) variation, and while clocked on a
+  **Switch** picker ("Switch to a variation (e.g. hit rock)…" / "Switch
+  variation / back to the stage…"): clock-off then clock-on at the same
+  instant (`planClockSwitch`; the clock-off first — 0090). The stage is the
+  web's old rule (the job's scheduled cost centre — the phone's
+  `manualClockOnCostCentre` has no web copy); a switch keeps the open entry's
+  cost centre. Browser writes as the user (RLS + 0120's guard decide; its
+  refusals shown with `variationTimeRefusal`). Rules `lib/web-clock-on.ts`
+  (`clockOnChoices`, `clockOnRow` — `variation_id` only when set,
+  `showVariationChoice`), tested in `tests/unit/web-clock-on.test.ts`. A
+  database without the column: the picker hides once a read came back
+  without it, and a refused clock-on retries as stage time (42703/PGRST204).
+  No "+ New variation" on the web clock-on (raise it on the Variations tab,
+  then clock on to it). Not checked in a browser.
+- **Not done / to know:** the phone's office
   screens don't show variation hours or links (the office uses the web);
   a linked supplier PO / expense is the WHOLE record; a cost can be both
   part of a mistake and linked to a variation (the ledger moves it to the
@@ -2765,8 +2806,20 @@ on to is shown as "Not attended" — computed, never written.
   a dead letter rather than lost silently; "Not attended" works (it needs no
   column). Nothing writes the columns directly, so the gateway needs no
   optional-column entry.
-- **Not done:** no "Didn't make it" button on the web job page (phone only, as
-  asked); no push to the office; the phone's office booking menu sheet doesn't
+- **Web, for the office (27 Nov 2026; no migration).** Office/admin get
+  "Didn't make it…" (or "Didn't make it — change or clear…" once flagged) as
+  the last item of the board's hold / right-click booking menu
+  (`bookingMenuItems` `missed`, rule `missedAction` in
+  `components/schedule/board-actions.ts` = `canFlagMissed` + office/admin;
+  tested in `tests/unit/web-booking-missed.test.ts`) and under each booking
+  in the job Overview's bookings list. Both open
+  `components/schedule/booking-missed-dialog.tsx` (a `KeyboardSafeDialogContent`:
+  the six reasons, note ≤ 500 — Other needs one — `validateMissed`, Clear on a
+  flagged booking) → the existing `POST/DELETE …/bookings/[bookingId]/missed`
+  route; its sentence is shown on a refusal; the page refreshes after. Not
+  offered to technicians on the web (the phone is their door). Not checked in
+  a browser.
+- **Not done:** no push to the office; the phone's office booking menu sheet doesn't
   repeat the reason (the block and List row do); the web board clears a moved
   booking's tag on the next refresh (the board refreshes after every write).
 - **Apply / deploy order:** paste `supabase/migrations/0121_booking_missed.sql`

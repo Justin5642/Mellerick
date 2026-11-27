@@ -20,6 +20,9 @@ import { formatDateKeyRange } from "@/lib/schedule-form";
 import { scheduleDays } from "@/lib/scheduling";
 import { bookingWindow, describeBooking, type JobBookingWithNames } from "@/lib/bookings";
 import { BookingAttendanceTag } from "@/components/schedule/booking-attendance-tag";
+import { BookingMissedDialog, type MissedTarget } from "@/components/schedule/booking-missed-dialog";
+import { missedAction } from "@/components/schedule/board-actions";
+import { dateKeyInBusinessTZ } from "@/lib/date";
 import { leaveDateLabel, leaveDayLabel, NEEDS_REASSIGNING, type LeaveConflict } from "@/lib/staff-leave";
 import { CustomerPicker } from "@/components/customer-picker";
 import { AddSiteDialog } from "@/components/site-add-dialog";
@@ -43,6 +46,8 @@ interface Props {
   onEditSchedule?: () => void;
   /** Office/admin: may set the site's map pin (sites are office-writable, 0064). */
   canEditSite?: boolean;
+  /** Office/admin: "Didn't make it…" on each booking (0121; 27 Nov 2026). */
+  canFlagMissed?: boolean;
 }
 
 // The Site picker (components/job/site-picker.tsx) offers "No site" — a job
@@ -50,8 +55,10 @@ interface Props {
 // "Add New Site" dialog inline, so a wrong/missing site can be fixed here
 // without a trip to the Customer page — same picker as the New Job form.
 
-export function JobOverview({ job, readOnly = false, bookings, bookingsError, leaveClashes, notAttendedIds, hideSchedule = false, onEditSchedule, canEditSite = false }: Props) {
+export function JobOverview({ job, readOnly = false, bookings, bookingsError, leaveClashes, notAttendedIds, hideSchedule = false, onEditSchedule, canEditSite = false, canFlagMissed = false }: Props) {
   const [pinOpen, setPinOpen] = useState(false);
+  const [missedTarget, setMissedTarget] = useState<MissedTarget | null>(null);
+  const todayKey = dateKeyInBusinessTZ(new Date());
   const router = useRouter();
   const supabase = createClient();
   const [savingFence, setSavingFence] = useState(false);
@@ -313,6 +320,26 @@ export function JobOverview({ job, readOnly = false, bookings, bookingsError, le
                       {b.note && <p className="text-xs text-amber-800 whitespace-pre-wrap mt-0.5">Note: {b.note}</p>}
                       <BookingAttendanceTag booking={{ ...b, not_attended: notAttendedIds?.has(b.id) }} className="text-xs mt-0.5 whitespace-normal" />
                       {b.missed_note && <p className="text-xs text-red-700 whitespace-pre-wrap">{b.missed_note}</p>}
+                      {!readOnly && (() => {
+                        const action = missedAction(b, job.status, todayKey, canFlagMissed);
+                        if (!action) return null;
+                        return (
+                          <button
+                            type="button"
+                            className="mt-0.5 text-xs font-medium text-slate-500 underline-offset-2 hover:text-red-700 hover:underline"
+                            onClick={() =>
+                              setMissedTarget({
+                                jobId: job.id,
+                                bookingId: b.id,
+                                title: `#${job.job_number} — ${b.staff_name ?? "Technician"}, ${describeBooking(b)}`,
+                                missed: b,
+                              })
+                            }
+                          >
+                            {action === "change" ? "Didn't make it — change or clear…" : "Didn't make it…"}
+                          </button>
+                        );
+                      })()}
                       {(leaveClashes?.get(b.id)?.length ?? 0) > 0 && (
                         <p className="text-xs text-rose-700 mt-0.5">
                           <span className="inline-block rounded bg-rose-600 px-1 font-bold text-white mr-1">{NEEDS_REASSIGNING}</span>
@@ -480,6 +507,7 @@ export function JobOverview({ job, readOnly = false, bookings, bookingsError, le
           set("site_id", site.id);
         }}
       />
+      <BookingMissedDialog target={missedTarget} onClose={() => setMissedTarget(null)} onSaved={() => router.refresh()} />
     </div>
   );
 }

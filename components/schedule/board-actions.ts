@@ -4,6 +4,7 @@
 // on a job and copy it so we can paste it into another employee's schedule").
 // Pure: the board (team-schedule-view.tsx) holds the state and does the writes.
 // Web only — not mirrored to the phone (its schedule tab has its own sheets).
+import { canFlagMissed, isMissed, type AttendanceBooking, type MissedFields } from "@/lib/booking-attendance";
 
 // ---------------------------------------------------------------------------
 // Press and hold vs drag
@@ -51,7 +52,7 @@ export function movedBeyond(from: Point, to: Point, px: number): boolean {
 // The booking menu
 // ---------------------------------------------------------------------------
 
-export type BookingMenuAction = "copy" | "cut" | "schedule" | "open" | "todo";
+export type BookingMenuAction = "copy" | "cut" | "schedule" | "open" | "todo" | "missed";
 
 export type BookingMenuItem = { action: BookingMenuAction; label: string; disabled?: string };
 
@@ -68,6 +69,8 @@ export function bookingMenuItems(opts: {
   unsaved: boolean;
   readOnly: boolean;
   canTodo: boolean;
+  /** "Didn't make it" for the office (missedAction): offer to flag, to change/clear, or nothing. */
+  missed?: MissedAction;
 }): BookingMenuItem[] {
   if (opts.closed) return [{ action: "open", label: "Open job" }];
   const blocked = opts.readOnly
@@ -84,7 +87,33 @@ export function bookingMenuItems(opts: {
     { action: "open", label: "Open job" },
   ];
   if (opts.canTodo) items.push({ action: "todo", label: "Back to to-do list", disabled: blocked });
+  if (opts.missed) {
+    items.push({
+      action: "missed",
+      label: opts.missed === "change" ? "Didn't make it — change or clear…" : "Didn't make it…",
+      disabled: opts.unsaved ? "Still saving" : undefined,
+    });
+  }
   return items;
+}
+
+/** What "Didn't make it" offers on a booking: flag it, change/clear its flag, or nothing. */
+export type MissedAction = "flag" | "change" | null;
+
+/**
+ * Office/admin only on the web (27 Nov 2026; the phone is the technician's
+ * door). The same rules as 0121's functions (`canFlagMissed`: someone's
+ * booking, open job, first booked day today or earlier) — the route and the
+ * database decide again.
+ */
+export function missedAction(
+  booking: Pick<AttendanceBooking, "staff_id" | "starts_at" | "ends_at" | "daily"> & MissedFields,
+  jobStatus: string | null | undefined,
+  todayKey: string,
+  isOffice: boolean,
+): MissedAction {
+  if (!isOffice || !canFlagMissed(booking, jobStatus, todayKey)) return null;
+  return isMissed(booking) ? "change" : "flag";
 }
 
 /**
