@@ -74,6 +74,8 @@ interface VendorOrder {
   invoice_storage_path?: string | null;
   xero_bill_id?: string | null;
   delivered_at?: string | null;
+  /** 0124, drafted: the invoice was filled in from an email and nobody has checked it yet. */
+  invoice_needs_check?: boolean;
 }
 
 interface ExpenseForAgg {
@@ -625,6 +627,10 @@ export function JobPO({ jobId, jobNumber, customerName, site, pos: initialPos, t
       gst_amount: Math.round(amount * 10) / 100,
       invoice_storage_path: path,
       status: vo.status === "cancelled" ? vo.status : ("received" as const),
+      // Saving the form IS the office's check of an invoice read from email
+      // (0124, drafted). Only sent when the column exists, so a database without it
+      // saves as before.
+      ...(vo.invoice_needs_check !== undefined ? { invoice_needs_check: false } : {}),
     };
     const { error, count } = await supabase.from("vendor_orders").update(patch, { count: "exact" }).eq("id", vo.id);
     setInvoiceBusy(false);
@@ -634,6 +640,18 @@ export function JobPO({ jobId, jobNumber, customerName, site, pos: initialPos, t
     onVendorOrdersUpdate(updated);
     setInvoiceFor(null);
     toast.success(`Invoice saved on ${vo.po_number}`);
+  }
+
+  // The office has checked an invoice read from email against its PDF (0124, drafted).
+  async function confirmEmailedInvoice(vo: VendorOrder) {
+    setInvoiceBusy(true);
+    const { error, count } = await supabase.from("vendor_orders").update({ invoice_needs_check: false }, { count: "exact" }).eq("id", vo.id);
+    setInvoiceBusy(false);
+    if (error || count === 0) { toast.error("Couldn't confirm the invoice"); return; }
+    const updated = vendorOrders.map(v => v.id === vo.id ? { ...v, invoice_needs_check: false } : v);
+    setVendorOrders(updated);
+    onVendorOrdersUpdate(updated);
+    toast.success(`Invoice on ${vo.po_number} checked — it can go to Xero now`);
   }
 
   async function sendInvoiceToXero(vo: VendorOrder) {
@@ -804,6 +822,14 @@ export function JobPO({ jobId, jobNumber, customerName, site, pos: initialPos, t
             )}
             {vo.xero_bill_id ? (
               <span className="text-green-700 font-medium">In Xero ✓</span>
+            ) : vo.invoice_needs_check ? (
+              <>
+                <span className="rounded bg-amber-100 px-1.5 py-0.5 text-amber-800 font-medium" title="Read from an email by the app. Check the number, date and amount against the PDF.">
+                  From email — check
+                </span>
+                <button onClick={() => openInvoice(vo)} className="text-slate-400 hover:text-slate-600 underline">Edit</button>
+                <button onClick={() => confirmEmailedInvoice(vo)} disabled={invoiceBusy} className="text-blue-600 hover:underline font-medium">Confirm</button>
+              </>
             ) : (
               <>
                 <button onClick={() => openInvoice(vo)} className="text-slate-400 hover:text-slate-600 underline">Edit</button>

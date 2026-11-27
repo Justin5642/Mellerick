@@ -14,15 +14,18 @@ import { getFromAddress, getReplyTo } from "@/lib/resend";
 import { getViewer } from "@/lib/auth/viewer";
 import { loadLeaveTypeAudience } from "@/lib/staff-leave-data";
 import { LeaveVisibilitySetting } from "@/components/settings/leave-visibility-setting";
+import { GmailInvoiceSetting } from "@/components/settings/gmail-invoice-setting";
 
 export default async function SettingsPage({ searchParams }: { searchParams: Promise<{ xero?: string; google?: string }> }) {
   const params = await searchParams;
   const supabase = await createClient();
-  const [{ data: xeroToken }, { data: googleToken }, leaveAudience, viewer] = await Promise.all([
+  const [{ data: xeroToken }, { data: googleToken }, leaveAudience, viewer, gmailState] = await Promise.all([
     supabase.from("xero_tokens").select("tenant_name, updated_at, default_expense_account_code, default_sales_account_code, xero_invoice_last_synced_at").single(),
     supabase.from("google_tokens").select("google_email, updated_at, calendar_last_synced_at").single(),
     loadLeaveTypeAudience(supabase),
     getViewer(),
+    // 0124, drafted — null before it is applied (the read errors) or for anyone RLS hides it from.
+    supabase.from("gmail_invoice_settings").select("label_name, gmail_allowed, last_poll_at, last_error").eq("id", true).maybeSingle(),
   ]);
 
   const isConnected = !!xeroToken;
@@ -201,12 +204,13 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
                   </Button>
                 </form>
               </div>
+              <GmailInvoiceSetting state={gmailState.error ? null : gmailState.data} viewerId={viewer?.user.id ?? null} />
             </div>
           ) : (
             <div className="space-y-3">
               <p className="text-sm text-slate-500">
                 Connect Google Calendar so scheduled jobs automatically appear as events — created, moved, and removed as jobs are scheduled, rescheduled, or completed. Drag or resize an event
-                directly in Google Calendar and it'll sync back to the job too (via the periodic sync or the "Sync now" button).
+                directly in Google Calendar and it'll sync back to the job too (via the periodic sync or the "Sync now" button). Connecting also lets the app read (never send or change) the supplier invoices in one Gmail label.
               </p>
               <Link href="/api/google/auth">
                 <Button className="gap-2">

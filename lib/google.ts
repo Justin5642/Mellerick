@@ -1,7 +1,6 @@
 // The per-API packages, not the 200 MB `googleapis` umbrella — this app only
 // uses Calendar (here) and OAuth2 userinfo (app/api/google/callback).
 import { auth, calendar, type calendar_v3 } from "@googleapis/calendar";
-import { createClient } from "@/lib/supabase/server";
 import { buildCalendarEventTiming, eventMatchesJob, instanceMatchesJob } from "@/lib/calendar-event";
 import { shiftDateKey } from "@/lib/date";
 import {
@@ -25,9 +24,20 @@ function tokenClient() {
 }
 
 
-const SCOPES = [
+/**
+ * gmail.readonly (0124, drafted, 27 Nov 2026): the hourly import reads supplier
+ * invoices from a label in the accounts mailbox (lib/gmail-invoices.ts). A
+ * scope only reaches the stored refresh token when Google is RECONNECTED, so
+ * the connection made before this keeps its calendar scope and keeps working;
+ * the Gmail import then sees Google's 403 "insufficient scope" and asks for a
+ * reconnect (gmail_invoice_settings.gmail_allowed = false).
+ */
+export const GMAIL_READONLY_SCOPE = "https://www.googleapis.com/auth/gmail.readonly";
+
+export const SCOPES = [
   "https://www.googleapis.com/auth/calendar.events",
   "https://www.googleapis.com/auth/userinfo.email",
+  GMAIL_READONLY_SCOPE,
 ];
 
 export function getGoogleOAuthClient() {
@@ -56,11 +66,23 @@ export function getGoogleConsentUrl(state?: string) {
  * Returns null if no Google account is connected — callers should treat
  * this as "skip calendar sync", not as an error.
  *
- * Accepts an optional Supabase client so callers without a browser session
- * (e.g. a cron job using the service-role client) can reuse the same logic.
+ * The token row is read with the service role (below), so the optional
+ * Supabase client callers still pass is no longer needed for that; it is kept
+ * in the signature so existing callers don't change.
  */
-export async function getGoogleCalendarClient(supabaseClient?: any) {
-  const supabase = supabaseClient ?? (await createClient());
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+export async function getGoogleCalendarClient(_supabaseClient?: unknown) {
+  const oauth2Client = await getGoogleAuthClient();
+  return oauth2Client ? calendar({ version: "v3", auth: oauth2Client }) : null;
+}
+
+/**
+ * The org's single Google connection as an authorised OAuth2 client (token
+ * refreshed and persisted when near expiry), or null when nothing is
+ * connected. Shared by Calendar and the Gmail invoice import — one token row,
+ * one refresh path.
+ */
+export async function getGoogleAuthClient() {
   const { data: tokenRow } = await tokenClient().from("google_tokens").select("*").single();
   if (!tokenRow) return null;
 
@@ -96,7 +118,7 @@ export async function getGoogleCalendarClient(supabaseClient?: any) {
     }
   }
 
-  return calendar({ version: "v3", auth: oauth2Client });
+  return oauth2Client;
 }
 
 /**

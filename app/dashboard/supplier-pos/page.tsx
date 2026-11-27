@@ -5,6 +5,48 @@ import { createClient } from "@/lib/supabase/server";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
+import { getViewer } from "@/lib/auth/viewer";
+import { EmailedInvoicesPanel, type EmailedInvoice, type GmailState } from "@/components/supplier-invoices/emailed-invoices-panel";
+import type { SupabaseClient } from "@supabase/supabase-js";
+
+// Supplier invoices read from the accounts Gmail label (0124, drafted): the review
+// queue and the last 30 days' matches, each file with a signed link from the
+// office-only supplier-invoices bucket. Before the drafted 0124 → null (panel says so).
+async function loadEmailedInvoices(supabase: SupabaseClient): Promise<{ rows: EmailedInvoice[]; state: GmailState | null }> {
+  const since = new Date(Date.now() - 30 * 24 * 3600 * 1000).toISOString();
+  const cols =
+    "id, status, received_at, sender, subject, file_name, review_reason, supplier_name, invoice_number, invoice_date, " +
+    "amount_ex_gst, gst_amount, po_refs, job_refs, storage_path, created_at, " +
+    "vendor_orders(po_number, job_id, invoice_needs_check), jobs(job_number, title)";
+  const [state, open, recent] = await Promise.all([
+    supabase.from("gmail_invoice_settings").select("label_name, gmail_allowed, last_poll_at, last_ok_at, last_error").eq("id", true).maybeSingle(),
+    supabase.from("gmail_supplier_invoices").select(cols).in("status", ["new", "needs_review"]).order("received_at", { ascending: true }).limit(100),
+    supabase.from("gmail_supplier_invoices").select(cols).eq("status", "matched").gte("created_at", since).order("received_at", { ascending: false }).limit(50),
+  ]);
+  if (state.error || open.error || recent.error) {
+    const code = state.error?.code ?? open.error?.code ?? recent.error?.code;
+    if (code !== "42P01" && code !== "PGRST205") console.error("emailed invoices load failed:", code);
+    return { rows: [], state: null };
+  }
+  type Raw = Omit<EmailedInvoice, "fileUrl" | "po" | "job"> & {
+    storage_path: string | null;
+    vendor_orders: EmailedInvoice["po"];
+    jobs: EmailedInvoice["job"];
+  };
+  const raw = [...((open.data ?? []) as unknown as Raw[]), ...((recent.data ?? []) as unknown as Raw[])];
+  const paths = raw.map((r) => r.storage_path).filter((p): p is string => !!p);
+  const signed = paths.length ? await supabase.storage.from("supplier-invoices").createSignedUrls(paths, 3600) : { data: [] };
+  const urlFor = new Map(((signed.data ?? []) as { path: string | null; signedUrl: string }[]).map((s) => [s.path, s.signedUrl]));
+  const rows = raw.map(({ storage_path, vendor_orders, jobs, ...r }) => ({
+    ...r,
+    po_refs: r.po_refs ?? [],
+    job_refs: r.job_refs ?? [],
+    fileUrl: storage_path ? urlFor.get(storage_path) ?? null : null,
+    po: vendor_orders,
+    job: jobs,
+  }));
+  return { rows, state: (state.data as GmailState | null) ?? null };
+}
 
 // Where a supplier invoice gets matched (Stage 4, 31 Oct 2026: "When a
 // supplier invoice arrives quoting the PO number, it should be easy to attach
@@ -48,6 +90,7 @@ export default async function SupplierPosPage({ searchParams }: { searchParams: 
       : Promise.resolve({ data: null, error: null }),
     supabase.from("vendor_orders").select(COLS).is("invoice_number", null).neq("status", "cancelled").order("created_at", { ascending: true }).limit(200),
   ]);
+  const [emailed, viewer] = await Promise.all([loadEmailedInvoices(supabase), getViewer()]);
   const loadFailed = !!(found.error || waiting.error);
   if (loadFailed) console.error("supplier POs load failed:", found.error ?? waiting.error);
 
@@ -129,6 +172,8 @@ export default async function SupplierPosPage({ searchParams }: { searchParams: 
         <Input name="q" defaultValue={q} placeholder="PO number (e.g. 1234) or supplier" autoFocus />
         <Button type="submit">Find</Button>
       </form>
+
+      <EmailedInvoicesPanel rows={emailed.rows} state={emailed.state} canCheckNow={viewer?.profile?.role === "admin"} />
 
       {loadFailed && <p className="text-sm text-red-600">Couldn&apos;t load supplier POs. Refresh to try again.</p>}
 

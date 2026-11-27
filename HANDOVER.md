@@ -1383,9 +1383,114 @@ account, not by job. This finds the bills with no job and gets them assigned.
   page. **Recipients are the `WEEKLY_DIGEST_TO` env var (comma-separated) — set it in
   Vercel; unset = skipped.** Addresses are deliberately not in source (public repo).
   Sends from `EMAIL_FROM` (must be a Resend-verified domain, as for supplier POs).
-- **Next (not built):** pull supplier invoices from the admin Gmail label, read the PO
-  number off each PDF and attach it to the job automatically (needs Gmail read scope on
-  the Google connection → reconnect); unmatched ones land in this queue.
+- **Supplier invoices from the Gmail label:** built 27 Nov 2026 (0124 DRAFT) — see
+  "Supplier invoices from Gmail", below. A bill it puts on a PO reaches Xero through
+  that PO's Send to Xero, so it shows here as `crm` once sent.
+
+**Supplier invoices from Gmail, filed against the job automatically (27 Nov 2026; migration `0124` DRAFT — not applied; no PowerSync change).**
+Justin: bills land in a Gmail LABEL in the accounts mailbox ("Supplier invoices" by
+default, renamable in Settings → Google); the app reads new ones every hour.
+- **Scope:** `lib/google.ts` `SCOPES` gained `gmail.readonly` (`GMAIL_READONLY_SCOPE`).
+  It reaches the stored refresh token only when Google is **reconnected** (Settings →
+  Google → Reconnect — the callback is admin-only); the existing calendar connection
+  keeps working unchanged (same token row and refresh path — `getGoogleAuthClient()`
+  is now shared by Calendar and Gmail; `getGoogleCalendarClient` wraps it). The
+  callback records whether the consent granted Gmail (`tokens.scope`,
+  `grantsGmailRead`) in `gmail_invoice_settings.gmail_allowed`; a Gmail 403
+  insufficient-scope answer sets it false with "Reconnect Google to allow reading
+  supplier invoices", shown on Supplier POs and Settings. Gmail read is a Google
+  **restricted** scope: fine for an Internal (Workspace) OAuth app; an External app
+  needs it added on the consent screen (and Google's verification for real users).
+  The Gmail API must be enabled in the Google Cloud project (its 403 is told apart:
+  "The Gmail API isn't switched on…").
+- **Import** (`lib/gmail-invoices.ts` `importGmailInvoices`, rules
+  `lib/gmail-invoice-rules.ts`): `GET /api/gmail/poll-invoices` (cron secret, hourly at
+  :05, `maxDuration` 300) and `POST` (admin — "Check now" on Supplier POs). Gmail via
+  REST with the shared OAuth client (no new package). Lists the label's messages
+  `after:` the last one read minus a day (first run: 7 days back), skips any message
+  already recorded, oldest first; each named PDF / JPEG / PNG / WebP attachment
+  (≤ 10 MB; images under 30 KB are signature logos, skipped; bytes sniffed) is claimed
+  as a row first (`(gmail_message_id, part_id)` unique — the MIME part id, because
+  Gmail's attachmentId changes between fetches), kept in the office-only
+  `supplier-invoices` bucket at `gmail/<day>/<row>.<ext>`, read with Claude
+  (`readSupplierInvoiceFile` — the 0103 reader, now taking photos too; photos over
+  ~5 MB are shrunk with sharp), and checked (`checkRead`: one invoice, an invoice
+  number, amount > 0 and ≤ $1 M, GST within 0.2% (≥ 5c) of 10% or derived at 10% when
+  not printed, amount + GST = total, date not in the future nor > 2 years ago).
+  **Matched** (`decideMatch`) = exactly one of our `PO-…` numbers printed that exists in
+  `vendor_orders`, isn't cancelled, has no invoice and no Xero bill, is with the same
+  supplier (loose name match), and the supplier's invoice number wasn't already
+  received (emails, 0103 uploads or any PO). Then the file is copied to
+  `job-documents` at the PO tab's `{job}/expense-receipt-{PO}-{ts}_{name}` (0047 hides
+  it from technicians) and the PO's invoice number, date, amount, GST, file and
+  `received` are filled **in one UPDATE conditioned on `invoice_number is null and
+  xero_bill_id is null`** — an invoice the office typed meanwhile is never
+  overwritten (file removed again) — with `vendor_orders.invoice_needs_check = true`.
+  **Nothing is ever sent to Xero by the import.** Anything else → `needs_review` with a
+  sentence. Limits: ≤ 12 Claude reads a run (≤ 240 a day), stops starting new emails
+  after 200 s, ≤ 200 messages listed; rows a dead run left `new` for 30 min go to
+  review. Errors: fixed sentences in `gmail_invoice_settings.last_error`; Sentry tags
+  only; Google's status + enumerated reasons only — no email content, sender, subject
+  or amounts are logged or reported. Read-only toward Gmail (nothing labelled, moved
+  or marked read).
+- **Migration `0124_gmail_supplier_invoices.sql`:** `gmail_supplier_invoices` (one row
+  per attachment; an email with nothing readable gets one row, part `-`): message id,
+  part id, file name/type, received at, sender, subject, storage path, job-document
+  path, status new / matched / needs_review / dismissed, reason, error, the read
+  fields (supplier, invoice number/date, amount ex GST, GST, total — **money**), PO and
+  job refs, `vendor_order_id`, `job_id`, handled by/at. ONE FOR ALL policy on
+  `is_office_or_admin()`, granted to authenticated + service_role, revoked from anon,
+  in no publication/stream. `gmail_invoice_settings` (one row: `label_name` — the only
+  column a person may update, by column grant; `gmail_allowed`, last poll/ok/error,
+  resume point — service role). `vendor_orders.invoice_needs_check boolean not null
+  default false` (vendor_orders is granted at table level; asserted). Idempotent, no
+  temp tables, end state asserted. CI's `seed-roles.sql` seeds one imported row so the
+  money sweep checks its amounts.
+- **Web (office/admin):** Supplier POs gets **Emailed supplier invoices**
+  (`components/supplier-invoices/emailed-invoices-panel.tsx`, loaded on the server as
+  the caller): needs review (reason, PDF via a 1-hour signed URL, "Put on this PO" by
+  number or **Dismiss**) and the last 30 days' matches (PO link → the job's PO tab,
+  "Check and send to Xero" / "Checked"); the label, last check and any error; admin
+  **Check now**. Actions → `POST /api/gmail/invoices/[id]` (`assign` / `dismiss` /
+  `reopen`, `requireOfficeOrAdmin`, every read and write as the CALLER, row claimed
+  first and put back if filing fails; the same conditional PO write). **PO tab:** a
+  PO whose invoice came from email shows **"From email — check"** with Edit and
+  **Confirm** (clears the flag) instead of Send to Xero; saving the invoice form also
+  clears it; `/api/xero/push-vendor-order` refuses (409) while it is set (column read
+  separately, so it sends as before without 0124). **Settings → Google:** whether
+  Gmail reading is allowed, the label name (editable), link to Supplier POs.
+- **Before 0124 is applied nothing breaks:** the cron/Check now answer `{skipped}`;
+  the panel and Settings say it isn't switched on; the PO tab never sends the flag
+  (the key is only present when the column exists).
+- **Tests** (Gmail and Anthropic mocked): `tests/unit/gmail-invoices.test.ts` (rules,
+  attachment picking, the Gmail client's 403-scope handling, the import against an
+  in-memory database: match + flag + file path, no overwrite of an entered invoice,
+  idempotency, no-attachment email, missing scope, no label / not connected,
+  untrusted read → review, tables missing) and `tests/unit/gmail-invoice-routes.test.ts`
+  (route auth, assign / dismiss / undo, Xero refusal).
+- **Checked** on a scratch Postgres 16 (full chain 0000–0122 + CI seed, `/var/tmp/pg124`):
+  0124 applies twice cleanly; `supabase/tests/0124_gmail_supplier_invoices_test.sql`
+  passes (21 scenarios: anon nothing; a technician reads/inserts/updates/deletes
+  nothing in either table; office reads, inserts, dismisses, sets the label but not
+  the import state; (message, part) unique; status and blank-label checks) and fails
+  naming 8 scenarios with the policy loosened to `using (true)`; the money sweep stays
+  intact with the seeded row. **Not verified against live Gmail or the Anthropic API**
+  (unreachable from where it was written) — likeliest first-run tweaks: attachment
+  shapes from particular suppliers' mailers, and whether the Workspace OAuth app
+  lists the Gmail scope.
+- **Not done:** credit notes and statements go to review (entered by hand); an
+  invoice quoting only a job number (no PO) goes to review — no automatic job
+  expense; the phone's office PO tab doesn't show the flag (its Send to Xero gets the
+  route's 409 sentence); nothing is labelled back in Gmail.
+- **Apply / deploy order:** paste `supabase/migrations/0124_gmail_supplier_invoices.sql`
+  → paste `supabase/tests/0124_gmail_supplier_invoices_test.sql` (needs an active
+  technician and an active office/admin), trust only `0124 PASSED` → change 0124's
+  STATUS line to applied, add the ledger row (`('0124','gmail_supplier_invoices')`),
+  regenerate types (`lib/database.types.ts` has both tables and
+  `vendor_orders.invoice_needs_check` by hand) → deploy the web → admin: Settings →
+  Google → **Reconnect** (grants Gmail read) → in the accounts mailbox create/confirm
+  the **Supplier invoices** label and a Gmail filter that applies it to supplier bills
+  → Supplier POs → **Check now**. No PowerSync redeploy.
 
 **Invoice payment terms (16 Nov 2026; no migration).** New and Edit Invoice
 have a "Payment terms" drop-down (14 days / 30 days / Custom date) beside the
@@ -3929,6 +4034,7 @@ a shippable release.
 | **Komtrax: sync and link machines** | Justin | `0113` applied 2026-11-20 (gate test passed). Ledger row: `insert into supabase_migrations.schema_migrations (version,name) values ('0113','komtrax') on conflict do nothing;` Admin → Fleet → Komtrax machines → **Sync Komtrax**, then link any Komatsu machine not linked by serial (or put its serial in the fleet item's notes). `KOMTRAX_USERNAME` / `KOMTRAX_PASSWORD` are in Vercel Production. |
 | **Technicians start work themselves: record 0118** | Justin | `0118` applied 2026-11-25 (gate test passed). Ledger row if not yet run: `insert into supabase_migrations.schema_migrations (version,name) values ('0118','self_start_bookings') on conflict do nothing;` Deploy the web, then the phone build. No PowerSync redeploy. |
 | **Sent back + Didn't make it: ship the phone build** | Justin | `0121` and `0122` applied, ledger rows recorded and PowerSync streams redeployed (2026-11-27). Only the phone build is left (with 0120's). |
+| **Supplier invoices from Gmail: apply 0124, reconnect Google** | Justin | `0124` is a DRAFT. Paste `supabase/migrations/0124_gmail_supplier_invoices.sql`, then `supabase/tests/0124_gmail_supplier_invoices_test.sql`; trust only `0124 PASSED`. Mark its STATUS applied; ledger: `insert into supabase_migrations.schema_migrations (version,name) values ('0124','gmail_supplier_invoices') on conflict do nothing;` Deploy the web, then Settings → Google → **Reconnect** (adds Gmail read; make sure the Gmail API is enabled and the scope is on the OAuth consent screen in Google Cloud), create the **Supplier invoices** label + a filter in the accounts mailbox, then Supplier POs → Check now. No PowerSync redeploy. |
 | **Time against variations: ship the phone build** | Justin | `0120` applied, ledger row recorded and PowerSync streams redeployed (2026-11-27). Only the phone build is left. Office: tick "Charged by the hour" on hourly variations. |
 | **Cost of mistakes: record 0119** | Justin | `0119` applied 2026-11-25 (gate test passed). Ledger row if not yet run: `insert into supabase_migrations.schema_migrations (version,name) values ('0119','mistake_tracking') on conflict do nothing;` Deploy the web, then the phone build. No PowerSync redeploy. Check Settings → Mistake categories. |
 | **Record the 24–25 Nov migrations; redeploy PowerSync** | Justin | The catch-up (0067 + 0070 + 0117, which did 0064–0066's job) and 0114, 0116, 0115 are applied and confirmed by a read-only check (nothing from 0060–0116 missing). Ledger rows: `insert into supabase_migrations.schema_migrations (version,name) values ('0064','restrict_site_writes_to_office_admin'),('0065','office_only_job_documents'),('0066','backflow_certificate_storage_policies'),('0067','job_todo_list'),('0070','page_load_indexes'),('0114','customer_address_doc_folders'),('0115','job_mistakes'),('0116','job_folders'),('0117','catch_up_sites_and_office_only_documents') on conflict do nothing;` Then **redeploy the PowerSync streams** (`tech_job_photos` lists `folder`; docs/powersync-deploy.md), then the phone build. Run `scripts/audit-job-documents.mjs` to mark priced Simpro attachments office-only. Add billing addresses to customers. |

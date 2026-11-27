@@ -19,6 +19,10 @@
       "schedule": "15 * * * *"
     },
     {
+      "path": "/api/gmail/poll-invoices",
+      "schedule": "5 * * * *"
+    },
+    {
       "path": "/api/xero/poll-suppliers",
       "schedule": "40 16 * * *"
     },

@@ -359,6 +359,21 @@ values ('b2b2b2b2-0000-0000-0000-000000000001', 'ci/0103.pdf', 'ci.pdf', 'ci-sha
         'CI Supplier', 'CI-INV-1', 550.00, 55.00, 605.00)
 on conflict (id) do nothing;
 
+-- A supplier invoice imported from the accounts Gmail label (0124, drafted —
+-- guarded so the seed still runs before it is applied). Office/admin only, so
+-- the sweep checks amount_ex_gst / gst_amount / total with real money.
+do $$
+begin
+  if to_regclass('public.gmail_supplier_invoices') is not null then
+    insert into gmail_supplier_invoices (id, gmail_message_id, part_id, file_name, status, doc_kind,
+                                         supplier_name, invoice_number, amount_ex_gst, gst_amount, total)
+    values ('b3b3b3b3-0000-0000-0000-000000000001', 'ci-gmail-msg-1', '1', 'ci-emailed.pdf', 'needs_review', 'invoice',
+            'CI Supplier', 'CI-INV-2', 550.00, 55.00, 605.00)
+    on conflict (id) do nothing;
+  end if;
+end;
+$$;
+
 insert into inventory (id, name, sku, unit_cost, unit_sell)
 values ('c1c1c1c1-0000-0000-0000-000000000001', 'CI Part', 'CI-SKU-1', 12.50, 25.00)
 on conflict (id) do nothing;
@@ -448,3 +463,4 @@ begin
   end if;
 end;
 $$;
+
