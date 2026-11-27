@@ -53,6 +53,22 @@ const ICONS: Record<string, typeof LayoutDashboard> = {
   "/dashboard/settings": Settings,
 };
 
+// "Office" tag beside the logo: this website is Mellerick Office; technicians
+// use the Mellerick Field app on their phone. Keeps the two from being mixed up.
+function OfficeBadge({ className }: { className?: string }) {
+  return (
+    <span
+      title="Mellerick Office — the website for the office. Technicians use the Mellerick Field app."
+      className={cn(
+        "inline-flex items-center rounded-md bg-slate-900 px-2 py-0.5 text-[11px] font-bold uppercase tracking-widest text-white ring-1 ring-slate-600",
+        className
+      )}
+    >
+      Office
+    </span>
+  );
+}
+
 interface AppSidebarProps {
   userEmail?: string;
   userName?: string;
@@ -116,6 +132,7 @@ export function AppSidebar({ userEmail, userName, userRole }: AppSidebarProps) {
             <Menu className="w-6 h-6" />
           </button>
           <img src="/icon-192.png" alt="Mellerick Plumbing and Drainage" className="w-8 h-8 object-contain rounded" />
+          <OfficeBadge />
         </div>
       </div>
 
@@ -163,6 +180,7 @@ export function AppSidebar({ userEmail, userName, userRole }: AppSidebarProps) {
             alt="Mellerick Plumbing and Drainage"
             className={collapsed ? "w-9 h-9 object-contain rounded" : "h-11 w-auto object-contain"}
           />
+          {!collapsed && <OfficeBadge className="hidden md:inline-flex ml-2" />}
           {/* Close button -- mobile drawer only */}
           <button
             onClick={() => setMobileOpen(false)}

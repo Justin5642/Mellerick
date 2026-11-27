@@ -165,10 +165,10 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
             <div>
               <CardTitle className="text-base flex items-center gap-2">
                 <CalendarDays className="w-4 h-4 text-blue-600" />
-                Google Calendar
+                Google (Calendar and Gmail)
               </CardTitle>
               <CardDescription className="mt-1">
-                Automatically syncs scheduled jobs to your Google Calendar
+                Syncs scheduled jobs to Google Calendar, and reads supplier invoices from one Gmail label
               </CardDescription>
             </div>
             {isGoogleConnected ? (
@@ -214,7 +214,7 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
               </p>
               <Link href="/api/google/auth">
                 <Button className="gap-2">
-                  <ExternalLink className="w-4 h-4" /> Connect Google Calendar
+                  <ExternalLink className="w-4 h-4" /> Connect Google
                 </Button>
               </Link>
             </div>

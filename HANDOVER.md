@@ -73,6 +73,17 @@ phone's office Schedule tab (move, copy, add/edit bookings, to-do list) is
 kept level with the web board and may get new features. Reason: every port doubles the work and the places
 it can break.
 
+**Two apps, two names (27 Nov 2026).** The website is **Mellerick Office**
+(`app/manifest.ts`, `app/layout.tsx`; installable on a laptop from Chrome/Edge),
+the phone app is **Mellerick Field**. The website's installed icon is the logo
+with a dark OFFICE band (`public/office-icon-*.png`,
+`public/office-apple-touch-icon.png`, made by `scripts/make-office-icons.mjs`;
+the plain `icon-*.png` stay for the sidebar), an **Office** tag sits beside the
+logo in the sidebar and phone-width top bar (`components/app-sidebar.tsx`), and
+the sign-in card says which app is which. The manifest no longer forces
+portrait (it is installed on laptops). Team handout:
+[`docs/team-guide-office-vs-field.md`](docs/team-guide-office-vs-field.md).
+
 **Two separate npm projects.** Root and `mobile/` have their own lockfiles and no
 workspace linking them. Install in the right directory.
 
@@ -1383,11 +1394,11 @@ account, not by job. This finds the bills with no job and gets them assigned.
   page. **Recipients are the `WEEKLY_DIGEST_TO` env var (comma-separated) — set it in
   Vercel; unset = skipped.** Addresses are deliberately not in source (public repo).
   Sends from `EMAIL_FROM` (must be a Resend-verified domain, as for supplier POs).
-- **Supplier invoices from the Gmail label:** built 27 Nov 2026 (0124 DRAFT) — see
+- **Supplier invoices from the Gmail label:** built 27 Nov 2026 (0124 applied 2026-11-27) — see
   "Supplier invoices from Gmail", below. A bill it puts on a PO reaches Xero through
   that PO's Send to Xero, so it shows here as `crm` once sent.
 
-**Supplier invoices from Gmail, filed against the job automatically (27 Nov 2026; migration `0124` DRAFT — not applied; no PowerSync change).**
+**Supplier invoices from Gmail, filed against the job automatically (27 Nov 2026; migration `0124` applied 2026-11-27, gate test passed; no PowerSync change).**
 Justin: bills land in a Gmail LABEL in the accounts mailbox ("Supplier invoices" by
 default, renamable in Settings → Google); the app reads new ones every hour.
 - **Scope:** `lib/google.ts` `SCOPES` gained `gmail.readonly` (`GMAIL_READONLY_SCOPE`).
@@ -4034,7 +4045,7 @@ a shippable release.
 | **Komtrax: sync and link machines** | Justin | `0113` applied 2026-11-20 (gate test passed). Ledger row: `insert into supabase_migrations.schema_migrations (version,name) values ('0113','komtrax') on conflict do nothing;` Admin → Fleet → Komtrax machines → **Sync Komtrax**, then link any Komatsu machine not linked by serial (or put its serial in the fleet item's notes). `KOMTRAX_USERNAME` / `KOMTRAX_PASSWORD` are in Vercel Production. |
 | **Technicians start work themselves: record 0118** | Justin | `0118` applied 2026-11-25 (gate test passed). Ledger row if not yet run: `insert into supabase_migrations.schema_migrations (version,name) values ('0118','self_start_bookings') on conflict do nothing;` Deploy the web, then the phone build. No PowerSync redeploy. |
 | **Sent back + Didn't make it: ship the phone build** | Justin | `0121` and `0122` applied, ledger rows recorded and PowerSync streams redeployed (2026-11-27). Only the phone build is left (with 0120's). |
-| **Supplier invoices from Gmail: apply 0124, reconnect Google** | Justin | `0124` is a DRAFT. Paste `supabase/migrations/0124_gmail_supplier_invoices.sql`, then `supabase/tests/0124_gmail_supplier_invoices_test.sql`; trust only `0124 PASSED`. Mark its STATUS applied; ledger: `insert into supabase_migrations.schema_migrations (version,name) values ('0124','gmail_supplier_invoices') on conflict do nothing;` Deploy the web, then Settings → Google → **Reconnect** (adds Gmail read; make sure the Gmail API is enabled and the scope is on the OAuth consent screen in Google Cloud), create the **Supplier invoices** label + a filter in the accounts mailbox, then Supplier POs → Check now. No PowerSync redeploy. |
+| **Supplier invoices from Gmail: reconnect Google** | Justin | `0124` applied 2026-11-27 (gate test passed). Ledger row if not yet run: `insert into supabase_migrations.schema_migrations (version,name) values ('0124','gmail_supplier_invoices') on conflict do nothing;` Then Settings → the **Google (Calendar and Gmail)** card (it was titled "Google Calendar") → **Reconnect** (adds Gmail read; make sure the Gmail API is enabled and the scope is on the OAuth consent screen in Google Cloud), create the **Supplier invoices** label + a filter in the accounts mailbox, then Supplier POs → Check now. No PowerSync redeploy. |
 | **Time against variations: ship the phone build** | Justin | `0120` applied, ledger row recorded and PowerSync streams redeployed (2026-11-27). Only the phone build is left. Office: tick "Charged by the hour" on hourly variations. |
 | **Cost of mistakes: record 0119** | Justin | `0119` applied 2026-11-25 (gate test passed). Ledger row if not yet run: `insert into supabase_migrations.schema_migrations (version,name) values ('0119','mistake_tracking') on conflict do nothing;` Deploy the web, then the phone build. No PowerSync redeploy. Check Settings → Mistake categories. |
 | **Record the 24–25 Nov migrations; redeploy PowerSync** | Justin | The catch-up (0067 + 0070 + 0117, which did 0064–0066's job) and 0114, 0116, 0115 are applied and confirmed by a read-only check (nothing from 0060–0116 missing). Ledger rows: `insert into supabase_migrations.schema_migrations (version,name) values ('0064','restrict_site_writes_to_office_admin'),('0065','office_only_job_documents'),('0066','backflow_certificate_storage_policies'),('0067','job_todo_list'),('0070','page_load_indexes'),('0114','customer_address_doc_folders'),('0115','job_mistakes'),('0116','job_folders'),('0117','catch_up_sites_and_office_only_documents') on conflict do nothing;` Then **redeploy the PowerSync streams** (`tech_job_photos` lists `folder`; docs/powersync-deploy.md), then the phone build. Run `scripts/audit-job-documents.mjs` to mark priced Simpro attachments office-only. Add billing addresses to customers. |
