@@ -19,6 +19,8 @@ const mockInsert = jest.fn();
 const mockUpdate = jest.fn();
 const mockMaybeSingleResult = { data: null as unknown, error: null as unknown };
 const mockInsertResult = { value: { error: null as unknown, status: 201 } };
+// The job's live status, read before a background clock-on (lib/autoClockClosedJob.ts).
+const mockJobResult = { data: null as unknown, error: null as unknown, status: 200 };
 
 jest.mock("expo-location", () => ({}));
 jest.mock("expo-task-manager", () => ({ defineTask: jest.fn() }));
@@ -31,7 +33,9 @@ jest.mock("@react-native-async-storage/async-storage", () => ({
 
 jest.mock("./supabase", () => ({
   supabase: {
-    from: () => ({
+    from: (table: string) => table === "jobs" ? ({
+      select: () => ({ eq: () => ({ maybeSingle: () => Promise.resolve(mockJobResult) }) }),
+    }) : ({
       insert: (payload: unknown) => {
         mockInsert(payload);
         return Promise.resolve(mockInsertResult.value);
@@ -67,6 +71,8 @@ beforeEach(() => {
   mockMaybeSingleResult.data = null;
   mockMaybeSingleResult.error = null;
   mockInsertResult.value = { error: null, status: 201 };
+  mockJobResult.data = null;
+  mockJobResult.error = null;
 });
 
 describe("supabaseClockDeps.onArrive — the travel leg actually reaches the database", () => {
@@ -216,5 +222,34 @@ describe("replay safety", () => {
     mockMaybeSingleResult.data = { id: "entry-2", clock_in: iso(60 * MIN) };
     await supabaseClockDeps.onDepart("job-a", iso(0), "staff-1");
     expect(mockUpdate).not.toHaveBeenCalled();
+  });
+});
+
+describe("never clocks on to a job already signed off (Templestowe, 27 Nov 2026)", () => {
+  const workInserts = () => mockInsert.mock.calls.map((c) => c[0]).filter((p) => p.entry_type === "work");
+
+  it("skips the clock-on when the job was completed before it", async () => {
+    mockJobResult.data = { status: "completed", actual_end: iso(20 * MIN) };
+    await supabaseClockDeps.onArrive("job-b", iso(25 * MIN), null, null, "staff-1", null);
+    expect(workInserts()).toHaveLength(0);
+  });
+
+  it("still clocks on when the job was completed AFTER the queued arrival", async () => {
+    mockJobResult.data = { status: "completed", actual_end: iso(3 * 60 * MIN) };
+    await supabaseClockDeps.onArrive("job-b", iso(25 * MIN), null, null, "staff-1", null);
+    expect(workInserts()).toHaveLength(1);
+  });
+
+  it("clocks on to an open job", async () => {
+    mockJobResult.data = { status: "in_progress", actual_end: null };
+    await supabaseClockDeps.onArrive("job-b", iso(25 * MIN), null, null, "staff-1", null);
+    expect(workInserts()).toHaveLength(1);
+  });
+
+  it("keeps the action queued when the status read fails with no signal", async () => {
+    mockJobResult.error = { code: "", message: "TypeError: Network request failed" };
+    mockJobResult.status = 0;
+    await expect(supabaseClockDeps.onArrive("job-b", iso(25 * MIN), null, null, "staff-1", null)).rejects.toMatchObject({ transient: true });
+    mockJobResult.status = 200;
   });
 });

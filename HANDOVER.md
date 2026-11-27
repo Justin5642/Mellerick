@@ -3715,6 +3715,23 @@ Justin chose to keep automatic clocking and fix it. What changed:
     fix within ±50 m, asks before moving an existing pin, records
     `sites.location_set_by/_at`.
 
+**No auto clock-on to a job already signed off (27 Nov 2026; no migration; phone only).**
+Templestowe, #2594: signed off at 12:50 (which clocked Justin off); the phone's
+own copy still had the job open, so four minutes later, still inside the
+150 m fence, the geofence clocked him straight back on, and the entry ran all
+afternoon on a completed job. Now, before an AUTOMATIC clock-on, the phone
+reads the job's live `status, actual_end` (rule `skipAutoClockOn`,
+`mobile/lib/autoClockClosedJob.ts`, tested): completed / cancelled with no end,
+or with the clock-on at or after `actual_end` → no clock-on; a clock-on from
+BEFORE the sign-off that only synced later (a background arrival queued in a
+dead zone) still lands. Foreground (`location-tracking.tsx`
+`isJobClosed` dep of `applyGeofenceTransition`): online only — offline it
+clocks on as before; a skipped arrival keeps any pending departure for the
+next real arrival. Background (`backgroundClockTask.ts insertWorkClockIn`):
+reads the job before inserting; a failed read keeps the action queued
+(transient). Manual clock-ons and the clock prompts are unchanged. Reaches
+phones with the next build.
+
 **Clock prompts for sites with no map pin (23 Nov 2026; no migration, no stream change).**
 Justin: many sites have no pin, so auto clock-on never fires there. He
 approved PROMPTS — the phone asks, never clocks on or off by itself. Phone

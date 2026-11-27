@@ -21,6 +21,7 @@ import { appendClockActions, replayClockActions, type QueuedClockAction } from "
 import { isTransientFailure, syncError } from "./data/outbox/errors";
 import { cryptoIdGen } from "./data/ids";
 import { fixColumns, type ClockFix } from "./clockFix";
+import { skipAutoClockOn } from "./autoClockClosedJob";
 import { reportSyncError } from "./monitoring";
 import { processClockPrompts } from "./clockPrompts";
 
@@ -74,6 +75,18 @@ async function insertWorkClockIn(
     .maybeSingle();
   if (error) throw syncError(`backgroundClock openEntry: ${error.message}`, status);
   if (openEntry) return;
+
+  // Never clock on to a job already signed off (lib/autoClockClosedJob.ts) —
+  // the phone's copy can lag a sign-off made elsewhere. A clock-on from before
+  // the sign-off (queued in a dead zone) still lands.
+  const { data: job, error: jobError, status: jobStatus } = await supabase
+    .from("jobs")
+    .select("status, actual_end")
+    .eq("id", jobId)
+    .maybeSingle();
+  if (jobError) throw syncError(`backgroundClock job status: ${jobError.message}`, jobStatus);
+  const closure = job as { status: string | null; actual_end: string | null } | null;
+  if (closure && skipAutoClockOn({ status: closure.status, actualEnd: closure.actual_end }, at)) return;
 
   // The client id makes a replay idempotent even when the first attempt's
   // response was lost after the row landed (and was then closed, so the
