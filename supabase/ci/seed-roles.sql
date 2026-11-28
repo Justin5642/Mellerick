@@ -374,6 +374,22 @@ begin
 end;
 $$;
 
+-- A supplier credit note against an invoiced supplier PO (0125, a draft until
+-- applied), so the money sweep checks vendor_order_credits' amounts with data.
+do $$
+begin
+  if to_regclass('public.vendor_order_credits') is not null then
+    insert into vendor_orders (id, cost_center_id, job_id, vendor_name, amount, gst_amount, invoice_number, status)
+    values ('99999999-0000-0000-0000-000000000002', '88888888-0000-0000-0000-000000000001',
+            'cccccccc-0000-0000-0000-000000000001', 'CI Vendor', 640.00, 64.00, 'CI-VINV-1', 'received')
+    on conflict (id) do nothing;
+    insert into vendor_order_credits (id, vendor_order_id, credit_number, amount_ex_gst, gst_amount)
+    values ('b4b4b4b4-0000-0000-0000-000000000001', '99999999-0000-0000-0000-000000000002', 'CI-CR-1', 120.00, 12.00)
+    on conflict (id) do nothing;
+  end if;
+end;
+$$;
+
 insert into inventory (id, name, sku, unit_cost, unit_sell)
 values ('c1c1c1c1-0000-0000-0000-000000000001', 'CI Part', 'CI-SKU-1', 12.50, 25.00)
 on conflict (id) do nothing;

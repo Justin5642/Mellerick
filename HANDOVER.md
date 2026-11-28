@@ -1550,10 +1550,9 @@ default, renamable in Settings → Google); the app reads new ones every hour.
   (unreachable from where it was written) — likeliest first-run tweaks: attachment
   shapes from particular suppliers' mailers, and whether the Workspace OAuth app
   lists the Gmail scope.
-- **Not done:** credit notes and statements go to review (entered by hand); an
-  invoice quoting only a job number (no PO) goes to review — no automatic job
-  expense; the phone's office PO tab doesn't show the flag (its Send to Xero gets the
-  route's 409 sentence); nothing is labelled back in Gmail.
+- **Not done:** the phone's office PO tab doesn't show the flag (its Send to Xero gets
+  the route's 409 sentence) nor credits; nothing is labelled back in Gmail. (Credit
+  notes, statements and job-number-only bills: see the 28 Nov 2026 entry below.)
 - **Apply / deploy order:** paste `supabase/migrations/0124_gmail_supplier_invoices.sql`
   → paste `supabase/tests/0124_gmail_supplier_invoices_test.sql` (needs an active
   technician and an active office/admin), trust only `0124 PASSED` → change 0124's
@@ -1563,6 +1562,90 @@ default, renamable in Settings → Google); the app reads new ones every hour.
   Google → **Reconnect** (grants Gmail read) → in the accounts mailbox create/confirm
   the **Supplier invoices** label and a Gmail filter that applies it to supplier bills
   → Supplier POs → **Check now**. No PowerSync redeploy.
+
+**Gmail invoices: credit notes, statements, job-number-only bills (28 Nov 2026; migration `0125` applied 2026-11-28, gate test passed; no PowerSync change; web only).**
+Justin: the two kinds the import sent to "needs review" for hand entry now come with a
+one-click action for office/admin. **Nothing is ever done by itself** — the import only
+OFFERS; the office presses the button. Everything else in the import is unchanged.
+- **Reader:** unchanged — `readSupplierInvoiceFile` already returns `doc_kind`
+  (invoice / credit_note / statement / other). `checkRead` now checks a credit note
+  exactly like an invoice ("No credit note number was read", dates, GST, total) and
+  flags a lone statement (`statement: true`); it also reads our job numbers off the
+  order and job refs (`job_numbers`, 0103's `jobNumbersIn`; not stored).
+- **Credit notes** (`decideCredit`, `lib/gmail-invoice-rules.ts`): exactly one of our
+  `PO-…` numbers, the order not cancelled, its invoice already recorded, the same
+  supplier, and the credit no larger than that invoice → review row with
+  `vendor_order_id` set and the reason "Credit note for PO-1234 — $50.00 ex GST."; any
+  other credit note → plain review, no PO. On Supplier POs → **Apply credit to PO-1234**
+  (`POST /api/gmail/invoices/[id]` `{action:"credit"}`, `requireOfficeOrAdmin`, every
+  read and write as the CALLER): re-checks (`creditRefusal`, `lib/vendor-order-credits.ts`
+  — the order's credits together may not pass its invoice amount; the same credit
+  number twice refused), claims the row, copies the file to
+  `{job}/expense-receipt-{PO}-credit-{ts}_{name}` (0047 hides it from technicians), then
+  inserts a **`vendor_order_credits`** row (id and `gmail_invoice_id` = the emailed
+  row's id, so a second click adds nothing); a refusal puts the row back and removes
+  the file. **The PO's own invoice is never touched, and credits are NOT sent to Xero**
+  — the screen says "Enter the credit note in Xero too" (an ACCPAYCREDIT push is a
+  possible follow-up; not built).
+- **Where credits show:** the PO tab lists each credit under its order ("Credit note
+  CR-9 · −$50.00 ex GST", View, "Enter it in Xero") and nets it off the cost centre's
+  committed spend; the **Job Ledger** (Costing tab) and **Reports → Job margins** net an
+  order's credits off THAT order's materials cost, never below $0 (`supplierOrders[].credits`
+  in `lib/job-ledger.ts`; tested in `tests/unit/vendor-order-credits.test.ts`).
+- **Statements:** put away by the import — `status = dismissed`, reason "Supplier
+  statement — not a bill" (a statement bundled with other documents still goes to
+  review). Supplier POs has a collapsed **Dismissed — last 30 days** list (by hand or
+  by the import) with **Reopen**.
+- **Job number only** (`decideJobOnly`): an invoice that checked out, isn't a repeat,
+  quotes no PO of ours that exists, but quotes our job number ("Job 2542", "JOB-2542",
+  "#2542", a builder PO "2542-3", or a bare number that isn't one of our POs) matching
+  exactly ONE job that is open or completed within 90 days (`actual_end`, else
+  `updated_at`; never cancelled) → review row with `job_id` set and no PO, reason
+  "Job #2542 — no PO. Add it to the job as an expense, or put it on a PO." Two of our
+  jobs quoted, or only closed ones → plain review saying so. On Supplier POs → **Add as
+  job expense on #2542** (`{action:"expense"}`, same guard, as the caller): re-checks the
+  job, refuses the same invoice number already an expense on it, copies the file to
+  `{job}/expense-receipt-{ts}_{name}` (the Expenses tab's shape), inserts `job_expenses`
+  (category materials, id = the emailed row's id — idempotent; amount/GST ex GST,
+  `entered_by` the office user). "Put on a PO instead" (the existing assign box) stays.
+- **Offer read back** without a new column: `reviewOffer` — a credit note with
+  `vendor_order_id` → credit; an invoice with `job_id` and no `vendor_order_id` → job
+  expense (the import sets those only when it offers). The page passes it to the panel.
+- **Migration `0125_vendor_order_credits.sql` (applied 2026-11-28):** `vendor_order_credits`
+  (`vendor_order_id` cascade, `gmail_invoice_id` unique when set, `credit_number`,
+  `credit_date`, `amount_ex_gst` > 0, `gst_amount` ≥ 0, `file_path`, `entered_by`
+  forced to the caller, `created_at`). Guard trigger: order exists, not cancelled,
+  has its invoice; the order's credits ≤ its invoice amount (23514); the same credit
+  number twice on an order (23505). **Money → ONE FOR ALL policy on
+  `is_office_or_admin()`**, dropped by enumeration first; granted to authenticated +
+  service_role, revoked from anon; in no publication; end state asserted. CI's
+  `seed-roles.sql` seeds an invoiced order + one credit so the money sweep checks
+  `amount_ex_gst` / `gst_amount` with data. `lib/database.types.ts` has the table by
+  hand.
+- **Before 0125 is applied nothing breaks:** every credits reader treats
+  42P01/PGRST205 as "no credits" (PO tab, ledger, Job margins); Apply credit answers
+  409 "Supplier credit notes aren't switched on yet" and writes nothing. Statements,
+  the job-expense offer and Reopen need no migration.
+- **Checked** on a scratch Postgres 16 (`/var/tmp/pg125`: full chain 0000–0124 + CI
+  seed): 0125 applies twice cleanly; `supabase/tests/0125_vendor_order_credits_test.sql`
+  passes (16 scenarios: anon nothing; a technician on the job reads/adds/changes/
+  deletes nothing; office reads, adds (entered_by forced), deletes; over the invoice,
+  same number twice, no invoice, $0, cancelled order refused) and fails naming 6
+  scenarios with the policy loosened to `using (true)` and 5 with the guard trigger
+  disabled; the money sweep stays intact with the seeded credit. Tests:
+  `tests/unit/gmail-invoices.test.ts` (doc-type routing + the import),
+  `tests/unit/gmail-credit-expense-routes.test.ts` (auth, as caller, idempotent, too
+  large / cancelled / missing / no invoice / before 0125 / undo),
+  `tests/unit/vendor-order-credits.test.ts`. **Not checked in a browser**, nor against
+  live Gmail/Anthropic.
+- **Not done:** credits can't be deleted or typed by hand on the PO tab (only from an
+  email; a wrong one is removed in the SQL editor for now); no Xero credit push; a
+  credit note quoting only a job number goes to plain review.
+- **Apply order:** paste `supabase/migrations/0125_vendor_order_credits.sql` → paste
+  `supabase/tests/0125_vendor_order_credits_test.sql` (needs an active technician and
+  an active office/admin), trust only `0125 PASSED` → change 0125's STATUS line to
+  applied, add the ledger row (`('0125','vendor_order_credits')`), regenerate types.
+  The web may deploy before or after. No PowerSync redeploy.
 
 **Invoice payment terms (16 Nov 2026; no migration).** New and Edit Invoice
 have a "Payment terms" drop-down (14 days / 30 days / Custom date) beside the
@@ -4161,6 +4244,7 @@ a shippable release.
 | **Komtrax: sync and link machines** | Justin | `0113` applied 2026-11-20 (gate test passed). Ledger row: `insert into supabase_migrations.schema_migrations (version,name) values ('0113','komtrax') on conflict do nothing;` Admin → Fleet → Komtrax machines → **Sync Komtrax**, then link any Komatsu machine not linked by serial (or put its serial in the fleet item's notes). `KOMTRAX_USERNAME` / `KOMTRAX_PASSWORD` are in Vercel Production. |
 | **Technicians start work themselves: record 0118** | Justin | `0118` applied 2026-11-25 (gate test passed). Ledger row if not yet run: `insert into supabase_migrations.schema_migrations (version,name) values ('0118','self_start_bookings') on conflict do nothing;` Deploy the web, then the phone build. No PowerSync redeploy. |
 | **Sent back + Didn't make it: ship the phone build** | Justin | `0121` and `0122` applied, ledger rows recorded and PowerSync streams redeployed (2026-11-27). Only the phone build is left (with 0120's). |
+| **Supplier credit notes: record 0125** | Justin | `0125` applied 2026-11-28 (gate test passed). Ledger row if not yet run: `insert into supabase_migrations.schema_migrations (version,name) values ('0125','vendor_order_credits') on conflict do nothing;` No PowerSync redeploy. |
 | **Supplier invoices from Gmail: reconnect Google** | Justin | `0124` applied 2026-11-27 (gate test passed). Ledger row if not yet run: `insert into supabase_migrations.schema_migrations (version,name) values ('0124','gmail_supplier_invoices') on conflict do nothing;` Then Settings → the **Google (Calendar and Gmail)** card (it was titled "Google Calendar") → **Reconnect** (adds Gmail read; make sure the Gmail API is enabled and the scope is on the OAuth consent screen in Google Cloud), create the **Supplier invoices** label + a filter in the accounts mailbox, then Supplier POs → Check now. No PowerSync redeploy. |
 | **Time against variations: ship the phone build** | Justin | `0120` applied, ledger row recorded and PowerSync streams redeployed (2026-11-27). Only the phone build is left. Office: tick "Charged by the hour" on hourly variations. |
 | **Cost of mistakes: record 0119** | Justin | `0119` applied 2026-11-25 (gate test passed). Ledger row if not yet run: `insert into supabase_migrations.schema_migrations (version,name) values ('0119','mistake_tracking') on conflict do nothing;` Deploy the web, then the phone build. No PowerSync redeploy. Check Settings → Mistake categories. |

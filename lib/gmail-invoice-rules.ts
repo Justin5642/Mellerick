@@ -11,6 +11,7 @@
 // review queue with a sentence saying why.
 
 import { ourPoNumbers, supplierKey } from "./supplier-invoice-refs";
+import { jobNumbersIn } from "./supplier-invoice-match";
 import type { ReadInvoice } from "./supplier-invoice-read";
 
 /** Each attachment at most this (Gmail allows 25 MB; Claude's PDF limit is 32 MB). */
@@ -185,6 +186,8 @@ export interface CheckedFields {
   total: number | null;
   po_refs: string[];
   job_refs: string[];
+  /** Job numbers printed (lib/supplier-invoice-match.ts jobNumbersIn) — not stored; the import looks them up. */
+  job_numbers?: number[];
 }
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
@@ -199,7 +202,10 @@ export function melbourneToday(now: Date): string {
  * (always — the office sees them even when they can't be trusted) and the
  * reason it can't be filed by itself, or null when it can.
  */
-export function checkRead(reads: ReadInvoice[], today: string): { fields: CheckedFields; problem: string | null } {
+export function checkRead(
+  reads: ReadInvoice[],
+  today: string,
+): { fields: CheckedFields; problem: string | null; statement?: boolean } {
   const first = reads[0];
   const fields: CheckedFields = {
     doc_kind: first?.doc_kind ?? null,
@@ -211,13 +217,16 @@ export function checkRead(reads: ReadInvoice[], today: string): { fields: Checke
     total: first?.total ?? null,
     po_refs: first ? ourPoNumbers(first.order_refs) : [],
     job_refs: first?.job_refs ?? [],
+    job_numbers: first ? jobNumbersIn({ po_refs: first.order_refs, job_refs: first.job_refs }).map((j) => j.n) : [],
   };
   if (!first) return { fields, problem: "Nothing could be read from this file — enter it by hand." };
   if (reads.length > 1) return { fields, problem: `This file holds ${reads.length} documents — enter each one by hand.` };
-  if (first.doc_kind === "credit_note") return { fields, problem: "This is a credit note — enter it by hand." };
-  if (first.doc_kind === "statement") return { fields, problem: "This is a statement, not an invoice." };
-  if (first.doc_kind !== "invoice") return { fields, problem: "This doesn't look like an invoice." };
-  if (!fields.invoice_number) return { fields, problem: "No invoice number was read." };
+  if (first.doc_kind === "statement") return { fields, problem: "This is a statement, not an invoice.", statement: true };
+  if (first.doc_kind !== "invoice" && first.doc_kind !== "credit_note") return { fields, problem: "This doesn't look like an invoice." };
+  // A credit note is checked exactly like an invoice (its amounts are read as
+  // positive); decideCredit then decides where it may go.
+  const noun = first.doc_kind === "credit_note" ? "credit note" : "invoice";
+  if (!fields.invoice_number) return { fields, problem: `No ${noun} number was read.` };
 
   const amount = fields.amount_ex_gst;
   if (amount === null || !(amount > 0)) return { fields, problem: "No amount over $0 was read." };
@@ -235,9 +244,9 @@ export function checkRead(reads: ReadInvoice[], today: string): { fields: Checke
     return { fields, problem: "The amount and GST don't add up to the total — check it." };
   }
   if (fields.invoice_date) {
-    if (fields.invoice_date > today) return { fields, problem: "The invoice date is in the future — check it." };
+    if (fields.invoice_date > today) return { fields, problem: `The ${noun} date is in the future — check it.` };
     const twoYearsAgo = `${Number(today.slice(0, 4)) - 2}${today.slice(4)}`;
-    if (fields.invoice_date < twoYearsAgo) return { fields, problem: "The invoice date is over two years ago — check it." };
+    if (fields.invoice_date < twoYearsAgo) return { fields, problem: `The ${noun} date is over two years ago — check it.` };
   }
   return { fields, problem: null };
 }
@@ -250,6 +259,8 @@ export interface CandidateOrder {
   status: string;
   invoice_number: string | null;
   xero_bill_id: string | null;
+  /** The order's invoice amount ex GST (credits are measured against it). */
+  amount?: number | string | null;
 }
 
 /** Why a PO can't take this invoice, or null. */
@@ -322,4 +333,116 @@ export function orderInvoicePatch(fields: CheckedFields, path: string) {
 /** A typed PO number ("1234", "po1234", "PO-1234") as ours, or null. */
 export function typedPoNumber(text: string): string | null {
   return ourPoNumbers([text.trim()])[0] ?? null;
+}
+
+// ---------------------------------------------------------------- credit notes, statements, job-only bills (28 Nov 2026)
+
+/** The reason an automatically dismissed statement carries. */
+export const STATEMENT_REASON = "Supplier statement — not a bill";
+
+const dollars = (n: number) => `$${n.toLocaleString("en-AU", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+/** A money figure in whole cents. */
+const cents = (n: number | string | null | undefined) => Math.round((Number(n) || 0) * 100);
+
+export type CreditDecision =
+  | { kind: "credit"; order: CandidateOrder; reason: string }
+  | { kind: "review"; reason: string };
+
+/**
+ * Where a checked CREDIT NOTE goes. It is only ever OFFERED (the office
+ * applies it): exactly one of our POs, not cancelled, that already has its
+ * invoice, from the same supplier, and the credit no larger than that
+ * invoice. Never applied here.
+ */
+export function decideCredit(fields: CheckedFields, problem: string | null, orders: CandidateOrder[]): CreditDecision {
+  if (problem) return { kind: "review", reason: problem };
+  const wanted = new Set(fields.po_refs.map((p) => p.toUpperCase()));
+  const found = orders.filter((o) => wanted.has(o.po_number.toUpperCase()));
+  if (fields.po_refs.length === 0) return { kind: "review", reason: "A credit note with no PO number of ours on it — enter it by hand (and in Xero)." };
+  if (found.length === 0) return { kind: "review", reason: `${fields.po_refs.join(", ")} isn't one of our supplier POs — enter this credit note by hand.` };
+  if (found.length > 1) return { kind: "review", reason: `This credit note quotes more than one of our POs (${found.map((o) => o.po_number).join(", ")}) — enter it by hand.` };
+  const order = found[0];
+  if (order.status === "cancelled") return { kind: "review", reason: `${order.po_number} was cancelled — enter this credit note by hand.` };
+  if (!order.invoice_number) return { kind: "review", reason: `${order.po_number} has no invoice yet for this to credit — enter it by hand.` };
+  const amount = fields.amount_ex_gst ?? 0;
+  if (order.amount !== undefined && order.amount !== null && cents(amount) > cents(order.amount)) {
+    return {
+      kind: "review",
+      reason: `The credit (${dollars(amount)}) is more than ${order.po_number}'s invoice (${dollars(Number(order.amount) || 0)}) — check it.`,
+    };
+  }
+  if (!sameSupplier(fields.supplier_name, order.vendor_name)) {
+    return { kind: "review", reason: `The credit note is from ${fields.supplier_name} but ${order.po_number} is with ${order.vendor_name}.` };
+  }
+  return { kind: "credit", order, reason: `Credit note for ${order.po_number} — ${dollars(amount)} ex GST.` };
+}
+
+export interface CandidateJob {
+  id: string;
+  job_number: number;
+  status: string;
+  actual_end?: string | null;
+  updated_at?: string | null;
+}
+
+/** A completed job takes a job-only bill for this long after it finished. */
+export const RECENT_COMPLETED_DAYS = 90;
+
+/** Open, or completed within RECENT_COMPLETED_DAYS (by actual_end, else updated_at). Never cancelled. */
+export function jobTakesBill(job: CandidateJob, now: Date): boolean {
+  if (job.status === "cancelled") return false;
+  if (job.status !== "completed") return true;
+  const at = Date.parse(job.actual_end ?? job.updated_at ?? "");
+  return Number.isFinite(at) && now.getTime() - at <= RECENT_COMPLETED_DAYS * 24 * 3600 * 1000;
+}
+
+export type JobOnlyDecision = { kind: "job_expense"; job: CandidateJob; reason: string } | { kind: "review"; reason: string };
+
+/**
+ * An INVOICE with no PO of ours but a job number of ours: offered to the
+ * office as a job expense (never added here). `jobs` are those whose number
+ * is among fields.job_numbers. Exactly one job that can take it → offer;
+ * several → plain review; only closed ones → say so; none → `fallback`.
+ */
+export function decideJobOnly(fields: CheckedFields, jobs: CandidateJob[], fallback: string, now: Date): JobOnlyDecision {
+  const wanted = new Set(fields.job_numbers ?? []);
+  const named = jobs.filter((j) => wanted.has(j.job_number));
+  if (named.length === 0) return { kind: "review", reason: fallback };
+  const open = named.filter((j) => jobTakesBill(j, now));
+  if (open.length > 1) {
+    return { kind: "review", reason: `It quotes more than one of our jobs (${open.map((j) => `#${j.job_number}`).join(", ")}) — put it on the right PO or job by hand.` };
+  }
+  if (open.length === 0) {
+    return { kind: "review", reason: `Job ${named.map((j) => `#${j.job_number}`).join(", ")} is ${named[0].status} — enter this one by hand.` };
+  }
+  const job = open[0];
+  return { kind: "job_expense", job, reason: `Job #${job.job_number} — no PO. Add it to the job as an expense, or put it on a PO.` };
+}
+
+export type ReviewOffer = "credit" | "job_expense" | null;
+
+/**
+ * What one-click action a review row offers, from what the import stored:
+ * a credit note with its PO → "Apply credit to PO"; an invoice with a job
+ * but no PO → "Add as job expense". The import sets vendor_order_id on a
+ * credit note, and job_id without vendor_order_id on an invoice, ONLY when
+ * it offers one (decideCredit / decideJobOnly); the route re-checks
+ * everything before it writes.
+ */
+export function reviewOffer(row: { status: string; doc_kind: string | null; vendor_order_id: string | null; job_id: string | null }): ReviewOffer {
+  if (row.status !== "needs_review") return null;
+  if (row.doc_kind === "credit_note" && row.vendor_order_id) return "credit";
+  if (row.doc_kind === "invoice" && row.job_id && !row.vendor_order_id) return "job_expense";
+  return null;
+}
+
+/** The job-documents path of an emailed credit note (expense-receipt- → 0047 hides it from technicians). */
+export function creditDocumentPath(jobId: string, poNumber: string, fileName: string, nowMs: number): string {
+  return `${jobId}/expense-receipt-${poNumber}-credit-${nowMs}_${safeFileName(fileName)}`;
+}
+
+/** The job-documents path of an emailed bill added as a job expense (the Expenses tab's shape). */
+export function expenseDocumentPath(jobId: string, fileName: string, nowMs: number): string {
+  return `${jobId}/expense-receipt-${nowMs}_${safeFileName(fileName)}`;
 }

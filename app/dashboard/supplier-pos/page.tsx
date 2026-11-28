@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { getViewer } from "@/lib/auth/viewer";
 import { EmailedInvoicesPanel, type EmailedInvoice, type GmailState } from "@/components/supplier-invoices/emailed-invoices-panel";
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { reviewOffer } from "@/lib/gmail-invoice-rules";
 
 // Supplier invoices read from the accounts Gmail label (0124, drafted): the review
 // queue and the last 30 days' matches, each file with a signed link from the
@@ -16,29 +17,39 @@ async function loadEmailedInvoices(supabase: SupabaseClient): Promise<{ rows: Em
   const since = new Date(Date.now() - 30 * 24 * 3600 * 1000).toISOString();
   const cols =
     "id, status, received_at, sender, subject, file_name, review_reason, supplier_name, invoice_number, invoice_date, " +
-    "amount_ex_gst, gst_amount, po_refs, job_refs, storage_path, created_at, " +
+    "amount_ex_gst, gst_amount, po_refs, job_refs, storage_path, created_at, doc_kind, vendor_order_id, job_id, " +
     "vendor_orders(po_number, job_id, invoice_needs_check), jobs(job_number, title)";
-  const [state, open, recent] = await Promise.all([
+  const [state, open, recent, dismissed] = await Promise.all([
     supabase.from("gmail_invoice_settings").select("label_name, gmail_allowed, last_poll_at, last_ok_at, last_error").eq("id", true).maybeSingle(),
     supabase.from("gmail_supplier_invoices").select(cols).in("status", ["new", "needs_review"]).order("received_at", { ascending: true }).limit(100),
     supabase.from("gmail_supplier_invoices").select(cols).eq("status", "matched").gte("created_at", since).order("received_at", { ascending: false }).limit(50),
+    // Dismissed in the last 30 days (by hand, or a statement put away by the import) — Reopen brings one back.
+    supabase.from("gmail_supplier_invoices").select(cols).eq("status", "dismissed").gte("updated_at", since).order("received_at", { ascending: false }).limit(50),
   ]);
-  if (state.error || open.error || recent.error) {
-    const code = state.error?.code ?? open.error?.code ?? recent.error?.code;
+  if (state.error || open.error || recent.error || dismissed.error) {
+    const code = state.error?.code ?? open.error?.code ?? recent.error?.code ?? dismissed.error?.code;
     if (code !== "42P01" && code !== "PGRST205") console.error("emailed invoices load failed:", code);
     return { rows: [], state: null };
   }
-  type Raw = Omit<EmailedInvoice, "fileUrl" | "po" | "job"> & {
+  type Raw = Omit<EmailedInvoice, "fileUrl" | "po" | "job" | "offer"> & {
     storage_path: string | null;
+    doc_kind: string | null;
+    vendor_order_id: string | null;
+    job_id: string | null;
     vendor_orders: EmailedInvoice["po"];
     jobs: EmailedInvoice["job"];
   };
-  const raw = [...((open.data ?? []) as unknown as Raw[]), ...((recent.data ?? []) as unknown as Raw[])];
+  const raw = [
+    ...((open.data ?? []) as unknown as Raw[]),
+    ...((recent.data ?? []) as unknown as Raw[]),
+    ...((dismissed.data ?? []) as unknown as Raw[]),
+  ];
   const paths = raw.map((r) => r.storage_path).filter((p): p is string => !!p);
   const signed = paths.length ? await supabase.storage.from("supplier-invoices").createSignedUrls(paths, 3600) : { data: [] };
   const urlFor = new Map(((signed.data ?? []) as { path: string | null; signedUrl: string }[]).map((s) => [s.path, s.signedUrl]));
-  const rows = raw.map(({ storage_path, vendor_orders, jobs, ...r }) => ({
+  const rows = raw.map(({ storage_path, vendor_orders, jobs, doc_kind, vendor_order_id, job_id, ...r }) => ({
     ...r,
+    offer: reviewOffer({ status: r.status, doc_kind, vendor_order_id, job_id }),
     po_refs: r.po_refs ?? [],
     job_refs: r.job_refs ?? [],
     fileUrl: storage_path ? urlFor.get(storage_path) ?? null : null,

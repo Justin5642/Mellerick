@@ -11,7 +11,11 @@ vi.mock("@/lib/google", () => ({ getGoogleAuthClient: vi.fn(async () => null) })
 import {
   checkRead,
   classifyGmailFailure,
+  decideCredit,
+  decideJobOnly,
   decideMatch,
+  reviewOffer,
+  STATEMENT_REASON,
   googleErrorReasons,
   grantsGmailRead,
   jobDocumentPath,
@@ -101,7 +105,8 @@ describe("checkRead", () => {
   });
   it.each([
     ["several documents", [invoice(), invoice()], /2 documents/],
-    ["a credit note", [invoice({ doc_kind: "credit_note" })], /credit note/],
+    ["a credit note with no number", [invoice({ doc_kind: "credit_note", invoice_number: null })], /No credit note number/],
+    ["an 'other' document", [invoice({ doc_kind: "other" })], /doesn't look like an invoice/],
     ["a statement", [invoice({ doc_kind: "statement" })], /statement/],
     ["no invoice number", [invoice({ invoice_number: null })], /invoice number/],
     ["no amount", [invoice({ amount_ex_gst: null })], /amount/],
@@ -373,5 +378,133 @@ describe("importGmailInvoices", () => {
   it("before 0124 (drafted) is applied: throws GmailTablesMissing", async () => {
     const { db } = fakeDb({}, { missing: ["gmail_invoice_settings"] });
     await expect(importGmailInvoices({ db, gmail: fakeGmail({}), read, now })).rejects.toBeInstanceOf(GmailTablesMissing);
+  });
+});
+
+// ---------------------------------------------------------------- credit notes, statements, job-only bills (28 Nov 2026)
+
+describe("doc-type routing rules", () => {
+  const credit = (over: Partial<ReadInvoice> = {}) => checkRead([invoice({ doc_kind: "credit_note", invoice_number: "CR-9", amount_ex_gst: 50, gst_amount: 5, total: 55, ...over })], TODAY);
+  const invoiced = order({ invoice_number: "INV-1", amount: 200, status: "received" });
+
+  it("a clean credit note passes checkRead and is offered against its invoiced PO", () => {
+    const { fields, problem } = credit();
+    expect(problem).toBeNull();
+    const d = decideCredit(fields, problem, [invoiced]);
+    expect(d).toMatchObject({ kind: "credit", order: { id: "o1" } });
+    expect(d.reason).toBe("Credit note for PO-1008 — $50.00 ex GST.");
+  });
+
+  it.each([
+    ["no PO of ours", { order_refs: [] }, [invoiced], /no PO number of ours/],
+    ["a PO with no invoice yet", {}, [order()], /has no invoice yet/],
+    ["a cancelled PO", {}, [order({ invoice_number: "INV-1", status: "cancelled" })], /cancelled/],
+    ["more than the invoice", { amount_ex_gst: 300, gst_amount: 30, total: 330 }, [invoiced], /more than PO-1008's invoice/],
+    ["another supplier", { supplier_name: "Tradelink" }, [invoiced], /is with Reece/],
+    ["an unknown PO", {}, [], /isn't one of our supplier POs/],
+  ])("a credit note with %s goes to plain review", (_n, over, orders, re) => {
+    const { fields, problem } = credit(over as Partial<ReadInvoice>);
+    const d = decideCredit(fields, problem, orders as CandidateOrder[]);
+    expect(d.kind).toBe("review");
+    expect(d.reason).toMatch(re);
+  });
+
+  it("flags a lone statement; a statement in a bundle is not put away", () => {
+    expect(checkRead([invoice({ doc_kind: "statement" })], TODAY).statement).toBe(true);
+    expect(checkRead([invoice({ doc_kind: "statement" }), invoice()], TODAY).statement).toBeFalsy();
+  });
+
+  it("reads job numbers off the order and job refs", () => {
+    expect(checkRead([invoice({ order_refs: ["Job 2542"], job_refs: ["#2600"] })], TODAY).fields.job_numbers).toEqual(expect.arrayContaining([2542, 2600]));
+    expect(checkRead([invoice({ order_refs: ["PO-1008"] })], TODAY).fields.job_numbers).toEqual([]);
+  });
+
+  const nowDate = new Date("2026-11-27T01:00:00Z");
+  const job = (n: number, over: Record<string, unknown> = {}) => ({ id: `job-${n}`, job_number: n, status: "in_progress", actual_end: null, updated_at: null, ...over });
+
+  it("one open job number → job expense offer", () => {
+    const { fields } = checkRead([invoice({ order_refs: ["JOB-2542"] })], TODAY);
+    expect(decideJobOnly(fields, [job(2542)], "fallback", nowDate)).toMatchObject({ kind: "job_expense", job: { id: "job-2542" }, reason: "Job #2542 — no PO. Add it to the job as an expense, or put it on a PO." });
+  });
+
+  it("a recently completed job takes it; one completed long ago or cancelled doesn't", () => {
+    const { fields } = checkRead([invoice({ order_refs: ["Job 2542"] })], TODAY);
+    expect(decideJobOnly(fields, [job(2542, { status: "completed", actual_end: "2026-11-01T00:00:00Z" })], "f", nowDate).kind).toBe("job_expense");
+    expect(decideJobOnly(fields, [job(2542, { status: "completed", actual_end: "2026-01-01T00:00:00Z" })], "f", nowDate)).toMatchObject({ kind: "review", reason: /completed/ });
+    expect(decideJobOnly(fields, [job(2542, { status: "cancelled" })], "f", nowDate)).toMatchObject({ kind: "review", reason: /cancelled/ });
+  });
+
+  it("an ambiguous job number (two of our jobs quoted) → plain review", () => {
+    const { fields } = checkRead([invoice({ order_refs: ["Job 2542"], job_refs: ["Job 2600"] })], TODAY);
+    const d = decideJobOnly(fields, [job(2542), job(2600)], "f", nowDate);
+    expect(d).toMatchObject({ kind: "review" });
+    expect(d.reason).toMatch(/more than one of our jobs \(#2542, #2600\)/);
+  });
+
+  it("no job of ours → the fallback reason", () => {
+    const { fields } = checkRead([invoice({ order_refs: ["Job 9999"] })], TODAY);
+    expect(decideJobOnly(fields, [], "No PO number", nowDate)).toEqual({ kind: "review", reason: "No PO number" });
+  });
+
+  it("reviewOffer reads the offer back from what the import stored", () => {
+    expect(reviewOffer({ status: "needs_review", doc_kind: "credit_note", vendor_order_id: "o1", job_id: "j1" })).toBe("credit");
+    expect(reviewOffer({ status: "needs_review", doc_kind: "invoice", vendor_order_id: null, job_id: "j1" })).toBe("job_expense");
+    expect(reviewOffer({ status: "needs_review", doc_kind: "invoice", vendor_order_id: "o1", job_id: "j1" })).toBeNull();
+    expect(reviewOffer({ status: "needs_review", doc_kind: "credit_note", vendor_order_id: null, job_id: null })).toBeNull();
+    expect(reviewOffer({ status: "matched", doc_kind: "credit_note", vendor_order_id: "o1", job_id: "j1" })).toBeNull();
+  });
+});
+
+describe("importGmailInvoices — credit notes, statements, job-only bills", () => {
+  it("a credit note for an invoiced PO is OFFERED, never written to the PO", async () => {
+    const { db, tables, storage } = fakeDb({
+      gmail_invoice_settings: [settings()],
+      vendor_orders: [vendorOrder({ invoice_number: "INV-1", amount: 200, status: "received" })],
+    });
+    const read = vi.fn(async () => [invoice({ doc_kind: "credit_note", invoice_number: "CR-9", amount_ex_gst: 50, gst_amount: 5, total: 55 })]);
+    const res = await importGmailInvoices({ db, gmail: fakeGmail({ m1: mail("m1") }), read, now });
+    expect(res).toMatchObject({ matched: 0, needsReview: 1 });
+    expect(tables.gmail_supplier_invoices[0]).toMatchObject({
+      status: "needs_review",
+      doc_kind: "credit_note",
+      vendor_order_id: "o1",
+      job_id: "j1",
+      review_reason: "Credit note for PO-1008 — $50.00 ex GST.",
+    });
+    expect(tables.vendor_orders[0]).toMatchObject({ invoice_number: "INV-1", amount: 200 });
+    expect(storage["job-documents"]).toBeUndefined();
+  });
+
+  it("a statement is put away (dismissed) with its reason", async () => {
+    const { db, tables } = fakeDb({ gmail_invoice_settings: [settings()] });
+    const read = vi.fn(async () => [invoice({ doc_kind: "statement", invoice_number: null })]);
+    const res = await importGmailInvoices({ db, gmail: fakeGmail({ m1: mail("m1") }), read, now });
+    expect(res).toMatchObject({ dismissed: 1, needsReview: 0, matched: 0 });
+    expect(tables.gmail_supplier_invoices[0]).toMatchObject({ status: "dismissed", review_reason: STATEMENT_REASON });
+  });
+
+  it("an invoice quoting only our job number is offered as a job expense", async () => {
+    const { db, tables } = fakeDb({
+      gmail_invoice_settings: [settings()],
+      jobs: [{ id: "job-a", job_number: 2542, status: "in_progress", actual_end: null, updated_at: null }],
+    });
+    const read = vi.fn(async () => [invoice({ order_refs: ["Job 2542"] })]);
+    await importGmailInvoices({ db, gmail: fakeGmail({ m1: mail("m1") }), read, now });
+    expect(tables.gmail_supplier_invoices[0]).toMatchObject({ status: "needs_review", job_id: "job-a", vendor_order_id: null, review_reason: /^Job #2542 — no PO/ });
+    expect(tables.job_expenses ?? []).toHaveLength(0);
+  });
+
+  it("an invoice quoting two of our jobs stays a plain review with no job", async () => {
+    const { db, tables } = fakeDb({
+      gmail_invoice_settings: [settings()],
+      jobs: [
+        { id: "job-a", job_number: 2542, status: "in_progress" },
+        { id: "job-b", job_number: 2600, status: "scheduled" },
+      ],
+    });
+    const read = vi.fn(async () => [invoice({ order_refs: ["Job 2542"], job_refs: ["Job 2600"] })]);
+    await importGmailInvoices({ db, gmail: fakeGmail({ m1: mail("m1") }), read, now });
+    expect(tables.gmail_supplier_invoices[0]).toMatchObject({ status: "needs_review", job_id: null, vendor_order_id: null });
+    expect(String(tables.gmail_supplier_invoices[0].review_reason)).toMatch(/more than one of our jobs/);
   });
 });

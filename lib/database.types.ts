@@ -4113,6 +4113,67 @@ export type Database = {
         }
         Relationships: []
       }
+      vendor_order_credits: {
+        Row: {
+          amount_ex_gst: number
+          created_at: string
+          credit_date: string | null
+          credit_number: string | null
+          entered_by: string | null
+          file_path: string | null
+          gmail_invoice_id: string | null
+          gst_amount: number
+          id: string
+          vendor_order_id: string
+        }
+        Insert: {
+          amount_ex_gst: number
+          created_at?: string
+          credit_date?: string | null
+          credit_number?: string | null
+          entered_by?: string | null
+          file_path?: string | null
+          gmail_invoice_id?: string | null
+          gst_amount?: number
+          id?: string
+          vendor_order_id: string
+        }
+        Update: {
+          amount_ex_gst?: number
+          created_at?: string
+          credit_date?: string | null
+          credit_number?: string | null
+          entered_by?: string | null
+          file_path?: string | null
+          gmail_invoice_id?: string | null
+          gst_amount?: number
+          id?: string
+          vendor_order_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "vendor_order_credits_vendor_order_id_fkey"
+            columns: ["vendor_order_id"]
+            isOneToOne: false
+            referencedRelation: "vendor_orders"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "vendor_order_credits_gmail_invoice_id_fkey"
+            columns: ["gmail_invoice_id"]
+            isOneToOne: true
+            referencedRelation: "gmail_supplier_invoices"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "vendor_order_credits_entered_by_fkey"
+            columns: ["entered_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       vendor_order_items: {
         Row: {
           description: string
