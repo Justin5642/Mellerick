@@ -9,6 +9,9 @@ import { buildDigest, type DigestDebtor } from "@/lib/weekly-digest";
 import { reportError } from "@/lib/monitoring";
 import { loadRecentFaultsForDigest } from "@/lib/komtrax-data";
 import { loadMistakesForDigest } from "@/lib/mistakes-digest";
+import { loadUnbilledWork } from "@/lib/unbilled-work-data";
+import { groupUnbilled, unbilledDigest } from "@/lib/unbilled-work";
+import { dateKeyInBusinessTZ } from "@/lib/date";
 
 export const maxDuration = 60;
 
@@ -79,6 +82,15 @@ export async function GET(request: NextRequest) {
       console.error("weekly digest: mistakes unavailable", err);
     }
 
+    // Unbilled work (Reports → Unbilled work). Optional: a failure here never stops the email.
+    let unbilled: ReturnType<typeof unbilledDigest> | null = null;
+    try {
+      const loadedWork = await loadUnbilledWork(admin, admin);
+      unbilled = unbilledDigest(groupUnbilled(loadedWork.items, loadedWork.jobs, dateKeyInBusinessTZ(new Date())));
+    } catch (err) {
+      console.error("weekly digest: unbilled work unavailable", err);
+    }
+
     const digest = buildDigest({
       appUrl: appUrl(),
       unallocated: unallocatedSummary(loaded.bills),
@@ -98,6 +110,7 @@ export async function GET(request: NextRequest) {
       },
       machineFaults,
       mistakes,
+      unbilled,
     });
 
     const { error: sendError } = await getResend().emails.send({ from: getFromAddress(), to, subject: digest.subject, html: digest.html, text: digest.text });

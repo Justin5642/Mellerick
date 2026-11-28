@@ -29,6 +29,26 @@ export interface DigestInput {
   machineFaults?: DigestMachineFault[] | null;
   /** Mistakes (0119, a draft not applied yet): logged in the last 7 days, and credits claimed but not yet received. null/undefined = not switched on, left out. */
   mistakes?: DigestMistakes | null;
+  /** Reports → Unbilled work (lib/unbilled-work.ts): priced work done and not invoiced. null/undefined = couldn't be worked out, left out. */
+  unbilled?: DigestUnbilled | null;
+}
+
+export interface DigestUnbilled {
+  /** Priced work not yet invoiced, ex GST. */
+  total: number;
+  jobs: number;
+  /** Days since the oldest unbilled item. */
+  oldestDays: number | null;
+  /** Work hours not on an invoice (never priced here). */
+  hours: number;
+}
+
+/** "Unbilled work: $X across N jobs (oldest D days)". */
+export function unbilledLine(u: DigestUnbilled): string {
+  if (u.jobs === 0) return "Unbilled work: nothing waiting to be invoiced";
+  const oldest = u.oldestDays == null ? "" : ` (oldest ${u.oldestDays} day${u.oldestDays === 1 ? "" : "s"})`;
+  const hours = u.hours > 0 ? `, plus ${u.hours.toFixed(1)} h not yet priced` : "";
+  return `Unbilled work: ${money(u.total)} across ${u.jobs} job${u.jobs === 1 ? "" : "s"}${oldest}${hours}`;
 }
 
 export interface DigestMistakes {
@@ -99,6 +119,7 @@ export function buildDigest(i: DigestInput): { subject: string; html: string; te
     "",
     `SUPPLIER POs STILL WAITING FOR THEIR INVOICE: ${i.awaitingInvoice.count}`,
     ...i.awaitingInvoice.oldest.map((p) => `  - ${p.poNumber}  ${p.supplier}  ordered ${p.orderedOn ?? "?"}`),
+    ...(i.unbilled ? ["", unbilledLine(i.unbilled), `See it all: ${i.appUrl}/dashboard/reports/unbilled`] : []),
     ...(i.mistakes
       ? [
           "",
@@ -142,6 +163,12 @@ ${h(`Overdue debtors: ${i.overdue.count} invoices, ${money(i.overdue.total)}`)}
 ${table(i.overdue.top.map((d) => row([escapeHtml(d.customer), `#${escapeHtml(String(d.invoiceNumber))}`, `due ${escapeHtml(d.dueDate ?? "?")}`, money(d.balance)])))}
 ${h(`Supplier POs still waiting for their invoice: ${i.awaitingInvoice.count}`)}
 ${table(i.awaitingInvoice.oldest.map((p) => row([escapeHtml(p.poNumber), escapeHtml(p.supplier), `ordered ${escapeHtml(p.orderedOn ?? "?")}`])))}
+${
+  i.unbilled
+    ? `${h(escapeHtml(unbilledLine(i.unbilled)))}
+<p style="font-size:14px;margin:0;"><a href="${escapeHtml(`${i.appUrl}/dashboard/reports/unbilled`)}">See what hasn't been invoiced</a></p>`
+    : ""
+}
 ${
   i.mistakes
     ? `${h(`Mistakes: ${i.mistakes.newThisWeek} logged this week`)}
