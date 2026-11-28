@@ -4,7 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { AlertTriangle, CheckCircle2, Loader2, Mail, RefreshCw } from "lucide-react";
+import { AlertTriangle, CheckCircle2, ChevronDown, ChevronRight, Loader2, Mail, RefreshCw } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -13,7 +13,12 @@ import { Input } from "@/components/ui/input";
 // only (the page is, and the table is by RLS). Matched ones are on their PO,
 // flagged "from email — check": the office opens the job's PO tab, checks the
 // invoice against the PDF and confirms before Send to Xero. The rest wait
-// here: assign to a PO by number, or dismiss.
+// here: assign to a PO by number, or dismiss. Two kinds get a one-click
+// action (28 Nov 2026, never done by itself): a credit note for one of our
+// POs → "Apply credit to PO" (a credit under the order, 0125; the office
+// enters it in Xero), and a bill quoting only a job number → "Add as job
+// expense". Supplier statements are put away by the import; they and anything
+// dismissed by hand sit in a collapsed "Dismissed" list with Reopen.
 
 export interface EmailedInvoice {
   id: string;
@@ -33,6 +38,8 @@ export interface EmailedInvoice {
   fileUrl: string | null;
   po: { po_number: string; job_id: string; invoice_needs_check: boolean | null } | null;
   job: { job_number: number; title: string } | null;
+  /** The one-click action offered (lib/gmail-invoice-rules.ts reviewOffer). */
+  offer: "credit" | "job_expense" | null;
 }
 
 export interface GmailState {
@@ -59,11 +66,20 @@ export function EmailedInvoicesPanel({
   const router = useRouter();
   const [busy, setBusy] = useState<string | null>(null);
   const [po, setPo] = useState<Record<string, string>>({});
+  const [showDismissed, setShowDismissed] = useState(false);
 
   const review = rows.filter((r) => r.status === "needs_review" || r.status === "new");
   const matched = rows.filter((r) => r.status === "matched");
+  const dismissed = rows.filter((r) => r.status === "dismissed");
 
-  async function act(id: string, action: "assign" | "dismiss", poNumber?: string) {
+  const done = (action: Action, body: { poNumber?: string; jobNumber?: number; already?: boolean }) => {
+    if (action === "assign") return `On ${body.poNumber} — check it on the job's PO tab, then send to Xero`;
+    if (action === "credit") return body.already ? "Already applied" : `Credit added under ${body.poNumber}. Enter the credit note in Xero too.`;
+    if (action === "expense") return body.already ? "Already added" : `Added to job #${body.jobNumber}'s expenses`;
+    return action === "dismiss" ? "Dismissed" : "Back in the review list";
+  };
+
+  async function act(id: string, action: Action, poNumber?: string) {
     setBusy(id);
     try {
       const res = await fetch(`/api/gmail/invoices/${id}`, {
@@ -76,7 +92,7 @@ export function EmailedInvoicesPanel({
         toast.error(body.error ?? "Couldn't update the invoice");
         return;
       }
-      toast.success(action === "assign" ? `On ${body.poNumber} — check it on the job's PO tab, then send to Xero` : "Dismissed");
+      toast.success(done(action, body));
       router.refresh();
     } catch {
       toast.error("Couldn't reach the server. Check your connection.");
@@ -92,7 +108,7 @@ export function EmailedInvoicesPanel({
       const body = await res.json().catch(() => ({}));
       if (!res.ok) toast.error(body.error ?? "Couldn't check Gmail");
       else if (body.skipped) toast.message("Gmail wasn't checked — see the note above the list.");
-      else toast.success(`${body.files ?? 0} new file(s): ${body.matched ?? 0} on a PO, ${body.needsReview ?? 0} to review${body.more ? " — more next run" : ""}`);
+      else toast.success(`${body.files ?? 0} new file(s): ${body.matched ?? 0} on a PO, ${body.needsReview ?? 0} to review${body.dismissed ? `, ${body.dismissed} statement(s) put away` : ""}${body.more ? " — more next run" : ""}`);
       router.refresh();
     } catch {
       toast.error("Couldn't reach the server. Check your connection.");
@@ -167,7 +183,23 @@ export function EmailedInvoicesPanel({
               <div key={r.id} className="rounded border border-amber-200 bg-amber-50/40 p-3 space-y-2 text-sm">
                 {header(r)}
                 <p className="text-xs text-amber-800">{r.status === "new" ? "Being read…" : r.review_reason}</p>
-                {r.status === "needs_review" && (
+                {r.status === "needs_review" && r.offer === "credit" && r.po && (
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <Button size="sm" className="h-8 text-xs" disabled={busy !== null} onClick={() => act(r.id, "credit")}>
+                      {busy === r.id ? "Saving…" : `Apply credit to ${r.po.po_number}`}
+                    </Button>
+                    <span className="text-xs text-slate-500">Adds it under the PO&apos;s invoice. Enter the credit note in Xero too — the app doesn&apos;t send credits.</span>
+                  </div>
+                )}
+                {r.status === "needs_review" && r.offer === "job_expense" && r.job && (
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <Button size="sm" className="h-8 text-xs" disabled={busy !== null} onClick={() => act(r.id, "expense")}>
+                      {busy === r.id ? "Saving…" : `Add as job expense on #${r.job.job_number}`}
+                    </Button>
+                    <span className="text-xs text-slate-500">or put it on a PO instead:</span>
+                  </div>
+                )}
+                {r.status === "needs_review" && r.offer !== "credit" && (
                   <div className="flex items-center gap-2 flex-wrap">
                     <Input
                       value={po[r.id] ?? r.po_refs[0] ?? ""}
@@ -182,6 +214,11 @@ export function EmailedInvoicesPanel({
                       Dismiss
                     </Button>
                   </div>
+                )}
+                {r.status === "needs_review" && r.offer === "credit" && (
+                  <Button size="sm" variant="ghost" className="h-8 text-xs text-slate-500" disabled={busy !== null} onClick={() => act(r.id, "dismiss")}>
+                    Dismiss
+                  </Button>
                 )}
               </div>
             ))
@@ -212,7 +249,32 @@ export function EmailedInvoicesPanel({
             ))
           )}
         </div>
+        {dismissed.length > 0 && (
+          <div className="space-y-2">
+            <button
+              type="button"
+              onClick={() => setShowDismissed((v) => !v)}
+              className="flex items-center gap-1 text-sm font-semibold text-slate-500 hover:text-slate-700"
+            >
+              {showDismissed ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />} Dismissed — last 30 days ({dismissed.length})
+            </button>
+            {showDismissed &&
+              dismissed.map((r) => (
+                <div key={r.id} className="rounded border border-slate-200 bg-slate-50/60 p-3 flex items-start justify-between gap-3 text-sm">
+                  <div className="min-w-0 space-y-1">
+                    {header(r)}
+                    {r.review_reason && <p className="text-xs text-slate-500">{r.review_reason}</p>}
+                  </div>
+                  <Button size="sm" variant="outline" className="h-8 text-xs shrink-0" disabled={busy !== null} onClick={() => act(r.id, "reopen")}>
+                    {busy === r.id ? "Saving…" : "Reopen"}
+                  </Button>
+                </div>
+              ))}
+          </div>
+        )}
       </CardContent>
     </Card>
   );
 }
+
+type Action = "assign" | "dismiss" | "reopen" | "credit" | "expense";

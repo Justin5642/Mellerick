@@ -8,6 +8,7 @@ import { belowMinimumMargin, computeJobLedger, costCentreTotals, loadedRatesBySt
 import { attachEffectiveRates } from "@/lib/fleet-rates";
 import { ledgerMistakes, loadCostSources, loadMistakes } from "@/lib/mistakes-data";
 import { linkIndex, loadVariationLinks, withLinkedVariation } from "@/lib/variation-links";
+import { creditTotals, loadOrderCredits, withCredits } from "@/lib/vendor-order-credits";
 import { isMissingVariationColumn, variationName } from "@/lib/variation-time";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -161,6 +162,10 @@ export default async function JobMarginsPage() {
     const linksRes = await loadVariationLinks(supabase as never, variationRows.map((v) => v.id));
     if (linksRes.error) throw new Error(linksRes.error);
     const links = linkIndex(linksRes.links);
+    // Supplier credit notes (0125, a draft until applied) come off their orders' cost; none before it is applied.
+    const creditsRes = await loadOrderCredits(supabase as never, orders.map((o) => o.id));
+    if (creditsRes.error) throw new Error("supplier credits could not be read");
+    const creditsBy = creditTotals(creditsRes.credits);
     const ledgerVariations = variationRows.map((v) => ({
       job_id: v.job_id,
       id: v.id,
@@ -174,7 +179,7 @@ export default async function JobMarginsPage() {
       byJob(pos),
       byJob(time),
       byJob(withLinkedVariation(expenses, "job_expense", links)),
-      byJob(withLinkedVariation(orders, "vendor_order", links)),
+      byJob(withLinkedVariation(withCredits(orders, creditsBy), "vendor_order", links)),
       byJob(withLinkedVariation(usage, "equipment_usage", links)),
       byJob(mistakes),
       byJob(ledgerVariations),

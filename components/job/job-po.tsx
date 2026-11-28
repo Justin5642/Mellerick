@@ -18,6 +18,7 @@ import { BuilderPoLines, blankLine, type StageOption } from "@/components/job/bu
 import { SupplierPicker, OTHER_SUPPLIER } from "@/components/job/supplier-picker";
 import { recentSupplierIds } from "@/lib/supplier-picker";
 import { poInvoiceState, type PoInvoiceRef } from "@/lib/po-invoice";
+import { creditTotals, loadOrderCredits, type VendorOrderCredit } from "@/lib/vendor-order-credits";
 
 interface CostCenter {
   id: string;
@@ -178,6 +179,27 @@ export function JobPO({ jobId, jobNumber, customerName, site, pos: initialPos, t
       });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [jobId]);
+
+  // Supplier credit notes under each order (0125, a draft until applied; added from Supplier POs →
+  // Emailed supplier invoices). None before 0125; a failed read shows none.
+  const [credits, setCredits] = useState<VendorOrderCredit[]>([]);
+  const orderIdKey = vendorOrders.map(v => v.id).join(",");
+  useEffect(() => {
+    let live = true;
+    void loadOrderCredits(supabase, orderIdKey ? orderIdKey.split(",") : []).then(r => {
+      if (!live) return;
+      if (r.error) console.error("supplier credits load failed:", r.error);
+      setCredits(r.credits);
+    });
+    return () => { live = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [orderIdKey]);
+
+  async function openCreditFile(path: string) {
+    const { data } = await supabase.storage.from("job-documents").createSignedUrl(path, 60);
+    if (data?.signedUrl) window.open(data.signedUrl, "_blank");
+    else toast.error("Couldn't open the credit note");
+  }
 
   useEffect(() => {
     supabase
@@ -726,10 +748,13 @@ export function JobPO({ jobId, jobNumber, customerName, site, pos: initialPos, t
   for (const vo of vendorOrders) {
     (vendorOrdersByCostCenter[vo.cost_center_id] ??= []).push(vo);
   }
+  const creditByOrder = creditTotals(credits);
   const committedByCostCenter: Record<string, number> = {};
   for (const vo of vendorOrders) {
     if (vo.status === "cancelled") continue;
-    committedByCostCenter[vo.cost_center_id] = (committedByCostCenter[vo.cost_center_id] ?? 0) + (Number(vo.amount) || 0);
+    // Net of the order's supplier credit notes (0125).
+    const net = Math.max(0, (Number(vo.amount) || 0) - (creditByOrder.get(vo.id) ?? 0));
+    committedByCostCenter[vo.cost_center_id] = (committedByCostCenter[vo.cost_center_id] ?? 0) + net;
   }
 
   const totalAllocatedHours = pos.reduce((sum, p) => sum + (Number(p.total_hours) || 0), 0);
@@ -840,6 +865,18 @@ export function JobPO({ jobId, jobNumber, customerName, site, pos: initialPos, t
         ) : vo.status !== "cancelled" ? (
           <button onClick={() => openInvoice(vo)} className="text-blue-600 hover:underline">+ Enter supplier invoice</button>
         ) : null}
+        {credits.filter(c => c.vendor_order_id === vo.id).map(c => (
+          <div key={c.id} className="flex items-center gap-2 text-emerald-700">
+            <span>
+              Credit note {c.credit_number ? <span className="font-mono">{c.credit_number}</span> : null}
+              {c.credit_date ? ` · ${c.credit_date}` : ""} · −${Number(c.amount_ex_gst).toFixed(2)} ex GST
+            </span>
+            {c.file_path && (
+              <button onClick={() => openCreditFile(c.file_path!)} className="text-blue-600 hover:underline">View</button>
+            )}
+            <span className="text-slate-400" title="The app doesn't send credit notes to Xero.">Enter it in Xero</span>
+          </div>
+        ))}
         {(dockets[vo.id] ?? []).length > 0 && (
           <div className="flex items-center gap-2">
             {(dockets[vo.id] ?? []).map((path, n) => (

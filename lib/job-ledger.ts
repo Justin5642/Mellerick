@@ -20,6 +20,8 @@ import { costPerHourOf, usageCost, type EffectiveRate } from "@/lib/fleet-costs"
 //   travel     travel hours × loaded rate — its own row, it has no line
 //   materials  job_expenses + priced supplier orders, by line. A supplier
 //              order with no amount yet is counted as "to be priced", not $0.
+//              A supplier credit note on an order (vendor_order_credits,
+//              0125) is netted off THAT order's amount (28 Nov 2026).
 //   plant      equipment usage: hours × cost per hour, plus loads × cost per
 //              load (0091), by the usage's line — the truck's cartage on the
 //              Transport line. Untagged usage lands in "Not tagged".
@@ -125,7 +127,8 @@ export interface LedgerInputs {
   ratesByStaff: Map<string, number>;
   /** variation_id: the variation the office linked it to (variation_cost_links, 0120 (draft)). */
   expenses: { amount: number | null; cost_center_id: string | null; variation_id?: string | null }[];
-  supplierOrders: { amount: number | null; cost_center_id: string | null; status: string; variation_id?: string | null }[];
+  /** credits: the order's supplier credit notes, ex GST (vendor_order_credits, 0125) — netted off its amount. */
+  supplierOrders: { amount: number | null; cost_center_id: string | null; status: string; variation_id?: string | null; credits?: number | null }[];
   plant: { cost: number; cost_center_id: string | null; variation_id?: string | null }[];
   /**
    * The job's variations (office/admin — they carry the price). Each gets its
@@ -265,7 +268,8 @@ export function computeJobLedger(i: LedgerInputs): JobLedger {
     if (o.status === "cancelled") continue;
     const r = forCost(o.cost_center_id, o.variation_id);
     const amount = Number(o.amount ?? 0);
-    if (amount > 0) r.materials += amount;
+    // A supplier credit note (0125) comes off its own order's cost, never below $0.
+    if (amount > 0) r.materials += Math.max(0, amount - (Number(o.credits ?? 0) || 0));
     else r.unpricedOrders += 1;
   }
 

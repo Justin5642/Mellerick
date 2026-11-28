@@ -18,6 +18,7 @@ import {
 import { ledgerMistakes, loadCostSources, loadMistakes } from "@/lib/mistakes-data";
 import { linkIndex, loadVariationLinks, withLinkedVariation, type VariationLink } from "@/lib/variation-links";
 import { variationName } from "@/lib/variation-time";
+import { creditTotals, loadOrderCredits, withCredits } from "@/lib/vendor-order-credits";
 
 // The job ledger card at the top of the Costing tab (admin only, like the rest
 // of the tab — labour cost comes from payroll data). Budget per cost centre
@@ -63,6 +64,20 @@ export function JobLedger({ jobId, purchaseOrders, timeEntries, expenses, vendor
   const variationIds = variations.map((v) => v.id).join(",");
   const [mistakes, setMistakes] = useState<ReturnType<typeof ledgerMistakes>>([]);
   const [mistakesError, setMistakesError] = useState(false);
+  // Supplier credit notes on the job's orders (0125, a draft until applied): netted off each order's cost. None before 0125.
+  const [orderCredits, setOrderCredits] = useState<Map<string, number>>(new Map());
+  const orderIds = vendorOrders.map((o) => o.id ?? "").filter(Boolean).join(",");
+  useEffect(() => {
+    let live = true;
+    void loadOrderCredits(createClient(), orderIds ? orderIds.split(",") : []).then((r) => {
+      if (!live) return;
+      if (r.error) console.error("job ledger: supplier credits load failed:", r.error);
+      setOrderCredits(creditTotals(r.credits));
+    });
+    return () => {
+      live = false;
+    };
+  }, [orderIds]);
 
   useEffect(() => {
     createClient()
@@ -132,12 +147,12 @@ export function JobLedger({ jobId, purchaseOrders, timeEntries, expenses, vendor
       timeEntries,
       ratesByStaff: loadedRatesByStaff(staffCostProfiles, equipmentOptions),
       expenses: withLinkedVariation(expenses, "job_expense", index),
-      supplierOrders: withLinkedVariation(vendorOrders, "vendor_order", index),
+      supplierOrders: withLinkedVariation(withCredits(vendorOrders, orderCredits), "vendor_order", index),
       plant: plantCosts(withLinkedVariation(equipmentUsage, "equipment_usage", index), equipmentOptions),
       mistakes,
       variations: ledgerVariations,
     });
-  }, [costCentres, purchaseOrders, timeEntries, staffCostProfiles, equipmentOptions, expenses, vendorOrders, equipmentUsage, mistakes, links, variations]);
+  }, [costCentres, purchaseOrders, timeEntries, staffCostProfiles, equipmentOptions, expenses, vendorOrders, equipmentUsage, mistakes, links, variations, orderCredits]);
 
   if (ledger.budget === 0) {
     return (

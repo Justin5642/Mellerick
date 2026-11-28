@@ -35,6 +35,8 @@ import {
 import {
   checkRead,
   classifyGmailFailure,
+  decideCredit,
+  decideJobOnly,
   decideMatch,
   decodeBase64Url,
   DEFAULT_LABEL,
@@ -49,7 +51,9 @@ import {
   pickAttachments,
   searchAfterSeconds,
   SENTENCES,
+  STATEMENT_REASON,
   type AttachmentRef,
+  type CandidateJob,
   type CandidateOrder,
   type CheckedFields,
   type GmailFailureKind,
@@ -63,7 +67,8 @@ const MAX_MESSAGES_LISTED = 200;
 /** A row left 'new' this long by a run that died is handed to the office. */
 const STUCK_MS = 30 * 60_000;
 
-export const ORDER_COLUMNS = "id, po_number, job_id, vendor_name, status, invoice_number, xero_bill_id";
+export const ORDER_COLUMNS = "id, po_number, job_id, vendor_name, status, invoice_number, xero_bill_id, amount";
+export const JOB_COLUMNS = "id, job_number, status, actual_end, updated_at";
 
 export class GmailTablesMissing extends Error {
   constructor() {
@@ -189,10 +194,12 @@ export interface ImportResult {
   files: number;
   matched: number;
   needsReview: number;
+  /** Supplier statements put away by themselves. */
+  dismissed: number;
   more: boolean;
 }
 
-const emptyResult = (): ImportResult => ({ messages: 0, files: 0, matched: 0, needsReview: 0, more: false });
+const emptyResult = (): ImportResult => ({ messages: 0, files: 0, matched: 0, needsReview: 0, dismissed: 0, more: false });
 
 /** Shrink a photo to fit Claude's image limit; PDFs are passed as they are. */
 async function fitForReader(file: Buffer, mime: SupplierInvoiceMime): Promise<{ file: Buffer; mime: SupplierInvoiceMime }> {
@@ -298,7 +305,7 @@ export async function importGmailInvoices(deps: ImportDeps): Promise<ImportResul
       msg = await deps.gmail.getMessage(id);
     } catch (err) {
       const r = await fail(err, "message");
-      return { ...r, messages: result.messages, files: result.files, matched: result.matched, needsReview: result.needsReview };
+      return { ...r, messages: result.messages, files: result.files, matched: result.matched, needsReview: result.needsReview, dismissed: result.dismissed };
     }
     const outcome = await importMessage(deps, msg, maxReads - reads, now);
     if (outcome === "claimed-elsewhere") continue;
@@ -307,6 +314,7 @@ export async function importGmailInvoices(deps: ImportDeps): Promise<ImportResul
     result.files += outcome.files;
     result.matched += outcome.matched;
     result.needsReview += outcome.needsReview;
+    result.dismissed += outcome.dismissed;
     const at = msg.internalDate ? new Date(Number(msg.internalDate)).toISOString() : null;
     if (at && (!cursor || at > cursor)) cursor = at;
   }
@@ -322,7 +330,7 @@ export async function importGmailInvoices(deps: ImportDeps): Promise<ImportResul
   return result;
 }
 
-type MessageOutcome = { reads: number; files: number; matched: number; needsReview: number } | "claimed-elsewhere";
+type MessageOutcome = { reads: number; files: number; matched: number; needsReview: number; dismissed: number } | "claimed-elsewhere";
 
 async function importMessage(deps: ImportDeps, msg: GmailMessage, readsLeft: number, now: () => Date): Promise<MessageOutcome> {
   const { db } = deps;
@@ -332,7 +340,7 @@ async function importMessage(deps: ImportDeps, msg: GmailMessage, readsLeft: num
     sender: headerValue(msg, "From")?.slice(0, 500) ?? null,
     subject: headerValue(msg, "Subject")?.slice(0, 1000) ?? null,
   };
-  const out = { reads: 0, files: 0, matched: 0, needsReview: 0 };
+  const out = { reads: 0, files: 0, matched: 0, needsReview: 0, dismissed: 0 };
   const attachments = pickAttachments(msg);
 
   if (attachments.length === 0) {
@@ -365,6 +373,7 @@ async function importMessage(deps: ImportDeps, msg: GmailMessage, readsLeft: num
     const r = await importAttachment(deps, msg.id, rowId, att, useRead, now);
     if (r.read) out.reads += 1;
     if (r.status === "matched") out.matched += 1;
+    else if (r.status === "dismissed") out.dismissed += 1;
     else out.needsReview += 1;
   }
   return out;
@@ -382,7 +391,7 @@ async function importAttachment(
   att: AttachmentRef,
   mayRead: boolean,
   now: () => Date,
-): Promise<{ status: "matched" | "needs_review"; read: boolean }> {
+): Promise<{ status: "matched" | "needs_review" | "dismissed"; read: boolean }> {
   const { db } = deps;
   const review = async (reason: string, extra: Record<string, unknown> = {}) => {
     await finish(db, rowId, { status: "needs_review", review_reason: reason, ...extra });
@@ -433,7 +442,7 @@ async function importAttachment(
     return { ...(await review("The invoice reader couldn't read this one just now — enter it by hand.", { error: "reader failed" })), read: true };
   }
 
-  const { fields, problem } = checkRead(reads, melbourneToday(now()));
+  const { fields, problem, statement } = checkRead(reads, melbourneToday(now()));
   const stored = {
     doc_kind: fields.doc_kind,
     supplier_name: fields.supplier_name,
@@ -446,11 +455,53 @@ async function importAttachment(
     job_refs: fields.job_refs,
   };
 
+  // A supplier statement is not a bill: put away by itself, kept in the
+  // Dismissed list (Reopen brings it back).
+  if (statement) {
+    await finish(db, rowId, { ...stored, status: "dismissed", review_reason: STATEMENT_REASON });
+    return { status: "dismissed", read: true };
+  }
+
   const orders = await loadOrders(db, fields.po_refs);
+
+  // A credit note is only ever OFFERED to the office (Apply credit to PO);
+  // nothing is written to the PO here.
+  if (fields.doc_kind === "credit_note") {
+    const credit = orders === null
+      ? { kind: "review" as const, reason: "Our supplier POs couldn't be checked just now — enter this credit note by hand." }
+      : decideCredit(fields, problem, orders);
+    await finish(db, rowId, {
+      ...stored,
+      status: "needs_review",
+      review_reason: credit.reason,
+      vendor_order_id: credit.kind === "credit" ? credit.order.id : null,
+      job_id: credit.kind === "credit" ? credit.order.job_id : null,
+    });
+    return { status: "needs_review", read: true };
+  }
+
   const duplicate = orders === null ? false : await isDuplicate(db, fields, rowId);
   const decision = orders === null
     ? { kind: "review" as const, reason: "Our supplier POs couldn't be checked just now — assign it to a PO.", order: null }
     : decideMatch(fields, problem, orders, duplicate);
+
+  // No PO of ours on it, but one of our job numbers: offer it to the office
+  // as a job expense (Add as job expense). Only for an invoice that checked
+  // out and isn't a repeat.
+  if (decision.kind === "review" && !decision.order && orders !== null && !problem && !duplicate
+      && !orders.some((o) => fields.po_refs.includes(o.po_number.toUpperCase()))
+      && (fields.job_numbers ?? []).length > 0) {
+    const jobs = await loadJobs(db, fields.job_numbers ?? []);
+    const jobOnly = jobs === null ? { kind: "review" as const, reason: decision.reason } : decideJobOnly(fields, jobs, decision.reason, now());
+    await finish(db, rowId, {
+      ...stored,
+      status: "needs_review",
+      review_reason: jobOnly.reason,
+      vendor_order_id: null,
+      job_id: jobOnly.kind === "job_expense" ? jobOnly.job.id : null,
+    });
+    return { status: "needs_review", read: true };
+  }
 
   if (decision.kind === "review") {
     await finish(db, rowId, {
@@ -477,6 +528,17 @@ async function importAttachment(
     job_document_path: filed.path,
   });
   return { status: "matched", read: true };
+}
+
+/** Our jobs with these numbers; null when they couldn't be read. */
+export async function loadJobs(db: SupabaseClient, jobNumbers: number[]): Promise<CandidateJob[] | null> {
+  if (jobNumbers.length === 0) return [];
+  const r = await db.from("jobs").select(JOB_COLUMNS).in("job_number", jobNumbers.slice(0, 20));
+  if (r.error) {
+    reportError(r.error, { route: ROUTE, step: "jobs" });
+    return null;
+  }
+  return (r.data ?? []) as CandidateJob[];
 }
 
 /** The vendor orders with these PO numbers; null when they couldn't be read. */
