@@ -2767,6 +2767,61 @@ as the caller (RLS), paged with `fetchAllRows`, lookups `.in()` in chunks of
 100. Rules `lib/time-log-report.ts`, tested in
 `tests/unit/time-log-report.test.ts` (incl. no money-named key or CSV column).
 
+**Reports → Unbilled work (28 Nov 2026; no migration, no stream change; web only).**
+Justin: one place to see everything done but not yet invoiced, so labour and
+extras aren't left unbilled. `app/dashboard/reports/unbilled` (office/admin —
+technicians get "for the office"), linked from the Reports header. Grouped by
+job (number, title, customer billed as on invoices — `billingName` — status,
+oldest unbilled day and its age), a total per job, a grand total and a total
+per section; oldest first (default) or biggest value; filters `customer` and
+`older` (days, on the job's oldest item); **Download CSV** (one row per item,
+built on the server). Each section links to where it is invoiced.
+- **Sections** (rules `lib/unbilled-work.ts`, pure, tested in
+  `tests/unit/unbilled-work.test.ts`):
+  - **Day Works** — `hire_entries` signed, no `invoice_id`, priced by
+    `priceEntry` at TODAY's rates exactly as the Day Works report / Invoice Day
+    Works; no hire setup → "not priced" (never $0). Link: the Day Works tab.
+  - **Extra truck loads** — `cartage_loads` signed, `billing = extra`, no
+    invoice, priced by `priceLoad` (truck rates, docket cost, margin override,
+    else the company `cartage_margin_pct`); one that can't be priced shows the
+    pricing's own reason. Link: the Day Works tab.
+  - **Approved variations** — approved / auto-approved with no `invoice_id`
+    (the Approvals "Variations to invoice" rule), the QA fixture job left out
+    (title starts "QA FIXTURE", as Approvals). Worth `total_amount`, else rate ×
+    quantity (the ledger's `variationRevenue`); neither → not priced. Link:
+    the Variations tab.
+  - **Hours to invoice** — `loadJobHours` + not-billed entries (variation time
+    already left out there), shown in HOURS only: nothing prices hours until
+    "Apply hourly rate" on the invoice, so no rate is invented and hours never
+    add to a dollar total. Jobs asked (`isHoursCandidate`): ready to invoice;
+    completed with no live invoice unless approved (Simpro-era / pre-0098
+    approvals); completed with a live invoice made on/after 15 Nov 2026
+    (`HOURS_ON_INVOICES_SINCE`, when 0098 made hours reach invoices — older
+    invoices billed hours without linking them). Link: New Invoice for the job.
+  - **Builder POs** — POs with a value on COMPLETED jobs, `poInvoiceState`
+    none/part, worth value − invoiced so far; `SIMPRO-…` POs left out
+    (invoiced in Simpro). Link: Invoice this PO.
+- **Reads** (`lib/unbilled-work-data.ts`, shared with the email): as the
+  CALLER (RLS), named columns (time_entries through `loadJobHours`' list —
+  never `rate_override`), paged with `fetchAllRows`, `.in()` in chunks of 100
+  (hours ten jobs a read, job by job if a read hits the 1000-row cap). The
+  company cartage margin is read with the service role after the role check
+  (`billing_rate_config` is admin-only by RLS), as Invoice Day Works does. A
+  section whose table/column is missing (42P01/PGRST205/42703/PGRST204) or
+  whose read fails is left out with a one-line note; the rest still loads.
+- **Monday email:** "Unbilled work: $X across N jobs (oldest D days)" (+ hours
+  not yet priced) with a link to the page (`unbilledLine` in
+  `lib/weekly-digest.ts`; service role; a failure leaves the line out and never
+  stops the email).
+- Checked in Chromium (a temporary uncommitted harness rendering
+  `components/reports/unbilled-job-card.tsx` with mock data, 1400 px and
+  390 px): every section draws, no horizontal scroll, no console errors. The
+  page's loader was not run against a database.
+- **To know:** completed jobs from before the app (no invoice, not
+  `admin_status = approved`) may still show hours or POs — the "older than"
+  filter and the customer filter narrow them; a variation's or a Day Works
+  line's amount is today's figure, not what an eventual invoice says.
+
 **Time against variations (25 Nov 2026; migration `0120` applied 2026-11-27, gate test passed; PowerSync streams redeployed 2026-11-27).**
 Justin: a stage's allowed hours (sewer and stormwater, 16 h) blow out when the
 crew hit rock. That extra time must go against a VARIATION, so the variation
